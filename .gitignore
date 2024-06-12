@@ -12,7 +12,18 @@ yarn-error.log*
 .vscode
 *.swp
 *.swo
-.turbo
+
 # Operating System Files
 .DS_Store
 Thumbs.db
+
+# Cache directories
+/.cache
+
+# Build directories
+/build
+
+# Specific files
+vite.config.ts.timestamp*
+pnpm-lock.yaml
+package-lock.json
