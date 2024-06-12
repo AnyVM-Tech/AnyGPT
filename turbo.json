@@ -1,27 +1,42 @@
 {
-    "$schema": "https://turbo.build/schema.json",
-    "tasks": {
-      "build": {
-        "dependsOn": ["^build"],
-        "outputs": ["dist/**"],
-        "inputs": ["app/**", "tsconfig.json", "package.json", "pnpm-lock.yaml"]
-      },
-      "lint": {
-        "dependsOn": ["build"],
-        "outputs": [],
-        "inputs": ["app/**", ".eslintrc.js", "package.json", "pnpm-lock.yaml"]
-      },
-      "test": {
-        "dependsOn": ["build"],
-        "outputs": [],
-        "inputs": ["app/**", "tests/**", "package.json", "pnpm-lock.yaml"]
-      },
-      "dev": {
-        "dependsOn": [],
-        "outputs": [],
-        "inputs": ["app/**", "tsconfig.json", "package.json", "pnpm-lock.yaml"],
-        "cache": false,
-        "persistent": true
-      }
-    }
-  }
+	"$schema": "https://turbo.build/schema.json",
+	"tasks": {
+		"build": {
+			"dependsOn": ["^build"],
+			"outputs": ["dist/**"],
+			"inputs": [
+				"app/**",
+				"tsconfig.json",
+				"package.json",
+				"pnpm-lock.yaml"
+			]
+		},
+		"lint": {
+			"dependsOn": ["build"],
+			"outputs": [],
+			"inputs": [
+				"app/**",
+				".eslintrc.js",
+				"package.json",
+				"pnpm-lock.yaml"
+			]
+		},
+		"test": {
+			"dependsOn": ["build"],
+			"outputs": [],
+			"inputs": ["app/**", "tests/**", "package.json", "pnpm-lock.yaml"]
+		},
+		"dev": {
+			"dependsOn": [],
+			"outputs": [],
+			"inputs": [
+				"app/**",
+				"tsconfig.json",
+				"package.json",
+				"pnpm-lock.yaml"
+			],
+			"cache": false,
+			"persistent": true
+		}
+	}
+}
