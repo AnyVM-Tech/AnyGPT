@@ -1,35 +1,27 @@
 {
 	"name": "anygpt",
 	"version": "1.0.0",
-	"description": "gpt4free but better (js, improved api to be compatible with most things like bettergpt)",
-	"main": "api.ts",
-	"scripts": {
-		"test": "echo \"Error: no test specified\" && exit 1"
-	},
+	"private": true,
+	"description": "AnyGPT, the only free api and apps youll ever need",
+	"workspaces": [
+	  "packages/*"
+	],
 	"repository": {
-		"type": "git",
-		"url": "git+https://github.com/any-VM/anyGPT.git"
+	  "type": "git",
+	  "url": "git+https://github.com/any-VM/anyGPT.git"
 	},
-	"author": "sukuna/skullcmd",
-	"license": "ISC",
-	"bugs": {
-		"url": "https://github.com/any-VM/anyGPT/issues"
-	},
-	"homepage": "https://github.com/any-VM/anyGPT#readme",
-	"dependencies": {
-		"@google/generative-ai": "^0.11.3",
-		"@types/express": "^4.17.21",
-		"axios": "^1.7.2",
-		"dotenv": "^16.4.5",
-		"express": "^4.19.2",
-		"hyper-express": "^6.16.3",
-		"openai": "^4.47.1",
-		"pnpm": "^9.1.4",
-		"prettier": "^3.3.2"
-	},
+"scripts": {
+  "build": "tsc -b", 
+  "dev": "turbo run dev",
+  "test": "turbo run test",
+  "lint": "turbo run lint",
+  "check-types": "tsc --noEmit"
+},
 	"devDependencies": {
-		"@types/dotenv": "^8.2.0",
-		"tsx": "^4.10.5",
-		"typescript": "^5.4.5"
-	}
-}
+	  "turbo": "^2.0.3",
+	  "typescript": "^5.4.5",
+	  "eslint": "^8.2.0",
+	  "prettier": "^3.3.2"
+	},
+	"packageManager": "pnpm@7.9.0"
+  }

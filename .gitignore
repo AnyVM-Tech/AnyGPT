@@ -12,7 +12,7 @@ yarn-error.log*
 .vscode
 *.swp
 *.swo
-
+.turbo
 # Operating System Files
 .DS_Store
 Thumbs.db
