@@ -27,3 +27,5 @@ Thumbs.db
 vite.config.ts.timestamp*
 pnpm-lock.yaml
 package-lock.json
+/dist
+.turbo

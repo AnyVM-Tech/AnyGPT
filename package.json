@@ -2,14 +2,10 @@
 	"name": "anygpt",
 	"version": "1.0.0",
 	"private": true,
-	"description": "AnyGPT, the only free api and apps youll ever need",
+	"description": "AnyGPT, the only free API and apps you'll ever need",
 	"workspaces": [
-		"packages/*"
+		"apps/*"
 	],
-	"repository": {
-		"type": "git",
-		"url": "git+https://github.com/any-VM/anyGPT.git"
-	},
 	"scripts": {
 		"build": "tsc -b",
 		"dev": "turbo run dev",

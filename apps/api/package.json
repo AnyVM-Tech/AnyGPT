@@ -1,25 +1,13 @@
 {
 	"name": "anygpt-api",
 	"version": "1.0.0",
-	"description": "API for anygpt - a better GPT-4 free alternative",
-	"main": "api.ts",
 	"scripts": {
-		"build": "tsc -p tsconfig.json",
+		"build": "tsc -p tsconfig.json --outDir ../../dist/api",
 		"start": "npx tsx dist/api.js",
 		"dev": "npx tsx api.ts",
 		"lint": "eslint . --ext .ts",
 		"test": "jest"
 	},
-	"repository": {
-		"type": "git",
-		"url": "git+https://github.com/any-VM/anyGPT.git"
-	},
-	"author": "sukuna/skullcmd",
-	"license": "ISC",
-	"bugs": {
-		"url": "https://github.com/any-VM/anyGPT/issues"
-	},
-	"homepage": "https://github.com/any-VM/anyGPT#readme",
 	"dependencies": {
 		"@google/generative-ai": "^0.11.3",
 		"@types/express": "^4.17.21",
