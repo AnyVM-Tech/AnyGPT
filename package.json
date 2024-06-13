@@ -10,6 +10,7 @@
 	  "type": "git",
 	  "url": "git+https://github.com/any-VM/anyGPT.git"
 	},
+	
 "scripts": {
   "build": "tsc -b", 
   "dev": "turbo run dev",
@@ -18,7 +19,7 @@
   "check-types": "tsc --noEmit"
 },
 	"devDependencies": {
-	  "turbo": "^2.0.3",
+	  "turbo": "latest",
 	  "typescript": "^5.4.5",
 	  "eslint": "^8.2.0",
 	  "prettier": "^3.3.2"
