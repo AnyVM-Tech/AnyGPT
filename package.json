@@ -2,14 +2,19 @@
 	"name": "anygpt",
 	"version": "1.0.0",
 	"private": true,
-	"description": "AnyGPT, the only free api and apps youll ever need",
+	"description": "AnyGPT, the only free API and apps you'll ever need",
 	"workspaces": [
-	  "packages/*"
+		"apps/*"
 	],
-	"repository": {
-	  "type": "git",
-	  "url": "git+https://github.com/any-VM/anyGPT.git"
+	"scripts": {
+		"build": "tsc -b",
+		"dev": "turbo run dev",
+		"test": "turbo run test",
+		"lint": "turbo run lint",
+		"typecheck": "tsc --noEmit",
+		"format": "prettier --write ./"
 	},
+<<<<<<< HEAD
 	
 "scripts": {
   "build": "tsc -b", 
@@ -23,6 +28,13 @@
 	  "typescript": "^5.4.5",
 	  "eslint": "^8.2.0",
 	  "prettier": "^3.3.2"
+=======
+	"devDependencies": {
+		"turbo": "^2.0.3",
+		"typescript": "^5.4.5",
+		"eslint": "^8.2.0",
+		"prettier": "^3.3.2"
+>>>>>>> 6baf4bff09190b89fb5e9a722be32ee4bb97fe72
 	},
 	"packageManager": "pnpm@7.9.0"
-  }
+}
