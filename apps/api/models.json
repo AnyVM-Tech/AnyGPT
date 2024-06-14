@@ -1,0 +1,735 @@
+{
+  "openai": [
+    {
+      "id": "gpt-3.5-turbo"
+    },
+    {
+      "id": "gpt-3.5-turbo-1106"
+    },
+    {
+      "id": "gpt-3.5-turbo-0125"
+    },
+    {
+      "id": "gpt-4"
+    },
+    {
+      "id": "gpt-4o"
+    },
+    {
+      "id": "gpt-4o-2024-05-13"
+    },
+    {
+      "id": "gpt-4-turbo"
+    },
+    {
+      "id": "gpt-4-turbo-2024-04-09"
+    },
+    {
+      "id": "gpt-4-vision-preview"
+    },
+    {
+      "id": "gpt-4-0125-preview"
+    },
+    {
+      "id": "gpt-4-1106-preview"
+    },
+    {
+      "id": "gpt-4-1106-vision-preview"
+    },
+    {
+      "id": "gpt-4-turbo-preview"
+    },
+    {
+      "id": "dall-e-3"
+    },
+    {
+      "id": "tts-1"
+    },
+    {
+      "id": "tts-1-hd"
+    },
+    {
+      "id": "text-embedding-ada-002"
+    },
+    {
+      "id": "text-embedding-3-small"
+    },
+    {
+      "id": "text-embedding-3-large"
+    },
+    {
+      "id": "whisper"
+    },
+    {
+      "id": "gpt-2"
+    },
+    {
+      "id": "gpt-4"
+    },
+    {
+      "id": "gpt-3.5-turbo"
+    },
+    {
+      "id": "gpt-3.5"
+    },
+    {
+      "id": "text-embedding-3-large"
+    },
+    {
+      "id": "text-embedding-3-small"
+    },
+    {
+      "id": "text-embedding-ada-002"
+    }
+  ],
+  "fireworks.ai": [
+    {
+      "id": "firefunction-v1"
+    }
+  ],
+  "cohere": [
+    {
+      "id": "command-r"
+    },
+    {
+      "id": "command-r-plus"
+    },
+    {
+      "id": "command-light-nightly"
+    },
+    {
+      "id": "command"
+    },
+    {
+      "id": "command-light"
+    },
+    {
+      "id": "c4ai-aya"
+    },
+    {
+      "id": "embed-english-light-v2.0"
+    },
+    {
+      "id": "embed-english-v2.0"
+    },
+    {
+      "id": "embed-multilingual-light-v3.0"
+    },
+    {
+      "id": "embed-multilingual-v3.0"
+    },
+    {
+      "id": "embed-multilingual-v2.0"
+    },
+    {
+      "id": "embed-english-v3.0"
+    },
+    {
+      "id": "embed-english-light-v3.0"
+    },
+    {
+      "id": "bge-large-en-v1.5"
+    },
+    {
+      "id": "bge-base-en-v1.5"
+    },
+    {
+      "id": "e5-base-v2"
+    },
+    {
+      "id": "all-minilm-l12-v2"
+    },
+    {
+      "id": "all-minilm-l6-v2"
+    },
+    {
+      "id": "all-mpnet-base-v2"
+    },
+    {
+      "id": "clip-vit-b-32"
+    },
+    {
+      "id": "clip-vit-b-32-multilingual-v1"
+    },
+    {
+      "id": "multi-qa-mpnet-base-dot-v1"
+    },
+    {
+      "id": "paraphrase-minilm-l6-v2"
+    },
+    {
+      "id": "text2vec-base-chinese"
+    },
+    {
+      "id": "gte-large"
+    },
+    {
+      "id": "gte-base"
+    }
+  ],
+  "anthropic": [
+    {
+      "id": "claude-3-haiku"
+    },
+    {
+      "id": "claude-3-sonnet"
+    },
+    {
+      "id": "claude-3-opus"
+    }
+  ],
+  "databricks": [
+    {
+      "id": "dbrx-instruct"
+    }
+  ],
+  "google": [
+    {
+      "id": "gemini-pro"
+    },
+    {
+      "id": "gemini-1.0-pro"
+    },
+    {
+      "id": "gemini-1.0-pro-001"
+    },
+    {
+      "id": "gemini-1.0-pro-latest"
+    },
+    {
+      "id": "gemini-1.5-flash"
+    },
+    {
+      "id": "gemini-1.5-pro-latest"
+    },
+    {
+      "id": "gemma-2b"
+    },
+    {
+      "id": "gemma-7b"
+    },
+    {
+      "id": "codegemma-7b"
+    },
+    {
+      "id": "gemma-1.1-7b"
+    },
+    {
+      "id": "gtts"
+    },
+    {
+      "id": "embedding-001"
+    },
+    {
+      "id": "text-embedding-004"
+    },
+    {
+      "id": "embedding-gecko-001"
+    }
+  ],
+  "mistralai": [
+    {
+      "id": "mixtral-8x7b-instruct"
+    },
+    {
+      "id": "mixtral-8x22b-instruct"
+    },
+    {
+      "id": "mistral-tiny"
+    },
+    {
+      "id": "mistral-small"
+    },
+    {
+      "id": "mistral-medium"
+    },
+    {
+      "id": "mistral-large"
+    },
+    {
+      "id": "mistral-next"
+    },
+    {
+      "id": "mistral-7b-instruct"
+    },
+    {
+      "id": "e5-mistral-7b-instruct"
+    }
+  ],
+  "microsoft": [
+    {
+      "id": "wizard-2-7b"
+    },
+    {
+      "id": "wizard-2-8x22b"
+    },
+    {
+      "id": "phi-2"
+    },
+    {
+      "id": "phi-3-mini-4k"
+    },
+    {
+      "id": "edge"
+    }
+  ],
+  "zeypher": [
+    {
+      "id": "zephyr-8x22b"
+    },
+    {
+      "id": "zephyr-7b"
+    }
+  ],
+  "Uknown": [
+    {
+      "id": "goliath-120b"
+    },
+    {
+      "id": "snowflake-arctic-instruct"
+    },
+    {
+      "id": "finance-chat"
+    },
+    {
+      "id": "law-chat"
+    },
+    {
+      "id": "medicine-chat"
+    },
+    {
+      "id": "daredevil-8b-abliterated"
+    },
+    {
+      "id": "wizardcoder-python-7b"
+    },
+    {
+      "id": "deepseek-coder-6.7b-instruct"
+    },
+    {
+      "id": "yi-34b"
+    },
+    {
+      "id": "yi-6b"
+    },
+    {
+      "id": "realvisxl-v3"
+    },
+    {
+      "id": "realvisxl-v4"
+    },
+    {
+      "id": "pixart-xl-2"
+    },
+    {
+      "id": "proteus-v4"
+    },
+    {
+      "id": "sdxl-deepcache"
+    }
+  ],
+  "Unknown": [
+    {
+      "id": "vicuna-13b"
+    },
+    {
+      "id": "openchat-3.5"
+    },
+    {
+      "id": "openchat-3.6"
+    },
+    {
+      "id": "phind-codellama-34b"
+    },
+    {
+      "id": "llava-1.5"
+    },
+    {
+      "id": "lzlv-70b"
+    },
+    {
+      "id": "airoboros-70b"
+    },
+    {
+      "id": "airoboros-70b-gpt4"
+    },
+    {
+      "id": "codellama-7b-instruct"
+    },
+    {
+      "id": "codellama-13b-instruct"
+    },
+    {
+      "id": "deepseek-coder-33b-instruct"
+    },
+    {
+      "id": "deepseek-chat-67b"
+    },
+    {
+      "id": "phind-codellama-34b-v2-instruct"
+    },
+    {
+      "id": "codellama-34b-instruct"
+    },
+    {
+      "id": "codellama-70b-instruct"
+    },
+    {
+      "id": "dolphine-mixtral"
+    },
+    {
+      "id": "hermes-2"
+    },
+    {
+      "id": "hermes-2-pro"
+    },
+    {
+      "id": "hermes-2-pro-llama-3-8b"
+    },
+    {
+      "id": "nueralhermes-2.5-mistral-7b"
+    },
+    {
+      "id": "qwen-1.5-32b"
+    },
+    {
+      "id": "qwen-1.5-0.5b"
+    },
+    {
+      "id": "qwen-1.5-1.8b"
+    },
+    {
+      "id": "qwen-1.5-4b"
+    },
+    {
+      "id": "qwen-1.5-7b"
+    },
+    {
+      "id": "qwen-1.5-14b"
+    },
+    {
+      "id": "qwen-1.5-72b"
+    },
+    {
+      "id": "qwen-1.5-110b"
+    },
+    {
+      "id": "qwen-2-72b"
+    },
+    {
+      "id": "koala-7b"
+    },
+    {
+      "id": "koala-13b"
+    },
+    {
+      "id": "dolly-v2-3b"
+    },
+    {
+      "id": "dolly-v2-7b"
+    },
+    {
+      "id": "dolly-v2-13b"
+    }
+  ],
+  "metaai": [
+    {
+      "id": "llamaguard-7b"
+    },
+    {
+      "id": "llama-2-7b"
+    },
+    {
+      "id": "llama-2-13b"
+    },
+    {
+      "id": "llama-2-70b"
+    },
+    {
+      "id": "llama-3-70b"
+    },
+    {
+      "id": "llama-3-8b"
+    },
+    {
+      "id": "llama-3-8b-chinese"
+    },
+    {
+      "id": "llava-1.6-34b"
+    },
+    {
+      "id": "llava-1.6-7b"
+    }
+  ],
+  "Unkown": [
+    {
+      "id": "cinematika-7b"
+    },
+    {
+      "id": "toppy-7b"
+    }
+  ],
+  "pi": [
+    {
+      "id": "pi"
+    }
+  ],
+  "openrouter": [
+    {
+      "id": "mythomax-l2-13b"
+    },
+    {
+      "id": "nous-capybara-7b"
+    }
+  ],
+  "perplexity": [
+    {
+      "id": "sonar-small-chat"
+    },
+    {
+      "id": "sonar-medium-chat"
+    },
+    {
+      "id": "sonar-small-online"
+    },
+    {
+      "id": "sonar-medium-online"
+    },
+    {
+      "id": "perplexity-related"
+    }
+  ],
+  "huggingface": [
+    {
+      "id": "dall-e-3-xl"
+    },
+    {
+      "id": "dall-e-3-4k"
+    },
+    {
+      "id": "sdxl-flash"
+    }
+  ],
+  "MidJourney": [
+    {
+      "id": "midjourney"
+    }
+  ],
+  "stable-diffusion": [
+    {
+      "id": "sdxl"
+    },
+    {
+      "id": "sdxl-turbo"
+    }
+  ],
+  "sberbank": [
+    {
+      "id": "kandinsky-2.2"
+    },
+    {
+      "id": "kandinsky-3"
+    }
+  ],
+  "other": [
+    {
+      "id": "latent-consistency-model"
+    }
+  ],
+  "playgroundai": [
+    {
+      "id": "playground-v2"
+    },
+    {
+      "id": "playground-v2.5"
+    }
+  ],
+  "pollinationsai": [
+    {
+      "id": "pollinations"
+    }
+  ],
+  "stablity.ai": [
+    {
+      "id": "pastel-mix-anime"
+    },
+    {
+      "id": "absolute-reality-v1.6"
+    },
+    {
+      "id": "absolute-reality-v1.8.1"
+    },
+    {
+      "id": "anything-v3"
+    },
+    {
+      "id": "anything-v4.5"
+    },
+    {
+      "id": "anything-v5"
+    },
+    {
+      "id": "meinamix"
+    },
+    {
+      "id": "deliberate-v2"
+    },
+    {
+      "id": "deliberate-v3"
+    },
+    {
+      "id": "rev-animated"
+    },
+    {
+      "id": "dreamshaper-6"
+    },
+    {
+      "id": "dreamshaper-7"
+    },
+    {
+      "id": "dreamshaper-8"
+    },
+    {
+      "id": "realistic-vision-v1.4"
+    },
+    {
+      "id": "realistic-vision-v2"
+    },
+    {
+      "id": "realistic-vision-v4"
+    },
+    {
+      "id": "realistic-vision-v5"
+    },
+    {
+      "id": "openjourney-v4"
+    },
+    {
+      "id": "am-i-real-v4.1"
+    },
+    {
+      "id": "analog-v1"
+    },
+    {
+      "id": "abyssorangemix-v3"
+    },
+    {
+      "id": "blazing-drive-v10g"
+    },
+    {
+      "id": "cetusmix-version35"
+    },
+    {
+      "id": "counterfeit-v3.0"
+    },
+    {
+      "id": "cyberrealistic-v3.3"
+    },
+    {
+      "id": "dalcefo-v4"
+    },
+    {
+      "id": "animagine"
+    },
+    {
+      "id": "dreamshaper-xl10"
+    },
+    {
+      "id": "dynavision-xl"
+    },
+    {
+      "id": "juggernaut-xl"
+    },
+    {
+      "id": "realism-engine"
+    },
+    {
+      "id": "realvisx"
+    },
+    {
+      "id": "sdxl-base"
+    },
+    {
+      "id": "turbovision"
+    },
+    {
+      "id": "dreamlike-anime-v1"
+    },
+    {
+      "id": "dreamlike-diffusion-v1"
+    },
+    {
+      "id": "dreamlike-photoreal-v2"
+    },
+    {
+      "id": "edge-of-realism-eor-v2.0"
+    },
+    {
+      "id": "eimis-anime-diffusion-v1.0"
+    },
+    {
+      "id": "elldreth's-vivid"
+    },
+    {
+      "id": "epicrealism-natural-sin-rc1"
+    },
+    {
+      "id": "juggernaut-aftermath"
+    },
+    {
+      "id": "lofi-v4"
+    },
+    {
+      "id": "lyriel-v1.6"
+    },
+    {
+      "id": "majicmix-realistic-v4"
+    },
+    {
+      "id": "mechamix-v1.0"
+    },
+    {
+      "id": "meinamix-meina-v9"
+    },
+    {
+      "id": "neverending-dream-v1.22"
+    },
+    {
+      "id": "protogen-x3.4"
+    },
+    {
+      "id": "redshift-diffusion-v1.0"
+    },
+    {
+      "id": "rundiffusion-fx-2.5d-v1.0"
+    },
+    {
+      "id": "rundiffusion-fx-photorealistic-v1.0"
+    },
+    {
+      "id": "sd-v1.4"
+    },
+    {
+      "id": "sd-v1.5"
+    },
+    {
+      "id": "sd-v1.5-inpainting"
+    },
+    {
+      "id": "timeless-v1"
+    },
+    {
+      "id": "toonyou-beta-6"
+    }
+  ],
+  "elevenlabs": [
+    {
+      "id": "elevenlabs"
+    }
+  ],
+  "speechify": [
+    {
+      "id": "speechify"
+    }
+  ]
+}

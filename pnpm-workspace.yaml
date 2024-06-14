@@ -1,10 +1,5 @@
 packages:
-<<<<<<< HEAD
-  - "apps/*"
-  - "packages/*"
-=======
     - 'packages/*'
->>>>>>> 6baf4bff09190b89fb5e9a722be32ee4bb97fe72
 importers:
     .:
         specifiers:

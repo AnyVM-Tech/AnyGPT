@@ -14,27 +14,11 @@
 		"typecheck": "tsc --noEmit",
 		"format": "prettier --write ./"
 	},
-<<<<<<< HEAD
-	
-"scripts": {
-  "build": "tsc -b", 
-  "dev": "turbo run dev",
-  "test": "turbo run test",
-  "lint": "turbo run lint",
-  "check-types": "tsc --noEmit"
-},
 	"devDependencies": {
-	  "turbo": "latest",
-	  "typescript": "^5.4.5",
-	  "eslint": "^8.2.0",
-	  "prettier": "^3.3.2"
-=======
-	"devDependencies": {
-		"turbo": "^2.0.3",
-		"typescript": "^5.4.5",
 		"eslint": "^8.2.0",
-		"prettier": "^3.3.2"
->>>>>>> 6baf4bff09190b89fb5e9a722be32ee4bb97fe72
+		"prettier": "^3.3.2",
+		"turbo": "^2.0.3",
+		"typescript": "^5.4.5"
 	},
 	"packageManager": "pnpm@7.9.0"
 }
