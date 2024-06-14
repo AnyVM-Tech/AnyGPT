@@ -74,7 +74,7 @@ async function fetchAndGroupModelData(): Promise<{ [ownedBy: string]: ModelSumma
       const existingData = JSON.parse(existingDataRaw);
       if (!existingData[groupKey]) {
         existingData[groupKey] = [];
-        // Uncomment the next line if you prefer to return an error instead of creating a new group
+        // uncomment the next line to return an error instead of creating a new group
         // throw new Error(`Group ${groupKey} does not exist.`);
       }
       const modelIndex = existingData[groupKey].findIndex((model: ModelSummary) => model.id === modelId);
