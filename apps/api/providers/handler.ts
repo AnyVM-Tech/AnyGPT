@@ -7,7 +7,6 @@ interface IAIModel {
 
 class AnotherAIModel implements IAIModel {
   async sendMessage(message: string): Promise<{ response: string; latency: number }> {
-    // Implementation for another AI model
     return { response: `AnotherAIModel response to: ${message}`, latency: 100 };
   }
 }
