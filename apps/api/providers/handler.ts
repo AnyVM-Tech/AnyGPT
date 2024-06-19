@@ -1,24 +1,24 @@
 import { readFileSync } from 'fs';
 import { GeminiAI } from 'providers/gemini';
 import dotenv from 'dotenv';
+import {OpenAI} from 'providers/openai';
 dotenv.config();
-interface IAIModel {
-  sendMessage(message: string): Promise<{ response: string; latency: number }>;
+interface IAIProvider {
+  sendMessage(message: string): Promise<{response: string, latency: number}>;
 }
-
-// AIModelIdentifier now returns the class reference instead of an instance
 class AIModelIdentifier {
   private static models = JSON.parse(readFileSync('models.json', 'utf8'));
 
-  static getModelClass(model: string): typeof GeminiAI | undefined {
+  static getModelClass(model: string): new (...args: any[]) => IAIProvider {
     for (const group in AIModelIdentifier.models) {
       const foundModel = AIModelIdentifier.models[group].find((m: any) => m.id === model);
       if (foundModel) {
         switch (group) {
           case 'google':
             return GeminiAI;
-          default:
-            throw new Error(`Unsupported group: ${group}`);
+          case 'openai':
+            return OpenAI;
+          // add cases for more providers
         }
       }
     }
@@ -26,13 +26,13 @@ class AIModelIdentifier {
   }
 }
 
-// MessageHandler uses the class reference to instantiate an object
+
 export class MessageHandler {
   static async handleMessages(
     messages: { role: string; content: string }[] | [] | { [key: string]: any },
     model: string
   ): Promise<{ response: string; latency: number }> {
-    console.log("handleMessages called with messages:", messages); // Debug log
+    console.log("handleMessages called with messages:", messages);
 
     if (Array.isArray(messages) && messages.length === 0) {
       return { response: "No messages provided.", latency: 0 };
@@ -42,53 +42,41 @@ export class MessageHandler {
       return { response: "Invalid message format.", latency: 0 };
     }
 
-    console.log("Messages are valid, proceeding..."); // Debug log
-
-    let responseText = "";
     let startTime = Date.now();
 
     let aiModelClass;
     try {
-      console.log("Attempting to get AI model class for model:", model); // Debug log
       aiModelClass = AIModelIdentifier.getModelClass(model);
-      console.log("AI model class obtained:", aiModelClass); // Debug log
-
       if (!aiModelClass) {
         throw new Error(`Model class not found for ${model}`);
       }
     } catch (error: any) {
-      console.error("Error getting AI model class:", error.message); // Error log
+      console.error("Error getting AI model class:", error.message);
       return { response: `Error getting AI model class: ${error.message}`, latency: 0 };
     }
 
-    console.log("guh"); // Original log
-
-    // Instantiate the AI model with necessary parameters
     const aiModel = new aiModelClass(model);
+    let responseText = "";
 
-    for (const message of messages) {
-      switch (message.role) {
-        case "system":
-          responseText += `System: ${message.content}\n`;
-          break;
-        case "user":
-          try {
-            const aiResponse = await aiModel.sendMessage(message.content);
-            responseText += `AI: ${aiResponse.response}\n`;
-            console.log("this s a log", aiResponse)
-          } catch (error: any) {
-            responseText += `Error processing message: ${error.message}\n`;
-          }
-          break;
-        default:
-          responseText += `Unknown role: ${message.role} with content: ${message.content}\n`;
-          
-      }
-    }
+const serializedMessages = JSON.stringify(messages);
+console.log("serializedMessages", serializedMessages);
 
-    let endTime = Date.now();
-    console.log(responseText.trim())
-    return { response: responseText.trim(), latency: endTime - startTime };
+try {
+  const messagesArray = JSON.parse(serializedMessages);
+  const data = {
+    model: model,
+    messages: messagesArray 
 
-  }
+  };
+
+  const aiResponse = await aiModel.sendMessage(JSON.stringify(data));
+  responseText = `${aiResponse.response}\n`;
+  console.log("AI response:", aiResponse);
+} catch (error: any) {
+  responseText = `Error processing messages: ${error.message}\n`;
+}
+
+let endTime = Date.now();
+return { response: responseText.trim(), latency: endTime - startTime };
+}
 }

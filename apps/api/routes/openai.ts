@@ -22,6 +22,7 @@ server.post('/openai', async (request, response) => {
 console.log(messages, model)
     const result = await MessageHandler.handleMessages(messages, model);
     console.log('Received messages:', messages);
+    console.log("response",(JSON.parse(JSON.stringify(result))));
     response.json(JSON.parse(JSON.stringify(result)));
   } catch (error) {
     console.error('Error receiving messages:', error);

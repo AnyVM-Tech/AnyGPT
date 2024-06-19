@@ -6,9 +6,13 @@ import {
   GenerativeModel
 } from '@google/generative-ai';
 
-dotenv.config();
+dotenv.config();   // cannot directly input messages to the model, it will not respond correctly as history and message are different,
+// currently messages are passed as one long string for object message 
 
-export class GeminiAI {
+interface IAIProvider {
+  sendMessage(message: string): Promise<{response: string, latency: number}>;
+}
+export class GeminiAI implements IAIProvider {
   private model: GenerativeModel;
   private generationConfig = {
     temperature: 1,
@@ -47,25 +51,24 @@ export class GeminiAI {
     });
   }
 
-  async sendMessage(message: string) {
+  async sendMessage(message: string): Promise<{response: string, latency: number}> {
     const startTime = Date.now();
-
+  
     try {
       const chatSession = this.model.startChat({
         generationConfig: this.generationConfig,
         safetySettings: this.safetySettings,
         history: []
       });
-
+  
       const result = await chatSession.sendMessage(message);
       console.log('Result:', result);
-
+  
       const endTime = Date.now();
-      const totalLatency = endTime - startTime;
-
+  
       return {
-        response: result.response.text(),
-        latency: totalLatency
+        response: await result.response.text(),
+        latency: endTime - startTime
       };
     } catch (error) {
       console.error('Error in Gemini API call:', error);

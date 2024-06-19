@@ -1,47 +1,44 @@
 import dotenv from 'dotenv';
-import { Server } from 'hyper-express';
 import axios from 'axios';
-
 dotenv.config();
 const apiKey = process.env.OPENAI_API_KEY || '';
 
-const server = new Server();
-const port = 3001;
+interface IAIProvider {
+	sendMessage(message: string): Promise<{response: string, latency: number}>;
+  }
+export class OpenAI implements IAIProvider {
+    private message: string;
 
-server.post('/openai', async (request, response) => {
-	const endpoint = `https://api.openai.com/v1/chat/completions`;
+    constructor(message: string) {
+        this.message = message;
+    }
+	async sendMessage(message: string): Promise<{ response: string; latency: number; }> {
+		const startTime = performance.now();
+		const url = `https://api.openai.com/v1/chat/completions`;
+		const headers = {
+			'Content-Type': 'application/json',
+			'Authorization': `Bearer ${apiKey}`
+		};
+	
+		const data = message;
+	
+		try {
+			const response = await axios.post(url, data, { headers });
+			const endTime = performance.now();
 
-	const body = await request.json();
-	const params = {
-		model: 'gpt-4-turbo',
-		messages: [{ role: 'user', content: body.message }],
-		temperature: 0.7
-	};
-
-	const startTime = Date.now();
-
-	try {
-		console.log('Params:', params);
-		const axiosResponse = await axios.post(endpoint, params, {
-			headers: {
-				Authorization: `Bearer ${apiKey}`,
-				'Content-Type': 'application/json'
-			}
-		});
-
-		const endTime = Date.now();
-		const totalLatency = endTime - startTime;
-
-		response.json({
-			...axiosResponse.data,
-			latency: totalLatency
-		});
-	} catch (error) {
-		console.error('Error in OpenAI API call:', error);
-		response.status(500).json('Error in OpenAI API call');
+			console.log("Full response:", JSON.stringify(response.data, null, 2));
+if (response.data.choices && response.data.choices.length > 0 && response.data.choices[0].message && response.data.choices[0].message.content) {
+    return {
+        response: response.data.choices[0].message.content,
+        latency: endTime - startTime
+    };
+} else {
+    console.warn("Expected data not found in response:", JSON.stringify(response.data, null, 2));
+    return { response: 'Data not found', latency: endTime - startTime };
+}
+		} catch (error) {
+			console.error('Error sending message to OpenAI:', error);
+			throw error;
+		}
 	}
-});
-
-server.listen(port).then(() => {
-	console.log(`Server running at http://localhost:${port}`);
-});
+}
