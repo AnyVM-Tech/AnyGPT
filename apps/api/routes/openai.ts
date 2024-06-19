@@ -1,47 +1,36 @@
 import { Server } from 'hyper-express';
 import dotenv from 'dotenv';
-
+import { MessageHandler } from 'providers/handler';
+import { resourceLimits } from 'worker_threads';
 dotenv.config();
 
-class Container {
-  private dependencies: Record<string, any> = {};
-
-  register(key: string, constructor: any) {
-    this.dependencies[key] = constructor;
-  }
-
-  resolve(key: string) {
-    if (!this.dependencies[key]) {
-      throw new Error(`Dependency ${key} not found`);
-    }
-    return this.dependencies[key];
-  }
-}
 interface IAIModel {
   sendMessage(message: string): Promise<{ response: string; latency: number }>;
 }
 
-const container = new Container();
-
-function createAIModel(modelName: string): IAIModel {
-  return container.resolve(modelName);
-}
-
-export async function extractMessageFromRequest(request: any): Promise<{ message: string; model: string }> {
+async function extractMessageFromRequest(request: any): Promise<{ messages: { role: string; content: string }[]; model: string }> {
   const requestBody = await request.json();
-  return { message: requestBody.message, model: requestBody.model || 'defaultModel' };
+  return { messages: requestBody.messages, model: requestBody.model || 'defaultModel' };
 }
-export function setupRoutes(server: Server) {
-  server.post('/openai', async (request, response) => {
-    try {
-      const { message, model } = await extractMessageFromRequest(request);
-      const aiModel = createAIModel(model); 
-      const result = await aiModel.sendMessage(message);
-      console.log('Received message:', message);
-      response.status(200).json({ message: "Message received, processing...", result });
-    } catch (error) {
-      console.error('Error receiving message:', error);
-      response.status(500).send('Error receiving message');
-    }
-  });
-}
+
+const server = new Server();
+
+server.post('/openai', async (request, response) => {
+  try {
+    const { messages, model } = await extractMessageFromRequest(request);
+
+console.log(messages, model)
+    const result = await MessageHandler.handleMessages(messages, model);
+    console.log('Received messages:', messages);
+    response.json(JSON.parse(JSON.stringify(result)));
+  } catch (error) {
+    console.error('Error receiving messages:', error);
+    response.status(500).json({ error: "Internal Server Error" });
+  }
+  
+});
+
+const port = parseInt(process.env.PORT || '3000', 10);
+server.listen(port, () => {
+  console.log(`Server is running on http://localhost:${port}`);
+});

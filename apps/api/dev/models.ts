@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 interface ModelSummary {
   id: string;
-  owned_by: string;
+  owned_by?: string;
 }
 
 async function fetchAndGroupModelData(): Promise<{ [ownedBy: string]: ModelSummary[] }> {
@@ -33,14 +33,16 @@ async function fetchAndGroupModelData(): Promise<{ [ownedBy: string]: ModelSumma
     }
   }
 
+  type GroupedModelData = Record<string, ModelSummary[]>;
+
   async function readAndMergeModelData() {
     const filePath = path.join('/workspaces/anyGPT/apps/api', 'models.json');
   
     try {
-      let existingData = {};
+      let existingData: GroupedModelData = {}; 
       try {
         const existingDataRaw = fs.readFileSync(filePath, 'utf8');
-        existingData = JSON.parse(existingDataRaw);
+        existingData = JSON.parse(existingDataRaw) as GroupedModelData;
       } catch (readOrParseError) {
         console.warn('Warning: Failed to read or parse existing models.json. Assuming empty object.', readOrParseError);
       }
@@ -66,12 +68,13 @@ async function fetchAndGroupModelData(): Promise<{ [ownedBy: string]: ModelSumma
       console.error('Error reading, merging, or writing model data:', error);
     }
   }
+  
   async function modifyModel(groupKey: string, modelId: string, newModelData: Partial<ModelSummary>) {
     const filePath = path.join('/workspaces/anyGPT/apps/api', 'models.json');
   
     try {
       const existingDataRaw = fs.readFileSync(filePath, 'utf8');
-      const existingData = JSON.parse(existingDataRaw);
+      const existingData = JSON.parse(existingDataRaw) as GroupedModelData; 
       if (!existingData[groupKey]) {
         existingData[groupKey] = [];
         // uncomment the next line to return an error instead of creating a new group

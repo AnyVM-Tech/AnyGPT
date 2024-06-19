@@ -36,10 +36,14 @@ export class GeminiAI {
     }
   ];
 
-  constructor(apiKey: string) {
+  constructor(model: string) {
+    const apiKey = process.env.GEMINI_API_KEY; 
+    if (!apiKey) {
+      throw new Error('API key is not defined in .env');
+    }
     const genAI = new GoogleGenerativeAI(apiKey);
     this.model = genAI.getGenerativeModel({
-      model: 'gemini-1.5-pro'
+      model: model
     });
   }
 

@@ -1,13 +1,20 @@
 {
 	"compilerOptions": {
-		"target": "es5",
-		"module": "commonjs",
-		"outDir": "../../dist/api",
-		"strict": true,
-		"esModuleInterop": true,
-		"skipLibCheck": true,
-		"forceConsistentCasingInFileNames": true
+	  "target": "es5",
+	  "module": "commonjs",
+	  "outDir": "../../dist/api",
+	  "strict": true,
+	  "esModuleInterop": true,
+	  "skipLibCheck": true,
+	  "forceConsistentCasingInFileNames": true,
+	  "baseUrl": ".", 
+	  "paths": { 
+		"*": ["*", "./node_modules/*"]
+	  },
+	  "moduleResolution": "node", 
+	  "resolveJsonModule": true, 
+	  "allowSyntheticDefaultImports": true 
 	},
-	"include": ["./**/*"],
+	"include": ["./**/*"], 
 	"exclude": ["node_modules"]
-}
+  }
