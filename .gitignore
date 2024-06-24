@@ -21,11 +21,10 @@ Thumbs.db
 /.cache
 
 # Build directories
-/build
+/dist
 
 # Specific files
 vite.config.ts.timestamp*
 pnpm-lock.yaml
 package-lock.json
-/dist
 .turbo

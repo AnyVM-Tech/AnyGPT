@@ -31,6 +31,12 @@ console.log(messages, model)
   
 });
 
+server.get('/models', (request, response) => {
+  const modelsFilePath = './models.json';
+  response.sendFile(modelsFilePath);
+});
+
+
 const port = parseInt(process.env.PORT || '3000', 10);
 server.listen(port, () => {
   console.log(`Server is running on http://localhost:${port}`);

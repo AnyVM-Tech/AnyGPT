@@ -7,11 +7,9 @@ interface IAIProvider {
 	sendMessage(message: string): Promise<{response: string, latency: number}>;
   }
 export class OpenAI implements IAIProvider {
-    private message: string;
 
-    constructor(message: string) {
-        this.message = message;
-    }
+
+
 	async sendMessage(message: string): Promise<{ response: string; latency: number; }> {
 		const startTime = performance.now();
 		const url = `https://api.openai.com/v1/chat/completions`;
