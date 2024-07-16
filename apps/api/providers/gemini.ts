@@ -11,6 +11,8 @@ dotenv.config();   // cannot directly input messages to the model, it will not r
 
 interface IAIProvider {
   sendMessage(message: string): Promise<{response: string, latency: number}>;
+  isBusy(): boolean;
+  getLatency(): number;
 }
 const generationConfig = {
   temperature: 1,
@@ -41,7 +43,13 @@ const safetySettings = [
 
 export class GeminiAI implements IAIProvider {
   private model: GenerativeModel;
+  private busy: boolean = false;
+  private lastLatency: number = 0;
 
+  isBusy(): boolean {
+    return this.busy;
+  }
+  
   constructor(model: string) {
     const apiKey = process.env.GEMINI_API_KEY; 
     if (!apiKey) {
@@ -54,6 +62,7 @@ export class GeminiAI implements IAIProvider {
   }
 
   async sendMessage(message: string): Promise<{response: string, latency: number}> {
+    this.busy = true;
     const startTime = Date.now();
   
     try {
@@ -67,14 +76,23 @@ export class GeminiAI implements IAIProvider {
       console.log('Result:', result);
   
       const endTime = Date.now();
+      this.lastLatency = endTime - startTime;
+      this.busy = false;
   
       return {
         response: await result.response.text(),
-        latency: endTime - startTime
+        latency: this.lastLatency
       };
     } catch (error) {
       console.error('Error in Gemini API call:', error);
+      this.busy = false;
       throw new Error('Error in Gemini API call');
     }
+  }
+
+
+
+  getLatency(): number {
+    return this.lastLatency;
   }
 }

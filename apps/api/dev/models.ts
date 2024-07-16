@@ -1,6 +1,7 @@
 import axios from 'axios';
 import fs from 'fs';
 import path from 'path';
+import { promisify } from 'util';
 interface ModelSummary {
   id: string;
   owned_by?: string;
@@ -92,4 +93,63 @@ async function fetchAndGroupModelData(): Promise<{ [ownedBy: string]: ModelSumma
       console.error('Error modifying model data:', error);
     }
   }
-  readAndMergeModelData();
+
+  interface Model {
+    id: string;
+  }
+  
+  interface ProviderReport {
+    name: string;
+    models: Model[];
+  }
+  
+  class ModelProvider {
+    supportedProviders: string[];
+  
+    constructor(supportedProviders: string[]) {
+      this.supportedProviders = supportedProviders;
+    }
+  
+    async generateProviderModelLatencyReport(providerName: string, modelName: string) {
+      const modelsFilePath = '/root/github/anyGPT/apps/api/models.json';
+      const reportFilePath = '/root/github/anyGPT/apps/api/devmodels.json';
+      try {
+        const modelsData = await fs.promises.readFile(modelsFilePath, 'utf8');
+        const models = JSON.parse(modelsData);
+  
+       
+        const report = { provider: [] };
+        
+        if (models[providerName]) {
+          const filteredModels = models[providerName]
+            .filter((model: { id: string; }) => model.id.includes(modelName))
+            .map((model: { id: string; }) => ({ id: model.id }));
+        
+          
+          const providerReport: ProviderReport = {
+            name: providerName,
+            models: filteredModels
+          };
+        
+          
+          if (!report.provider) {
+            report.provider = [];
+          }
+        
+          
+          report.provider.push(providerReport);
+        }
+  
+        await promisify(fs.writeFile)(reportFilePath, JSON.stringify(report, null, 2), 'utf8');
+        console.log('Provider model latency report generated successfully.');
+      } catch (error) {
+        console.error('Error generating provider model latency report:', error);
+      }
+    }
+  }
+  
+  (async () => {
+    const modelProvider = new ModelProvider(['google', 'gemini']); 
+    await modelProvider.generateProviderModelLatencyReport('google', 'gemini'); 
+    console.log('Report generation completed.');
+  })();

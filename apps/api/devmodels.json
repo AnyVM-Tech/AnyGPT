@@ -1,0 +1,27 @@
+{
+  "provider": [
+    {
+      "name": "google",
+      "models": [
+        {
+          "id": "gemini-pro"
+        },
+        {
+          "id": "gemini-1.0-pro"
+        },
+        {
+          "id": "gemini-1.0-pro-001"
+        },
+        {
+          "id": "gemini-1.0-pro-latest"
+        },
+        {
+          "id": "gemini-1.5-flash"
+        },
+        {
+          "id": "gemini-1.5-pro-latest"
+        }
+      ]
+    }
+  ]
+}

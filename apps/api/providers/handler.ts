@@ -1,11 +1,15 @@
 import { readFileSync } from 'fs';
 import { GeminiAI } from 'providers/gemini';
 import { OpenAI } from 'providers/openai';
+import fs from 'fs/promises';
+import path from 'path';
 import dotenv from 'dotenv';
 dotenv.config();
 
 interface IAIProvider {
-  sendMessage(message: string): Promise<{ response: string, latency: number }>;
+  sendMessage(message: string): Promise<{response: string, latency: number}>;
+  isBusy(): boolean;
+  getLatency(): number;
 }
 
 interface ModelEntry {
@@ -18,18 +22,48 @@ interface Models {
 
 const models: Models = JSON.parse(readFileSync('models.json', 'utf8'));
 
-const providerClassMap: { [provider: string]: new (...args: any[]) => IAIProvider } = {
-  google: GeminiAI,
-  openai: OpenAI,
-  // add other providers here
+const providerClassMap: { [provider: string]: { [modelType: string]: new (...args: any[]) => IAIProvider } } = {
+  google: {
+    default: GeminiAI,
+    // Add other Google model types here
+  },
+  openai: {
+    default: OpenAI,
+  },
+  // Add other providers here
 };
-
-function getModelClass(model: string): new (...args: any[]) => IAIProvider {
+export async function updateModelLatency(modelId: string, provider: string, latency: number): Promise<void> {
+  const modelsFilePath = path.join(__dirname, 'models.json');
+  try {
+    const modelsData = await fs.readFile(modelsFilePath, 'utf8');
+    const models = JSON.parse(modelsData);
+    if (!models[provider]) {
+      models[provider] = [];
+    }
+    const modelIndex = models[provider].findIndex((m: any) => m.id === modelId);
+    if (modelIndex !== -1) {
+      if (!models[provider][modelIndex].latency) {
+        models[provider][modelIndex].latency = [];
+      }
+      models[provider][modelIndex].latency.push(latency);
+    } else {
+      models[provider].push({ id: modelId, latency: [latency] });
+    }
+    await fs.writeFile(modelsFilePath, JSON.stringify(models, null, 2), 'utf8');
+  } catch (error) {
+    console.error('Error updating models.json with latency:', error);
+  }
+}
+function getModelClass(model: string, modelType: string = 'default'): new (...args: any[]) => IAIProvider {
   for (const [provider, modelEntries] of Object.entries(models)) {
     const found = modelEntries.some(entry => entry.id === model);
     if (found) {
-      const ModelClass = providerClassMap[provider];
-      if (ModelClass) return ModelClass;
+      const ModelClasses = providerClassMap[provider];
+      if (ModelClasses) {
+        const ModelClass = ModelClasses[modelType];
+        if (ModelClass) return ModelClass;
+        throw new Error(`Unsupported model type: ${modelType} for provider: ${provider}`);
+      }
       throw new Error(`Unsupported model group: ${provider}`);
     }
   }
@@ -37,34 +71,39 @@ function getModelClass(model: string): new (...args: any[]) => IAIProvider {
 }
 
 export class MessageHandler {
-  static async handleMessages(
-    messages: { role: string; content: string }[] | { [key: string]: any },
-    model: string
-  ): Promise<{ response: string; latency: number }> {
-    console.log("handleMessages called with messages:", messages);
+  private static aiModelInstances: IAIProvider[] = []; 
 
-    if (!Array.isArray(messages) || messages.length === 0) {
-      return { response: "No valid messages provided.", latency: 0 };
-    }
-
-    const startTime = Date.now();
-    let responseText = "";
-
-    try {
-      const aiModelClass = getModelClass(model);
-      const aiModel = new aiModelClass(model);
-      const serializedMessages = JSON.stringify({ model, messages });
-      console.log("serializedMessages", serializedMessages);
-
-      const aiResponse = await aiModel.sendMessage(serializedMessages);
-      responseText = aiResponse.response;
-      console.log("AI response:", aiResponse);
-    } catch (error: any) {
-      console.error("Error:", error.message);
-      responseText = `Error: ${error.message}`;
-    }
-
-    const endTime = Date.now();
-    return { response: responseText.trim(), latency: endTime - startTime };
+  static initializeModelInstances(modelClass: new () => IAIProvider, count: number = 3) {
+    this.aiModelInstances = Array.from({ length: count }, () => new modelClass());
   }
+  private static selectAIModelInstance(): IAIProvider {
+    const availableInstances = this.aiModelInstances.filter(instance => !instance.isBusy());
+    
+    const selectedInstance = availableInstances.reduce((prev, curr) => 
+      (prev.getLatency() < curr.getLatency() ? prev : curr), availableInstances[0]);
+
+    return selectedInstance;
+  }
+
+  static async handleMessages(
+    messages: { role: string; content: string }[],
+    modelId: string
+  ): Promise<any[]> {
+    const ModelClass = getModelClass(modelId);
+    const aiProvider = new ModelClass();
+
+    const responses = [];
+    for (const message of messages) {
+      if (!aiProvider.isBusy()) {
+        const response = await aiProvider.sendMessage(message.content);
+        responses.push(response);
+      } else {
+        // make handler when AI provider is busy
+        responses.push({ error: 'AI provider is busy' });
+      }
+    }
+
+    return responses;
+  }
+
 }
