@@ -3,12 +3,6 @@ import dotenv from 'dotenv';
 import { MessageHandler } from 'providers/handler';
 import { resourceLimits } from 'worker_threads';
 dotenv.config();
-
-interface IAIProvider {
-  sendMessage(message: string): Promise<{response: string, latency: number}>;
-  isBusy(): boolean;
-  getLatency(): number;
-} //implement this interface in the providers
 async function extractMessageFromRequest(request: any): Promise<{ messages: { role: string; content: string }[]; model: string }> {
   const requestBody = await request.json();
   return { messages: requestBody.messages, model: requestBody.model || 'defaultModel' };
