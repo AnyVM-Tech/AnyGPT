@@ -1,27 +1,31 @@
-{
-  "provider": [
-    {
-      "name": "google",
-      "models": [
-        {
-          "id": "gemini-pro"
-        },
-        {
-          "id": "gemini-1.0-pro"
-        },
-        {
-          "id": "gemini-1.0-pro-001"
-        },
-        {
-          "id": "gemini-1.0-pro-latest"
-        },
-        {
-          "id": "gemini-1.5-flash"
-        },
-        {
-          "id": "gemini-1.5-pro-latest"
-        }
-      ]
-    }
-  ]
-}
+[
+  {
+    "provider_url": "https://generativelanguage.googleapis.com",
+    "models": [
+      {
+        "model_id": "gemini-pro",
+        "response_time": null
+      },
+      {
+        "model_id": "gemini-1.0-pro",
+        "response_time": null
+      },
+      {
+        "model_id": "gemini-1.0-pro-001",
+        "response_time": null
+      },
+      {
+        "model_id": "gemini-1.0-pro-latest",
+        "response_time": null
+      },
+      {
+        "model_id": "gemini-1.5-flash",
+        "response_time": null
+      },
+      {
+        "model_id": "gemini-1.5-pro-latest",
+        "response_time": null
+      }
+    ]
+  }
+]

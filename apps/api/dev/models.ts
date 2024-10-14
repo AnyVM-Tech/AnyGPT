@@ -6,6 +6,24 @@ interface ModelSummary {
   id: string;
   owned_by?: string;
 }
+// transformModels.ts
+
+interface Model {
+  id: string;
+  object?: string;
+  created?: number;
+  owned_by?: string;
+  providers?: number; // Number of providers offering this model
+}
+
+interface ProviderModels {
+  [provider: string]: Model[];
+}
+
+interface OutputData {
+  object: string;
+  data: Model[];
+}
 
 async function fetchAndGroupModelData(): Promise<{ [ownedBy: string]: ModelSummary[] }> {
     const modelsEndpoint = 'https://api.shard-ai.xyz/v1/models/';
