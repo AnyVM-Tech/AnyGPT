@@ -13,7 +13,9 @@
 	  },
 	  "moduleResolution": "node", 
 	  "resolveJsonModule": true, 
-	  "allowSyntheticDefaultImports": true 
+	  "allowSyntheticDefaultImports": true,
+	  "allowImportingTsExtensions": true,
+	  "noEmit": true
 	},
 	"include": ["./**/*"], 
 	"exclude": ["node_modules"]

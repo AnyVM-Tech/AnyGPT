@@ -1,5 +1,7 @@
 [
   {
+    "id": "gemini",
+    "apiKey": null,
     "provider_url": "https://generativelanguage.googleapis.com",
     "models": [
       {
