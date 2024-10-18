@@ -20,5 +20,9 @@
 		"turbo": "^2.0.4",
 		"typescript": "^5.4.5"
 	},
-	"packageManager": "pnpm@7.9.0"
+	"packageManager": "pnpm@7.9.0",
+	"dependencies": {
+		"commander": "^12.1.0",
+		"hyper-express": "^6.17.2"
+	}
 }
