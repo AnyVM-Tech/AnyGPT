@@ -15,7 +15,7 @@
 	  "resolveJsonModule": true, 
 	  "allowSyntheticDefaultImports": true,
 	  "allowImportingTsExtensions": true,
-	  "noEmit": true
+	  "noEmit": true,
 	},
 	"include": ["./**/*"], 
 	"exclude": ["node_modules"]

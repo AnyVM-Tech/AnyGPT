@@ -6,14 +6,13 @@ interface ModelSummary {
   id: string;
   owned_by?: string;
 }
-// transformModels.ts
 
 interface Model {
   id: string;
   object?: string;
   created?: number;
   owned_by?: string;
-  providers?: number; // Number of providers offering this model
+  providers?: number; 
 }
 
 interface ProviderModels {

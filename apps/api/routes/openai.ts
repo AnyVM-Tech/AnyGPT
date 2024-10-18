@@ -1,79 +1,92 @@
-import axios from 'axios';
-import { IAIProvider, IMessage } from '../providers/interfaces';
+import HyperExpress, { Request, Response } from 'hyper-express';
+import dotenv from 'dotenv';
+import { MessageHandler } from '../providers/handler';
+import { generateUserApiKey, validateApiKey, extractMessageFromRequest, updateUserTokenUsage } from '../modules/userData';
+dotenv.config();
 
-export class OpenAI implements IAIProvider {
-  private busy = false;
-  private lastLatency = 0;
-  private apiKey: string;
-  private endpointUrl: string;
+const server = new HyperExpress.Server();
 
-  /**
-   * Constructor for the OpenAI provider.
-   * @param apiKey - The API key to use. If it starts with 'sk-', it's considered an OpenAI key.
-   * @param endpointUrl - Optional custom endpoint URL. If provided, it replaces the default endpoint.
-   */
-  constructor(apiKey: string, endpointUrl?: string) {
-    if (!apiKey && !endpointUrl) {
-      throw new Error('Either an OpenAI API key or an endpoint URL must be provided');
-    }
-
-    if (apiKey && apiKey.startsWith('sk-')) {
-      this.apiKey = apiKey;
-      this.endpointUrl = endpointUrl || 'https://api.openai.com/v1/chat/completions';
-    } else {
-      this.apiKey = apiKey || '';
-      if (endpointUrl) {
-        this.endpointUrl = endpointUrl;
-      } else {
-        throw new Error('Endpoint URL must be provided if API key is not an OpenAI API key');
-      }
-    }
-  }
-
-  isBusy(): boolean {
-    return this.busy;
-  }
-
-  getLatency(): number {
-    return this.lastLatency;
-  }
-
-  async sendMessage(message: IMessage): Promise<{ response: string; latency: number }> {
-    this.busy = true;
-    const startTime = Date.now();
-    const url = this.endpointUrl;
-
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-    };
-
-    if (this.apiKey) {
-      headers['Authorization'] = `Bearer ${this.apiKey}`;
-    }
-
-    const data = {
-      model: message.model.id,
-      messages: [{ role: 'user', content: message.content }],
-    };
-
-    try {
-      const response = await axios.post(url, data, { headers });
-      const endTime = Date.now();
-      this.lastLatency = endTime - startTime;
-      this.busy = false;
-
-      if (response.data.choices && response.data.choices.length > 0) {
-        return {
-          response: response.data.choices[0].message.content,
-          latency: this.lastLatency,
-        };
-      } else {
-        throw new Error('Unexpected response structure from the API');
-      }
-    } catch (error: any) {
-      this.busy = false;
-      const errorMessage = error.response?.data?.error?.message || error.message || 'Unknown error';
-      throw new Error(`Error sending message: ${errorMessage}`);
-    }
+declare module 'hyper-express' {
+  interface Request {
+    apiKey?: string;
+    userId?: string;
+    userRole?: string;
+    userTokenUsage?: number;
   }
 }
+
+async function apiKeyMiddleware(request: Request, response: Response, next: () => void) {
+  const authHeader = request.headers['authorization'] || request.headers['Authorization'];
+
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return response.status(401).json({ error: 'Unauthorized: Missing or invalid Authorization header' });
+  }
+
+  const apiKey = authHeader.slice(7);
+
+  const userData = validateApiKey(apiKey);
+
+  if (!userData) {
+    return response.status(401).json({ error: 'Unauthorized: Invalid API key' });
+  }
+
+
+  request.apiKey = apiKey;
+  request.userId = userData.userId;
+  request.userRole = userData.role;
+  request.userTokenUsage = userData.tokenUsage;
+  next();
+}
+
+
+server.post('/generate_key', apiKeyMiddleware, async (request: Request, response: Response) => {
+  try {
+    if (request.userRole !== 'admin') {
+      return response.status(403).json({ error: 'Forbidden: Only admins can generate user API keys' });
+    }
+
+    const { userId } = await request.json();
+    if (!userId) {
+      return response.status(400).json({ error: 'Bad Request: userId is required to generate a new user API key' });
+    }
+
+    const newUserApiKey = generateUserApiKey(userId);
+    response.json({ apiKey: newUserApiKey });
+  } catch (error: any) {
+    console.error('Error generating API key:', error.message);
+    response.status(500).json({ error: error.message });
+  }
+});
+
+
+server.use('/v1', apiKeyMiddleware);
+
+server.post('/v1/chat/completions', async (request: Request, response: Response) => {
+  try {
+    const { messages, model } = await extractMessageFromRequest(request);
+    console.log('Received messages:', messages, 'Model:', model);
+
+    const messageHandler = new MessageHandler();
+
+
+    const messagesWithModel = messages.map(message => ({ ...message, model: { id: model } }));
+    const result = await messageHandler.handleMessages(messagesWithModel, model);
+
+    console.log('Response:', result);
+
+    const totalTokensUsed = result.tokenUsage || 0;
+
+    if (request.apiKey) {
+      updateUserTokenUsage(totalTokensUsed, request.apiKey);
+    }
+
+    response.json(result);
+  } catch (error) {
+    console.error('Error receiving messages:', error);
+    response.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+const port = parseInt(process.env.PORT || '3000', 10);
+server.listen(port);
+console.log(`Server is listening on port ${port}`);
