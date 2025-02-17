@@ -1,0 +1,23 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "required": ["object", "data"],
+    "properties": {
+      "object": { "type": "string", "enum": ["list"] },
+      "data": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": ["id", "object", "created", "owned_by", "providers", "throughput"],
+          "properties": {
+            "id": { "type": "string" },
+            "object": { "type": "string", "enum": ["model"] },
+            "created": { "type": "number" },
+            "owned_by": { "type": "string" },
+            "providers": { "type": "number" },
+            "throughput": { "type": "number" }
+          }
+        }
+      }
+    }
+  }

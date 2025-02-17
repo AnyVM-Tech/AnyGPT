@@ -109,8 +109,6 @@ export function updateUserTokenUsage(numberOfTokens: number, apiKey: string): vo
     userData.tokenUsage += numberOfTokens;
 
     keys[apiKey] = userData;
-
-    // Save the updated keys
     saveKeys(keys);
   } else {
     console.warn(`API key ${apiKey} not found.`);

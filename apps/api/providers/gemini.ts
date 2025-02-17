@@ -1,3 +1,4 @@
+// prob doesnt work
 import dotenv from 'dotenv';
 import {
   GoogleGenerativeAI,
@@ -67,7 +68,7 @@ export class GeminiAI implements IAIProvider {
       const chatSession = this.model.startChat({
         generationConfig,
         safetySettings,
-        history: [] // Include conversation history if needed
+        history: []
       });
 
       const result = await chatSession.sendMessage(message.content);

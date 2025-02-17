@@ -1,20 +1,39 @@
-import { Provider, ResponseEntry, Model } from './interfaces'; 
+import * as fs from 'fs';
+import * as path from 'path';
+import { fileURLToPath } from 'url';
+import type { Provider, ResponseEntry, Model } from '../providers/interfaces.ts';
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const modelsJsonPath = path.resolve(__dirname, '../models.json');
+const modelsJsonData = fs.readFileSync(modelsJsonPath, 'utf-8');
+const modelsData = JSON.parse(modelsJsonData);
+
+const modelThroughputMap = new Map<string, number>();
+modelsData.data.forEach((model: Model) => {
+  if (model.id && model.throughput && !isNaN(model.throughput)) {
+    modelThroughputMap.set(model.id, model.throughput);
+  }
+});
 
 export function updateProviderData(
   providerData: Provider,
   modelId: string,
   responseEntry: ResponseEntry | null,
   isError: boolean,
-  tokenGenerationSpeed: number
+  modelThroughputMap?: Map<string, number> // optional 
 ): void {
   if (!providerData.models[modelId]) {
+    const tokenGenerationSpeed = modelThroughputMap?.get(modelId) ?? 50; // Default is 50
     providerData.models[modelId] = {
-      model_id: modelId,
-      token_generation_speed: tokenGenerationSpeed, 
+      id: modelId,
+      token_generation_speed: tokenGenerationSpeed,
       response_times: [],
       errors: 0,
-      avg_response_time: undefined,
-      avg_provider_latency: undefined,
+      avg_response_time: null,
+      avg_provider_latency: null,
+      provider_score: null,
+      response_time: null,
     };
   }
 
@@ -24,7 +43,6 @@ export function updateProviderData(
     modelData.errors += 1;
     providerData.errors = (providerData.errors || 0) + 1;
   } else if (responseEntry) {
-
     modelData.response_times.push(responseEntry);
   }
 }
@@ -132,7 +150,7 @@ export function applyTimeWindow(providersData: Provider[], windowInHours: number
   providersData.forEach(provider => {
     for (const modelId in provider.models) {
       const model = provider.models[modelId];
-      model.response_times = model.response_times.filter(response => {
+      model.response_times = model.response_times.filter((response: { timestamp: { getTime: () => number; }; }) => {
         const hoursDifference = (now.getTime() - response.timestamp.getTime()) / (1000 * 60 * 60);
         return hoursDifference <= windowInHours;
       });
@@ -140,3 +158,5 @@ export function applyTimeWindow(providersData: Provider[], windowInHours: number
   });
 }
 
+
+export { ResponseEntry, Provider };

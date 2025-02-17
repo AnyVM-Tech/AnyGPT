@@ -14,13 +14,16 @@
 	},
 	"dependencies": {
 		"@google/generative-ai": "^0.11.3",
+		"@types/ajv": "^1.0.4",
 		"@types/express": "^4.17.21",
+		"ajv": "^8.17.1",
 		"axios": "^1.7.2",
 		"dotenv": "^16.4.5",
 		"express": "^4.19.2",
 		"hyper-express": "^6.16.3",
 		"openai": "^4.47.1",
-		"package.json": "link:/apps/api/package.json"
+		"package.json": "link:/apps/api/package.json",
+		"selenium-webdriver": "^4.26.0"
 	},
 	"devDependencies": {
 		"@types/jest": "^27.0.2",

@@ -135,7 +135,7 @@ async function fetchAndGroupModelData(): Promise<{ [ownedBy: string]: ModelSumma
         const models = JSON.parse(modelsData);
   
        
-        const report = { provider: [] };
+        const report: { provider: ProviderReport[] } = { provider: [] };
         
         if (models[providerName]) {
           const filteredModels = models[providerName]
