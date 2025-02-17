@@ -6,1554 +6,2072 @@
       "object": "model",
       "created": 1728945617008,
       "owned_by": "openai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 82.18
     },
     {
       "id": "gpt-3.5-turbo-1106",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "openai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 130.6
     },
     {
       "id": "gpt-3.5-turbo-0125",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "openai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 80.81
     },
     {
       "id": "gpt-4",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "openai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 26.42
     },
     {
       "id": "gpt-4o",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "openai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 128.3
     },
     {
       "id": "gpt-4o-2024-05-13",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "openai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 105.7
     },
     {
       "id": "gpt-4-turbo",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "openai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 32.67
     },
     {
       "id": "gpt-4-turbo-2024-04-09",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "openai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "gpt-4-vision-preview",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "openai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 52.54
     },
     {
       "id": "gpt-4-0125-preview",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "openai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "gpt-4-1106-preview",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "openai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 30.63
     },
     {
       "id": "gpt-4-1106-vision-preview",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "openai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "gpt-4-turbo-preview",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "openai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 32.61
     },
     {
       "id": "dall-e-3",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "openai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "tts-1",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "openai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "tts-1-hd",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "openai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "text-embedding-ada-002",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "openai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "text-embedding-3-small",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "openai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "text-embedding-3-large",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "openai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "whisper",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "openai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "gpt-2",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "openai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "gpt-3.5",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "openai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "firefunction-v1",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "fireworks.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "command-r",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "cohere",
-      "providers": 0
+      "providers": 0,
+      "throughput": 116.5
     },
     {
       "id": "command-r-plus",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "cohere",
-      "providers": 0
+      "providers": 0,
+      "throughput": 48.02
     },
     {
       "id": "command-light-nightly",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "cohere",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "command",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "cohere",
-      "providers": 0
+      "providers": 0,
+      "throughput": 22.83
     },
     {
       "id": "command-light",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "cohere",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "c4ai-aya",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "cohere",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "embed-english-light-v2.0",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "cohere",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "embed-english-v2.0",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "cohere",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "embed-multilingual-light-v3.0",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "cohere",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "embed-multilingual-v3.0",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "cohere",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "embed-multilingual-v2.0",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "cohere",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "embed-english-v3.0",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "cohere",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "embed-english-light-v3.0",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "cohere",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "bge-large-en-v1.5",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "cohere",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "bge-base-en-v1.5",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "cohere",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "e5-base-v2",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "cohere",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "all-minilm-l12-v2",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "cohere",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "all-minilm-l6-v2",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "cohere",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "all-mpnet-base-v2",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "cohere",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "clip-vit-b-32",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "cohere",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "clip-vit-b-32-multilingual-v1",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "cohere",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "multi-qa-mpnet-base-dot-v1",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "cohere",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "paraphrase-minilm-l6-v2",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "cohere",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "text2vec-base-chinese",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "cohere",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "gte-large",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "cohere",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "gte-base",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "cohere",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "claude-3-haiku",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "anthropic",
-      "providers": 0
+      "providers": 0,
+      "throughput": 136.2
     },
     {
       "id": "claude-3-sonnet",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "anthropic",
-      "providers": 0
+      "providers": 0,
+      "throughput": 67.79
     },
     {
       "id": "claude-3-opus",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "anthropic",
-      "providers": 0
+      "providers": 0,
+      "throughput": 21.63
     },
     {
       "id": "dbrx-instruct",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "databricks",
-      "providers": 0
+      "providers": 0,
+      "throughput": 90.28
     },
     {
       "id": "gemini-pro",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "google",
-      "providers": 0
+      "providers": 0,
+      "throughput": 143.1
     },
     {
       "id": "gemini-1.0-pro",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "google",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "gemini-1.0-pro-001",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "google",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "gemini-1.0-pro-latest",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "google",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "gemini-1.5-flash",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "google",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "gemini-1.5-pro-latest",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "google",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "gemma-2b",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "google",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "gemma-7b",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "google",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "codegemma-7b",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "google",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "gemma-1.1-7b",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "google",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "gtts",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "google",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "embedding-001",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "google",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "text-embedding-004",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "google",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "embedding-gecko-001",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "google",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "mixtral-8x7b-instruct",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "mistralai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 49.42
     },
     {
       "id": "mixtral-8x22b-instruct",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "mistralai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 76.13
     },
     {
       "id": "mistral-tiny",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "mistralai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 62.96
     },
     {
       "id": "mistral-small",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "mistralai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 64.9
     },
     {
       "id": "mistral-medium",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "mistralai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 37.49
     },
     {
       "id": "mistral-large",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "mistralai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 19.1
     },
     {
       "id": "mistral-next",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "mistralai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "mistral-7b-instruct",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "mistralai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 84.11
     },
     {
       "id": "e5-mistral-7b-instruct",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "mistralai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "wizard-2-7b",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "microsoft",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "wizard-2-8x22b",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "microsoft",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "phi-2",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "microsoft",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "phi-3-mini-4k",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "microsoft",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "edge",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "microsoft",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "zephyr-8x22b",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "zeypher",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "zephyr-7b",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "zeypher",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "goliath-120b",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "Uknown",
-      "providers": 0
+      "providers": 0,
+      "throughput": 11.04
     },
     {
       "id": "snowflake-arctic-instruct",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "Uknown",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "finance-chat",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "Uknown",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "law-chat",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "Uknown",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "medicine-chat",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "Uknown",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "daredevil-8b-abliterated",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "Uknown",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "wizardcoder-python-7b",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "Uknown",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "deepseek-coder-6.7b-instruct",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "Uknown",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "yi-34b",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "Uknown",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "yi-6b",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "Uknown",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "realvisxl-v3",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "Uknown",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "realvisxl-v4",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "Uknown",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "pixart-xl-2",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "Uknown",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "proteus-v4",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "Uknown",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "sdxl-deepcache",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "Uknown",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "vicuna-13b",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "Unknown",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "openchat-3.5",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "Unknown",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "openchat-3.6",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "Unknown",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "phind-codellama-34b",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "Unknown",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "llava-1.5",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "Unknown",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "lzlv-70b",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "Unknown",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "airoboros-70b",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "Unknown",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "airoboros-70b-gpt4",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "Unknown",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "codellama-7b-instruct",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "Unknown",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "codellama-13b-instruct",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "Unknown",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "deepseek-coder-33b-instruct",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "Unknown",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "deepseek-chat-67b",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "Unknown",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "phind-codellama-34b-v2-instruct",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "Unknown",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "codellama-34b-instruct",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "Unknown",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "codellama-70b-instruct",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "Unknown",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "dolphine-mixtral",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "Unknown",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "hermes-2",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "Unknown",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "hermes-2-pro",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "Unknown",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "hermes-2-pro-llama-3-8b",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "Unknown",
-      "providers": 0
+      "providers": 0,
+      "throughput": 114.8
     },
     {
       "id": "nueralhermes-2.5-mistral-7b",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "Unknown",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "qwen-1.5-32b",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "Unknown",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "qwen-1.5-0.5b",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "Unknown",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "qwen-1.5-1.8b",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "Unknown",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "qwen-1.5-4b",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "Unknown",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "qwen-1.5-7b",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "Unknown",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "qwen-1.5-14b",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "Unknown",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "qwen-1.5-72b",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "Unknown",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "qwen-1.5-110b",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "Unknown",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "qwen-2-72b",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "Unknown",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "koala-7b",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "Unknown",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "koala-13b",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "Unknown",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "dolly-v2-3b",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "Unknown",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "dolly-v2-7b",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "Unknown",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "dolly-v2-13b",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "Unknown",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "llamaguard-7b",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "metaai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "llama-2-7b",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "metaai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "llama-2-13b",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "metaai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "llama-2-70b",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "metaai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "llama-3-70b",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "metaai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "llama-3-8b",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "metaai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "llama-3-8b-chinese",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "metaai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "llava-1.6-34b",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "metaai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "llava-1.6-7b",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "metaai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "cinematika-7b",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "Unkown",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "toppy-7b",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "Unkown",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "pi",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "pi",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "mythomax-l2-13b",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "openrouter",
-      "providers": 0
+      "providers": 0,
+      "throughput": 33.61
     },
     {
       "id": "nous-capybara-7b",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "openrouter",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "sonar-small-chat",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "perplexity",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "sonar-medium-chat",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "perplexity",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "sonar-small-online",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "perplexity",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "sonar-medium-online",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "perplexity",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "perplexity-related",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "perplexity",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "dall-e-3-xl",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "huggingface",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "dall-e-3-4k",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "huggingface",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "sdxl-flash",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "huggingface",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "midjourney",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "MidJourney",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "sdxl",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stable-diffusion",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "sdxl-turbo",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stable-diffusion",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "kandinsky-2.2",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "sberbank",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "kandinsky-3",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "sberbank",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "latent-consistency-model",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "other",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "playground-v2",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "playgroundai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "playground-v2.5",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "playgroundai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "pollinations",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "pollinationsai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "pastel-mix-anime",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "absolute-reality-v1.6",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "absolute-reality-v1.8.1",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "anything-v3",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "anything-v4.5",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "anything-v5",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "meinamix",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "deliberate-v2",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "deliberate-v3",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "rev-animated",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "dreamshaper-6",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "dreamshaper-7",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "dreamshaper-8",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "realistic-vision-v1.4",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "realistic-vision-v2",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "realistic-vision-v4",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "realistic-vision-v5",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "openjourney-v4",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "am-i-real-v4.1",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "analog-v1",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "abyssorangemix-v3",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "blazing-drive-v10g",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "cetusmix-version35",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "counterfeit-v3.0",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "cyberrealistic-v3.3",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "dalcefo-v4",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "animagine",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "dreamshaper-xl10",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "dynavision-xl",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "juggernaut-xl",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "realism-engine",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "realvisx",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "sdxl-base",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "turbovision",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "dreamlike-anime-v1",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "dreamlike-diffusion-v1",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "dreamlike-photoreal-v2",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "edge-of-realism-eor-v2.0",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "eimis-anime-diffusion-v1.0",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "elldreth's-vivid",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "epicrealism-natural-sin-rc1",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "juggernaut-aftermath",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "lofi-v4",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "lyriel-v1.6",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "majicmix-realistic-v4",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "mechamix-v1.0",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "meinamix-meina-v9",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "neverending-dream-v1.22",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "protogen-x3.4",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "redshift-diffusion-v1.0",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "rundiffusion-fx-2.5d-v1.0",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "rundiffusion-fx-photorealistic-v1.0",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "sd-v1.4",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "sd-v1.5",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "sd-v1.5-inpainting",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "timeless-v1",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "toonyou-beta-6",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "stablity.ai",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "elevenlabs",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "elevenlabs",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
     },
     {
       "id": "speechify",
       "object": "model",
       "created": 1728945617008,
       "owned_by": "speechify",
-      "providers": 0
+      "providers": 0,
+      "throughput": 0
+    },
+    {
+      "id": "chatgpt-4o-latest",
+      "object": "model",
+      "created": 1730493447873,
+      "owned_by": "openai",
+      "providers": 0,
+      "throughput": 0
+    },
+    {
+      "id": "claude-3.5-sonnet",
+      "object": "model",
+      "created": 1730493447873,
+      "owned_by": "anthropic",
+      "providers": 0,
+      "throughput": 0
+    },
+    {
+      "id": "claude-3.5-sonnet-20240620",
+      "object": "model",
+      "created": 1730493447873,
+      "owned_by": "anthropic",
+      "providers": 0,
+      "throughput": 0
+    },
+    {
+      "id": "gemini-1.0-pro-002",
+      "object": "model",
+      "created": 1730493447873,
+      "owned_by": "google",
+      "providers": 0,
+      "throughput": 0
+    },
+    {
+      "id": "gemini-1.5-flash-001",
+      "object": "model",
+      "created": 1730493447874,
+      "owned_by": "google",
+      "providers": 0,
+      "throughput": 0
+    },
+    {
+      "id": "gemini-1.5-flash-002",
+      "object": "model",
+      "created": 1730493447874,
+      "owned_by": "google",
+      "providers": 0,
+      "throughput": 0
+    },
+    {
+      "id": "gemini-1.5-pro",
+      "object": "model",
+      "created": 1730493447874,
+      "owned_by": "google",
+      "providers": 0,
+      "throughput": 0
+    },
+    {
+      "id": "gemini-1.5-pro-001",
+      "object": "model",
+      "created": 1730493447874,
+      "owned_by": "google",
+      "providers": 0,
+      "throughput": 0
+    },
+    {
+      "id": "gemini-1.5-pro-002",
+      "object": "model",
+      "created": 1730493447874,
+      "owned_by": "google",
+      "providers": 0,
+      "throughput": 0
+    },
+    {
+      "id": "gemma-2-27b-it",
+      "object": "model",
+      "created": 1730493447875,
+      "owned_by": "google",
+      "providers": 0,
+      "throughput": 0
+    },
+    {
+      "id": "gemma-2-9b-it",
+      "object": "model",
+      "created": 1730493447875,
+      "owned_by": "google",
+      "providers": 0,
+      "throughput": 0
+    },
+    {
+      "id": "gemma-7b-it",
+      "object": "model",
+      "created": 1730493447875,
+      "owned_by": "google",
+      "providers": 0,
+      "throughput": 0
+    },
+    {
+      "id": "gpt-4o-2024-08-06",
+      "object": "model",
+      "created": 1730493447875,
+      "owned_by": "openai",
+      "providers": 0,
+      "throughput": 0
+    },
+    {
+      "id": "gpt-4o-mini",
+      "object": "model",
+      "created": 1730493447875,
+      "owned_by": "openai",
+      "providers": 0,
+      "throughput": 0
+    },
+    {
+      "id": "llama-3-70b-chat",
+      "object": "model",
+      "created": 1730493447875,
+      "owned_by": "meta",
+      "providers": 0,
+      "throughput": 0
+    },
+    {
+      "id": "llama-3-8b-chat",
+      "object": "model",
+      "created": 1730493447876,
+      "owned_by": "meta",
+      "providers": 0,
+      "throughput": 0
+    },
+    {
+      "id": "llama-3.1-405b-chat",
+      "object": "model",
+      "created": 1730493447876,
+      "owned_by": "meta",
+      "providers": 0,
+      "throughput": 0
+    },
+    {
+      "id": "llama-3.1-70b-chat",
+      "object": "model",
+      "created": 1730493447876,
+      "owned_by": "meta",
+      "providers": 0,
+      "throughput": 0
+    },
+    {
+      "id": "llama-3.1-8b-chat",
+      "object": "model",
+      "created": 1730493447876,
+      "owned_by": "meta",
+      "providers": 0,
+      "throughput": 0
+    },
+    {
+      "id": "llama-3.1-nemotron-70b-chat",
+      "object": "model",
+      "created": 1730493447876,
+      "owned_by": "meta",
+      "providers": 0,
+      "throughput": 0
+    },
+    {
+      "id": "llama-3.2-11b-chat",
+      "object": "model",
+      "created": 1730493447876,
+      "owned_by": "meta",
+      "providers": 0,
+      "throughput": 0
+    },
+    {
+      "id": "llama-3.2-1b-chat",
+      "object": "model",
+      "created": 1730493447877,
+      "owned_by": "meta",
+      "providers": 0,
+      "throughput": 0
+    },
+    {
+      "id": "llama-3.2-3b-chat",
+      "object": "model",
+      "created": 1730493447877,
+      "owned_by": "meta",
+      "providers": 0,
+      "throughput": 0
+    },
+    {
+      "id": "llama-3.2-90b-chat",
+      "object": "model",
+      "created": 1730493447877,
+      "owned_by": "meta",
+      "providers": 0,
+      "throughput": 0
+    },
+    {
+      "id": "ministral-3b",
+      "object": "model",
+      "created": 1730493447877,
+      "owned_by": "mistral.ai",
+      "providers": 0,
+      "throughput": 0
+    },
+    {
+      "id": "ministral-8b",
+      "object": "model",
+      "created": 1730493447879,
+      "owned_by": "mistral.ai",
+      "providers": 0,
+      "throughput": 0
+    },
+    {
+      "id": "mistral-7b-instruct-v0.2",
+      "object": "model",
+      "created": 1730493447880,
+      "owned_by": "mistral.ai",
+      "providers": 0,
+      "throughput": 0
+    },
+    {
+      "id": "mistral-7b-instruct-v0.3",
+      "object": "model",
+      "created": 1730493447880,
+      "owned_by": "mistral.ai",
+      "providers": 0,
+      "throughput": 0
+    },
+    {
+      "id": "mistral-nemo",
+      "object": "model",
+      "created": 1730493447880,
+      "owned_by": "mistral.ai",
+      "providers": 0,
+      "throughput": 0
+    },
+    {
+      "id": "mixtral-8x22b-instruct-v0.1",
+      "object": "model",
+      "created": 1730493447880,
+      "owned_by": "mistral.ai",
+      "providers": 0,
+      "throughput": 0
+    },
+    {
+      "id": "mixtral-8x7b-instruct-v0.1",
+      "object": "model",
+      "created": 1730493447880,
+      "owned_by": "mistral.ai",
+      "providers": 0,
+      "throughput": 0
+    },
+    {
+      "id": "o1-mini",
+      "object": "model",
+      "created": 1730493447880,
+      "owned_by": "openai",
+      "providers": 0,
+      "throughput": 0
+    },
+    {
+      "id": "o1-preview",
+      "object": "model",
+      "created": 1730493447881,
+      "owned_by": "openai",
+      "providers": 0,
+      "throughput": 0
+    },
+    {
+      "id": "qwen-2-72b-instruct",
+      "object": "model",
+      "created": 1730493447881,
+      "owned_by": "alibaba",
+      "providers": 0,
+      "throughput": 0
+    },
+    {
+      "id": "qwen-2.5-14b-instruct",
+      "object": "model",
+      "created": 1730493447881,
+      "owned_by": "alibaba",
+      "providers": 0,
+      "throughput": 0
+    },
+    {
+      "id": "qwen-2.5-72b-instruct",
+      "object": "model",
+      "created": 1730493447881,
+      "owned_by": "alibaba",
+      "providers": 0,
+      "throughput": 0
+    },
+    {
+      "id": "qwen-2.5-7b-instruct",
+      "object": "model",
+      "created": 1730493447882,
+      "owned_by": "alibaba",
+      "providers": 0,
+      "throughput": 0
     }
   ]
 }

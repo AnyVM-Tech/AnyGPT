@@ -45,10 +45,12 @@ export class OpenAI implements IAIProvider {
     this.providerData = {
       id: this.providerId,
       models: {},
-      avg_response_time: undefined,
-      avg_provider_latency: undefined,
+      avg_response_time: null,
+      avg_provider_latency: null,
       errors: 0,
-      provider_score: undefined,
+      provider_score: null,
+      apiKey: this.apiKey,
+      provider_url: this.endpointUrl,
     };
   }
 
@@ -108,8 +110,7 @@ export class OpenAI implements IAIProvider {
         this.providerData,
         message.model.id,
         responseEntry,
-        false, 
-        50
+        false
       );
 
       const modelData = this.providerData.models[message.model.id];
@@ -140,8 +141,7 @@ export class OpenAI implements IAIProvider {
         this.providerData,
         message.model.id,
         null,
-        true,
-        50 
+        true
       );
 
       const errorMessage = error.response?.data?.error?.message || error.message || 'Unknown error';
@@ -149,10 +149,6 @@ export class OpenAI implements IAIProvider {
     }
   }
 
-  /**
-   * Retrieves the current provider data and statistics.
-   * @returns The provider data.
-   */
   getProviderData(): Provider {
     return this.providerData;
   }

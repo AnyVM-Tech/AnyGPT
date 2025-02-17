@@ -1,0 +1,28 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "array",
+    "items": {
+      "type": "object",
+      "required": ["id", "apiKey", "provider_url", "models", "errors"],
+      "properties": {
+        "id": { "type": "string" },
+        "apiKey": { "type": ["string", "null"] },
+        "provider_url": { "type": "string" },
+        "models": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["provider_score"],
+            "properties": {
+              "response_time": { "type": ["number", "null"] },
+              "provider_score": { "type": ["number", "null"] }
+            }
+          }
+        },
+        "avg_response_time": { "type": ["number", "null"] },
+        "avg_provider_latency": { "type": ["number", "null"] },
+        "errors": { "type": "number" },
+        "provider_score": { "type": ["number", "null"] }
+      }
+    }
+  }
