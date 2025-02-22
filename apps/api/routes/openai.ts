@@ -62,6 +62,10 @@ server.post('/generate_key', apiKeyMiddleware, async (request: Request, response
 server.use('/v1', apiKeyMiddleware);
 
 server.post('/v1/chat/completions', async (request: Request, response: Response) => {
+  // Guard to prevent double processing
+  if ((request as any)._processed) return;
+  (request as any)._processed = true;
+
   try {
     const { messages, model } = await extractMessageFromRequest(request);
     console.log('Received messages:', messages, 'Model:', model);

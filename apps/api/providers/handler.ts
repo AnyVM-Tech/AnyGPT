@@ -129,8 +129,8 @@ for (const providerEntry of devModels) {
   const providerId = providerEntry.id;
   const providerUrl = providerEntry.provider_url || '';
   const apiKey = providerEntry.apiKey || '';
-
-  if (providerId.startsWith('openai')) {
+// class's used for message handling, openai json schema or google json schema
+  if (providerId.startsWith('openai')) { // tied to providers.json ID name
     providerConfigs[providerId] = {
       class: OpenAI,
       args: [apiKey, providerUrl],
@@ -159,7 +159,7 @@ export class MessageHandler {
   private providerDataMap: { [providerId: string]: Provider } = {};
   private alpha: number = 0.3;
   private modelThroughputMap: Map<string, number> = new Map();
-  private readonly DEFAULT_GENERATION_SPEED = 50;
+  private readonly DEFAULT_GENERATION_SPEED = 500;
 
   constructor() {
     // provider data
@@ -241,18 +241,15 @@ for (const providerEntry of devModels) {
     continue;
   }
 
-  const providerModelIds = Object.keys(providerEntry.models);
+  const providerModelIds = Object.keys(providerEntry.models)
   console.log(`Provider: ${providerId}, Models: ${providerModelIds.join(', ')}`);
 
   if (providerModelIds.includes(modelId)) {
     eligibleProviders.push(providerId);
         computeProviderStatsWithEMA(providerData, this.alpha);
         computeProviderScore(providerData, 0.7, 0.3);
-  
-        const previousEMA =
-          providerEntry.models[modelId]?.provider_score ||
-          providerData.provider_score ||
-          0;
+  console.log(providerData.provider_score, "previousEMA");
+        const previousEMA = providerData.provider_score || 0;
         const newEMA = computeEMA(
           previousEMA,
           providerData.provider_score || 0,
@@ -299,6 +296,12 @@ for (const providerEntry of devModels) {
     };
   }  async handleMessages(messages: IMessage[], modelId: string): Promise<any> {
     const { providerId, providerConfig } = await this.selectBestProvider(modelId);
+    
+
+    if (!providerConfig) {
+      throw new Error(`Provider configuration not found for ${providerId}. Check that the provider's name is tied to its class's function.`);
+    }
+    
     const providerInstance = new providerConfig.class(...(providerConfig.args || []));
     const tokenGenerationSpeed = this.getTokenGenerationSpeed(modelId);
 
@@ -333,6 +336,7 @@ for (const providerEntry of devModels) {
         tokenUsage: totalTokens,
       };
     } catch (error: any) {
+      console.error(`Error in ${providerConfig.class.name} sendMessage:`, error);
       this.updateProviderData(providerId, modelId, null, true);
       throw new Error(`Error handling message: ${error.message}`);
     }
