@@ -12,10 +12,8 @@
           "type": "object",
           "additionalProperties": {
             "type": "object",
-            "required": ["provider_score"],
             "properties": {
-              "response_time": { "type": ["number", "null"] },
-              "provider_score": { "type": ["number", "null"] }
+              "response_time": { "type": ["number", "null"] }
             }
           }
         },

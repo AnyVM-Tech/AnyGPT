@@ -71,7 +71,7 @@ export class OpenAI implements IAIProvider {
     this.busy = true;
     const startTime = Date.now();
     const url = this.endpointUrl;
-
+console.log(this.apiKey)
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     };
@@ -114,6 +114,12 @@ export class OpenAI implements IAIProvider {
       );
 
       const modelData = this.providerData.models[message.model.id];
+
+      // Ensure that token_generation_speed is defined; otherwise, assign a default value.
+      if (!modelData.token_generation_speed) {
+        modelData.token_generation_speed = 50; // default tokens per second
+      }
+
       const expectedTokenTime =
         (responseEntry.tokens_generated / modelData.token_generation_speed) * 1000;
 
@@ -125,7 +131,11 @@ export class OpenAI implements IAIProvider {
       computeProviderStatsWithEMA(this.providerData, this.alpha);
 
       computeProviderScore(this.providerData, 0.7, 0.3); 
-
+      Object.keys(this.providerData.models).forEach(modelId => {
+        if ('provider_score' in this.providerData.models[modelId]) {
+          delete (this.providerData.models[modelId] as any).provider_score;
+        }
+      });
       if (response.data.choices && response.data.choices.length > 0) {
         return {
           response: response.data.choices[0].message.content,

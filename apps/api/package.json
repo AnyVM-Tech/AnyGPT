@@ -21,6 +21,7 @@
 		"dotenv": "^16.4.5",
 		"express": "^4.19.2",
 		"hyper-express": "^6.16.3",
+		"ioredis": "^5.5.0",
 		"openai": "^4.47.1",
 		"package.json": "link:/apps/api/package.json",
 		"selenium-webdriver": "^4.26.0"
@@ -32,6 +33,7 @@
 		"jest": "^27.2.5",
 		"ts-jest": "^29.1.5",
 		"ts-node-dev": "^1.1.8",
+		"tsx": "^4.7.1",
 		"typescript": "^5.4.5"
 	}
 }
