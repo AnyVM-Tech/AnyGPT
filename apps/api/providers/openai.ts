@@ -54,10 +54,6 @@ export class OpenAI implements IAIProvider {
     };
   }
 
-  isBusy(): boolean {
-    return this.busy;
-  }
-
   getLatency(): number {
     return this.lastLatency;
   }

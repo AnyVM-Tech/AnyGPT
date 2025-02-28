@@ -1,6 +1,5 @@
 export interface IAIProvider {
   sendMessage(message: IMessage): Promise<{ response: string; latency: number }>;
-  isBusy(): boolean;
   getLatency(): number;
 }
 
