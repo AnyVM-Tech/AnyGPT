@@ -1,24 +1,11 @@
 import axios from 'axios';
-import { IAIProvider, IMessage } from '../providers/interfaces';
-import {
-  Provider,
-  updateProviderData,
-  computeProviderStatsWithEMA,
-  computeProviderScore,
-  ResponseEntry,
-} from '../modules/compute.ts'; 
+import { IAIProvider, IMessage } from './interfaces'; // Only import necessary interfaces
+// Removed imports related to compute and Provider state
 
 export class OpenAI implements IAIProvider {
-  private busy = false;
-  private lastLatency = 0;
   private apiKey: string;
   private endpointUrl: string;
-  private providerId: string = 'openai';
-
-  private providerData: Provider;
-
-  // EMA smoothing factor
-  private alpha: number = 0.3; 
+  // Removed state properties: busy, lastLatency, providerData, alpha
 
   /**
    * Constructor for the OpenAI provider.
@@ -26,6 +13,7 @@ export class OpenAI implements IAIProvider {
    * @param endpointUrl - Optional custom endpoint URL. If provided, it replaces the default endpoint.
    */
   constructor(apiKey: string, endpointUrl?: string) {
+    // Validate inputs
     if (!apiKey && !endpointUrl) {
       throw new Error('Either an OpenAI API key or an endpoint URL must be provided');
     }
@@ -41,33 +29,22 @@ export class OpenAI implements IAIProvider {
         throw new Error('Endpoint URL must be provided if API key is not an OpenAI API key');
       }
     }
-
-    this.providerData = {
-      id: this.providerId,
-      models: {},
-      avg_response_time: null,
-      avg_provider_latency: null,
-      errors: 0,
-      provider_score: null,
-      apiKey: this.apiKey,
-      provider_url: this.endpointUrl,
-    };
+    // Removed providerData initialization
   }
 
-  getLatency(): number {
-    return this.lastLatency;
-  }
+  // Removed getLatency and getProviderData methods
 
   /**
-   * Sends a message to the OpenAI API and updates the provider statistics.
+   * Sends a message to the OpenAI API.
+   * This method is now stateless and only focuses on the API interaction.
    * @param message - The message to send, including the model details.
    * @returns A promise containing the API response content and latency.
    */
   async sendMessage(message: IMessage): Promise<{ response: string; latency: number }> {
-    this.busy = true;
+    // Removed busy flag management
     const startTime = Date.now();
     const url = this.endpointUrl;
-console.log(this.apiKey)
+
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     };
@@ -78,84 +55,43 @@ console.log(this.apiKey)
 
     const data = {
       model: message.model.id,
+      // Assuming the handler formats messages correctly if needed by the specific API
       messages: [{ role: 'user', content: message.content }],
     };
 
     try {
       const response = await axios.post(url, data, { headers });
       const endTime = Date.now();
-      this.lastLatency = endTime - startTime;
-      this.busy = false;
+      const latency = endTime - startTime;
+      // Removed lastLatency update
 
-      const inputTokens = Math.ceil(message.content.length / 4);
-      const outputContent = response.data.choices[0].message.content;
-      const outputTokens = Math.ceil(outputContent.length / 4);
-      const totalTokens = inputTokens + outputTokens;
+      if (response.data?.choices?.[0]?.message?.content) {
+        const responseText = response.data.choices[0].message.content;
 
+        // Removed all internal state updates (token calculation, updateProviderData, compute calls)
 
-      const responseEntry: ResponseEntry = {
-        timestamp: new Date(),
-        response_time: this.lastLatency,
-        input_tokens: inputTokens,
-        output_tokens: outputTokens,
-        tokens_generated: totalTokens,
-        provider_latency: 0,
-      };
-
-      updateProviderData(
-        this.providerData,
-        message.model.id,
-        responseEntry,
-        false
-      );
-
-      const modelData = this.providerData.models[message.model.id];
-
-      // Ensure that token_generation_speed is defined; otherwise, assign a default value.
-      if (!modelData.token_generation_speed) {
-        modelData.token_generation_speed = 50; // default tokens per second
-      }
-
-      const expectedTokenTime =
-        (responseEntry.tokens_generated / modelData.token_generation_speed) * 1000;
-
-      responseEntry.provider_latency = Math.max(
-        responseEntry.response_time - expectedTokenTime,
-        0
-      );
-
-      computeProviderStatsWithEMA(this.providerData, this.alpha);
-
-      computeProviderScore(this.providerData, 0.7, 0.3); 
-      Object.keys(this.providerData.models).forEach(modelId => {
-        if ('provider_score' in this.providerData.models[modelId]) {
-          delete (this.providerData.models[modelId] as any).provider_score;
-        }
-      });
-      if (response.data.choices && response.data.choices.length > 0) {
+        // Return only the response and latency
         return {
-          response: response.data.choices[0].message.content,
-          latency: this.lastLatency,
+          response: responseText,
+          latency: latency,
         };
       } else {
+        // Handle cases where the response structure is unexpected
+        console.error('Unexpected response structure from API:', response.data);
         throw new Error('Unexpected response structure from the API');
       }
     } catch (error: any) {
-      this.busy = false;
+      // Removed busy flag management
+      // Removed internal state updates on error
 
-      updateProviderData(
-        this.providerData,
-        message.model.id,
-        null,
-        true
-      );
+      const endTime = Date.now(); // Still useful to know when the error occurred
+      const latency = endTime - startTime;
+      console.error(`Error during sendMessage to ${url} (Latency: ${latency}ms):`, error);
 
-      const errorMessage = error.response?.data?.error?.message || error.message || 'Unknown error';
-      throw new Error(`Error sending message: ${errorMessage}`);
+      // Extract a more specific error message if possible
+      const errorMessage = error.response?.data?.error?.message || error.message || 'Unknown API error';
+      // Rethrow the error to be handled by the MessageHandler
+      throw new Error(`API call failed: ${errorMessage}`);
     }
-  }
-
-  getProviderData(): Provider {
-    return this.providerData;
   }
 }

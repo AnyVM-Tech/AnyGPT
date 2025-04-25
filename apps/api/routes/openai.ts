@@ -1,6 +1,9 @@
 import HyperExpress, { Request, Response } from 'hyper-express';
 import dotenv from 'dotenv';
-import { MessageHandler } from '../providers/handler';
+// Import the singleton instance, not the class
+import { messageHandler } from '../providers/handler';
+// Import IMessage interface
+import { IMessage } from '../providers/interfaces';
 import { generateUserApiKey, validateApiKey, extractMessageFromRequest, updateUserTokenUsage } from '../modules/userData';
 dotenv.config();
 
@@ -31,7 +34,7 @@ async function apiKeyMiddleware(request: Request, response: Response, next: () =
   }
 
 
-  request.apiKey = apiKey;
+  request.apiKey = apiKey; // Attach the validated API key to the request object
   request.userId = userData.userId;
   request.userRole = userData.role;
   request.userTokenUsage = userData.tokenUsage;
@@ -59,34 +62,48 @@ server.post('/generate_key', apiKeyMiddleware, async (request: Request, response
 });
 
 
-server.use('/v1', apiKeyMiddleware);
+server.use('/v1', apiKeyMiddleware); // Apply middleware to all /v1 routes
 
 server.post('/v1/chat/completions', async (request: Request, response: Response) => {
-  // Guard to prevent double processing
-  if ((request as any)._processed) return;
-  (request as any)._processed = true;
+  // Guard to prevent double processing (if applicable)
+  // if ((request as any)._processed) return;
+  // (request as any)._processed = true;
 
   try {
-    const { messages, model } = await extractMessageFromRequest(request);
-    console.log('Received messages:', messages, 'Model:', model);
+    // Extract messages (still {role, content}) and model ID
+    const { messages: rawMessages, model: modelId } = await extractMessageFromRequest(request);
+    console.log('Received messages:', rawMessages, 'Model:', modelId);
 
-    const messageHandler = new MessageHandler();
+    // Get the API key attached by the middleware
+    const userApiKey = request.apiKey;
+    if (!userApiKey) {
+        console.error("API key missing from request after middleware.");
+        return response.status(401).json({ error: 'Unauthorized: API Key missing internally.'});
+    }
 
+    // --- Transform messages to match IMessage interface --- 
+    const formattedMessages: IMessage[] = rawMessages.map(msg => ({
+        content: msg.content,
+        // Add the model object to each message as required by IMessage
+        model: { id: modelId }
+        // Note: Role is not part of IMessage, so it's omitted here.
+        // MessageHandler likely only uses the last message's content.
+    }));
 
-    const messagesWithModel = messages.map(message => ({ ...message, model: { id: model } }));
-    const result = await messageHandler.handleMessages(messagesWithModel, model);
+    // Pass the formatted messages, modelId, and apiKey to handleMessages
+    const result = await messageHandler.handleMessages(formattedMessages, modelId, userApiKey);
 
     console.log('Response:', result);
 
+    // Token usage update seems to use the key correctly already
     const totalTokensUsed = result.tokenUsage || 0;
-
-    if (request.apiKey) {
+    if (request.apiKey) { // Or use userApiKey here
       updateUserTokenUsage(totalTokensUsed, request.apiKey);
     }
 
     response.json(result);
-  } catch (error) {
-    console.error('Error receiving messages:', error);
+  } catch (error: any) { // Catch any errors from handleMessages or earlier
+    console.error('Error in /v1/chat/completions:', error.message);
     response.status(500).json({ error: 'Internal Server Error' });
   }
 });

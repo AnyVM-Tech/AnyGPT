@@ -1,49 +1,63 @@
-export interface IAIProvider {
-  sendMessage(message: IMessage): Promise<{ response: string; latency: number }>;
-  getLatency(): number;
+// Interface for the structure of data in models.json
+export interface ModelDefinition {
+  id: string;
+  object?: string;
+  created?: number;
+  owned_by?: string;
+  providers?: number;
+  throughput?: number; // Represents tokens per second from the static file
 }
 
+// Removed TokenSpeedEntry interface
 
-
+// Interface for runtime Model state within a Provider object
 export interface Model {
   id: string;
-  token_generation_speed: number;
+  token_generation_speed: number; // Default or last known average speed
+  response_times: ResponseEntry[]; // Array stores response data including observed speed
   errors: number;
-  provider_score: number | null;
-  response_time: number | null;
-  [key: string]: any;
+  avg_response_time: number | null;
+  avg_provider_latency: number | null;
+  avg_token_speed: number | null; // Calculated average token speed (tokens/sec, e.g., EMA)
+}
+
+export interface ResponseEntry {
+  timestamp: number;           // Epoch milliseconds
+  response_time: number;       // Total time for the API call (ms)
+  input_tokens: number;
+  output_tokens: number;
+  tokens_generated: number;
+  provider_latency: number | null; // Calculated latency attributable to the provider (ms)
+  observed_speed_tps?: number | null; // Observed speed (tokens/sec) for this specific request
+  apiKey?: string | null; // User's API key making the request
 }
 
 export interface Provider {
   id: string;
   apiKey: string | null;
   provider_url: string;
-  models: { [modelId: string]: Model };
+  models: { [modelId: string]: Model }; // Map of model IDs to their runtime state
   avg_response_time: number | null;
   avg_provider_latency: number | null;
   errors: number;
-  provider_score: number | null;
+  provider_score: number | null; // Kept at provider level
 }
 
+// Type representing the structure of the entire providers.json file (an array of Providers)
 export type DevModels = Provider[];
+
+export interface IAIProvider {
+  sendMessage(message: IMessage): Promise<{ response: string; latency: number }>;
+}
 
 export interface IMessage {
   content: string;
   model: {
     id: string;
-    [key: string]: any;
   };
-  [key: string]: any;
-}
-export interface ResponseEntry {
-  timestamp: Date;
-  response_time: number; // in milliseconds
-  input_tokens: number;
-  output_tokens: number;
-  tokens_generated: number; // input_tokens + output_tokens
-  provider_latency: number; // latency per token
 }
 
+// --- Potentially for user management/API key tracking --- //
 export interface UserData {
   userId: string;
   tokenUsage: number;
