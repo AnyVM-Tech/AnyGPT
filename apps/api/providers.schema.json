@@ -1,26 +1,125 @@
 {
     "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Provider Runtime State Schema",
+    "description": "Schema for validating the structure of provider data, including runtime state.",
     "type": "array",
     "items": {
-      "type": "object",
-      "required": ["id", "apiKey", "provider_url", "models", "errors"],
-      "properties": {
-        "id": { "type": "string" },
-        "apiKey": { "type": ["string", "null"] },
-        "provider_url": { "type": "string" },
-        "models": {
-          "type": "object",
-          "additionalProperties": {
+      "$ref": "#/definitions/provider"
+    },
+    "definitions": {
+      "provider": {
+        "type": "object",
+        "required": [
+          "id",
+          "apiKey",
+          "provider_url",
+          "models"
+        ],
+        "properties": {
+          "id": { "type": "string", "description": "Unique identifier for the provider (e.g., 'openai', 'google')." },
+          "apiKey": { "type": ["string", "null"], "description": "API key for the provider." },
+          "provider_url": { "type": "string", "description": "Base URL for the provider's API." },
+          "models": {
             "type": "object",
-            "properties": {
-              "response_time": { "type": ["number", "null"] }
+            "description": "Map of model IDs to their runtime state.",
+            "additionalProperties": {
+              "$ref": "#/definitions/model"
             }
+          },
+          "avg_response_time": {
+            "type": ["number", "null"],
+            "description": "Overall average response time across models (ms, EMA)."
+          },
+          "avg_provider_latency": {
+            "type": ["number", "null"],
+            "description": "Overall average provider latency across models (ms, EMA)."
+          },
+          "errors": {
+            "type": "number",
+            "default": 0,
+            "description": "Total errors encountered for this provider."
+          },
+          "provider_score": { 
+            "type": ["number", "null"],
+            "description": "Overall calculated score for the provider (0-100)."
           }
-        },
-        "avg_response_time": { "type": ["number", "null"] },
-        "avg_provider_latency": { "type": ["number", "null"] },
-        "errors": { "type": "number" },
-        "provider_score": { "type": ["number", "null"] }
+        }
+      },
+      "model": {
+        "type": "object",
+        "required": [
+          "id", 
+          "token_generation_speed",
+          "response_times",
+          "errors"
+        ],
+        "properties": {
+          "id": { "type": "string", "description": "Model identifier (matches the key in the parent map)." },
+          "token_generation_speed": {
+            "type": "number",
+            "description": "Default or calculated token generation speed (tokens/sec)."
+          },
+          "response_times": {
+            "type": "array",
+            "description": "Array of recent response entries.",
+            "items": {
+              "$ref": "#/definitions/responseEntry"
+            }
+          },
+          "errors": {
+            "type": "number",
+            "default": 0,
+            "description": "Count of errors for this model within this provider."
+          },
+          "avg_response_time": {
+            "type": ["number", "null"],
+            "description": "Calculated average response time for this model (ms, EMA)."
+          },
+          "avg_provider_latency": {
+            "type": ["number", "null"],
+            "description": "Calculated average provider latency for this model (ms, EMA)."
+          },
+          "avg_token_speed": { 
+            "type": ["number", "null"],
+            "description": "Calculated average token speed (tokens/sec, e.g., EMA)."
+          }
+        }
+      },
+      "responseEntry": {
+        "type": "object",
+        "required": [
+          "timestamp",
+          "response_time",
+          "input_tokens",
+          "output_tokens",
+          "tokens_generated",
+          "provider_latency"
+        ],
+        "properties": {
+          "timestamp": {
+            "type": "number",
+            "description": "Timestamp of the response recording (epoch milliseconds)."
+          },
+          "response_time": {
+            "type": "number",
+            "description": "Total time for the API call (ms)."
+          },
+          "input_tokens": { "type": "number" },
+          "output_tokens": { "type": "number" },
+          "tokens_generated": { "type": "number" },
+          "provider_latency": {
+            "type": ["number", "null"],
+            "description": "Calculated latency attributable to the provider (ms)."
+          },
+          "observed_speed_tps": { 
+            "type": ["number", "null"],
+            "description": "Observed speed (tokens/sec) for this specific request."
+          },
+           "apiKey": { 
+            "type": ["string", "null"],
+            "description": "API key of the user making the request."
+          }
+        }
       }
     }
   }

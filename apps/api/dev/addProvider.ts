@@ -4,37 +4,18 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 
-// Import the JSON data directly. TypeScript infers the type.
-// Note: This imports the state of the file at the start of the script run.
-import providersData from '../providers.json' assert { type: 'json' };
+// Import the interfaces matching the RUNTIME state/schema
+// Make sure interfaces.ts reflects the removal of model-level score/response_time
+import type { Provider, Model, ResponseEntry } from '../providers/interfaces';
 
-// Define the structure for a model entry (match providers.json structure)
-interface ModelInfo {
-  response_time: number | null;
-  response_times: number[];
-  // Add other potential stats if needed
-}
-
-// Define the structure for a provider entry (match providers.json structure)
-interface ProviderEntry {
-  id: string;
-  apiKey: string;
-  provider_url: string;
-  models: { [modelId: string]: ModelInfo };
-  avg_response_time?: number;
-  avg_provider_latency?: number;
-  errors?: number;
-  provider_score?: number;
-}
-
-// Define the expected type for the imported JSON data
-type ProvidersFile = ProviderEntry[];
+// Type Alias for the structure read from/written to providers.json
+type ProvidersFile = Provider[];
 
 // Correct way to get the directory path in an ES module:
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// The actual path is still needed for writing the file back
+// Path to the providers.json file
 const providersFilePath = path.resolve(__dirname, '../providers.json');
 
 const rl = readline.createInterface({
@@ -52,62 +33,70 @@ function promptUser(question: string): Promise<string> {
 }
 
 async function addProvider() {
-  // Use a deep copy of the imported data to avoid modifying the original import cache
-  // and to ensure we have a mutable array based on the file's initial state.
-  let providers: ProvidersFile = JSON.parse(JSON.stringify(providersData));
+  let providers: ProvidersFile = [];
 
-  // Validate the structure after import (optional but good practice)
-  if (!Array.isArray(providers)) {
-      console.error(`Error: Imported ${providersFilePath} is not a valid JSON array.`);
-      rl.close();
-      return; // Stop execution
+  // 1. Load existing providers from the file
+  try {
+      const fileContent = await fs.readFile(providersFilePath, 'utf-8');
+      providers = JSON.parse(fileContent);
+      if (!Array.isArray(providers)) {
+          throw new Error('providers.json does not contain a valid JSON array.');
+      }
+      console.log(`Loaded ${providers.length} existing providers from ${providersFilePath}`);
+  } catch (error: any) {
+      if (error.code === 'ENOENT') {
+          console.log(`${providersFilePath} not found. Starting with an empty list.`);
+          providers = [];
+      } else {
+          console.error(`Error reading or parsing ${providersFilePath}:`, error.message);
+          rl.close();
+          return;
+      }
   }
-   console.log(`Imported ${providers.length} existing providers from ${providersFilePath}`);
 
   let providerBaseUrl = '';
   let apiKey = '';
   let providerId = '';
 
   try {
-    console.log('\n--- Add New Provider ---'); // Corrected console.log
+    console.log('--- Add New Provider ---');
 
-    // 1. Get User Input
+    // 2. Get User Input
     providerBaseUrl = await promptUser(
       'Enter the provider base URL (e.g., http://localhost:1234/v1): '
     );
     if (!providerBaseUrl) throw new Error('Provider base URL cannot be empty.');
 
-    apiKey = await promptUser('Enter the API Key for this provider: ');
+    apiKey = await promptUser('Enter the API Key for this provider (leave empty if none): ');
 
     providerId = await promptUser(
       'Enter a unique ID for this provider (e.g., openai-custom-provider): '
     );
     if (!providerId) throw new Error('Provider ID cannot be empty.');
 
-    // Construct the URL for fetching models (remove trailing slash if exists, then add /models)
     const modelsUrl = providerBaseUrl.replace(/\/$/, '') + '/models';
     console.log(`\nAttempting to fetch models from: ${modelsUrl}`);
 
-    // 2. Fetch Models from Provider
+    // 3. Fetch Models from Provider
     let fetchedModels: { id: string }[] = [];
     try {
         const response = await axios.get(modelsUrl, {
             headers: {
-                Authorization: `Bearer ${apiKey}`,
+                ...(apiKey && { Authorization: `Bearer ${apiKey}` }),
                 'Content-Type': 'application/json',
             },
-            timeout: 10000, // Increased timeout to 10 seconds
+            timeout: 10000,
         });
 
         if (response.data && Array.isArray(response.data.data)) {
-            fetchedModels = response.data.data.map((m: any) => ({ id: m.id }));
+            fetchedModels = response.data.data.filter((m: any) => m && typeof m.id === 'string').map((m: any) => ({ id: m.id }));
             console.log(`Successfully fetched ${fetchedModels.length} models.`);
         } else {
             console.warn(
                 `Warning: Could not parse models from response data. Expected format: { data: [{ id: 'model1' }, ...] }. Response received:`,
-                response.data
+                JSON.stringify(response.data, null, 2)
             );
-            const continueAnyway = await promptUser('Continue without specific models? (y/N): ');
+            const continueAnyway = await promptUser('Continue without adding specific models? (y/N): ');
             if (!continueAnyway.toLowerCase().startsWith('y')) {
                 throw new Error('Aborted due to model fetching issue.');
             }
@@ -119,69 +108,80 @@ async function addProvider() {
         );
         console.error('Error details:', error.message);
         if (error.response?.data) {
-            console.error('Response data:', error.response.data);
+            console.error('Response data:', JSON.stringify(error.response.data, null, 2));
         }
-        // Check if it's a timeout error specifically
         if (axios.isCancel(error) || error.code === 'ECONNABORTED') {
             console.error('The request to fetch models timed out.');
         }
-        const continueAnyway = await promptUser('Continue without specific models? (y/N): ');
+        const continueAnyway = await promptUser('Continue without adding specific models? (y/N): ');
         if (!continueAnyway.toLowerCase().startsWith('y')) {
             throw new Error('Aborted due to model fetching failure.');
         }
         fetchedModels = [];
     }
 
-    // 3. Construct New Provider Entry
-    const newModelsObject: { [modelId: string]: ModelInfo } = {};
+    // 4. Construct New Provider Entry according to the schema/interface
+    const newModelsObject: { [modelId: string]: Model } = {};
+    const DEFAULT_TOKEN_SPEED = 50;
+
     for (const model of fetchedModels) {
       if (model.id) {
+        // Create Model object conforming to the updated Model interface
         newModelsObject[model.id] = {
-          response_time: null,
-          response_times: [],
+          id: model.id,
+          token_generation_speed: DEFAULT_TOKEN_SPEED,
+          response_times: [],      // Required
+          errors: 0,               // Required
+          // Initialize optional fields to null (or omit if schema doesn't require them)
+          avg_response_time: null,
+          avg_provider_latency: null,
+          avg_token_speed: null
+          // provider_score removed from model level
+          // response_time removed from model level
         };
       }
     }
 
-    // Construct the final provider URL for API calls
+    // Construct the final provider URL
     const finalProviderUrl = providerBaseUrl.replace(/\/$/, '') + '/chat/completions';
-    console.log(`Provider endpoint URL set to: ${finalProviderUrl}`); // Log the final URL
+    console.log(`Provider API endpoint URL set to: ${finalProviderUrl}`);
 
-    const newProviderEntry: ProviderEntry = {
+    const newProviderEntry: Provider = {
       id: providerId,
-      apiKey: apiKey,
-      provider_url: finalProviderUrl, // Use the modified URL here
+      apiKey: apiKey || null,
+      provider_url: finalProviderUrl,
       models: newModelsObject,
-      avg_response_time: 0,
-      avg_provider_latency: 0,
+      // Initialize provider-level runtime stats
+      avg_response_time: null,
+      avg_provider_latency: null,
       errors: 0,
-      provider_score: 0,
+      provider_score: null, // Keep provider_score at provider level
     };
 
-    // 4. Add or Update Provider in the list (using the in-memory 'providers' array)
+    // 5. Add or Update Provider in the list
     const existingIdx = providers.findIndex((p) => p.id === providerId);
     if (existingIdx >= 0) {
-      providers[existingIdx] = newProviderEntry; // Overwrite
-       console.log(`\nUpdated existing provider with ID: ${providerId}`);
+      providers[existingIdx] = newProviderEntry;
+      console.log(`\nUpdated existing provider entry with ID: ${providerId}`);
     } else {
       providers.push(newProviderEntry);
-      console.log(`\nAdded new provider with ID: ${providerId}`);
+      console.log(`\nAdded new provider entry with ID: ${providerId}`);
     }
 
-    // 5. Write Updated Data Back to providers.json using fs
+    // 6. Write Updated Data Back to providers.json
     try {
-      const updatedJsonContent = JSON.stringify(providers, null, 2); // Pretty print JSON
+      const updatedJsonContent = JSON.stringify(providers, null, 2);
       await fs.writeFile(providersFilePath, updatedJsonContent, 'utf-8');
-      console.log(`\nSuccessfully updated ${providersFilePath}`);
+      console.log(`\nSuccessfully saved updated provider list to ${providersFilePath}`);
     } catch (error) {
       console.error(`Error writing updated data to ${providersFilePath}:`, error);
       throw new Error('Failed to write providers.json.');
     }
 
-    console.log('\n--- Provider Addition Complete ---');
+    console.log('--- Provider Addition Complete ---');
 
   } catch (error: any) {
-    console.error('\n--- Operation Failed ---');
+    console.error('--- Operation Failed ---');
     console.error('Error:', error.message);
   } finally {
     rl.close();
