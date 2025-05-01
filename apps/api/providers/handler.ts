@@ -210,7 +210,7 @@ export class MessageHandler {
          await dataManager.save<LoadedProviders>('providers', updatedProviderDataList); 
 
          if (errorOccurred) throw new Error(`Provider ${providerId} failed: ${errorOccurred.message || 'Unknown'}`);
-         else if (result && responseEntry) return { response: result.response, latency: result.latency, tokenUsage: responseEntry.tokens_generated, providerId: providerId };
+         else if (result && responseEntry) return { response: result.response, latency: result.latency, tokenUsage: responseEntry.tokens_generated };
          else throw new Error(`Provider ${providerId} finished in invalid state.`);
     }
 }
