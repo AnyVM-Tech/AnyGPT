@@ -1,0 +1,20 @@
+{
+  "free": {
+    "rps": 5,
+    "rpm": 100,
+    "rpd": 1000,
+    "max_tokens": 5000 
+  },
+  "pro": {
+    "rps": 20,
+    "rpm": 1000,
+    "rpd": 10000,
+    "max_tokens": 10000000 
+  },
+  "enterprise": {
+    "rps": 100,
+    "rpm": 5000,
+    "rpd": 100000,
+    "max_tokens": null 
+  }
+}
