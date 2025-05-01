@@ -1,178 +1,135 @@
 import crypto from 'crypto';
-import fs from 'fs';
+// Remove direct fs import if no longer needed
+// import fs from 'fs'; 
 import path from 'path';
 import { Request } from 'hyper-express';
-// Import tiers.json directly for compile-time checking and type safety
+// Import the singleton DataManager instance
+import { dataManager } from './dataManager'; 
+// Import tiers data directly (static configuration)
 import tiersData from '../tiers.json'; 
 
 // --- Type Definitions --- 
-
-// FIX: Ensure max_tokens allows null
-interface TierData {
+// Export interfaces for use in other modules
+export interface TierData {
   rps: number;
   rpm: number;
   rpd: number;
-  max_tokens: number | null; // Allowed null for unlimited
+  max_tokens: number | null; 
+  min_provider_score: number | null; 
+  max_provider_score: number | null; 
 }
-
-// Type for the entire tiers object (imported)
 type TiersFile = Record<string, TierData>;
-
-// This assignment should now work with the corrected TierData interface
 const tiers: TiersFile = tiersData;
 
-// UserData remains the same (no usage_start_date)
-interface UserData {
+export interface UserData {
   userId: string;
-  tokenUsage: number; // Represents cumulative token usage
+  tokenUsage: number; 
   role: 'admin' | 'user';
-  tier: keyof TiersFile; 
+  tier: keyof TiersFile; // Use keyof TiersFile for better type safety
 }
+// Define KeysFile structure locally or import if shared
+interface KeysFile { [apiKey: string]: UserData; }
 
-interface KeysFile {
-  [apiKey: string]: UserData;
-}
+// --- Functions using DataManager --- 
 
-// Resolve path relative to CWD. 
-// REMOVED __dirname logic.
-// IMPORTANT: This requires the process to be run from the project root.
-const keysFilePath = path.resolve('keys.json');
-console.log(`Using keys file path (relative to CWD): ${keysFilePath}`); 
-
-// --- Function Definitions --- 
-
-function loadKeys(): KeysFile {
-  try {
-    if (!fs.existsSync(keysFilePath)) {
-        console.warn(`Keys file not found at ${keysFilePath}. Creating a new one.`);
-        saveKeys({}); 
-        return {};
-    }
-    const data = fs.readFileSync(keysFilePath, 'utf8');
-    const parsedData = JSON.parse(data) as KeysFile;
-    if (typeof parsedData !== 'object' || parsedData === null) {
-        console.error(`Invalid keys.json format at ${keysFilePath}. Expected object. Resetting.`);
-        saveKeys({}); 
-        return {}; 
-    }
-    return parsedData;
-  } catch (error) {
-    console.error(`Error loading/parsing keys.json from ${keysFilePath}:`, error);
-    return {}; 
-  }
-}
-
-function saveKeys(keysToSave: KeysFile): void {
-  try {
-     if (typeof keysToSave !== 'object' || keysToSave === null) {
-        console.error('Attempted to save invalid data to keys.json. Aborting.');
-        return;
-     }
-    fs.writeFileSync(keysFilePath, JSON.stringify(keysToSave, null, 2), 'utf8');
-  } catch (error) {
-    console.error(`Error saving keys.json to ${keysFilePath}:`, error);
-  }
-}
-
-export function generateUserApiKey(userId: string): string {
+export async function generateUserApiKey(userId: string): Promise<string> { 
   if (!userId) throw new Error('User ID required.');
   const apiKey = crypto.randomBytes(32).toString('hex');
-  const currentKeys = loadKeys(); 
+  // Load keys using DataManager
+  const currentKeys = await dataManager.load<KeysFile>('keys'); 
+
   if (Object.values(currentKeys).find(data => data.userId === userId)) {
     throw new Error(`User ID '${userId}' already has API key.`);
   }
-  if (!tiers.free) throw new Error("Config error: 'free' tier missing.");
+  if (!tiers.free) throw new Error("Config error: 'free' tier missing."); 
+
   currentKeys[apiKey] = { userId, tokenUsage: 0, role: 'user', tier: 'free' };
-  saveKeys(currentKeys); 
+  // Save keys using DataManager
+  await dataManager.save<KeysFile>('keys', currentKeys); 
   console.log(`Generated key for ${userId}.`); 
   return apiKey;
 }
 
-export function generateAdminApiKey(userId: string): string {
+export async function generateAdminApiKey(userId: string): Promise<string> { // Made async
    if (!userId) throw new Error('User ID required.');
    const apiKey = crypto.randomBytes(32).toString('hex');
-   const currentKeys = loadKeys(); 
+   const currentKeys = await dataManager.load<KeysFile>('keys');
+
    if (Object.values(currentKeys).find(data => data.userId === userId)) {
     throw new Error(`User ID '${userId}' already has API key.`);
   }
    const adminTier: keyof TiersFile = tiers.enterprise ? 'enterprise' : (tiers.free ? 'free' : ''); 
    if (!adminTier) throw new Error("Config error: No admin tier found.");
+
   currentKeys[apiKey] = { userId, tokenUsage: 0, role: 'admin', tier: adminTier };
-  saveKeys(currentKeys); 
+  await dataManager.save<KeysFile>('keys', currentKeys); 
   console.log(`Generated admin key for ${userId}.`);
   return apiKey;
 }
 
-// Validates key existence, tier validity, and checks cumulative token usage
-export function validateApiKeyAndUsage(apiKey: string): { valid: boolean; userData?: UserData; tierLimits?: TierData, error?: string } {
-  const currentKeys = loadKeys(); 
+// Becomes async due to dataManager.load
+export async function validateApiKeyAndUsage(apiKey: string): Promise<{ valid: boolean; userData?: UserData; tierLimits?: TierData, error?: string }> {
+  const currentKeys = await dataManager.load<KeysFile>('keys'); 
   const userData = currentKeys[apiKey];
   
-  if (!userData) {
-    return { valid: false, error: 'API key not found.' }; 
-  }
+  if (!userData) return { valid: false, error: 'API key not found.' }; 
 
-  const tierLimits = tiers[userData.tier];
+  const tierLimits = tiers[userData.tier]; // tiers is static import
   if (!tierLimits) {
-      const errorMsg = `Invalid tier ('${userData.tier}') configured for API key ${apiKey.substring(0,6)}...`;
-      console.warn(errorMsg);
-      return { valid: false, error: errorMsg }; 
+      const errorMsg = `Invalid tier ('${userData.tier}') for key ${apiKey.substring(0,6)}...`;
+      return { valid: false, error: errorMsg, userData }; 
   }
-
-  // Check cumulative token usage against the tier's max_tokens limit
   if (tierLimits.max_tokens !== null && userData.tokenUsage >= tierLimits.max_tokens) {
-      const errorMsg = `Cumulative token limit (${tierLimits.max_tokens}) reached for API key ${apiKey.substring(0,6)}... Usage: ${userData.tokenUsage}`;
-      console.warn(errorMsg);
+      const errorMsg = `Token limit (${tierLimits.max_tokens}) reached for key ${apiKey.substring(0,6)}...`;
       return { valid: false, error: errorMsg, userData, tierLimits }; 
   }
-
   return { valid: true, userData, tierLimits }; 
 }
 
-// Can likely be removed, but kept for potential separate use.
-export function getUserTierLimits(apiKey: string): TierData | null {
-   const keys = loadKeys();
+// Becomes async due to dataManager.load
+export async function getTierLimits(apiKey: string): Promise<TierData | null> {
+   const keys = await dataManager.load<KeysFile>('keys');
    const userData = keys[apiKey];
-   if (!userData || !tiers[userData.tier]) {
-       return null;
-   }
-   const limits: TierData = tiers[userData.tier];
+   if (!userData) { return null; }
+   const limits = tiers[userData.tier]; // tiers is static import
+   if (!limits) { return null; }
    return limits;
 }
 
-export async function extractMessageFromRequest(request: Request): Promise<{ messages: { role: string; content: string }[]; model: string; max_tokens?: number }> {
-   try {
-    const requestBody = await request.json();
-    if (!requestBody || typeof requestBody !== 'object') throw new Error('Invalid request: body missing/not object.');
-    if (!Array.isArray(requestBody.messages)) throw new Error('Invalid format: messages must be array.');
-    if (typeof requestBody.model !== 'string' || !requestBody.model) console.warn("Model not specified, using 'defaultModel'");
-
-    let maxTokens: number | undefined = undefined;
-    if (requestBody.max_tokens !== undefined && requestBody.max_tokens !== null) {
-        const parsedTokens = parseInt(requestBody.max_tokens, 10);
-        if (isNaN(parsedTokens) || parsedTokens <= 0) throw new Error('Invalid format: max_tokens must be positive integer.');
-        maxTokens = parsedTokens;
+// extractMessageFromRequest remains synchronous (no data access)
+export async function extractMessageFromRequest(request: Request): Promise<{ messages: { role: string; content: string }[]; model: string; max_tokens?: number }> { 
+    // ... implementation remains same ...
+    try {
+        const requestBody = await request.json();
+        if (!requestBody || typeof requestBody !== 'object') throw new Error('Invalid body.');
+        if (!Array.isArray(requestBody.messages)) throw new Error('Invalid messages format.');
+        if (typeof requestBody.model !== 'string' || !requestBody.model) console.warn("Default model used.");
+    
+        let maxTokens: number | undefined = undefined;
+        if (requestBody.max_tokens !== undefined && requestBody.max_tokens !== null) {
+            const parsedTokens = parseInt(requestBody.max_tokens, 10);
+            if (isNaN(parsedTokens) || parsedTokens <= 0) throw new Error('Invalid max_tokens.');
+            maxTokens = parsedTokens;
+        }
+        return { messages: requestBody.messages, model: requestBody.model || 'defaultModel', max_tokens: maxTokens };
+    } catch(error) {
+        console.error("Error parsing request:", error);
+        throw new Error(`Request parse failed: ${error instanceof Error ? error.message : String(error)}`);
     }
-    return { messages: requestBody.messages, model: requestBody.model || 'defaultModel', max_tokens: maxTokens };
-  } catch(error) {
-      console.error("Error parsing request body:", error);
-      throw new Error(`Failed to parse request body: ${error instanceof Error ? error.message : String(error)}`);
-  }
 }
 
-export function updateUserTokenUsage(numberOfTokens: number, apiKey: string): void {
+// Becomes async due to dataManager load/save
+export async function updateUserTokenUsage(numberOfTokens: number, apiKey: string): Promise<void> {
   if (typeof numberOfTokens !== 'number' || isNaN(numberOfTokens) || numberOfTokens < 0) {
-      console.warn(`Invalid token count (${numberOfTokens}) for API key ${apiKey}. Skipping update.`);
-      return;
+      console.warn(`Invalid token count (${numberOfTokens}) for ${apiKey}.`); return;
   }
-  const currentKeys = loadKeys(); 
+  const currentKeys = await dataManager.load<KeysFile>('keys'); 
   const userData = currentKeys[apiKey];
   if (userData) {
-    const currentUsage = typeof userData.tokenUsage === 'number' ? userData.tokenUsage : 0;
-    userData.tokenUsage = currentUsage + numberOfTokens; 
+    userData.tokenUsage = (userData.tokenUsage || 0) + numberOfTokens; 
     currentKeys[apiKey] = userData; 
-    saveKeys(currentKeys); 
+    await dataManager.save<KeysFile>('keys', currentKeys); 
   } else {
-    console.warn(`Attempted token usage update for non-existent API key: ${apiKey}.`);
+    console.warn(`Update token usage failed: key ${apiKey} not found.`);
   }
 }
