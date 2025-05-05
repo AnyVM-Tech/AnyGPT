@@ -132,6 +132,7 @@ async function addProvider() {
           token_generation_speed: DEFAULT_TOKEN_SPEED,
           response_times: [],      // Required
           errors: 0,               // Required
+          consecutive_errors: 0,   // Required by new schema
           // Initialize optional fields to null (or omit if schema doesn't require them)
           avg_response_time: null,
           avg_provider_latency: null,
@@ -152,6 +153,7 @@ async function addProvider() {
       provider_url: finalProviderUrl,
       models: newModelsObject,
       // Initialize provider-level runtime stats
+      disabled: false, // Required by new schema
       avg_response_time: null,
       avg_provider_latency: null,
       errors: 0,

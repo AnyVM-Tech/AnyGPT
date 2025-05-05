@@ -16,6 +16,7 @@ export interface Model {
   token_generation_speed: number; // Default or last known average speed
   response_times: ResponseEntry[]; // Array stores response data including observed speed
   errors: number;
+  consecutive_errors?: number; // Number of consecutive errors
   avg_response_time: number | null;
   avg_provider_latency: number | null;
   avg_token_speed: number | null; // Calculated average token speed (tokens/sec, e.g., EMA)
@@ -41,6 +42,7 @@ export interface Provider {
   avg_provider_latency: number | null;
   errors: number;
   provider_score: number | null; // Kept at provider level
+  disabled?: boolean; // Flag if provider is auto-disabled
 }
 
 // Type representing the structure of the entire providers.json file (an array of Providers)

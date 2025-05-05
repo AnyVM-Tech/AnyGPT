@@ -33,11 +33,21 @@ declare module 'hyper-express' {
 // MUST be async because it calls await validateApiKeyAndUsage
 async function authAndUsageMiddleware(request: Request, response: Response, next: () => void) {
   const authHeader = request.headers['authorization'] || request.headers['Authorization'];
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-     // Since this is async, we MUST await the response sending or return it
-     return response.status(401).json({ error: 'Unauthorized: Missing header' }); 
+  let apiKey = '';
+
+  // Try Authorization header first (OpenAI style)
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+     apiKey = authHeader.slice(7);
+  } else {
+     // Fallback to api-key header (Azure style)
+     const apiKeyHeader = request.headers['api-key']; 
+     if (typeof apiKeyHeader === 'string' && apiKeyHeader) {
+         apiKey = apiKeyHeader;
+     } else {
+         // No valid key found in either header
+         return response.status(401).json({ error: 'Unauthorized: Missing or invalid API key header (Authorization: Bearer or api-key required).' }); 
+     }
   }
-  const apiKey = authHeader.slice(7);
   
   try {
       const validationResult = await validateApiKeyAndUsage(apiKey); 
@@ -167,7 +177,35 @@ server.post('/v1/chat/completions', async (request: Request, response: Response)
         console.warn(`Token usage not reported/zero for key ${userApiKey.substring(0, 6)}...`);
     }
  
-    response.json(result);
+    // --- Format response like OpenAI --- 
+    const openaiResponse = {
+        id: `chatcmpl-${Date.now()}-${Math.random().toString(36).substring(2)}`, // Generate a pseudo-random ID
+        object: "chat.completion",
+        created: Math.floor(Date.now() / 1000), // Unix timestamp
+        model: modelId,
+        // system_fingerprint: "fp_xxxxxxxxxx", // We don't have this
+        choices: [
+            {
+                index: 0,
+                message: {
+                    role: "assistant",
+                    content: result.response,
+                },
+                // logprobs: null, // Not supported
+                finish_reason: "stop", // Assuming stop as default
+            }
+        ],
+        usage: {
+            // prompt_tokens: ???, // We only have total tokens currently
+            // completion_tokens: ???, // We only have total tokens currently
+            total_tokens: totalTokensUsed
+        },
+        // Add custom fields if desired, e.g., latency or provider used
+        _latency_ms: result.latency,
+        _provider_id: result.providerId // Assuming providerId is returned by handleMessages
+    };
+
+    response.json(openaiResponse);
  
   } catch (error: any) { 
     // ... (error handling remains largely the same, checking specific error messages) ...
@@ -182,6 +220,87 @@ server.post('/v1/chat/completions', async (request: Request, response: Response)
     if (error.message.includes('Provider') && error.message.includes('failed')) return response.status(502).json({ error: error.message }); 
     response.status(500).json({ error: 'Internal Server Error' });
   }
+});
+
+// --- Azure OpenAI Compatible Route ---
+server.post('/openai/deployments/:deploymentId/chat/completions', authAndUsageMiddleware, rateLimitMiddleware, async (request: Request, response: Response) => {
+    // Middleware should have attached these if successful
+    if (!request.apiKey || !request.tierLimits || !request.params.deploymentId) {
+        return response.status(401).json({ error: 'Authentication or configuration failed (Azure route).' }); 
+    }
+
+    // Check for api-version query parameter (required by Azure)
+    const apiVersion = request.query['api-version'];
+    if (!apiVersion || typeof apiVersion !== 'string') {
+         return response.status(400).json({ error: 'Bad Request: Missing or invalid \'api-version\' query parameter.' });
+    }
+
+    const userApiKey = request.apiKey!;
+    const deploymentId = request.params.deploymentId; // Use deploymentId as the modelId
+    const tierLimits = request.tierLimits!;
+
+    try {
+        // Extract messages using the same logic as the standard route
+        const { messages: rawMessages } = await extractMessageFromRequest(request); 
+
+        // Use deploymentId as model identifier for the handler
+        const formattedMessages: IMessage[] = rawMessages.map(msg => ({ content: msg.content, model: { id: deploymentId } }));
+ 
+        // Call the central message handler
+        const result = await messageHandler.handleMessages(formattedMessages, deploymentId, userApiKey);
+ 
+        const totalTokensUsed = typeof result.tokenUsage === 'number' ? result.tokenUsage : 0;
+        if (totalTokensUsed > 0) {
+            await updateUserTokenUsage(totalTokensUsed, userApiKey); 
+        } else {
+            console.warn(`Azure Route - Token usage not reported/zero for key ${userApiKey.substring(0, 6)}...`);
+        }
+ 
+        // --- Format response like OpenAI (Azure format is compatible) ---
+        const openaiResponse = {
+            id: `chatcmpl-${Date.now()}-${Math.random().toString(36).substring(2)}`, 
+            object: "chat.completion",
+            created: Math.floor(Date.now() / 1000),
+            model: deploymentId, // Use deployment ID here as the model identifier
+            choices: [
+                {
+                    index: 0,
+                    message: {
+                        role: "assistant",
+                        content: result.response,
+                    },
+                    finish_reason: "stop", 
+                }
+            ],
+            usage: {
+                total_tokens: totalTokensUsed
+            },
+            _latency_ms: result.latency,
+            _provider_id: result.providerId 
+        };
+
+        response.json(openaiResponse);
+
+    } catch (error: any) {
+        // Reuse the same error handling as the standard OpenAI endpoint for consistency
+        console.error('Azure Chat completions error:', error.message, error.stack);
+        if (error.message.startsWith('Invalid request') || error.message.startsWith('Failed to parse')) return response.status(400).json({ error: `Bad Request: ${error.message}` });
+        if (error instanceof SyntaxError) return response.status(400).json({ error: 'Invalid JSON' });
+        if (error.message.includes('Unauthorized') || error.message.includes('limit reached')) {
+            const statusCode = error.message.includes('limit reached') ? 429 : 401;
+            return response.status(statusCode).json({ error: error.message });
+        }
+        if (error.message.includes('No suitable providers') || error.message.includes('supports model') || error.message.includes('No provider')) {
+             // Treat model/deployment not found as 404
+             return response.status(404).json({ error: `Deployment not found or model unsupported: ${deploymentId}` });
+        }
+        if (error.message.includes('Provider') && error.message.includes('failed')) return response.status(502).json({ error: error.message }); 
+        if (error.message.includes('Failed to process request')) { 
+            // Generic failure after retries
+            return response.status(503).json({ error: 'Service temporarily unavailable after multiple provider attempts.' });
+        }
+        response.status(500).json({ error: 'Internal Server Error' });
+    }
 });
  
 // --- Server Start ---

@@ -5,14 +5,27 @@ import { Redis } from 'ioredis';
 
 // --- Define or Import Data Structure Interfaces ---
 
+// Represents the runtime data held for a specific model WITHIN a provider entry
+interface ProviderModelData { 
+    id: string;
+    token_generation_speed?: number | null;
+    response_times?: any[]; // Keep flexible or refine based on usage
+    errors?: number;
+    avg_response_time?: number | null;
+    avg_provider_latency?: number | null;
+    avg_token_speed?: number | null;
+    consecutive_errors?: number; // Added field
+}
+
 // FIX: Add export
 export interface LoadedProviderData { 
     id: string; 
-    models: { [key: string]: any }; 
+    models: { [key: string]: ProviderModelData }; // Use the specific type
     provider_score: number | null; 
     apiKey?: string; // Keep optional fields if they exist
     provider_url?: string;
     category?: string; 
+    disabled?: boolean; // Added field
     avg_response_time?: number | null;
     avg_provider_latency?: number | null;
     errors?: number;
