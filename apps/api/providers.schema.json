@@ -26,6 +26,11 @@
               "$ref": "#/definitions/model"
             }
           },
+          "disabled": { 
+            "type": "boolean", 
+            "default": false, 
+            "description": "Flag indicating if the provider is automatically disabled due to consecutive errors." 
+          },
           "avg_response_time": {
             "type": ["number", "null"],
             "description": "Overall average response time across models (ms, EMA)."
@@ -70,6 +75,11 @@
             "type": "number",
             "default": 0,
             "description": "Count of errors for this model within this provider."
+          },
+          "consecutive_errors": {
+            "type": "number",
+            "default": 0,
+            "description": "Number of consecutive errors encountered for this model on this provider."
           },
           "avg_response_time": {
             "type": ["number", "null"],
