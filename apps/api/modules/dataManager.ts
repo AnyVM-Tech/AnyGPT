@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import redis from './db'; 
 import { Redis } from 'ioredis'; 
+import { refreshProviderCountsInModelsFile } from './modelUpdater'; // Import the refresh function
 
 // --- Define or Import Data Structure Interfaces ---
 
@@ -49,6 +50,10 @@ export interface KeysFile {
 // FIX: Add export
 export interface ModelDefinition {
     id: string;
+    object: "model"; // Add object field with literal type
+    created: number;  // Add created field
+    owned_by: string; // Add owned_by field
+    providers: number; // Add providers field
     throughput?: number | null;
 }
 // FIX: Add export
@@ -136,7 +141,6 @@ class DataManager {
     }
 
     async save<T extends ManagedDataStructure>(dataType: DataType, data: T): Promise<void> {
-        if (dataType === 'models') { console.warn("Runtime save for models skipped."); return; }
         const redisKey = redisKeys[dataType];
         const filePath = filePaths[dataType];
         let stringifiedData: string;
@@ -157,6 +161,15 @@ class DataManager {
         try {
             await fs.promises.writeFile(filePath, stringifiedData, 'utf8');
             console.log(`Data saved to filesystem: ${filePath}`);
+
+            // If providers data was saved, trigger an update to models.json provider counts
+            if (dataType === 'providers') {
+                console.log('Provider data changed, scheduling refresh of model provider counts.');
+                // Schedule as a microtask to avoid blocking and potential circular dependency issues
+                Promise.resolve().then(refreshProviderCountsInModelsFile).catch(err => {
+                    console.error('Error during scheduled refreshProviderCountsInModelsFile:', err);
+                });
+            }
         } catch (err) {
             console.error(`CRITICAL: Error writing file ${filePath}:`, err);
             if (!redisSuccess) console.error(`!!! Data loss possible: Failed save for ${dataType} to Redis & FS.`);

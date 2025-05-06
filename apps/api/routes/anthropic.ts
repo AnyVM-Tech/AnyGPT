@@ -8,6 +8,7 @@ import {
     validateApiKeyAndUsage, // Now async
     TierData // Import TierData type
 } from '../modules/userData';
+import { logErrorToFile } from '../modules/errorLogger'; // Import the logger
 
 dotenv.config();
 
@@ -25,9 +26,12 @@ const requestTimestamps: RequestTimestamps = {}; // Local store for this route f
 // AUTH Middleware (Adapted for Anthropic x-api-key)
 async function authAndUsageMiddleware(request: Request, response: Response, next: () => void) {
   const apiKey = request.headers['x-api-key'] as string; // Anthropic uses x-api-key
+  const timestamp = new Date().toISOString();
+
   if (!apiKey) {
-     // Anthropic error format
-     return response.status(401).json({ type: 'error', error: { type: 'authentication_error', message: 'Missing API key.' }}); 
+     const errDetail = { message: 'Missing API key (x-api-key header required).' };
+     logErrorToFile(errDetail, request);
+     return response.status(401).json({ type: 'error', error: { type: 'authentication_error', message: errDetail.message }, timestamp }); 
   }
   
   try {
@@ -35,8 +39,10 @@ async function authAndUsageMiddleware(request: Request, response: Response, next
       if (!validationResult.valid || !validationResult.userData || !validationResult.tierLimits) {
           const statusCode = validationResult.error?.includes('limit reached') ? 429 : 401; 
           const errorType = statusCode === 429 ? 'rate_limit_error' : 'authentication_error';
-          const message = statusCode === 429 ? 'Rate limit reached' : 'Invalid API Key';
-          return response.status(statusCode).json({ type: 'error', error: { type: errorType, message: `${message}. ${validationResult.error || ''}`.trim() }}); 
+          const clientMessage = statusCode === 429 ? 'Rate limit reached' : 'Invalid API Key';
+          const logMsg = `${clientMessage}. ${validationResult.error || ''}`.trim();
+          logErrorToFile({ message: logMsg, details: validationResult.error, apiKey }, request);
+          return response.status(statusCode).json({ type: 'error', error: { type: errorType, message: logMsg }, timestamp }); 
       }
 
       // Attach data
@@ -48,36 +54,73 @@ async function authAndUsageMiddleware(request: Request, response: Response, next
       request.tierLimits = validationResult.tierLimits; 
       
       // Let flow continue
+      next();
 
-  } catch (error) {
+  } catch (error: any) {
+       logErrorToFile(error, request);
        console.error("Anthropic Route - Error during auth/usage check:", error);
-       return response.status(500).json({ type: 'error', error: { type: 'api_error', message: 'Internal server error during validation.' }}); 
+       return response.status(500).json({ 
+           error: 'Internal Server Error', 
+           reference: 'Error during authentication processing.',
+           timestamp 
+       }); 
   }
 }
 
 // RATE LIMIT Middleware (Adapted for Anthropic)
 function rateLimitMiddleware(request: Request, response: Response, next: () => void) {
+    const timestamp = new Date().toISOString();
     if (!request.apiKey || !request.tierLimits) { 
-        console.error('Anthropic Route - Internal Error: API Key or Tier Limits missing.');
-        return response.status(500).json({ type: 'error', error: { type: 'api_error', message: 'Internal server error affecting rate limits.' }}); 
+        const errMsg = 'Internal Error: API Key or Tier Limits missing after auth (Anthropic rateLimitMiddleware).';
+        logErrorToFile({ message: errMsg, requestPath: request.path }, request);
+        console.error(errMsg);
+        return response.status(500).json({ 
+            error: 'Internal Server Error', 
+            reference: 'Configuration error for rate limiting.', 
+            timestamp 
+        });
     }
     const apiKey = request.apiKey;
     const tierLimits = request.tierLimits; 
     const now = Date.now();
     requestTimestamps[apiKey] = requestTimestamps[apiKey] || [];
-    const timestamps = requestTimestamps[apiKey];
+    const currentApiKeyTimestamps = requestTimestamps[apiKey];
+    
+    // Filter timestamps for RPD, RPM, RPS checks
+    const oneDayAgo = now - 86400000; // 24 * 60 * 60 * 1000
     const oneMinuteAgo = now - 60000;
-    const recentTimestamps = timestamps.filter(ts => ts > oneMinuteAgo);
-    const requestsLastMinute = recentTimestamps.length;
+    const oneSecondAgo = now - 1000;
 
-    // Primary limit: RPM
-    if (requestsLastMinute >= tierLimits.rpm) {
-         // Anthropic doesn't use Retry-After, just 429
-        return response.status(429).json({ type: 'error', error: { type: 'rate_limit_error', message: `Rate limit exceeded: You are limited to ${tierLimits.rpm} requests per minute.` }}); 
+    // Keep only relevant timestamps to avoid memory leak
+    const relevantTimestamps = currentApiKeyTimestamps.filter(ts => ts > oneDayAgo);
+    requestTimestamps[apiKey] = relevantTimestamps;
+
+    const requestsLastDay = relevantTimestamps.length; // Count for RPD directly from already filtered
+    const requestsLastMinute = relevantTimestamps.filter(ts => ts > oneMinuteAgo).length;
+    const requestsLastSecond = relevantTimestamps.filter(ts => ts > oneSecondAgo).length;
+
+    if (tierLimits.rps > 0 && requestsLastSecond >= tierLimits.rps) {
+         const errDetail = { message: `Rate limit exceeded: Max ${tierLimits.rps} RPS.`, type: 'rate_limit_error'};
+         logErrorToFile(errDetail, request);
+         response.setHeader('Retry-After', '1'); 
+         return response.status(429).json({ type: 'error', error: errDetail, timestamp });
+    }
+    if (tierLimits.rpm > 0 && requestsLastMinute >= tierLimits.rpm) {
+        const errDetail = { message: `Rate limit exceeded: Max ${tierLimits.rpm} RPM.`, type: 'rate_limit_error'};
+        logErrorToFile(errDetail, request);
+        // Calculate Retry-After for RPM if possible, though Anthropic might not use it
+        const retryAfterSeconds = Math.max(1, Math.ceil(Math.max(0, (relevantTimestamps.find(ts => ts > oneMinuteAgo) || now) + 60000 - now) / 1000));
+        response.setHeader('Retry-After', String(retryAfterSeconds));
+        return response.status(429).json({ type: 'error', error: errDetail, timestamp });
+    }
+    if (tierLimits.rpd > 0 && requestsLastDay >= tierLimits.rpd) {
+        const errDetail = { message: `Rate limit exceeded: Max ${tierLimits.rpd} RPD.`, type: 'rate_limit_error'};
+        logErrorToFile(errDetail, request);
+        const retryAfterSeconds = Math.max(1, Math.ceil(Math.max(0,(relevantTimestamps[0] || now) + 86400000 - now) / 1000));
+        response.setHeader('Retry-After', String(retryAfterSeconds)); 
+        return response.status(429).json({ type: 'error', error: errDetail, timestamp });
     }
     
-    // Keep track of requests within the window for RPM check
-    requestTimestamps[apiKey] = recentTimestamps;
     requestTimestamps[apiKey].push(now);
     next(); 
 }
@@ -86,8 +129,11 @@ function rateLimitMiddleware(request: Request, response: Response, next: () => v
  
 // Anthropic Messages Route
 router.post('/v3/messages', authAndUsageMiddleware, rateLimitMiddleware, async (request: Request, response: Response) => {
+   const timestamp = new Date().toISOString();
    if (!request.apiKey || !request.tierLimits) {
-        return response.status(500).json({ type: 'error', error: { type: 'api_error', message: 'Internal Server Error: Auth data missing.' }}); 
+        const errDetail = { message: 'Internal Server Error: Auth data missing after middleware.', type: 'api_error' };
+        logErrorToFile(errDetail, request);
+        return response.status(500).json({ error: 'Internal Server Error', reference: errDetail.message, timestamp }); 
    }
 
    const userApiKey = request.apiKey!;
@@ -98,19 +144,27 @@ router.post('/v3/messages', authAndUsageMiddleware, rateLimitMiddleware, async (
         
         // --- Basic Input Validation ---
         if (!body || !body.model || typeof body.model !== 'string') {
-             return response.status(400).json({ type: 'error', error: { type: 'invalid_request_error', message: 'Missing or invalid \'model\' parameter.' }});
+             const errDetail = { message: 'Missing or invalid model parameter.', type: 'invalid_request_error' };
+             logErrorToFile(errDetail, request);
+             return response.status(400).json({ type: 'error', error: errDetail, timestamp });
         }
          if (!Array.isArray(body.messages) || body.messages.length === 0) {
-             return response.status(400).json({ type: 'error', error: { type: 'invalid_request_error', message: 'Missing or invalid \'messages\' array.' }});
+             const errDetail = { message: 'Missing or invalid messages array.', type: 'invalid_request_error' };
+             logErrorToFile(errDetail, request);
+             return response.status(400).json({ type: 'error', error: errDetail, timestamp });
         }
         // Anthropic requires alternating user/assistant roles, starting with user.
         if (body.messages[0].role !== 'user') {
-             return response.status(400).json({ type: 'error', error: { type: 'invalid_request_error', message: 'First message must have role \'user\'.' }});
+             const errDetail = { message: 'First message must have role \'user\'.', type: 'invalid_request_error' };
+             logErrorToFile(errDetail, request);
+             return response.status(400).json({ type: 'error', error: errDetail, timestamp });
         }
         // We'll primarily use the *last* user message for our simple handler
         const lastMessage = body.messages[body.messages.length - 1];
          if (!lastMessage || lastMessage.role !== 'user' || typeof lastMessage.content !== 'string' || !lastMessage.content.trim()) {
-              return response.status(400).json({ type: 'error', error: { type: 'invalid_request_error', message: 'Invalid or empty content in the last user message.' }});
+              const errDetail = { message: 'Invalid or empty content in the last user message.', type: 'invalid_request_error' };
+              logErrorToFile(errDetail, request);
+              return response.status(400).json({ type: 'error', error: errDetail, timestamp });
          }
 
         const modelId = body.model;
@@ -154,28 +208,31 @@ router.post('/v3/messages', authAndUsageMiddleware, rateLimitMiddleware, async (
         response.json(anthropicResponse);
  
    } catch (error: any) { 
-        console.error('Anthropic Route - /v1/messages error:', error.message, error.stack);
-        
-        // Map internal errors to potential Anthropic error formats
-        if (error instanceof SyntaxError) return response.status(400).json({ type: 'error', error: { type: 'invalid_request_error', message: 'Invalid JSON payload.' }});
-        
-        if (error.message.includes('Unauthorized') || error.message.includes('Invalid API Key')) {
-             return response.status(401).json({ type: 'error', error: { type: 'authentication_error', message: error.message }});
+        logErrorToFile(error, request); // Log the full error
+        console.error('Anthropic Route - /v3/messages error:', error.message, error.stack);
+        const responseTimestamp = new Date().toISOString();
+        let statusCode = 500;
+        let errorType = 'api_error';
+        let clientMessage = 'Internal server error.';
+        let reference = 'An unexpected error occurred processing the Anthropic request.';
+
+        if (error instanceof SyntaxError) {
+            statusCode = 400; errorType = 'invalid_request_error'; clientMessage = 'Invalid JSON payload.';
+        } else if (error.message.includes('Unauthorized') || error.message.includes('Invalid API Key')) {
+            statusCode = 401; errorType = 'authentication_error'; clientMessage = error.message;
+        } else if (error.message.includes('limit reached') || error.message.includes('Rate limit exceeded')) {
+            statusCode = 429; errorType = 'rate_limit_error'; clientMessage = error.message;
+        } else if (error.message.includes('No currently active provider supports model') || error.message.includes('No provider (active or disabled) supports model')) {
+            statusCode = 404; errorType = 'not_found_error'; clientMessage = `The requested model '${body?.model ?? 'unknown'}' does not exist or you do not have access to it.`;
+        } else if (error.message.includes('Failed to process request')) {
+            statusCode = 503; errorType = 'api_error'; clientMessage = 'The service is temporarily overloaded. Please try again later.';
         }
-        if (error.message.includes('limit reached') || error.message.includes('Rate limit exceeded')) {
-             return response.status(429).json({ type: 'error', error: { type: 'rate_limit_error', message: error.message }});
+
+        if (statusCode === 500) {
+             response.status(statusCode).json({ error: 'Internal Server Error', reference, timestamp: responseTimestamp });
+        } else {
+             response.status(statusCode).json({ type: 'error', error: { type: errorType, message: clientMessage }, timestamp: responseTimestamp });
         }
-         if (error.message.includes('No currently active provider supports model') || error.message.includes('No provider (active or disabled) supports model')) {
-             // Model not found or unavailable via this proxy
-             // Use body?.model safely here because body is defined in the outer scope
-             return response.status(404).json({ type: 'error', error: { type: 'not_found_error', message: `The requested model '${body?.model ?? 'unknown'}' does not exist or you do not have access to it.` }});
-        }
-         if (error.message.includes('Failed to process request')) {
-              // Generic failure after retries - map to overload or internal error
-             return response.status(503).json({ type: 'error', error: { type: 'api_error', message: 'The service is temporarily overloaded. Please try again later.' }});
-         }
-        // Default internal error
-        response.status(500).json({ type: 'error', error: { type: 'api_error', message: 'Internal server error.' }});
    }
 });
 

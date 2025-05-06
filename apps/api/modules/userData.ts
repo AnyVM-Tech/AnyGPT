@@ -32,21 +32,32 @@ interface KeysFile { [apiKey: string]: UserData; }
 
 // --- Functions using DataManager --- 
 
-export async function generateUserApiKey(userId: string): Promise<string> { 
+export async function generateUserApiKey(userId: string, role: 'admin' | 'user' = 'user', tier: keyof TiersFile = 'free'): Promise<string> { 
   if (!userId) throw new Error('User ID required.');
   const apiKey = crypto.randomBytes(32).toString('hex');
-  // Load keys using DataManager
   const currentKeys = await dataManager.load<KeysFile>('keys'); 
 
   if (Object.values(currentKeys).find(data => data.userId === userId)) {
-    throw new Error(`User ID '${userId}' already has API key.`);
+    throw new Error(`User ID '${userId}' already has an API key.`); // Keep this specific error
   }
-  if (!tiers.free) throw new Error("Config error: 'free' tier missing."); 
 
-  currentKeys[apiKey] = { userId, tokenUsage: 0, role: 'user', tier: 'free' };
-  // Save keys using DataManager
+  // Validate provided tier or default
+  const finalTier = tiers[tier] ? tier : 'free';
+  if (!tiers[finalTier]) {
+      // This case should ideally not be hit if 'free' tier is always present, but good for safety
+      console.warn(`Tier '${tier}' not found, and default 'free' tier also missing. Falling back to first available tier or erroring.`);
+      // Attempt to find any available tier if 'free' is somehow missing
+      const availableTiers = Object.keys(tiers) as (keyof TiersFile)[];
+      if(availableTiers.length === 0) throw new Error("Configuration error: No tiers defined (including 'free').");
+      // If you want to be super robust, you might pick the first available tier, but it's better if 'free' exists.
+      // For now, this indicates a critical config issue if 'free' is not found when 'tier' is also invalid.
+      if (finalTier === 'free') throw new Error("Configuration error: Default 'free' tier is missing in tiers.json.");
+      // If a custom tier was provided but not found, and 'free' is missing, this is also an issue.
+  }
+
+  currentKeys[apiKey] = { userId, tokenUsage: 0, role: role, tier: finalTier };
   await dataManager.save<KeysFile>('keys', currentKeys); 
-  console.log(`Generated key for ${userId}.`); 
+  console.log(`Generated key for ${userId} with role: ${role} and tier: ${finalTier}.`); 
   return apiKey;
 }
 
