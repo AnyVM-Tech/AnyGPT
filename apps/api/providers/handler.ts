@@ -17,6 +17,7 @@ import {
     ModelsFileStructure, // Import exported type
     ModelDefinition // Import ModelDefinition from dataManager
 } from '../modules/dataManager'; 
+import { refreshProviderCountsInModelsFile } from '../modules/modelUpdater'; // Added import
 // FIX: Import fs for schema loading
 import * as fs from 'fs'; 
 import * as path from 'path';
@@ -56,7 +57,7 @@ let initialModelThroughputMap: Map<string, number> = new Map();
 let messageHandler: MessageHandler; 
 
 // --- Initialization using DataManager ---
-async function initializeHandlerData() {
+export async function initializeHandlerData() {
     console.log("Initializing handler data...");
     // Load models data using DataManager
     const modelsFileData = await dataManager.load<ModelsFileStructure>('models');
@@ -78,9 +79,14 @@ async function initializeHandlerData() {
     providerConfigs = {}; 
     // FIX: Add type annotation for p
     initialProviders.forEach((p: LoadedProviderData) => { 
-        const key = process.env[`PROVIDER_API_KEY_${p.id.toUpperCase().replace(/-/g, '_')}`] || p.apiKey;
+        const key = p.apiKey; // Use only apiKey from providers.json
         const url = p.provider_url || '';
-        if (!key) console.warn(`API key missing for provider config: ${p.id}.`);
+        // Updated warning to reflect that key should be in providers.json
+        if (!key) console.warn(`API key missing for provider config: ${p.id}. This provider may not function correctly if an API key is required and not defined in providers.json.`);
+        
+        // The rest of the logic for instantiating providerConfigs remains the same,
+        // but now 'key' will be undefined if not in providers.json, 
+        // and the provider class constructor should handle that if a key is essential.
         if (p.id.includes('openai')) providerConfigs[p.id] = { class: OpenAI, args: [key, url] };
         else if (p.id.includes('gemini') || p.id === 'google') providerConfigs[p.id] = { class: GeminiAI, args: [key, 'gemini-pro'] }; 
         else providerConfigs[p.id] = { class: OpenAI, args: [key, url] }; 
@@ -89,6 +95,9 @@ async function initializeHandlerData() {
 
     messageHandler = new MessageHandler(initialModelThroughputMap);
     console.log("MessageHandler initialized and ready.");
+
+    // Refresh provider counts in models.json after all initial data is loaded
+    await refreshProviderCountsInModelsFile();
 }
 
 initializeHandlerData().catch(error => {
@@ -251,7 +260,7 @@ export class MessageHandler {
          let lastError: any = null;
          for (const selectedProvider of candidateProviders) {
              const providerId = selectedProvider.id;
-             console.log(`Attempting provider: ${providerId} (Score: ${selectedProvider.provider_score?.toFixed(2)})`);
+             console.log(`Attempting provider: ${providerId} (Score: ${selectedProvider.provider_score?.toFixed(2)}) for model ${modelId}`);
 
              const providerConfig = providerConfigs[providerId]; 
              if (!providerConfig) {
@@ -265,7 +274,7 @@ export class MessageHandler {
              const currentTokenGenerationSpeed = modelStats?.avg_token_speed ?? this.initialModelThroughputMap.get(modelId) ?? this.DEFAULT_GENERATION_SPEED;
              let result: { response: string; latency: number } | null = null;
              let responseEntry: ResponseEntry | null = null; 
-             let attemptError: any = null;
+             let sendMessageError: any = null; // Renamed from attemptError for clarity
 
              try { 
                  result = await providerInstance.sendMessage({ content: messages[messages.length - 1].content, model: { id: modelId } });
@@ -282,28 +291,33 @@ export class MessageHandler {
                     }
                     responseEntry = { timestamp: Date.now(), response_time: result.latency, input_tokens: inputTokens, output_tokens: outputTokens, tokens_generated: inputTokens + outputTokens, provider_latency: providerLatency, observed_speed_tps: observedSpeedTps, apiKey: apiKey };
                  } else { 
-                    attemptError = new Error(`Provider ${providerId} returned null result.`); 
+                    sendMessageError = new Error(`Provider ${providerId} returned null result for model ${modelId}.`); 
                  }
              } catch (error: any) { 
                 console.error(`Error during sendMessage with ${providerId}/${modelId}:`, error); 
-                attemptError = error; 
+                sendMessageError = error; 
              }
 
              // --- Update Stats & Save (Always, regardless of attempt outcome) ---
-             // Need to load the *latest* provider data before updating and saving
-             let currentProvidersData = await dataManager.load<LoadedProviders>('providers');
-             const updatedProviderDataList = this.updateStatsInProviderList(
-                 currentProvidersData, // Use fresh data
-                 providerId, 
-                 modelId, 
-                 responseEntry, // Null if error occurred during generation
-                 !!attemptError // isError flag
-             );
-             await dataManager.save<LoadedProviders>('providers', updatedProviderDataList); 
+             try {
+                 let currentProvidersData = await dataManager.load<LoadedProviders>('providers');
+                 const updatedProviderDataList = this.updateStatsInProviderList(
+                     currentProvidersData, 
+                     providerId, 
+                     modelId, 
+                     responseEntry, // Null if error occurred during generation or result was null
+                     !!sendMessageError // isError flag based on sendMessageError
+                 );
+                 await dataManager.save<LoadedProviders>('providers', updatedProviderDataList); 
+             } catch (statsError: any) {
+                 console.error(`Error updating/saving stats for provider ${providerId}/${modelId}. Attempt outcome (sendMessageError): ${sendMessageError || 'Success'}. Stats error:`, statsError);
+                 // Do not let stats error stop the loop or overwrite sendMessageError if API call failed.
+                 // If API call succeeded (sendMessageError is null), but stats failed, the request is still considered successful.
+             }
 
              // --- Handle Attempt Outcome ---
-             if (!attemptError && result && responseEntry) {
-                console.log(`Successfully processed request with provider: ${providerId}`);
+             if (!sendMessageError && result && responseEntry) {
+                console.log(`Successfully processed request for model ${modelId} with provider: ${providerId}`);
                 // TODO: Add updateUserTokenUsage call if needed
                 // await updateUserTokenUsage(apiKey, responseEntry.tokens_generated); // Uncomment if needed
                  return { 
@@ -314,7 +328,7 @@ export class MessageHandler {
                 };
              } else {
                  // Attempt failed, store the error and loop to try next provider
-                 lastError = attemptError || new Error(`Provider ${providerId} finished in invalid state.`);
+                 lastError = sendMessageError || new Error(`Provider ${providerId} for model ${modelId} finished in invalid state or stats update failed after success.`);
                  console.warn(`Provider ${providerId} failed for model ${modelId}. Error: ${lastError.message}. Trying next provider if available...`);
              }
          } // End of loop through candidateProviders

@@ -6,14 +6,15 @@ import {
     generateUserApiKey, // Now async
     extractMessageFromRequest, 
     updateUserTokenUsage, // Now async
-    validateApiKeyAndUsage // Now async
+    validateApiKeyAndUsage, // Now async
 } from '../modules/userData';
 // Import TierData type for Request extension
 import { TierData } from '../modules/userData'; 
+import { logErrorToFile } from '../modules/errorLogger';
  
 dotenv.config();
  
-const server = new HyperExpress.Server();
+const openaiRouter = new HyperExpress.Router();
  
 // --- Rate Limiting Store --- 
 interface RequestTimestamps { [apiKey: string]: number[]; }
@@ -44,17 +45,18 @@ async function authAndUsageMiddleware(request: Request, response: Response, next
      if (typeof apiKeyHeader === 'string' && apiKeyHeader) {
          apiKey = apiKeyHeader;
      } else {
-         // No valid key found in either header
-         return response.status(401).json({ error: 'Unauthorized: Missing or invalid API key header (Authorization: Bearer or api-key required).' }); 
+         logErrorToFile({ message: 'Unauthorized: Missing API key' }, request);
+         return response.status(401).json({ error: 'Unauthorized: Missing or invalid API key header.', timestamp: new Date().toISOString() }); 
      }
   }
   
   try {
       const validationResult = await validateApiKeyAndUsage(apiKey); 
       if (!validationResult.valid || !validationResult.userData || !validationResult.tierLimits) {
-          const statusCode = validationResult.error?.includes('limit reached') ? 429 : 401; 
-          // Must return response
-          return response.status(statusCode).json({ error: `Unauthorized: ${validationResult.error || 'Invalid key/config.'}` }); 
+          const statusCode = validationResult.error?.includes('limit reached') ? 429 : 401;
+          const errorMessage = `Unauthorized: ${validationResult.error || 'Invalid key/config.'}`;
+          logErrorToFile({ message: errorMessage, statusCode: statusCode, apiKey: apiKey }, request);
+          return response.status(statusCode).json({ error: errorMessage, timestamp: new Date().toISOString() }); 
       }
 
       // Attach data
@@ -72,18 +74,22 @@ async function authAndUsageMiddleware(request: Request, response: Response, next
       // If requests hang, this is the place to investigate HyperExpress async middleware patterns.
        // next(); // REMOVED next() call - let flow continue naturally after await
 
-  } catch (error) {
+  } catch (error: any) {
+       logErrorToFile(error, request);
        console.error("Error during auth/usage check:", error);
-       // Must return response
-       return response.status(500).json({ error: "Internal Server Error during validation." }); 
+       // Generic client message for 500
+       return response.status(500).json({ error: "Internal Server Error", reference: "Error during authentication processing.", timestamp: new Date().toISOString() }); 
   }
 }
 
 // Remains synchronous
 function rateLimitMiddleware(request: Request, response: Response, next: () => void) {
     if (!request.apiKey || !request.tierLimits) { 
-        console.error('Internal Error: API Key or Tier Limits missing (rateLimitMiddleware).');
-        return response.status(500).json({ error: 'Internal Server Error' }); // Return
+        const errMsg = 'Internal Error: API Key or Tier Limits missing after auth (rateLimitMiddleware).';
+        logErrorToFile({ message: errMsg, requestPath: request.path }, request); // Log full error
+        console.error(errMsg);
+        // Generic client message for 500
+        return response.status(500).json({ error: 'Internal Server Error', reference: 'Configuration error for rate limiting.', timestamp: new Date().toISOString() });
     }
     const apiKey = request.apiKey;
     const tierLimits = request.tierLimits; 
@@ -100,17 +106,20 @@ function rateLimitMiddleware(request: Request, response: Response, next: () => v
 
     if (requestsLastSecond >= tierLimits.rps) {
          response.setHeader('Retry-After', '1'); 
-         return response.status(429).json({ error: `Rate limit exceeded: Max ${tierLimits.rps} RPS.` }); // Return
+         logErrorToFile({ message: `Rate limit exceeded: Max ${tierLimits.rps} RPS.`, apiKey }, request);
+         return response.status(429).json({ error: `Rate limit exceeded: Max ${tierLimits.rps} RPS.`, timestamp: new Date().toISOString() });
     }
      if (requestsLastMinute >= tierLimits.rpm) {
          const retryAfterSeconds = Math.ceil(Math.max(0, (recentTimestamps[recentTimestamps.length - tierLimits.rpm] + 60000 - now) / 1000));
          response.setHeader('Retry-After', String(retryAfterSeconds)); 
-        return response.status(429).json({ error: `Rate limit exceeded: Max ${tierLimits.rpm} RPM.` }); // Return
+        logErrorToFile({ message: `Rate limit exceeded: Max ${tierLimits.rpm} RPM.`, apiKey }, request);
+        return response.status(429).json({ error: `Rate limit exceeded: Max ${tierLimits.rpm} RPM.`, timestamp: new Date().toISOString() });
     }
     if (requestsLastDay >= tierLimits.rpd) {
          const retryAfterSeconds = Math.ceil(Math.max(0,(recentTimestamps[0] + 86400000 - now) / 1000));
         response.setHeader('Retry-After', String(retryAfterSeconds)); 
-        return response.status(429).json({ error: `Rate limit exceeded: Max ${tierLimits.rpd} RPD.` }); // Return
+        logErrorToFile({ message: `Rate limit exceeded: Max ${tierLimits.rpd} RPD.`, apiKey }, request);
+        return response.status(429).json({ error: `Rate limit exceeded: Max ${tierLimits.rpd} RPD.`, timestamp: new Date().toISOString() });
     }
     recentTimestamps.push(now);
     requestTimestamps[apiKey] = recentTimestamps; 
@@ -120,26 +129,33 @@ function rateLimitMiddleware(request: Request, response: Response, next: () => v
 // --- Routes ---
  
 // Generate Key Route - Handler becomes async
-server.post('/generate_key', authAndUsageMiddleware, async (request: Request, response: Response) => {
+openaiRouter.post('/generate_key', authAndUsageMiddleware, async (request: Request, response: Response) => {
   // Check if middleware failed (e.g., if it didn't attach data)
   if (!request.apiKey || request.userRole === undefined) {
-       // This might indicate middleware didn't run correctly or exited early
-       // If authAndUsageMiddleware sends a response on failure, this won't be reached.
-       return response.status(401).json({ error: 'Authentication failed' }); 
+       logErrorToFile({ message: 'Authentication failed in /generate_key route after middleware' }, request);
+       return response.status(401).json({ error: 'Authentication failed', timestamp: new Date().toISOString() }); 
   }
   try {
-    if (request.userRole !== 'admin') return response.status(403).json({ error: 'Forbidden' });
+    if (request.userRole !== 'admin') {
+        logErrorToFile({ message: 'Forbidden: Non-admin attempt to generate key', userId: request.userId }, request);
+        return response.status(403).json({ error: 'Forbidden', timestamp: new Date().toISOString() });
+    }
     const { userId } = await request.json(); 
-    if (!userId || typeof userId !== 'string') return response.status(400).json({ error: 'Bad Request: userId required' });
+    if (!userId || typeof userId !== 'string') {
+        logErrorToFile({ message: 'Bad Request: userId required for key generation' }, request);
+        return response.status(400).json({ error: 'Bad Request: userId required', timestamp: new Date().toISOString() });
+    }
     
     // --- Use await ---
     const newUserApiKey = await generateUserApiKey(userId); 
     response.json({ apiKey: newUserApiKey });
   } catch (error: any) {
+    logErrorToFile(error, request);
     console.error('Generate key error:', error);
-    if (error.message.includes('already has')) return response.status(409).json({ error: error.message }); 
-    if (error instanceof SyntaxError) return response.status(400).json({ error: 'Invalid JSON' });
-    response.status(500).json({ error: 'Internal error' });
+    const timestamp = new Date().toISOString();
+    if (error.message.includes('already has')) return response.status(409).json({ error: error.message, timestamp }); 
+    if (error instanceof SyntaxError) return response.status(400).json({ error: 'Invalid JSON', timestamp });
+    response.status(500).json({ error: 'Internal Server Error', reference: 'Failed to generate key.', timestamp });
   }
 });
  
@@ -147,15 +163,16 @@ server.post('/generate_key', authAndUsageMiddleware, async (request: Request, re
 // Apply Middlewares - order matters
 // Run auth/usage check first. Since it's async and doesn't call next(), 
 // rateLimitMiddleware needs to be applied *specifically* to the route AFTER auth.
-server.use('/v1', authAndUsageMiddleware); 
+openaiRouter.use('/v1', authAndUsageMiddleware); 
 // This pattern might be needed if async middleware doesn't implicitly pass control:
-server.use('/v1/chat/completions', rateLimitMiddleware); 
+openaiRouter.use('/v1/chat/completions', rateLimitMiddleware); 
  
 // Chat Completions Route - Handler is already async
-server.post('/v1/chat/completions', async (request: Request, response: Response) => {
+openaiRouter.post('/v1/chat/completions', async (request: Request, response: Response) => {
    // Check if middleware failed
    if (!request.apiKey || !request.tierLimits) {
-        return response.status(401).json({ error: 'Authentication or configuration failed' }); 
+        logErrorToFile({ message: 'Authentication or configuration failed in /v1/chat/completions after middleware' }, request);
+        return response.status(401).json({ error: 'Authentication or configuration failed', timestamp: new Date().toISOString() }); 
    }
   try {
     const userApiKey = request.apiKey!; 
@@ -177,13 +194,13 @@ server.post('/v1/chat/completions', async (request: Request, response: Response)
         console.warn(`Token usage not reported/zero for key ${userApiKey.substring(0, 6)}...`);
     }
  
-    // --- Format response like OpenAI --- 
+    // --- Format response strictly like OpenAI --- 
     const openaiResponse = {
-        id: `chatcmpl-${Date.now()}-${Math.random().toString(36).substring(2)}`, // Generate a pseudo-random ID
+        id: `chatcmpl-${Date.now()}-${Math.random().toString(36).substring(2)}`,
         object: "chat.completion",
         created: Math.floor(Date.now() / 1000), // Unix timestamp
         model: modelId,
-        // system_fingerprint: "fp_xxxxxxxxxx", // We don't have this
+        // system_fingerprint: null, // OpenAI typically includes this. Set to null if not available.
         choices: [
             {
                 index: 0,
@@ -191,48 +208,66 @@ server.post('/v1/chat/completions', async (request: Request, response: Response)
                     role: "assistant",
                     content: result.response,
                 },
-                // logprobs: null, // Not supported
+                logprobs: null, // OpenAI includes this, set to null if not applicable
                 finish_reason: "stop", // Assuming stop as default
             }
         ],
         usage: {
-            // prompt_tokens: ???, // We only have total tokens currently
-            // completion_tokens: ???, // We only have total tokens currently
+            // prompt_tokens: result.promptTokens, // Include if available from messageHandler
+            // completion_tokens: result.completionTokens, // Include if available from messageHandler
             total_tokens: totalTokensUsed
-        },
-        // Add custom fields if desired, e.g., latency or provider used
-        _latency_ms: result.latency,
-        _provider_id: result.providerId // Assuming providerId is returned by handleMessages
+        }
+        // Custom fields _latency_ms and _provider_id are removed
     };
 
     response.json(openaiResponse);
  
   } catch (error: any) { 
-    // ... (error handling remains largely the same, checking specific error messages) ...
+    logErrorToFile(error, request);
     console.error('Chat completions error:', error.message, error.stack);
-    if (error.message.startsWith('Invalid request') || error.message.startsWith('Failed to parse')) return response.status(400).json({ error: `Bad Request: ${error.message}` });
-    if (error instanceof SyntaxError) return response.status(400).json({ error: 'Invalid JSON' });
-    if (error.message.includes('Unauthorized') || error.message.includes('limit reached')) {
-        const statusCode = error.message.includes('limit reached') ? 429 : 401;
-        return response.status(statusCode).json({ error: error.message });
+    const timestamp = new Date().toISOString();
+    let statusCode = 500;
+    let clientMessage = 'Internal Server Error';
+    let clientReference = 'An unexpected error occurred while processing your chat request.';
+
+    if (error.message.startsWith('Invalid request') || error.message.startsWith('Failed to parse')) {
+        statusCode = 400;
+        clientMessage = `Bad Request: ${error.message}`;
+    } else if (error instanceof SyntaxError) {
+        statusCode = 400;
+        clientMessage = 'Invalid JSON';
+    } else if (error.message.includes('Unauthorized') || error.message.includes('limit reached')) {
+        statusCode = error.message.includes('limit reached') ? 429 : 401;
+        clientMessage = error.message;
+    } else if (error.message.includes('No suitable providers')) {
+        statusCode = 503;
+        clientMessage = error.message;
+    } else if (error.message.includes('Provider') && error.message.includes('failed')) {
+        statusCode = 502;
+        clientMessage = error.message;
     }
-    if (error.message.includes('No suitable providers')) return response.status(503).json({ error: error.message }); 
-    if (error.message.includes('Provider') && error.message.includes('failed')) return response.status(502).json({ error: error.message }); 
-    response.status(500).json({ error: 'Internal Server Error' });
+    
+    if (statusCode === 500) {
+        response.status(statusCode).json({ error: clientMessage, reference: clientReference, timestamp });
+    } else {
+        response.status(statusCode).json({ error: clientMessage, timestamp });
+    }
   }
 });
 
 // --- Azure OpenAI Compatible Route ---
-server.post('/openai/deployments/:deploymentId/chat/completions', authAndUsageMiddleware, rateLimitMiddleware, async (request: Request, response: Response) => {
+openaiRouter.post('/openai/deployments/:deploymentId/chat/completions', authAndUsageMiddleware, rateLimitMiddleware, async (request: Request, response: Response) => {
     // Middleware should have attached these if successful
     if (!request.apiKey || !request.tierLimits || !request.params.deploymentId) {
-        return response.status(401).json({ error: 'Authentication or configuration failed (Azure route).' }); 
+        logErrorToFile({ message: 'Authentication or configuration failed (Azure route) after middleware' }, request);
+        return response.status(401).json({ error: 'Authentication or configuration failed (Azure route).', timestamp: new Date().toISOString() }); 
     }
 
     // Check for api-version query parameter (required by Azure)
     const apiVersion = request.query['api-version'];
     if (!apiVersion || typeof apiVersion !== 'string') {
-         return response.status(400).json({ error: 'Bad Request: Missing or invalid \'api-version\' query parameter.' });
+         logErrorToFile({ message: 'Bad Request: Missing or invalid api-version query parameter (Azure route)' }, request);
+         return response.status(400).json({ error: 'Bad Request: Missing or invalid \'api-version\' query parameter.', timestamp: new Date().toISOString() });
     }
 
     const userApiKey = request.apiKey!;
@@ -256,12 +291,13 @@ server.post('/openai/deployments/:deploymentId/chat/completions', authAndUsageMi
             console.warn(`Azure Route - Token usage not reported/zero for key ${userApiKey.substring(0, 6)}...`);
         }
  
-        // --- Format response like OpenAI (Azure format is compatible) ---
+        // --- Format response strictly like OpenAI --- 
         const openaiResponse = {
             id: `chatcmpl-${Date.now()}-${Math.random().toString(36).substring(2)}`, 
             object: "chat.completion",
             created: Math.floor(Date.now() / 1000),
             model: deploymentId, // Use deployment ID here as the model identifier
+            // system_fingerprint: null, // Set to null if not available.
             choices: [
                 {
                     index: 0,
@@ -269,44 +305,54 @@ server.post('/openai/deployments/:deploymentId/chat/completions', authAndUsageMi
                         role: "assistant",
                         content: result.response,
                     },
+                    logprobs: null, // Set to null if not applicable
                     finish_reason: "stop", 
                 }
             ],
             usage: {
+                // prompt_tokens: result.promptTokens, // Include if available
+                // completion_tokens: result.completionTokens, // Include if available
                 total_tokens: totalTokensUsed
-            },
-            _latency_ms: result.latency,
-            _provider_id: result.providerId 
+            }
+            // Custom fields _latency_ms and _provider_id are removed
         };
 
         response.json(openaiResponse);
 
     } catch (error: any) {
-        // Reuse the same error handling as the standard OpenAI endpoint for consistency
+        logErrorToFile(error, request);
         console.error('Azure Chat completions error:', error.message, error.stack);
-        if (error.message.startsWith('Invalid request') || error.message.startsWith('Failed to parse')) return response.status(400).json({ error: `Bad Request: ${error.message}` });
-        if (error instanceof SyntaxError) return response.status(400).json({ error: 'Invalid JSON' });
-        if (error.message.includes('Unauthorized') || error.message.includes('limit reached')) {
-            const statusCode = error.message.includes('limit reached') ? 429 : 401;
-            return response.status(statusCode).json({ error: error.message });
+        const timestamp = new Date().toISOString();
+        let statusCode = 500;
+        let clientMessage = 'Internal Server Error';
+        let clientReference = 'An unexpected error occurred while processing your Azure chat request.';
+
+        if (error.message.startsWith('Invalid request') || error.message.startsWith('Failed to parse')) {
+            statusCode = 400;
+            clientMessage = `Bad Request: ${error.message}`;
+        } else if (error instanceof SyntaxError) {
+            statusCode = 400;
+            clientMessage = 'Invalid JSON';
+        } else if (error.message.includes('Unauthorized') || error.message.includes('limit reached')) {
+            statusCode = error.message.includes('limit reached') ? 429 : 401;
+            clientMessage = error.message;
+        } else if (error.message.includes('No suitable providers') || error.message.includes('supports model') || error.message.includes('No provider')) {
+             statusCode = 404;
+             clientMessage = `Deployment not found or model unsupported: ${deploymentId}`;
+        } else if (error.message.includes('Provider') && error.message.includes('failed')) {
+            statusCode = 502;
+            clientMessage = error.message;
+        } else if (error.message.includes('Failed to process request')) { 
+            statusCode = 503;
+            clientMessage = 'Service temporarily unavailable after multiple provider attempts.';
         }
-        if (error.message.includes('No suitable providers') || error.message.includes('supports model') || error.message.includes('No provider')) {
-             // Treat model/deployment not found as 404
-             return response.status(404).json({ error: `Deployment not found or model unsupported: ${deploymentId}` });
+        
+        if (statusCode === 500) {
+            response.status(statusCode).json({ error: clientMessage, reference: clientReference, timestamp });
+        } else {
+            response.status(statusCode).json({ error: clientMessage, timestamp });
         }
-        if (error.message.includes('Provider') && error.message.includes('failed')) return response.status(502).json({ error: error.message }); 
-        if (error.message.includes('Failed to process request')) { 
-            // Generic failure after retries
-            return response.status(503).json({ error: 'Service temporarily unavailable after multiple provider attempts.' });
-        }
-        response.status(500).json({ error: 'Internal Server Error' });
     }
 });
  
-// --- Server Start ---
-// ... (remains same) ...
-const port = parseInt(process.env.PORT || '3000', 10);
-if (isNaN(port) || port <= 0) console.error(`Invalid PORT: ${process.env.PORT}. Using 3000.`);
-server.listen(port || 3000)
-  .then(() => console.log(`Server listening on port ${port || 3000}`))
-  .catch((err) => console.error('Failed to start server:', err));
+export default openaiRouter;

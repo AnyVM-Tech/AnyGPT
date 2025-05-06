@@ -10,7 +10,7 @@ async function testApiGemini() {
   // Check your API's model configuration (e.g., models.json or routermodels.json)
   // Assuming 'openai-nexeon' is the provider and it uses a model ID like 'gpt-3.5-turbo' internally
   // Or if 'openai-nexeon' IS the model ID itself in your router configuration
-  const modelId = 'o3-mini'; // Use the ID that your router maps to the correct provider/model
+  const modelId = 'gpt-3.5-turbo'; // Use the ID that your router maps to the correct provider/model
   const testPrompt = 'Write a short haiku about APIs.';
   // Use an API key that is valid for your proxy/router API
   const apiKey = 'ad9970421fe07447bf011f78a88d72af2e7465df65d27844feeb2df9aa5f6772'; // Ensure this key is registered in your API's keys.json or equivalent

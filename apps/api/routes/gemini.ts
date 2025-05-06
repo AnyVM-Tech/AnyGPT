@@ -8,6 +8,7 @@ import {
     validateApiKeyAndUsage, // Now async
     TierData // Import TierData type
 } from '../modules/userData';
+import { logErrorToFile } from '../modules/errorLogger'; // Import the logger
 
 dotenv.config();
 
@@ -26,10 +27,13 @@ const requestTimestamps: RequestTimestamps = {};
 // NOTE: Ideally, middleware should be defined centrally and imported.
 // This is a temporary copy for self-containment.
 async function authAndUsageMiddleware(request: Request, response: Response, next: () => void) {
-  const apiKey = request.headers['x-goog-api-key'] as string; // Gemini uses x-goog-api-key
+  const apiKey = request.headers['x-goog-api-key'] as string;
+  const timestamp = new Date().toISOString();
+
   if (!apiKey) {
-     // Use double quotes for the outer string to allow inner single quotes
-     return response.status(401).json({ error: { code: 401, message: "API key missing. Please pass an API key in 'x-goog-api-key' header.", status: 'UNAUTHENTICATED' }}); 
+     const errDetail = { message: "API key missing. Please pass an API key in 'x-goog-api-key' header.", code: 401, status: 'UNAUTHENTICATED' };
+     logErrorToFile(errDetail, request);
+     return response.status(401).json({ error: { code: 401, message: errDetail.message, status: 'UNAUTHENTICATED' }, timestamp }); 
   }
   
   try {
@@ -37,7 +41,9 @@ async function authAndUsageMiddleware(request: Request, response: Response, next
       if (!validationResult.valid || !validationResult.userData || !validationResult.tierLimits) {
           const statusCode = validationResult.error?.includes('limit reached') ? 429 : 401; 
           const statusText = statusCode === 429 ? 'RESOURCE_EXHAUSTED' : 'UNAUTHENTICATED';
-          return response.status(statusCode).json({ error: { code: statusCode, message: `API key not valid. ${validationResult.error || 'Please pass a valid API key.'}`, status: statusText }}); 
+          const logMsg = `API key not valid. ${validationResult.error || 'Please pass a valid API key.'}`;
+          logErrorToFile({ message: logMsg, details: validationResult.error, apiKey, code: statusCode, status: statusText }, request);
+          return response.status(statusCode).json({ error: { code: statusCode, message: logMsg, status: statusText }, timestamp }); 
       }
 
       // Attach data
@@ -49,46 +55,76 @@ async function authAndUsageMiddleware(request: Request, response: Response, next
       request.tierLimits = validationResult.tierLimits; 
       
       // Let flow continue naturally in async middleware for HyperExpress
+      next();
 
-  } catch (error) {
+  } catch (error: any) {
+       logErrorToFile(error, request);
        console.error("Gemini Route - Error during auth/usage check:", error);
-       return response.status(500).json({ error: { code: 500, message: 'Internal server error during validation.', status: 'INTERNAL' }}); 
+       return response.status(500).json({ 
+           error: 'Internal Server Error', 
+           reference: 'Error during authentication processing.',
+           timestamp 
+       }); 
   }
 }
 
 // RATE LIMIT Middleware (Copied and adapted - Synchronous)
 // NOTE: Ideally, middleware should be defined centrally and imported.
 function rateLimitMiddleware(request: Request, response: Response, next: () => void) {
+    const timestamp = new Date().toISOString(); // For error responses
     if (!request.apiKey || !request.tierLimits) { 
-        console.error('Gemini Route - Internal Error: API Key or Tier Limits missing.');
-        // Gemini might return 429 for internal errors affecting limits too
-        return response.status(429).json({ error: { code: 429, message: 'Internal server error affecting rate limits.', status: 'RESOURCE_EXHAUSTED' }}); 
+        const errMsg = 'Internal Error: API Key or Tier Limits missing after auth (Gemini rateLimitMiddleware).';
+        logErrorToFile({ message: errMsg, requestPath: request.path }, request);
+        console.error(errMsg);
+        return response.status(500).json({ 
+            error: 'Internal Server Error', 
+            reference: 'Configuration error for rate limiting.', 
+            timestamp 
+        });
     }
+
     const apiKey = request.apiKey;
     const tierLimits = request.tierLimits; 
     const now = Date.now();
     requestTimestamps[apiKey] = requestTimestamps[apiKey] || [];
-    const timestamps = requestTimestamps[apiKey];
-    const oneDayAgo = now - 86400000; // 24 * 60 * 60 * 1000
+    const currentApiKeyTimestamps = requestTimestamps[apiKey];
+    
+    const oneDayAgo = now - 86400000;
     const oneMinuteAgo = now - 60000;
     const oneSecondAgo = now - 1000;
-    const recentTimestamps = timestamps.filter(ts => ts > oneDayAgo);
-    const requestsLastDay = recentTimestamps.length;
-    const requestsLastMinute = recentTimestamps.filter(ts => ts > oneMinuteAgo).length;
-    const requestsLastSecond = recentTimestamps.filter(ts => ts > oneSecondAgo).length;
 
-    // Use RPM as the primary limit for Gemini-style API
-    if (requestsLastMinute >= tierLimits.rpm) {
-         const retryAfterSeconds = Math.ceil(Math.max(0, (recentTimestamps[recentTimestamps.length - tierLimits.rpm] + 60000 - now) / 1000));
-         // Gemini doesn't typically use Retry-After header, just returns 429
-        return response.status(429).json({ error: { code: 429, message: `Rate limit exceeded. Please try again later. You are limited to ${tierLimits.rpm} requests per minute.`, status: 'RESOURCE_EXHAUSTED' }}); 
+    // Keep only relevant timestamps to avoid memory leak
+    const relevantTimestamps = currentApiKeyTimestamps.filter(ts => ts > oneDayAgo);
+    requestTimestamps[apiKey] = relevantTimestamps;
+
+    const requestsLastDay = relevantTimestamps.length;
+    const requestsLastMinute = relevantTimestamps.filter(ts => ts > oneMinuteAgo).length;
+    const requestsLastSecond = relevantTimestamps.filter(ts => ts > oneSecondAgo).length;
+
+    const errorStatus = 'RESOURCE_EXHAUSTED'; // Common status for Gemini rate limits
+
+    if (tierLimits.rps > 0 && requestsLastSecond >= tierLimits.rps) {
+         const errDetail = { message: `Rate limit exceeded: Max ${tierLimits.rps} RPS. Please try again later.`, code: 429, status: errorStatus };
+         logErrorToFile(errDetail, request);
+         response.setHeader('Retry-After', '1'); 
+         return response.status(429).json({ error: errDetail, timestamp });
+    }
+    if (tierLimits.rpm > 0 && requestsLastMinute >= tierLimits.rpm) {
+        const errDetail = { message: `Rate limit exceeded: Max ${tierLimits.rpm} RPM. Please try again later.`, code: 429, status: errorStatus };
+        logErrorToFile(errDetail, request);
+        const retryAfterSeconds = Math.max(1, Math.ceil(Math.max(0, (relevantTimestamps.find(ts => ts > oneMinuteAgo) || now) + 60000 - now) / 1000));
+        response.setHeader('Retry-After', String(retryAfterSeconds));
+        return response.status(429).json({ error: errDetail, timestamp });
+    }
+    if (tierLimits.rpd > 0 && requestsLastDay >= tierLimits.rpd) {
+        const errDetail = { message: `Rate limit exceeded: Max ${tierLimits.rpd} RPD. Please try again later.`, code: 429, status: errorStatus };
+        logErrorToFile(errDetail, request);
+        const retryAfterSeconds = Math.max(1, Math.ceil(Math.max(0,(relevantTimestamps[0] || now) + 86400000 - now) / 1000));
+        response.setHeader('Retry-After', String(retryAfterSeconds)); 
+        return response.status(429).json({ error: errDetail, timestamp });
     }
     
-    // Optional: Add RPD check if needed, though less common for Gemini direct errors
-    // if (requestsLastDay >= tierLimits.rpd) { ... }
-
-    recentTimestamps.push(now);
-    requestTimestamps[apiKey] = recentTimestamps; 
+    requestTimestamps[apiKey].push(now);
     next(); 
 }
  
@@ -96,64 +132,54 @@ function rateLimitMiddleware(request: Request, response: Response, next: () => v
  
 // Gemini Generate Content Route
 router.post('/v2/models/:modelId:generateContent', authAndUsageMiddleware, rateLimitMiddleware, async (request: Request, response: Response) => {
-    // Check if middleware failed (e.g., didn't attach required data)
+   const routeTimestamp = new Date().toISOString(); // Timestamp for this specific route handler context
    if (!request.apiKey || !request.tierLimits || !request.params.modelId) {
-        // This case might be handled by middleware sending responses, but as a safeguard:
-        return response.status(400).json({ error: { code: 400, message: 'Bad Request: Missing API key, tier limits, or model ID after middleware processing.', status: 'INVALID_ARGUMENT' }}); 
+        const errDetail = { message: 'Bad Request: Missing API key, tier limits, or model ID after middleware.', code: 400, status: 'INVALID_ARGUMENT' };
+        logErrorToFile(errDetail, request);
+        return response.status(400).json({ error: errDetail, timestamp: routeTimestamp }); 
    }
 
    const userApiKey = request.apiKey!;
    const modelId = request.params.modelId;
+   let body: any; // For use in error handling if body parsing fails or modelId isn't found from body
 
    try {
-        const body = await request.json();
+        body = await request.json(); 
         
-        // --- Basic Input Validation ---
         if (!body || !Array.isArray(body.contents) || body.contents.length === 0) {
-            // Use double quotes for the outer string
-            return response.status(400).json({ error: { code: 400, message: "Invalid request body: Missing or invalid 'contents' array.", status: 'INVALID_ARGUMENT' }});
+            const errDetail = { message: "Invalid request body: Missing or invalid 'contents' array.", code: 400, status: 'INVALID_ARGUMENT' };
+            logErrorToFile(errDetail, request);
+            return response.status(400).json({ error: errDetail, timestamp: new Date().toISOString() });
         }
 
-        // --- Map Gemini format to internal IMessage format ---
-        // Assuming simple text input for now, taking the last user message
         let lastUserContent = '';
         const lastContent = body.contents[body.contents.length - 1];
         if (lastContent && lastContent.role === 'user' && Array.isArray(lastContent.parts) && lastContent.parts.length > 0) {
-            // Find the first text part
             const textPart = lastContent.parts.find((part: any) => part.text);
-            if (textPart) {
+            if (textPart && typeof textPart.text === 'string') {
                 lastUserContent = textPart.text;
             }
         }
-
         if (!lastUserContent) {
-             // Use double quotes for the outer string
-             return response.status(400).json({ error: { code: 400, message: "Invalid request body: Could not extract valid user content from the last entry in 'contents'.", status: 'INVALID_ARGUMENT' }});
+             const errDetail = { message: "Invalid request body: Could not extract valid user content from 'contents'.", code: 400, status: 'INVALID_ARGUMENT' };
+             logErrorToFile(errDetail, request);
+             return response.status(400).json({ error: errDetail, timestamp: new Date().toISOString() });
         }
 
         const formattedMessages: IMessage[] = [{ content: lastUserContent, model: { id: modelId } }];
- 
-        // --- Call the central message handler ---
         const result = await messageHandler.handleMessages(formattedMessages, modelId, userApiKey);
  
         const totalTokensUsed = typeof result.tokenUsage === 'number' ? result.tokenUsage : 0;
         if (totalTokensUsed > 0) {
             await updateUserTokenUsage(totalTokensUsed, userApiKey); 
-        } else {
-            console.warn(`Gemini Route - Token usage not reported/zero for key ${userApiKey.substring(0, 6)}...`);
         }
         
-        // --- Format response like Gemini ---
         const geminiResponse = {
             candidates: [
                 {
-                    content: {
-                        parts: [{ text: result.response }],
-                        role: "model"
-                    },
-                    finishReason: "STOP", // Default - we don't get this detail back
+                    content: { parts: [{ text: result.response }], role: "model" },
+                    finishReason: "STOP", 
                     index: 0,
-                    // Basic safety ratings - replace with actual if available
                     safetyRatings: [
                         { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", probability: "NEGLIGIBLE" },
                         { category: "HARM_CATEGORY_HATE_SPEECH", probability: "NEGLIGIBLE" },
@@ -162,38 +188,39 @@ router.post('/v2/models/:modelId:generateContent', authAndUsageMiddleware, rateL
                     ]
                 }
             ],
-            // Basic usage metadata - refine if more detailed token counts become available
-             usageMetadata: {
-               // promptTokenCount: ???, // We don't have separate counts yet
-               // candidatesTokenCount: ???, // We don't have separate counts yet
-               totalTokenCount: totalTokensUsed 
-             }
+             usageMetadata: { totalTokenCount: totalTokensUsed }
         };
- 
         response.json(geminiResponse);
  
    } catch (error: any) { 
+        logErrorToFile(error, request);
         console.error('Gemini Route - generateContent error:', error.message, error.stack);
-        
-        // Map internal errors to potential Gemini error formats
-        if (error instanceof SyntaxError) return response.status(400).json({ error: { code: 400, message: 'Invalid JSON payload.', status: 'INVALID_ARGUMENT' }});
-        
-        if (error.message.includes('Unauthorized') || error.message.includes('API key not valid')) {
-             return response.status(401).json({ error: { code: 401, message: error.message , status: 'UNAUTHENTICATED' }});
+        const responseTimestamp = new Date().toISOString();
+        let statusCode = 500;
+        let statusText = 'INTERNAL'; // Default for Gemini-style error object
+        let clientMessage = 'Internal server error.';
+        let reference = 'An unexpected error occurred processing the Gemini request.'; // For generic 500
+
+        if (error instanceof SyntaxError) {
+            statusCode = 400; statusText = 'INVALID_ARGUMENT'; clientMessage = 'Invalid JSON payload.';
+        } else if (error.message.includes('Unauthorized') || error.message.includes('API key not valid')) {
+            statusCode = 401; statusText = 'UNAUTHENTICATED'; clientMessage = error.message;
+        } else if (error.message.includes('limit reached')) {
+            statusCode = 429; statusText = 'RESOURCE_EXHAUSTED'; clientMessage = error.message;
+        } else if (error.message.includes('No currently active provider supports model') || error.message.includes('No provider (active or disabled) supports model')) {
+            statusCode = 404; statusText = 'NOT_FOUND'; clientMessage = `Model ${modelId} not found or is not supported.`;
+        } else if (error.message.includes('Failed to process request')) {
+            statusCode = 503; statusText = 'UNAVAILABLE'; clientMessage = 'The service is currently unavailable. Please try again later.';
+        } else if (error.message.includes("Invalid request body: Could not extract valid user content")) {
+            statusCode = 400; statusText = 'INVALID_ARGUMENT'; clientMessage = error.message;
         }
-        if (error.message.includes('limit reached')) {
-             return response.status(429).json({ error: { code: 429, message: error.message, status: 'RESOURCE_EXHAUSTED' }});
+        // Add more specific error message mappings if needed
+
+        if (statusCode === 500) {
+             response.status(statusCode).json({ error: 'Internal Server Error', reference, timestamp: responseTimestamp });
+        } else {
+             response.status(statusCode).json({ error: { code: statusCode, message: clientMessage, status: statusText }, timestamp: responseTimestamp });
         }
-         if (error.message.includes('No currently active provider supports model') || error.message.includes('No provider (active or disabled) supports model')) {
-             // Model not found or unavailable via this proxy
-             return response.status(404).json({ error: { code: 404, message: `Model ${modelId} not found or is not supported.`, status: 'NOT_FOUND' }});
-        }
-         if (error.message.includes('Failed to process request')) {
-              // Generic failure after retries
-             return response.status(503).json({ error: { code: 503, message: 'The service is currently unavailable. Please try again later.', status: 'UNAVAILABLE' }});
-         }
-        // Default internal error
-        response.status(500).json({ error: { code: 500, message: 'Internal server error.', status: 'INTERNAL' }});
    }
 });
 
