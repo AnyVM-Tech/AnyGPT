@@ -55,55 +55,44 @@ interface ProviderConfig { class: new (...args: any[]) => IAIProvider; args?: an
 let providerConfigs: { [providerId: string]: ProviderConfig } = {};
 let initialModelThroughputMap: Map<string, number> = new Map(); 
 let messageHandler: MessageHandler; 
+let handlerDataInitialized = false; // Flag to track initialization
 
 // --- Initialization using DataManager ---
 export async function initializeHandlerData() {
-    console.log("Initializing handler data...");
-    // Load models data using DataManager
+    if (handlerDataInitialized) {
+        console.log("Handler data already initialized. Skipping.");
+        return;
+    }
+    console.log("Initializing handler data (first run)...");
     const modelsFileData = await dataManager.load<ModelsFileStructure>('models');
     const modelData = modelsFileData.data; 
 
     initialModelThroughputMap = new Map<string, number>();
-    // Use the imported ModelDefinition type here
     modelData.forEach((model: ModelDefinition) => { 
-        // Ensure throughput type compatibility (handle potential null from dataManager's ModelDefinition)
         const throughputValue = model.throughput;
         const throughput = (throughputValue != null && !isNaN(Number(throughputValue))) ? Number(throughputValue) : NaN;
         if (model.id && !isNaN(throughput)) initialModelThroughputMap.set(model.id, throughput);
     });
-    console.log(`Initialized throughput map with ${initialModelThroughputMap.size} entries.`);
 
-    // Load initial providers using DataManager for config setup
     const initialProviders = await dataManager.load<LoadedProviders>('providers');
     console.log("Initializing provider class configurations...");
     providerConfigs = {}; 
-    // FIX: Add type annotation for p
     initialProviders.forEach((p: LoadedProviderData) => { 
-        const key = p.apiKey; // Use only apiKey from providers.json
+        const key = p.apiKey;
         const url = p.provider_url || '';
-        // Updated warning to reflect that key should be in providers.json
         if (!key) console.warn(`API key missing for provider config: ${p.id}. This provider may not function correctly if an API key is required and not defined in providers.json.`);
-        
-        // The rest of the logic for instantiating providerConfigs remains the same,
-        // but now 'key' will be undefined if not in providers.json, 
-        // and the provider class constructor should handle that if a key is essential.
         if (p.id.includes('openai')) providerConfigs[p.id] = { class: OpenAI, args: [key, url] };
         else if (p.id.includes('gemini') || p.id === 'google') providerConfigs[p.id] = { class: GeminiAI, args: [key, 'gemini-pro'] }; 
         else providerConfigs[p.id] = { class: OpenAI, args: [key, url] }; 
     });
-    console.log("Provider class configurations initialized.");
+    console.log("Core handler components initialized.");
 
     messageHandler = new MessageHandler(initialModelThroughputMap);
-    console.log("MessageHandler initialized and ready.");
 
-    // Refresh provider counts in models.json after all initial data is loaded
     await refreshProviderCountsInModelsFile();
+    handlerDataInitialized = true; // Set flag after successful initialization
+    console.log("Handler data initialization complete.");
 }
-
-initializeHandlerData().catch(error => {
-    console.error("CRITICAL: Failed to initialize application data.", error);
-    process.exit(1); 
-});
 
 // --- Message Handler Class ---
 export class MessageHandler {
@@ -171,7 +160,6 @@ export class MessageHandler {
     async handleMessages(messages: IMessage[], modelId: string, apiKey: string): Promise<any> {
          if (!messages?.length || !modelId || !apiKey) throw new Error("Invalid arguments");
          if (!messageHandler) throw new Error("Service temporarily unavailable.");
-         console.log(`Handling message for model: ${modelId}, Key: ${apiKey.substring(0, 6)}...`);
 
          const validationResult = await validateApiKeyAndUsage(apiKey); 
          if (!validationResult.valid || !validationResult.userData || !validationResult.tierLimits) {
@@ -254,13 +242,11 @@ export class MessageHandler {
             // This case should technically be covered by earlier checks, but adding safety net
             throw new Error(`Could not determine any candidate providers for model ${modelId}.`);
          }
-         console.log(`Attempting request for model ${modelId}. Candidate providers (ordered): ${candidateProviders.map(p => `${p.id} (Score: ${p.provider_score?.toFixed(2)})`).join(', ')}`);
 
          // --- Attempt Loop ---
          let lastError: any = null;
          for (const selectedProvider of candidateProviders) {
              const providerId = selectedProvider.id;
-             console.log(`Attempting provider: ${providerId} (Score: ${selectedProvider.provider_score?.toFixed(2)}) for model ${modelId}`);
 
              const providerConfig = providerConfigs[providerId]; 
              if (!providerConfig) {
@@ -317,18 +303,15 @@ export class MessageHandler {
 
              // --- Handle Attempt Outcome ---
              if (!sendMessageError && result && responseEntry) {
-                console.log(`Successfully processed request for model ${modelId} with provider: ${providerId}`);
-                // TODO: Add updateUserTokenUsage call if needed
-                // await updateUserTokenUsage(apiKey, responseEntry.tokens_generated); // Uncomment if needed
-                 return { 
+                return { 
                     response: result.response, 
                     latency: result.latency, 
                     tokenUsage: responseEntry.tokens_generated,
-                    providerId: providerId // Optionally return which provider succeeded
+                    providerId: providerId 
                 };
              } else {
-                 // Attempt failed, store the error and loop to try next provider
                  lastError = sendMessageError || new Error(`Provider ${providerId} for model ${modelId} finished in invalid state or stats update failed after success.`);
+                 // Reinstate this important operational warning
                  console.warn(`Provider ${providerId} failed for model ${modelId}. Error: ${lastError.message}. Trying next provider if available...`);
              }
          } // End of loop through candidateProviders

@@ -10,7 +10,7 @@ import {
 } from '../modules/userData';
 // Import TierData type for Request extension
 import { TierData } from '../modules/userData'; 
-import { logErrorToFile } from '../modules/errorLogger';
+import { logError } from '../modules/errorLogger';
  
 dotenv.config();
  
@@ -36,6 +36,10 @@ async function authAndUsageMiddleware(request: Request, response: Response, next
   const authHeader = request.headers['authorization'] || request.headers['Authorization'];
   let apiKey = '';
 
+  console.log(`[AuthMiddleware] Request received at ${request.path} with method ${request.method}`);
+  console.log(`[AuthMiddleware] Authorization header: ${request.headers['authorization'] || 'None'}`);
+  console.log(`[AuthMiddleware] x-api-key header: ${request.headers['x-api-key'] || 'None'}`);
+
   // Try Authorization header first (OpenAI style)
   if (authHeader && authHeader.startsWith('Bearer ')) {
      apiKey = authHeader.slice(7);
@@ -45,18 +49,32 @@ async function authAndUsageMiddleware(request: Request, response: Response, next
      if (typeof apiKeyHeader === 'string' && apiKeyHeader) {
          apiKey = apiKeyHeader;
      } else {
-         logErrorToFile({ message: 'Unauthorized: Missing API key' }, request);
-         return response.status(401).json({ error: 'Unauthorized: Missing or invalid API key header.', timestamp: new Date().toISOString() }); 
+         await logError({ message: 'Unauthorized: Missing API key' }, request);
+         // Check response before sending
+         if (!response.completed) {
+           return response.status(401).json({ error: 'Unauthorized: Missing or invalid API key header.', timestamp: new Date().toISOString() }); 
+         } else {
+            console.warn('[AuthMiddleware] Response already completed, could not send 401 error.');
+            return; // Need to return something, even if undefined
+         }
      }
   }
   
+  console.log(`[AuthMiddleware] Extracted API key: ${apiKey || 'None provided'}`);
+
   try {
-      const validationResult = await validateApiKeyAndUsage(apiKey); 
+      const validationResult = await validateApiKeyAndUsage(apiKey);
       if (!validationResult.valid || !validationResult.userData || !validationResult.tierLimits) {
           const statusCode = validationResult.error?.includes('limit reached') ? 429 : 401;
           const errorMessage = `Unauthorized: ${validationResult.error || 'Invalid key/config.'}`;
-          logErrorToFile({ message: errorMessage, statusCode: statusCode, apiKey: apiKey }, request);
-          return response.status(statusCode).json({ error: errorMessage, timestamp: new Date().toISOString() }); 
+          await logError({ message: errorMessage, statusCode: statusCode, apiKey: apiKey }, request);
+          // Check response before sending
+          if (!response.completed) {
+             return response.status(statusCode).json({ error: errorMessage, timestamp: new Date().toISOString() }); 
+          } else {
+             console.warn('[AuthMiddleware] Response already completed, could not send auth error response.');
+             return;
+          }
       }
 
       // Attach data
@@ -75,10 +93,15 @@ async function authAndUsageMiddleware(request: Request, response: Response, next
        // next(); // REMOVED next() call - let flow continue naturally after await
 
   } catch (error: any) {
-       logErrorToFile(error, request);
+       await logError(error, request);
        console.error("Error during auth/usage check:", error);
-       // Generic client message for 500
-       return response.status(500).json({ error: "Internal Server Error", reference: "Error during authentication processing.", timestamp: new Date().toISOString() }); 
+       // Check response before sending
+       if (!response.completed) {
+          return response.status(500).json({ error: "Internal Server Error", reference: "Error during authentication processing.", timestamp: new Date().toISOString() }); 
+       } else {
+           console.warn('[AuthMiddleware] Response already completed, could not send 500 error.');
+           return;
+       }
   }
 }
 
@@ -86,10 +109,12 @@ async function authAndUsageMiddleware(request: Request, response: Response, next
 function rateLimitMiddleware(request: Request, response: Response, next: () => void) {
     if (!request.apiKey || !request.tierLimits) { 
         const errMsg = 'Internal Error: API Key or Tier Limits missing after auth (rateLimitMiddleware).';
-        logErrorToFile({ message: errMsg, requestPath: request.path }, request); // Log full error
+        // Logging here can be sync if logError itself handles async operations internally
+        logError({ message: errMsg, requestPath: request.path }, request).catch(e => console.error("Failed background log:",e)); // Log but don't wait
         console.error(errMsg);
-        // Generic client message for 500
-        return response.status(500).json({ error: 'Internal Server Error', reference: 'Configuration error for rate limiting.', timestamp: new Date().toISOString() });
+        if (!response.completed) {
+           return response.status(500).json({ error: 'Internal Server Error', reference: 'Configuration error for rate limiting.', timestamp: new Date().toISOString() });
+        } else { return; }
     }
     const apiKey = request.apiKey;
     const tierLimits = request.tierLimits; 
@@ -106,20 +131,26 @@ function rateLimitMiddleware(request: Request, response: Response, next: () => v
 
     if (requestsLastSecond >= tierLimits.rps) {
          response.setHeader('Retry-After', '1'); 
-         logErrorToFile({ message: `Rate limit exceeded: Max ${tierLimits.rps} RPS.`, apiKey }, request);
-         return response.status(429).json({ error: `Rate limit exceeded: Max ${tierLimits.rps} RPS.`, timestamp: new Date().toISOString() });
+         logError({ message: `Rate limit exceeded: Max ${tierLimits.rps} RPS.`, apiKey }, request).catch(e => console.error("Failed background log:",e)); // Log but don't wait
+         if (!response.completed) {
+            return response.status(429).json({ error: `Rate limit exceeded: Max ${tierLimits.rps} RPS.`, timestamp: new Date().toISOString() });
+         } else { return; }
     }
      if (requestsLastMinute >= tierLimits.rpm) {
          const retryAfterSeconds = Math.ceil(Math.max(0, (recentTimestamps[recentTimestamps.length - tierLimits.rpm] + 60000 - now) / 1000));
          response.setHeader('Retry-After', String(retryAfterSeconds)); 
-        logErrorToFile({ message: `Rate limit exceeded: Max ${tierLimits.rpm} RPM.`, apiKey }, request);
-        return response.status(429).json({ error: `Rate limit exceeded: Max ${tierLimits.rpm} RPM.`, timestamp: new Date().toISOString() });
+        logError({ message: `Rate limit exceeded: Max ${tierLimits.rpm} RPM.`, apiKey }, request).catch(e => console.error("Failed background log:",e)); // Log but don't wait
+        if (!response.completed) {
+           return response.status(429).json({ error: `Rate limit exceeded: Max ${tierLimits.rpm} RPM.`, timestamp: new Date().toISOString() });
+        } else { return; }
     }
     if (requestsLastDay >= tierLimits.rpd) {
          const retryAfterSeconds = Math.ceil(Math.max(0,(recentTimestamps[0] + 86400000 - now) / 1000));
         response.setHeader('Retry-After', String(retryAfterSeconds)); 
-        logErrorToFile({ message: `Rate limit exceeded: Max ${tierLimits.rpd} RPD.`, apiKey }, request);
-        return response.status(429).json({ error: `Rate limit exceeded: Max ${tierLimits.rpd} RPD.`, timestamp: new Date().toISOString() });
+        logError({ message: `Rate limit exceeded: Max ${tierLimits.rpd} RPD.`, apiKey }, request).catch(e => console.error("Failed background log:",e)); // Log but don't wait
+        if (!response.completed) {
+           return response.status(429).json({ error: `Rate limit exceeded: Max ${tierLimits.rpd} RPD.`, timestamp: new Date().toISOString() });
+        } else { return; }
     }
     recentTimestamps.push(now);
     requestTimestamps[apiKey] = recentTimestamps; 
@@ -132,47 +163,69 @@ function rateLimitMiddleware(request: Request, response: Response, next: () => v
 openaiRouter.post('/generate_key', authAndUsageMiddleware, async (request: Request, response: Response) => {
   // Check if middleware failed (e.g., if it didn't attach data)
   if (!request.apiKey || request.userRole === undefined) {
-       logErrorToFile({ message: 'Authentication failed in /generate_key route after middleware' }, request);
-       return response.status(401).json({ error: 'Authentication failed', timestamp: new Date().toISOString() }); 
+       await logError({ message: 'Authentication failed in /generate_key route after middleware' }, request);
+       if (!response.completed) {
+         return response.status(401).json({ error: 'Authentication failed', timestamp: new Date().toISOString() }); 
+       } else { return; }
   }
   try {
     if (request.userRole !== 'admin') {
-        logErrorToFile({ message: 'Forbidden: Non-admin attempt to generate key', userId: request.userId }, request);
-        return response.status(403).json({ error: 'Forbidden', timestamp: new Date().toISOString() });
+        await logError({ message: 'Forbidden: Non-admin attempt to generate key', userId: request.userId }, request);
+        if (!response.completed) {
+          return response.status(403).json({ error: 'Forbidden', timestamp: new Date().toISOString() });
+        } else { return; }
     }
     const { userId } = await request.json(); 
     if (!userId || typeof userId !== 'string') {
-        logErrorToFile({ message: 'Bad Request: userId required for key generation' }, request);
-        return response.status(400).json({ error: 'Bad Request: userId required', timestamp: new Date().toISOString() });
+        await logError({ message: 'Bad Request: userId required for key generation' }, request);
+        if (!response.completed) {
+           return response.status(400).json({ error: 'Bad Request: userId required', timestamp: new Date().toISOString() });
+        } else { return; }
     }
     
     // --- Use await ---
     const newUserApiKey = await generateUserApiKey(userId); 
     response.json({ apiKey: newUserApiKey });
   } catch (error: any) {
-    logErrorToFile(error, request);
+    await logError(error, request);
     console.error('Generate key error:', error);
     const timestamp = new Date().toISOString();
-    if (error.message.includes('already has')) return response.status(409).json({ error: error.message, timestamp }); 
-    if (error instanceof SyntaxError) return response.status(400).json({ error: 'Invalid JSON', timestamp });
-    response.status(500).json({ error: 'Internal Server Error', reference: 'Failed to generate key.', timestamp });
+    let status = 500;
+    let msg = 'Internal Server Error';
+    let ref: string | undefined = 'Failed to generate key.';
+    if (error.message.includes('already has')) { status = 409; msg = error.message; ref = undefined; }
+    if (error instanceof SyntaxError) { status = 400; msg = 'Invalid JSON'; ref = undefined; }
+    if (!response.completed) {
+      const responseBody: { error: string; reference?: string; timestamp: string } = {
+          error: msg,
+          timestamp
+      };
+      if (ref) {
+          responseBody.reference = ref;
+      }
+      response.status(status).json(responseBody);
+    } else {
+        // Cannot send response, middleware already handled it or response completed.
+        // No explicit return needed here if void is acceptable.
+    }
   }
 });
  
  
 // Apply Middlewares - order matters
-// Run auth/usage check first. Since it's async and doesn't call next(), 
-// rateLimitMiddleware needs to be applied *specifically* to the route AFTER auth.
-openaiRouter.use('/v1', authAndUsageMiddleware); 
-// This pattern might be needed if async middleware doesn't implicitly pass control:
-openaiRouter.use('/v1/chat/completions', rateLimitMiddleware); 
+// Fix: Remove '/v1' prefix since the router is already mounted at '/v1' in server.ts
+openaiRouter.use('/', authAndUsageMiddleware); 
+// Fix: Remove '/v1' prefix from the path
+openaiRouter.use('/chat/completions', rateLimitMiddleware); 
  
 // Chat Completions Route - Handler is already async
-openaiRouter.post('/v1/chat/completions', async (request: Request, response: Response) => {
+openaiRouter.post('/chat/completions', async (request: Request, response: Response) => {
    // Check if middleware failed
    if (!request.apiKey || !request.tierLimits) {
-        logErrorToFile({ message: 'Authentication or configuration failed in /v1/chat/completions after middleware' }, request);
-        return response.status(401).json({ error: 'Authentication or configuration failed', timestamp: new Date().toISOString() }); 
+        await logError({ message: 'Authentication or configuration failed in /v1/chat/completions after middleware' }, request);
+        if (!response.completed) {
+           return response.status(401).json({ error: 'Authentication or configuration failed', timestamp: new Date().toISOString() }); 
+        } else { return; }
    }
   try {
     const userApiKey = request.apiKey!; 
@@ -223,7 +276,7 @@ openaiRouter.post('/v1/chat/completions', async (request: Request, response: Res
     response.json(openaiResponse);
  
   } catch (error: any) { 
-    logErrorToFile(error, request);
+    await logError(error, request);
     console.error('Chat completions error:', error.message, error.stack);
     const timestamp = new Date().toISOString();
     let statusCode = 500;
@@ -247,27 +300,33 @@ openaiRouter.post('/v1/chat/completions', async (request: Request, response: Res
         clientMessage = error.message;
     }
     
-    if (statusCode === 500) {
-        response.status(statusCode).json({ error: clientMessage, reference: clientReference, timestamp });
-    } else {
-        response.status(statusCode).json({ error: clientMessage, timestamp });
-    }
+    if (!response.completed) {
+       if (statusCode === 500) {
+           response.status(statusCode).json({ error: clientMessage, reference: clientReference, timestamp });
+       } else {
+           response.status(statusCode).json({ error: clientMessage, timestamp });
+       }
+    } else { return; }
   }
 });
 
 // --- Azure OpenAI Compatible Route ---
-openaiRouter.post('/openai/deployments/:deploymentId/chat/completions', authAndUsageMiddleware, rateLimitMiddleware, async (request: Request, response: Response) => {
+openaiRouter.post('/deployments/:deploymentId/chat/completions', authAndUsageMiddleware, rateLimitMiddleware, async (request: Request, response: Response) => {
     // Middleware should have attached these if successful
     if (!request.apiKey || !request.tierLimits || !request.params.deploymentId) {
-        logErrorToFile({ message: 'Authentication or configuration failed (Azure route) after middleware' }, request);
-        return response.status(401).json({ error: 'Authentication or configuration failed (Azure route).', timestamp: new Date().toISOString() }); 
+        await logError({ message: 'Authentication or configuration failed (Azure route) after middleware' }, request);
+        if (!response.completed) {
+           return response.status(401).json({ error: 'Authentication or configuration failed (Azure route).', timestamp: new Date().toISOString() }); 
+        } else { return; }
     }
 
     // Check for api-version query parameter (required by Azure)
     const apiVersion = request.query['api-version'];
     if (!apiVersion || typeof apiVersion !== 'string') {
-         logErrorToFile({ message: 'Bad Request: Missing or invalid api-version query parameter (Azure route)' }, request);
-         return response.status(400).json({ error: 'Bad Request: Missing or invalid \'api-version\' query parameter.', timestamp: new Date().toISOString() });
+         await logError({ message: 'Bad Request: Missing or invalid api-version query parameter (Azure route)' }, request);
+         if (!response.completed) {
+           return response.status(400).json({ error: 'Bad Request: Missing or invalid \'api-version\' query parameter.', timestamp: new Date().toISOString() });
+         } else { return; }
     }
 
     const userApiKey = request.apiKey!;
@@ -320,7 +379,7 @@ openaiRouter.post('/openai/deployments/:deploymentId/chat/completions', authAndU
         response.json(openaiResponse);
 
     } catch (error: any) {
-        logErrorToFile(error, request);
+        await logError(error, request);
         console.error('Azure Chat completions error:', error.message, error.stack);
         const timestamp = new Date().toISOString();
         let statusCode = 500;
@@ -347,11 +406,13 @@ openaiRouter.post('/openai/deployments/:deploymentId/chat/completions', authAndU
             clientMessage = 'Service temporarily unavailable after multiple provider attempts.';
         }
         
-        if (statusCode === 500) {
-            response.status(statusCode).json({ error: clientMessage, reference: clientReference, timestamp });
-        } else {
-            response.status(statusCode).json({ error: clientMessage, timestamp });
-        }
+        if (!response.completed) {
+            if (statusCode === 500) {
+                response.status(statusCode).json({ error: clientMessage, reference: clientReference, timestamp });
+            } else {
+                response.status(statusCode).json({ error: clientMessage, timestamp });
+            }
+        } else { return; }
     }
 });
  

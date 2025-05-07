@@ -28,7 +28,7 @@ export interface UserData {
   tier: keyof TiersFile; // Use keyof TiersFile for better type safety
 }
 // Define KeysFile structure locally or import if shared
-interface KeysFile { [apiKey: string]: UserData; }
+export interface KeysFile { [apiKey: string]: UserData; }
 
 // --- Functions using DataManager --- 
 
@@ -80,20 +80,33 @@ export async function generateAdminApiKey(userId: string): Promise<string> { // 
 
 // Becomes async due to dataManager.load
 export async function validateApiKeyAndUsage(apiKey: string): Promise<{ valid: boolean; userData?: UserData; tierLimits?: TierData, error?: string }> {
+  console.log(`[validateApiKeyAndUsage] Validating API key: ${apiKey}`);
   const currentKeys = await dataManager.load<KeysFile>('keys'); 
+  console.log(`[validateApiKeyAndUsage] Loaded keys: ${JSON.stringify(currentKeys)}`);
   const userData = currentKeys[apiKey];
-  
-  if (!userData) return { valid: false, error: 'API key not found.' }; 
+  console.log(`[validateApiKeyAndUsage] User data for API key: ${JSON.stringify(userData)}`);
+
+  if (!userData) {
+      console.error(`[validateApiKeyAndUsage] API key not found: ${apiKey}`);
+      return { valid: false, error: 'API key not found.' };
+  }
 
   const tierLimits = tiers[userData.tier]; // tiers is static import
+  console.log(`[validateApiKeyAndUsage] Tier limits for user: ${JSON.stringify(tierLimits)}`);
+
   if (!tierLimits) {
       const errorMsg = `Invalid tier ('${userData.tier}') for key ${apiKey.substring(0,6)}...`;
-      return { valid: false, error: errorMsg, userData }; 
+      console.error(`[validateApiKeyAndUsage] ${errorMsg}`);
+      return { valid: false, error: errorMsg, userData };
   }
+
   if (tierLimits.max_tokens !== null && userData.tokenUsage >= tierLimits.max_tokens) {
       const errorMsg = `Token limit (${tierLimits.max_tokens}) reached for key ${apiKey.substring(0,6)}...`;
-      return { valid: false, error: errorMsg, userData, tierLimits }; 
+      console.error(`[validateApiKeyAndUsage] ${errorMsg}`);
+      return { valid: false, error: errorMsg, userData, tierLimits };
   }
+
+  console.log(`[validateApiKeyAndUsage] Validation successful for API key: ${apiKey}`);
   return { valid: true, userData, tierLimits }; 
 }
 

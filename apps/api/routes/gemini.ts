@@ -8,7 +8,7 @@ import {
     validateApiKeyAndUsage, // Now async
     TierData // Import TierData type
 } from '../modules/userData';
-import { logErrorToFile } from '../modules/errorLogger'; // Import the logger
+import { logError } from '../modules/errorLogger'; // Changed import
 
 dotenv.config();
 
@@ -32,18 +32,22 @@ async function authAndUsageMiddleware(request: Request, response: Response, next
 
   if (!apiKey) {
      const errDetail = { message: "API key missing. Please pass an API key in 'x-goog-api-key' header.", code: 401, status: 'UNAUTHENTICATED' };
-     logErrorToFile(errDetail, request);
-     return response.status(401).json({ error: { code: 401, message: errDetail.message, status: 'UNAUTHENTICATED' }, timestamp }); 
+     await logError(errDetail, request); // Renamed and added await
+     if (!response.completed) {
+        return response.status(401).json({ error: { code: 401, message: errDetail.message, status: 'UNAUTHENTICATED' }, timestamp }); 
+     } else { return; }
   }
   
   try {
-      const validationResult = await validateApiKeyAndUsage(apiKey); 
+      const validationResult = await validateApiKeyAndUsage(apiKey);
       if (!validationResult.valid || !validationResult.userData || !validationResult.tierLimits) {
           const statusCode = validationResult.error?.includes('limit reached') ? 429 : 401; 
           const statusText = statusCode === 429 ? 'RESOURCE_EXHAUSTED' : 'UNAUTHENTICATED';
           const logMsg = `API key not valid. ${validationResult.error || 'Please pass a valid API key.'}`;
-          logErrorToFile({ message: logMsg, details: validationResult.error, apiKey, code: statusCode, status: statusText }, request);
-          return response.status(statusCode).json({ error: { code: statusCode, message: logMsg, status: statusText }, timestamp }); 
+          await logError({ message: logMsg, details: validationResult.error, apiKey, code: statusCode, status: statusText }, request); // Renamed and added await
+          if (!response.completed) {
+            return response.status(statusCode).json({ error: { code: statusCode, message: logMsg, status: statusText }, timestamp }); 
+          } else { return; }
       }
 
       // Attach data
@@ -58,13 +62,15 @@ async function authAndUsageMiddleware(request: Request, response: Response, next
       next();
 
   } catch (error: any) {
-       logErrorToFile(error, request);
+       await logError(error, request); // Renamed and added await
        console.error("Gemini Route - Error during auth/usage check:", error);
-       return response.status(500).json({ 
-           error: 'Internal Server Error', 
-           reference: 'Error during authentication processing.',
-           timestamp 
-       }); 
+       if (!response.completed) {
+         return response.status(500).json({ 
+             error: 'Internal Server Error', 
+             reference: 'Error during authentication processing.',
+             timestamp 
+         }); 
+       } else { return; }
   }
 }
 
@@ -74,13 +80,15 @@ function rateLimitMiddleware(request: Request, response: Response, next: () => v
     const timestamp = new Date().toISOString(); // For error responses
     if (!request.apiKey || !request.tierLimits) { 
         const errMsg = 'Internal Error: API Key or Tier Limits missing after auth (Gemini rateLimitMiddleware).';
-        logErrorToFile({ message: errMsg, requestPath: request.path }, request);
+        logError({ message: errMsg, requestPath: request.path }, request).catch(e => console.error("Failed background log:",e)); // Log but don't wait
         console.error(errMsg);
-        return response.status(500).json({ 
-            error: 'Internal Server Error', 
-            reference: 'Configuration error for rate limiting.', 
-            timestamp 
-        });
+        if (!response.completed) {
+           return response.status(500).json({ 
+              error: 'Internal Server Error', 
+              reference: 'Configuration error for rate limiting.', 
+              timestamp 
+           });
+        } else { return; }
     }
 
     const apiKey = request.apiKey;
@@ -105,23 +113,29 @@ function rateLimitMiddleware(request: Request, response: Response, next: () => v
 
     if (tierLimits.rps > 0 && requestsLastSecond >= tierLimits.rps) {
          const errDetail = { message: `Rate limit exceeded: Max ${tierLimits.rps} RPS. Please try again later.`, code: 429, status: errorStatus };
-         logErrorToFile(errDetail, request);
+         logError(errDetail, request).catch(e => console.error("Failed background log:",e)); // Log but don't wait
          response.setHeader('Retry-After', '1'); 
-         return response.status(429).json({ error: errDetail, timestamp });
+         if (!response.completed) {
+           return response.status(429).json({ error: errDetail, timestamp });
+         } else { return; }
     }
     if (tierLimits.rpm > 0 && requestsLastMinute >= tierLimits.rpm) {
         const errDetail = { message: `Rate limit exceeded: Max ${tierLimits.rpm} RPM. Please try again later.`, code: 429, status: errorStatus };
-        logErrorToFile(errDetail, request);
+        logError(errDetail, request).catch(e => console.error("Failed background log:",e)); // Log but don't wait
         const retryAfterSeconds = Math.max(1, Math.ceil(Math.max(0, (relevantTimestamps.find(ts => ts > oneMinuteAgo) || now) + 60000 - now) / 1000));
         response.setHeader('Retry-After', String(retryAfterSeconds));
-        return response.status(429).json({ error: errDetail, timestamp });
+        if (!response.completed) {
+          return response.status(429).json({ error: errDetail, timestamp });
+        } else { return; }
     }
     if (tierLimits.rpd > 0 && requestsLastDay >= tierLimits.rpd) {
         const errDetail = { message: `Rate limit exceeded: Max ${tierLimits.rpd} RPD. Please try again later.`, code: 429, status: errorStatus };
-        logErrorToFile(errDetail, request);
+        logError(errDetail, request).catch(e => console.error("Failed background log:",e)); // Log but don't wait
         const retryAfterSeconds = Math.max(1, Math.ceil(Math.max(0,(relevantTimestamps[0] || now) + 86400000 - now) / 1000));
         response.setHeader('Retry-After', String(retryAfterSeconds)); 
-        return response.status(429).json({ error: errDetail, timestamp });
+        if (!response.completed) {
+          return response.status(429).json({ error: errDetail, timestamp });
+        } else { return; }
     }
     
     requestTimestamps[apiKey].push(now);
@@ -131,12 +145,14 @@ function rateLimitMiddleware(request: Request, response: Response, next: () => v
 // --- Routes ---
  
 // Gemini Generate Content Route
-router.post('/v2/models/:modelId:generateContent', authAndUsageMiddleware, rateLimitMiddleware, async (request: Request, response: Response) => {
+router.post('/v2/models/:modelId/generateContent', authAndUsageMiddleware, rateLimitMiddleware, async (request: Request, response: Response) => {
    const routeTimestamp = new Date().toISOString(); // Timestamp for this specific route handler context
    if (!request.apiKey || !request.tierLimits || !request.params.modelId) {
         const errDetail = { message: 'Bad Request: Missing API key, tier limits, or model ID after middleware.', code: 400, status: 'INVALID_ARGUMENT' };
-        logErrorToFile(errDetail, request);
-        return response.status(400).json({ error: errDetail, timestamp: routeTimestamp }); 
+        await logError(errDetail, request); // Renamed and added await
+        if (!response.completed) {
+          return response.status(400).json({ error: errDetail, timestamp: routeTimestamp }); 
+        } else { return; }
    }
 
    const userApiKey = request.apiKey!;
@@ -148,8 +164,10 @@ router.post('/v2/models/:modelId:generateContent', authAndUsageMiddleware, rateL
         
         if (!body || !Array.isArray(body.contents) || body.contents.length === 0) {
             const errDetail = { message: "Invalid request body: Missing or invalid 'contents' array.", code: 400, status: 'INVALID_ARGUMENT' };
-            logErrorToFile(errDetail, request);
-            return response.status(400).json({ error: errDetail, timestamp: new Date().toISOString() });
+            await logError(errDetail, request); // Renamed and added await
+            if (!response.completed) {
+               return response.status(400).json({ error: errDetail, timestamp: new Date().toISOString() });
+            } else { return; }
         }
 
         let lastUserContent = '';
@@ -162,8 +180,10 @@ router.post('/v2/models/:modelId:generateContent', authAndUsageMiddleware, rateL
         }
         if (!lastUserContent) {
              const errDetail = { message: "Invalid request body: Could not extract valid user content from 'contents'.", code: 400, status: 'INVALID_ARGUMENT' };
-             logErrorToFile(errDetail, request);
-             return response.status(400).json({ error: errDetail, timestamp: new Date().toISOString() });
+             await logError(errDetail, request); // Renamed and added await
+             if (!response.completed) {
+                return response.status(400).json({ error: errDetail, timestamp: new Date().toISOString() });
+             } else { return; }
         }
 
         const formattedMessages: IMessage[] = [{ content: lastUserContent, model: { id: modelId } }];
@@ -193,7 +213,7 @@ router.post('/v2/models/:modelId:generateContent', authAndUsageMiddleware, rateL
         response.json(geminiResponse);
  
    } catch (error: any) { 
-        logErrorToFile(error, request);
+        await logError(error, request); // Renamed and added await
         console.error('Gemini Route - generateContent error:', error.message, error.stack);
         const responseTimestamp = new Date().toISOString();
         let statusCode = 500;
@@ -216,12 +236,15 @@ router.post('/v2/models/:modelId:generateContent', authAndUsageMiddleware, rateL
         }
         // Add more specific error message mappings if needed
 
-        if (statusCode === 500) {
-             response.status(statusCode).json({ error: 'Internal Server Error', reference, timestamp: responseTimestamp });
-        } else {
-             response.status(statusCode).json({ error: { code: statusCode, message: clientMessage, status: statusText }, timestamp: responseTimestamp });
-        }
+        if (!response.completed) {
+          if (statusCode === 500) {
+               response.status(statusCode).json({ error: 'Internal Server Error', reference, timestamp: responseTimestamp });
+          } else {
+               response.status(statusCode).json({ error: { code: statusCode, message: clientMessage, status: statusText }, timestamp: responseTimestamp });
+          }
+        } else { return; }
    }
 });
 
-export default router; // Export the router 
+const geminiRouter = router;
+export default geminiRouter;

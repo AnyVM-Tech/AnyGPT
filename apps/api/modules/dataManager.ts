@@ -80,6 +80,13 @@ const defaultEmptyData: Record<DataType, any> = {
     models: { object: 'list', data: [] },
 };
 
+// Set to track if filesystem fallback has been logged for a dataType
+const filesystemFallbackLogged = new Set<DataType>();
+
+// Get data source preference
+const dataSourcePreference: 'redis' | 'filesystem' = process.env.DATA_SOURCE_PREFERENCE === 'redis' ? 'redis' : 'filesystem';
+console.log(`[DataManager] Data source preference set to: ${dataSourcePreference}`);
+
 // --- DataManager Class ---
 class DataManager {
     private redisClient: Redis | null;
@@ -113,31 +120,105 @@ class DataManager {
         const filePath = filePaths[dataType];
         const defaultValue = defaultEmptyData[dataType] as T;
         
-        if (this.isRedisReady()) {
+        const loadFromRedis = async (): Promise<T | null> => {
+            if (!this.isRedisReady()) {
+                if (!filesystemFallbackLogged.has(dataType)) {
+                    console.log(`DataManager: Redis not ready, cannot load ${dataType} from Redis.`);
+                    // No need to add to set here, loadFromFilesystem will log fallback
+                }
+                return null;
+            }
             try {
                 const redisData = await this.redisClient!.get(redisKey);
                 if (redisData) {
-                    const parsedData = JSON.parse(redisData);
-                    console.log(`Data loaded from Redis for key: ${redisKey}`);
-                    return parsedData as T; 
+                    console.log(`[DataManager] Data loaded successfully from Redis for: ${dataType}`);
+                    return JSON.parse(redisData) as T; 
                 }
-            } catch (err) { console.error(`Error reading/parsing from Redis key ${redisKey}. Falling back:`, err); }
-        } else { console.log(`Redis not ready, loading ${dataType} from filesystem.`); }
-
-        try {
-            if (fs.existsSync(filePath)) {
-                const fileData = fs.readFileSync(filePath, 'utf8');
-                const parsedData = JSON.parse(fileData);
-                console.log(`Data loaded from filesystem: ${filePath}`);
-                return parsedData as T;
-            } else {
-                 console.warn(`File not found: ${filePath}. Returning/creating default data for ${dataType}.`);
-                 if (dataType === 'keys' || dataType === 'providers') {
-                     await this.save(dataType, defaultValue); 
-                 }
-                return defaultValue;
+                 console.log(`[DataManager] No data found in Redis for: ${dataType}`);
+                return null; // Explicitly return null if key doesn't exist in Redis
+            } catch (err) {
+                 console.error(`[DataManager] Error loading/parsing from Redis key ${redisKey}. Error:`, err);
+                 return null;
             }
-        } catch (err) { console.error(`Error reading/parsing file ${filePath}. Returning default:`, err); return defaultValue; }
+        };
+
+        const loadFromFilesystem = async (): Promise<T | null> => {
+            if (!filesystemFallbackLogged.has(dataType)) {
+                // Log fallback only when actually attempting filesystem load *after* Redis potentially wasn't ready/failed
+                if (!this.isRedisReady() || dataSourcePreference === 'filesystem') { 
+                     console.log(`DataManager: Loading ${dataType} from filesystem.`);
+                     filesystemFallbackLogged.add(dataType);
+                }
+            }
+             try {
+                 if (fs.existsSync(filePath)) {
+                     const fileData = fs.readFileSync(filePath, 'utf8');
+                     console.log(`[DataManager] Data loaded successfully from Filesystem for: ${dataType}`);
+                     return JSON.parse(fileData) as T;
+                 } else {
+                     console.warn(`[DataManager] File not found: ${filePath}. Cannot load ${dataType} from filesystem.`);
+                     return null;
+                 }
+             } catch (err) {
+                 console.error(`[DataManager] Error loading/parsing file ${filePath}. Error:`, err);
+                 return null;
+            }
+        };
+
+        let loadedData: T | null = null;
+        let loadedFromFallback = false; // Flag to indicate if data was loaded from a fallback source
+
+        // Attempt to load based on preference
+        if (dataSourcePreference === 'redis') {
+            loadedData = await loadFromRedis();
+            if (loadedData === null) { // If Redis failed or was empty, try filesystem
+                console.log(`[DataManager] Redis preferred, but failed/empty for ${dataType}. Trying filesystem.`);
+                loadedData = await loadFromFilesystem();
+                if (loadedData !== null) {
+                    loadedFromFallback = true; // Mark that data was loaded from fallback
+                }
+            }
+        } else { // Filesystem preference
+            loadedData = await loadFromFilesystem();
+            if (loadedData === null) { // If filesystem failed or was empty, try Redis
+                console.log(`[DataManager] Filesystem preferred, but failed/empty for ${dataType}. Trying Redis.`);
+                loadedData = await loadFromRedis();
+                if (loadedData !== null) {
+                    loadedFromFallback = true; // Mark that data was loaded from fallback
+                }
+            }
+        }
+
+        // If data loaded successfully from either source
+        if (loadedData !== null) {
+            // If data was loaded from a fallback, save it back to ensure sync with the preferred source
+            if (loadedFromFallback) {
+                console.log(`[DataManager] Data for ${dataType} loaded from fallback. Attempting to save back to synchronize sources.`);
+                try {
+                    // Intentionally not awaiting this promise to avoid blocking the load operation,
+                    // but logging success/failure.
+                    // The save operation itself handles logging.
+                    this.save(dataType, loadedData).catch(saveErr => {
+                         console.error(`[DataManager] Asynchronous save after fallback for ${dataType} failed:`, saveErr);
+                    });
+                } catch (saveErr) {
+                    // This catch block might be redundant if `this.save` doesn't throw synchronously
+                    // when the promise is not awaited, but kept for safety.
+                    console.error(`[DataManager] Error initiating save for ${dataType} back after fallback load:`, saveErr);
+                }
+            }
+            return loadedData;
+        }
+
+        // If data is null after trying both sources, handle default case
+        console.warn(`[DataManager] Data for ${dataType} not found in ${dataSourcePreference} or fallback source. Using/creating default.`);
+        // Save the default value to both places to initialize
+        try {
+             await this.save(dataType, defaultValue); // save handles writing to both
+        } catch (saveErr) {
+            console.error(`[DataManager] CRITICAL: Failed to save default value for ${dataType} during initial load. Error:`, saveErr);
+        }
+        return defaultValue;
     }
 
     async save<T extends ManagedDataStructure>(dataType: DataType, data: T): Promise<void> {
@@ -148,31 +229,66 @@ class DataManager {
         try {
              if (data === null || typeof data !== 'object') throw new Error(`Invalid data type for ${dataType}: ${typeof data}`);
             stringifiedData = JSON.stringify(data, null, 2);
-        } catch (err) { console.error(`Error stringifying data for ${dataType}. Aborting:`, err); return; }
+        } catch (err) { 
+            console.error(`[DataManager] Error stringifying data for ${dataType}. Aborting save. Error:`, err);
+            // Optionally log to error logger
+            // await logError({ message: `Data serialization failed for ${dataType}`, error: err }); 
+            return; 
+        }
 
         let redisSuccess = false;
+        let fsSuccess = false;
+
+        // Attempt Redis Save
         if (this.isRedisReady()) {
             try {
                 await this.redisClient!.set(redisKey, stringifiedData);
-                redisSuccess = true; console.log(`Data saved to Redis: ${redisKey}`);
-            } catch (err) { console.error(`Error writing to Redis key ${redisKey}. FS save still attempted:`, err); }
-        } else { console.log(`Redis not ready. Saving ${dataType} to filesystem.`); }
+                redisSuccess = true; 
+                console.log(`[DataManager] Data saved successfully to Redis for: ${dataType}`);
+            } catch (err) {
+                 console.error(`[DataManager] Error saving to Redis key ${redisKey}. Error:`, err);
+                 if (dataSourcePreference === 'redis') {
+                     console.error(`[DataManager] CRITICAL: Failed to save to preferred source (Redis) for ${dataType}.`);
+                 }
+            }
+        } else {
+             if (!filesystemFallbackLogged.has(dataType)) {
+                 console.log(`DataManager: Redis not ready. Cannot save ${dataType} to Redis.`);
+                 // No need to add to set here, filesystem log will handle it if that's the preference
+            }
+             if (dataSourcePreference === 'redis') {
+                 console.error(`[DataManager] CRITICAL: Cannot save to preferred source (Redis) for ${dataType} - Client not ready.`);
+             }
+        }
 
+        // Attempt Filesystem Save
         try {
             await fs.promises.writeFile(filePath, stringifiedData, 'utf8');
-            console.log(`Data saved to filesystem: ${filePath}`);
-
-            // If providers data was saved, trigger an update to models.json provider counts
-            if (dataType === 'providers') {
-                console.log('Provider data changed, scheduling refresh of model provider counts.');
-                // Schedule as a microtask to avoid blocking and potential circular dependency issues
-                Promise.resolve().then(refreshProviderCountsInModelsFile).catch(err => {
-                    console.error('Error during scheduled refreshProviderCountsInModelsFile:', err);
-                });
-            }
+            fsSuccess = true;
+            console.log(`[DataManager] Data saved successfully to Filesystem for: ${dataType}`);
         } catch (err) {
-            console.error(`CRITICAL: Error writing file ${filePath}:`, err);
-            if (!redisSuccess) console.error(`!!! Data loss possible: Failed save for ${dataType} to Redis & FS.`);
+            console.error(`[DataManager] Error saving to file ${filePath}. Error:`, err);
+            if (dataSourcePreference === 'filesystem') {
+                 console.error(`[DataManager] CRITICAL: Failed to save to preferred source (Filesystem) for ${dataType}.`);
+            }
+        }
+
+        // Final status log
+        if (!redisSuccess && !fsSuccess) {
+            console.error(`[DataManager] !!! Data Save FAILED for ${dataType} on BOTH Redis and Filesystem !!!`);
+        } else if (!redisSuccess && dataSourcePreference === 'redis') {
+            console.warn(`[DataManager] WARNING: Saved ${dataType} to Filesystem, but FAILED to save to preferred source (Redis).`);
+        } else if (!fsSuccess && dataSourcePreference === 'filesystem') {
+             console.warn(`[DataManager] WARNING: Saved ${dataType} to Redis, but FAILED to save to preferred source (Filesystem).`);
+        }
+
+        // Trigger model count refresh if providers data changed, regardless of save success details
+        // (as long as the intent was to save new provider data)
+        if (dataType === 'providers') {
+            console.log('[DataManager] Provider data save attempted, scheduling refresh of model provider counts.');
+            Promise.resolve().then(refreshProviderCountsInModelsFile).catch(err => {
+                console.error('Error during scheduled refreshProviderCountsInModelsFile:', err);
+            });
         }
     }
 }

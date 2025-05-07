@@ -181,4 +181,5 @@ router.post('/v5/api/chat', authAndUsageMiddleware, rateLimitMiddleware, async (
    }
 });
 
-export default router; // Export the router 
+const ollamaRouter = router;
+export default ollamaRouter;

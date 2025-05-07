@@ -1,13 +1,24 @@
 import fs from 'fs';
 import path from 'path';
 import HyperExpress from 'hyper-express'; // For Request type, if used
+import redis from '../modules/db'; // Import redis client
 
 const logDirectory = path.resolve(process.cwd(), 'logs'); // Logs at the workspace root
 const errorLogFilePath = path.join(logDirectory, 'api-error.jsonl'); // Changed to .jsonl
 
+// Configuration from environment variables
+const logToRedis = process.env.ERROR_LOG_TO_REDIS === 'true';
+const redisLogKey = process.env.REDIS_ERROR_LOG_KEY || 'api:error_logs';
+const redisMaxLogEntries = parseInt(process.env.REDIS_ERROR_LOG_MAX_ENTRIES || '1000', 10);
+
 console.log(`[ErrorLogger] Current working directory: ${process.cwd()}`);
 console.log(`[ErrorLogger] Log directory target: ${logDirectory}`);
 console.log(`[ErrorLogger] Error log file path: ${errorLogFilePath}`);
+console.log(`[ErrorLogger] Log to Redis enabled: ${logToRedis}`);
+if (logToRedis) {
+    console.log(`[ErrorLogger] Redis log key: ${redisLogKey}`);
+    console.log(`[ErrorLogger] Redis max log entries: ${redisMaxLogEntries}`);
+}
 
 // Ensure log directory exists
 if (!fs.existsSync(logDirectory)) {
@@ -32,9 +43,10 @@ interface ErrorLogEntry {
     errorDetails?: any;
 }
 
-export function logErrorToFile(error: any, request?: HyperExpress.Request): void {
+// Renamed function to reflect potential Redis logging
+export async function logError(error: any, request?: HyperExpress.Request): Promise<void> {
     const timestamp = new Date().toISOString();
-    console.log(`[ErrorLogger] logErrorToFile called at ${timestamp}`);
+    console.log(`[ErrorLogger] logError called at ${timestamp}`);
 
     const logEntry: ErrorLogEntry = {
         timestamp,
@@ -86,16 +98,34 @@ export function logErrorToFile(error: any, request?: HyperExpress.Request): void
         }
     }
 
-    const logLine = JSON.stringify(logEntry) + '\n'; // Each JSON object on a new line
+    const logLine = JSON.stringify(logEntry);
 
-    console.log(`[ErrorLogger] Attempting to append to log file: ${errorLogFilePath}`);
-    console.log(`[ErrorLogger] Log line content: ${logLine.trim()}`);
-
-    fs.appendFile(errorLogFilePath, logLine, (err) => {
-        if (err) {
-            console.error(`[ErrorLogger] Failed to write to JSON error log: ${errorLogFilePath}. Error: ${err.message}`, err);
-        } else {
-            console.log(`[ErrorLogger] Successfully wrote to JSON error log: ${errorLogFilePath}`);
+    let loggedToRedis = false;
+    if (logToRedis && redis && redis.status === 'ready') {
+        try {
+            console.log(`[ErrorLogger] Attempting to log to Redis key: ${redisLogKey}`);
+            await redis.lpush(redisLogKey, logLine);
+            await redis.ltrim(redisLogKey, 0, redisMaxLogEntries - 1);
+            loggedToRedis = true;
+            console.log(`[ErrorLogger] Successfully logged to Redis key: ${redisLogKey}`);
+        } catch (redisErr: any) {
+            console.error(`[ErrorLogger] Failed to log error to Redis key ${redisLogKey}. Error: ${redisErr.message}. Falling back to file.`, redisErr);
         }
-    });
+    }
+
+    // Fallback to file if Redis logging is disabled, not ready, or failed
+    if (!loggedToRedis) {
+        console.log(`[ErrorLogger] Attempting to append to log file: ${errorLogFilePath}`);
+        console.log(`[ErrorLogger] Log line content: ${logLine.trim()}`);
+        try {
+            await fs.promises.appendFile(errorLogFilePath, logLine + '\n', 'utf8');
+            console.log(`[ErrorLogger] Successfully wrote to JSON error log: ${errorLogFilePath}`);
+        } catch (fileErr: any) {
+             console.error(`[ErrorLogger] CRITICAL: Failed to write to JSON error log file: ${errorLogFilePath}. Error: ${fileErr.message}`, fileErr);
+             // If both Redis and file logging fail, we might have lost the log
+             if (logToRedis) {
+                 console.error('[ErrorLogger] Logging failed for both Redis and Filesystem.');
+             }
+        }
+    }
 } 

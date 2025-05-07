@@ -9,7 +9,7 @@ import {
     TierData, // Import TierData type
     extractMessageFromRequest // Import helper
 } from '../modules/userData';
-import { logErrorToFile } from '../modules/errorLogger'; // Import the logger
+import { logError } from '../modules/errorLogger'; // Changed import
 
 dotenv.config();
 
@@ -31,20 +31,24 @@ async function authAndUsageMiddleware(request: Request, response: Response, next
 
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
      const errDetail = { message: 'Incorrect API key provided. You can find your API key at https://console.groq.com/keys.', type: 'invalid_request_error', param: null, code: 'invalid_api_key' };
-     logErrorToFile({ message: errDetail.message, type: errDetail.type, code: errDetail.code }, request);
-     return response.status(401).json({ error: errDetail, timestamp });
+     await logError({ message: errDetail.message, type: errDetail.type, code: errDetail.code }, request); // Renamed and added await
+     if (!response.completed) {
+        return response.status(401).json({ error: errDetail, timestamp });
+     } else { return; }
   }
   const apiKey = authHeader.slice(7);
   
   try {
-      const validationResult = await validateApiKeyAndUsage(apiKey); 
+      const validationResult = await validateApiKeyAndUsage(apiKey);
       if (!validationResult.valid || !validationResult.userData || !validationResult.tierLimits) {
           const statusCode = validationResult.error?.includes('limit reached') ? 429 : 401; 
-          const errorType = 'invalid_request_error'; // Groq uses this for both
+          const errorType = 'invalid_request_error'; 
           const code = statusCode === 429 ? 'rate_limit_exceeded' : 'invalid_api_key';
           const clientMessage = `${validationResult.error || 'Invalid API Key'}`;
-          logErrorToFile({ message: clientMessage, details: validationResult.error, type: errorType, code, apiKey }, request);
-          return response.status(statusCode).json({ error: { message: clientMessage, type: errorType, param: null, code: code }, timestamp }); 
+          await logError({ message: clientMessage, details: validationResult.error, type: errorType, code, apiKey }, request); // Renamed and added await
+          if (!response.completed) {
+            return response.status(statusCode).json({ error: { message: clientMessage, type: errorType, param: null, code: code }, timestamp }); 
+          } else { return; }
       }
 
       // Attach data
@@ -59,13 +63,15 @@ async function authAndUsageMiddleware(request: Request, response: Response, next
       next();
 
   } catch (error: any) {
-       logErrorToFile(error, request);
+       await logError(error, request); // Renamed and added await
        console.error("Groq Route - Error during auth/usage check:", error);
-       return response.status(500).json({ 
-           error: 'Internal Server Error', 
-           reference: 'Error during authentication processing.',
-           timestamp 
-       }); 
+       if (!response.completed) {
+         return response.status(500).json({ 
+             error: 'Internal Server Error', 
+             reference: 'Error during authentication processing.',
+             timestamp 
+         }); 
+       } else { return; }
   }
 }
 
@@ -74,13 +80,15 @@ function rateLimitMiddleware(request: Request, response: Response, next: () => v
     const timestamp = new Date().toISOString(); // For error responses
     if (!request.apiKey || !request.tierLimits) { 
         const errMsg = 'Internal Error: API Key or Tier Limits missing after auth (Groq rateLimitMiddleware).';
-        logErrorToFile({ message: errMsg, requestPath: request.path }, request);
+        logError({ message: errMsg, requestPath: request.path }, request).catch(e => console.error("Failed background log:",e)); // Log but don't wait
         console.error(errMsg);
-        return response.status(500).json({ 
-            error: 'Internal Server Error', 
-            reference: 'Configuration error for rate limiting.', 
-            timestamp 
-        });
+        if (!response.completed) {
+          return response.status(500).json({ 
+             error: 'Internal Server Error', 
+             reference: 'Configuration error for rate limiting.', 
+             timestamp 
+          });
+        } else { return; }
     }
     const apiKey = request.apiKey;
     const tierLimits = request.tierLimits; 
@@ -101,27 +109,33 @@ function rateLimitMiddleware(request: Request, response: Response, next: () => v
 
     if (tierLimits.rps > 0 && requestsLastSecond >= tierLimits.rps) {
          const errDetail = { message: `Rate limit exceeded for model. Limit: ${tierLimits.rps} RPS.`, type: errorType, code: errorCode, param: null };
-         logErrorToFile(errDetail, request);
+         logError(errDetail, request).catch(e => console.error("Failed background log:",e)); // Log but don't wait
          response.setHeader('Retry-After', '1'); 
-         return response.status(429).json({ error: errDetail, timestamp });
+         if (!response.completed) {
+           return response.status(429).json({ error: errDetail, timestamp });
+         } else { return; }
     }
     
     const requestsLastMinute = relevantTimestamps.filter(ts => ts > oneMinuteAgo).length;
      if (tierLimits.rpm > 0 && requestsLastMinute >= tierLimits.rpm) {
          const errDetail = { message: `Rate limit exceeded for model. Limit: ${tierLimits.rpm} RPM.`, type: errorType, code: errorCode, param: null };
-         logErrorToFile(errDetail, request);
+         logError(errDetail, request).catch(e => console.error("Failed background log:",e)); // Log but don't wait
          const retryAfterSeconds = Math.max(1, Math.ceil(Math.max(0, (relevantTimestamps.find(ts => ts > oneMinuteAgo) || now) + 60000 - now) / 1000));
          response.setHeader('Retry-After', String(retryAfterSeconds)); 
-        return response.status(429).json({ error: errDetail, timestamp });
+         if (!response.completed) {
+            return response.status(429).json({ error: errDetail, timestamp });
+         } else { return; }
     }
 
     const requestsLastDay = relevantTimestamps.length;
     if (tierLimits.rpd > 0 && requestsLastDay >= tierLimits.rpd) {
          const errDetail = { message: `Rate limit exceeded for model. Limit: ${tierLimits.rpd} RPD.`, type: errorType, code: errorCode, param: null };
-         logErrorToFile(errDetail, request);
+         logError(errDetail, request).catch(e => console.error("Failed background log:",e)); // Log but don't wait
          const retryAfterSeconds = Math.max(1, Math.ceil(Math.max(0,(relevantTimestamps[0] || now) + 86400000 - now) / 1000));
         response.setHeader('Retry-After', String(retryAfterSeconds)); 
-        return response.status(429).json({ error: errDetail, timestamp });
+        if (!response.completed) {
+            return response.status(429).json({ error: errDetail, timestamp });
+        } else { return; }
     }
     
     requestTimestamps[apiKey].push(now);
@@ -135,8 +149,10 @@ router.post('/v4/chat/completions', authAndUsageMiddleware, rateLimitMiddleware,
    const routeTimestamp = new Date().toISOString();
    if (!request.apiKey || !request.tierLimits) {
         const errDetail = { message: 'Internal Server Error: Auth data missing after middleware.', type: 'api_error', code: 'internal_server_error' };
-        logErrorToFile(errDetail, request);
-        return response.status(500).json({ error: 'Internal Server Error', reference: errDetail.message, timestamp: routeTimestamp }); 
+        await logError(errDetail, request); // Renamed and added await
+        if (!response.completed) {
+           return response.status(500).json({ error: 'Internal Server Error', reference: errDetail.message, timestamp: routeTimestamp }); 
+        } else { return; }
    }
 
    const userApiKey = request.apiKey!;
@@ -149,8 +165,10 @@ router.post('/v4/chat/completions', authAndUsageMiddleware, rateLimitMiddleware,
         
         if (!model) {
              const errDetail = { message: 'Missing \'model\' field in request body.', type: 'invalid_request_error', code: 'missing_field' };
-             logErrorToFile(errDetail, request);
-             return response.status(400).json({ error: errDetail, timestamp: new Date().toISOString() });
+             await logError(errDetail, request); // Renamed and added await
+             if (!response.completed) {
+                return response.status(400).json({ error: errDetail, timestamp: new Date().toISOString() });
+             } else { return; }
         }
         modelId = model;
         
@@ -192,7 +210,7 @@ router.post('/v4/chat/completions', authAndUsageMiddleware, rateLimitMiddleware,
         response.json(groqResponse);
  
    } catch (error: any) { 
-        logErrorToFile(error, request); // Log full error
+        await logError(error, request); // Renamed and added await
         console.error('Groq Route - Chat Completions Error:', error.message, error.stack);
         const responseTimestamp = new Date().toISOString();
         let statusCode = 500;
@@ -218,7 +236,9 @@ router.post('/v4/chat/completions', authAndUsageMiddleware, rateLimitMiddleware,
         } else {
             response.status(statusCode).json({ error: { message: clientMessage, type: errorType, param: null, code: errorCode }, timestamp: responseTimestamp });
         }
+        if (!response.completed) { return; }
    }
 });
 
-export default router; // Export the router 
+const groqRouter = router;
+export default groqRouter;
