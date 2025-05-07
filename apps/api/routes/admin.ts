@@ -1,7 +1,7 @@
 import HyperExpress, { Request, Response } from 'hyper-express';
 import { addOrUpdateProvider } from '../server/addProvider'; // Path to the refactored function
 import { generateUserApiKey } from '../modules/userData'; // For generating API keys
-import { logErrorToFile } from '../modules/errorLogger';
+import { logError } from '../modules/errorLogger';
 
 const adminRouter = new HyperExpress.Router();
 
@@ -10,14 +10,15 @@ const adminRouter = new HyperExpress.Router();
 // and populated request.userRole and request.apiKey.
 // You might need to ensure such a middleware is applied to the /api/admin base path in server.ts
 const adminOnlyMiddleware = (request: Request, response: Response, next: () => void) => {
-    // Ensure userRole is populated by a preceding authentication middleware
     if (request.userRole !== 'admin') {
-        logErrorToFile({ message: 'Forbidden: Admin access required.', attemptedPath: request.url, userRole: request.userRole, apiKey: request.apiKey }, request);
-        return response.status(403).json({
-            error: 'Forbidden',
-            message: 'Admin access required.',
-            timestamp: new Date().toISOString()
-        });
+        logError({ message: 'Forbidden: Admin access required.', attemptedPath: request.url, userRole: request.userRole, apiKey: request.apiKey }, request).catch(e => console.error("Failed background log:",e));
+        if (!response.completed) {
+            return response.status(403).json({
+                error: 'Forbidden',
+                message: 'Admin access required.',
+                timestamp: new Date().toISOString()
+            });
+        } else { return; }
     }
     next();
 };
@@ -31,12 +32,14 @@ adminRouter.post('/providers', async (request: Request, response: Response) => {
         const payload = await request.json();
         // Basic validation, more can be added
         if (!payload.providerId || !payload.providerBaseUrl) {
-            logErrorToFile({ message: 'Bad Request: Missing providerId or providerBaseUrl for add/update provider'}, request);
-            return response.status(400).json({
-                error: 'Bad Request',
-                message: 'providerId and providerBaseUrl are required.',
-                timestamp: new Date().toISOString()
-            });
+            await logError({ message: 'Bad Request: Missing providerId or providerBaseUrl for add/update provider'}, request);
+            if (!response.completed) {
+                return response.status(400).json({
+                    error: 'Bad Request',
+                    message: 'providerId and providerBaseUrl are required.',
+                    timestamp: new Date().toISOString()
+                });
+            } else { return; }
         }
         const result = await addOrUpdateProvider(payload);
 
@@ -56,13 +59,15 @@ adminRouter.post('/providers', async (request: Request, response: Response) => {
             timestamp: new Date().toISOString() 
         });
     } catch (error: any) {
-        logErrorToFile(error, request);
+        await logError(error, request);
         console.error('Admin add provider error:', error);
-        response.status(500).json({
-            error: 'Internal Server Error',
-            reference: error.message || 'Failed to add or update provider.',
-            timestamp: new Date().toISOString()
-        });
+        if (!response.completed) {
+            response.status(500).json({
+                error: 'Internal Server Error',
+                reference: error.message || 'Failed to add or update provider.',
+                timestamp: new Date().toISOString()
+            });
+        } else { return; }
     }
 });
 
@@ -71,12 +76,14 @@ adminRouter.post('/users/generate-key', async (request: Request, response: Respo
     try {
         const { userId, tier, role } = await request.json(); // Assuming tier and role might also be provided
         if (!userId || typeof userId !== 'string') {
-            logErrorToFile({ message: 'Bad Request: userId is required for generating API key' }, request);
-            return response.status(400).json({
-                error: 'Bad Request',
-                message: 'userId (string) is required.',
-                timestamp: new Date().toISOString()
-            });
+            await logError({ message: 'Bad Request: userId is required for generating API key' }, request);
+            if (!response.completed) {
+                return response.status(400).json({
+                    error: 'Bad Request',
+                    message: 'userId (string) is required.',
+                    timestamp: new Date().toISOString()
+                });
+            } else { return; }
         }
         // Call the existing async function from userData module
         // Adjust parameters for generateUserApiKey if it needs more than just userId (e.g., tier, role for new users)
@@ -88,16 +95,18 @@ adminRouter.post('/users/generate-key', async (request: Request, response: Respo
             timestamp: new Date().toISOString() 
         });
     } catch (error: any) {
-        logErrorToFile(error, request);
+        await logError(error, request);
         console.error('Admin generate key error:', error);
         const referenceMessage = error.message.includes('already has an API key') ? error.message : 'Failed to generate API key.';
         const statusCode = error.message.includes('already has an API key') ? 409 : 500;
 
-        response.status(statusCode).json({
-            error: statusCode === 409 ? 'Conflict' : 'Internal Server Error',
-            reference: referenceMessage,
-            timestamp: new Date().toISOString()
-        });
+        if (!response.completed) {
+            response.status(statusCode).json({
+                error: statusCode === 409 ? 'Conflict' : 'Internal Server Error',
+                reference: referenceMessage,
+                timestamp: new Date().toISOString()
+            });
+        } else { return; }
     }
 });
 

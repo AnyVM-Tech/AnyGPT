@@ -201,4 +201,5 @@ router.post('/v6/chat/completions', authAndUsageMiddleware, rateLimitMiddleware,
    }
 });
 
-export default router; // Export the router 
+const openrouterRouter = router;
+export default openrouterRouter;

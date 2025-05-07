@@ -87,7 +87,6 @@ apps/api/
     ```
 4.  **Create a `.env` file** by copying `.env.example` (if it exists, otherwise create one) and populate it with your API keys and other configurations. Key environment variables include:
     *   `PORT`: Port for the API server (default: 3000).
-    *   `PROVIDER_API_KEY_OPENAI_DEFAULT`: API key for your OpenAI account (example, follow pattern for other providers like `PROVIDER_API_KEY_ANTHROPIC_DEFAULT`, etc., if the provider's primary key is set in `providers.json` this is a fallback or override).
     *   `ENABLE_OPENAI_ROUTES`: Set to `true` or `false` to enable/disable OpenAI routes (default: `true`).
     *   `ENABLE_ANTHROPIC_ROUTES`: Set to `true` or `false` (default: `true`).
     *   `ENABLE_GEMINI_ROUTES`: Set to `true` or `false` (default: `true`).

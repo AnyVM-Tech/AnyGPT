@@ -13,7 +13,7 @@ async function testApiGemini() {
   const modelId = 'gpt-3.5-turbo'; // Use the ID that your router maps to the correct provider/model
   const testPrompt = 'Write a short haiku about APIs.';
   // Use an API key that is valid for your proxy/router API
-  const apiKey = 'ad9970421fe07447bf011f78a88d72af2e7465df65d27844feeb2df9aa5f6772'; // Ensure this key is registered in your API's keys.json or equivalent
+  const apiKey = 'f94b06121fcae0383f1284f4609a9783b2a60f1277b6670ec6edde62739edb35'; // Ensure this key is registered in your API's keys.json or equivalent
 
   console.log(`Testing API endpoint: ${apiUrl}`);
   console.log(`Using model: ${modelId}`); // Updated log
