@@ -45,11 +45,20 @@ async function testApiGemini() {
     console.log('[TEST] -----------------------'); // Added prefix for clarity
 
     // *** Updated success check ***
-    // Check for the actual response structure received based on logs
-    if (response.status === 200 && response.data && typeof response.data.response === 'string' && typeof response.data.latency === 'number' && typeof response.data.tokenUsage === 'number') {
+    // Check for OpenAI-compatible response structure
+    if (response.status === 200 && 
+        response.data && 
+        response.data.choices && 
+        Array.isArray(response.data.choices) && 
+        response.data.choices.length > 0 &&
+        response.data.choices[0].message &&
+        typeof response.data.choices[0].message.content === 'string' &&
+        response.data.usage &&
+        typeof response.data.usage.total_tokens === 'number') {
       console.log('[TEST] API test completed successfully.');
     } else {
       console.error('[TEST] API test failed: Unexpected response structure or status code.');
+      console.error('[TEST] Expected OpenAI-compatible structure with choices[0].message.content and usage.total_tokens');
       process.exit(1);
     }
 

@@ -6,10 +6,10 @@ import path from 'path';
 
 const modelsRouter = new HyperExpress.Router();
 
-// Route to serve the main models.json (apps/api/models.json)
+// Route to serve the main models.json (models.json in current directory)
 modelsRouter.get('/v1/models', async (request, response) => {
     try {
-        const filePath = path.resolve(process.cwd(), 'apps/api/models.json'); 
+        const filePath = path.resolve('models.json'); 
         // Before sending, ensure the content is parsed if readFile returns a string
         const fileContentString = await dataManager.readFile(filePath);
         const jsonData = JSON.parse(fileContentString);
