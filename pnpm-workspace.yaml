@@ -1,10 +1,16 @@
 packages:
-    - 'packages/*'
-    - 'apps/*'
+  - packages/*
+  - apps/*
 importers:
-    .:
-        specifiers:
-            turbo: '^2.0.3'
-            typescript: '^5.4.5'
-            eslint: '^8.2.0'
-            prettier: '^3.3.2'
+  .:
+    specifiers:
+      turbo: ^2.0.3
+      typescript: ^5.4.5
+      eslint: ^8.2.0
+      prettier: ^3.3.2
+onlyBuiltDependencies:
+  - '@tsparticles/engine'
+  - bufferutil
+  - esbuild
+  - sharp
+  - utf-8-validate
