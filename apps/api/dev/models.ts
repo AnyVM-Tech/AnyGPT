@@ -126,47 +126,10 @@ async function fetchAndGroupModelData(): Promise<{ [ownedBy: string]: ModelSumma
     constructor(supportedProviders: string[]) {
       this.supportedProviders = supportedProviders;
     }
-  
-    async generateProviderModelLatencyReport(providerName: string, modelName: string) {
-      const modelsFilePath = '/root/github/anyGPT/apps/api/models.json';
-      const reportFilePath = '/root/github/anyGPT/apps/api/devmodels.json';
-      try {
-        const modelsData = await fs.promises.readFile(modelsFilePath, 'utf8');
-        const models = JSON.parse(modelsData);
-  
-       
-        const report: { provider: ProviderReport[] } = { provider: [] };
-        
-        if (models[providerName]) {
-          const filteredModels = models[providerName]
-            .filter((model: { id: string; }) => model.id.includes(modelName))
-            .map((model: { id: string; }) => ({ id: model.id }));
-        
-          
-          const providerReport: ProviderReport = {
-            name: providerName,
-            models: filteredModels
-          };
-        
-          
-          if (!report.provider) {
-            report.provider = [];
-          }
-        
-          
-          report.provider.push(providerReport);
-        }
-  
-        await promisify(fs.writeFile)(reportFilePath, JSON.stringify(report, null, 2), 'utf8');
-        console.log('Provider model latency report generated successfully.');
-      } catch (error) {
-        console.error('Error generating provider model latency report:', error);
-      }
-    }
   }
   
-  (async () => {
-    const modelProvider = new ModelProvider(['google', 'gemini']); 
-    await modelProvider.generateProviderModelLatencyReport('google', 'gemini'); 
-    console.log('Report generation completed.');
-  })();
+  // Example usage (commented out since generateProviderModelLatencyReport was removed)
+  // (async () => {
+  //   const modelProvider = new ModelProvider(['google', 'gemini']); 
+  //   console.log('ModelProvider instance created.');
+  // })();

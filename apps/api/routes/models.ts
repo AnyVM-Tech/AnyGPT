@@ -1,7 +1,7 @@
 import HyperExpress from 'hyper-express';
-import { refreshProviderCountsInModelsFile } from '../modules/modelUpdater';
-import { dataManager } from '../modules/dataManager'; // For serving the main models.json
-import { logError } from '../modules/errorLogger'; // Changed import
+import { refreshProviderCountsInModelsFile } from '../modules/modelUpdater.js';
+import { dataManager } from '../modules/dataManager.js'; // For serving the main models.json
+import { logError } from '../modules/errorLogger.js'; // Changed import
 import path from 'path';
 
 const modelsRouter = new HyperExpress.Router();

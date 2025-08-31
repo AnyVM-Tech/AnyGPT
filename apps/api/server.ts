@@ -2,29 +2,29 @@ import HyperExpress, { Request, Response } from 'hyper-express';
 import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
-// import { Model, Provider, UserData, KeysFile } from './providers/interfaces'; // Keep if needed for init
-import { modelsRouter } from './routes/models';
-import { adminRouter } from './routes/admin'; // Import the admin router
+// import { Model, Provider, UserData, KeysFile } from './providers/interfaces.js'; // Keep if needed for init
+import { modelsRouter } from './routes/models.js';
+import { adminRouter } from './routes/admin.js'; // Import the admin router
 // Import other routers (assuming they export a HyperExpress.Router instance)
-// import { openRouter } from './routes/openrouter';
-// import { anthropicRouter } from './routes/anthropic';
-// import { geminiRouter } from './routes/gemini';
-// import { groqRouter } from './routes/groq';
-// import { ollamaRouter } from './routes/ollama';
-import { logError } from './modules/errorLogger'; // Import the logger
-import { initializeHandlerData } from './providers/handler';
-import { refreshProviderCountsInModelsFile } from './modules/modelUpdater';
-import { validateApiKeyAndUsage, TierData, generateUserApiKey, UserData } from './modules/userData'; // For generalAuthMiddleware
-import { dataManager, LoadedProviders, LoadedProviderData } from './modules/dataManager'; // Added LoadedProviders and LoadedProviderData
-import { redisReadyPromise } from './modules/db'; // Import the redisReadyPromise
+// import { openRouter } from './routes/openrouter.js';
+// import { anthropicRouter } from './routes/anthropic.js';
+// import { geminiRouter } from './routes/gemini.js';
+// import { groqRouter } from './routes/groq.js';
+// import { ollamaRouter } from './routes/ollama.js';
+import { logError } from './modules/errorLogger.js'; // Import the logger
+import { initializeHandlerData } from './providers/handler.js';
+import { refreshProviderCountsInModelsFile } from './modules/modelUpdater.js';
+import { validateApiKeyAndUsage, TierData, generateUserApiKey, UserData } from './modules/userData.js'; // For generalAuthMiddleware
+import { dataManager, LoadedProviders, LoadedProviderData } from './modules/dataManager.js'; // Added LoadedProviders and LoadedProviderData
+import { redisReadyPromise } from './modules/db.js'; // Import the redisReadyPromise
 
 // Import Routers
-import openaiRouter from './routes/openai';
-import anthropicRouter from './routes/anthropic';
-import geminiRouter from './routes/gemini';
-import groqRouter from './routes/groq';
-import ollamaRouter from './routes/ollama';
-import openrouterRouter from './routes/openrouter';
+import openaiRouter from './routes/openai.js';
+import anthropicRouter from './routes/anthropic.js';
+import geminiRouter from './routes/gemini.js';
+import groqRouter from './routes/groq.js';
+import ollamaRouter from './routes/ollama.js';
+import openrouterRouter from './routes/openrouter.js';
 
 dotenv.config();
 
@@ -33,12 +33,9 @@ const defaultModels = {
   data: [] as any[], // Using any[] for broader compatibility during init
 };
 
-const defaultDevModels: any[] = []; // Using any[]
-
 const defaultKeys: Record<string, any> = {}; // Using Record<string, any>
 
 const modelsJsonPath = path.resolve('models.json'); // Adjusted path
-const devModelsJsonPath = path.resolve('devmodels.json'); // Adjusted path
 const keysJsonPath = path.resolve('keys.json'); // Adjusted path
 
 function initializeJsonFile<T>(filePath: string, defaultContent: T): void {
@@ -59,7 +56,6 @@ function initializeJsonFile<T>(filePath: string, defaultContent: T): void {
 
 // Initialize JSON files first
 initializeJsonFile(modelsJsonPath, defaultModels);
-initializeJsonFile(devModelsJsonPath, defaultDevModels);
 initializeJsonFile(keysJsonPath, defaultKeys);
 
 // Function to ensure an initial admin key exists

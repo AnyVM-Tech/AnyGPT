@@ -1,5 +1,5 @@
-import type { Provider, ResponseEntry, Model, ModelDefinition } from '../providers/interfaces.ts'; // Removed TokenSpeedEntry
-import modelsData from '../models.json';
+import type { Provider, ResponseEntry, Model, ModelDefinition } from '../providers/interfaces.js'; // Removed TokenSpeedEntry
+import modelsData from '../models.json' with { type: 'json' };
 
 const typedModelsData = modelsData as { data: ModelDefinition[] };
 
@@ -9,8 +9,6 @@ typedModelsData.data.forEach((model: ModelDefinition) => {
     initialModelThroughputMap.set(model.id, Number(model.throughput));
   }
 });
-
-const DEFAULT_TOKEN_SPEED = 50;
 
 // Updated signature: removed speedEntry
 export function updateProviderData(

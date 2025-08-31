@@ -5,10 +5,10 @@ import {
   ResponseEntry,
   Provider as ProviderStateStructure,
   Model,
-} from './interfaces'; // Removed ModelDefinition from here
-import { GeminiAI } from './gemini';
-import { OpenAI } from './openai';
-import { computeProviderStatsWithEMA, updateProviderData, computeProviderScore, applyTimeWindow } from '../modules/compute';
+} from './interfaces.js'; // Removed ModelDefinition from here
+import { GeminiAI } from './gemini.js';
+import { OpenAI } from './openai.js';
+import { computeProviderStatsWithEMA, updateProviderData, computeProviderScore, applyTimeWindow } from '../modules/compute.js';
 // Import DataManager and necessary EXPORTED types
 import { 
     dataManager, 
@@ -16,8 +16,8 @@ import {
     LoadedProviderData, // Import exported type
     ModelsFileStructure, // Import exported type
     ModelDefinition // Import ModelDefinition from dataManager
-} from '../modules/dataManager'; 
-import { refreshProviderCountsInModelsFile } from '../modules/modelUpdater'; // Added import
+} from '../modules/dataManager.js'; 
+import { refreshProviderCountsInModelsFile } from '../modules/modelUpdater.js'; // Added import
 // FIX: Import fs for schema loading
 import * as fs from 'fs'; 
 import * as path from 'path';
@@ -26,9 +26,9 @@ import {
   validateApiKeyAndUsage, // Now async
   UserData, // Assuming this is exported from userData
   TierData, // Assuming this is exported from userData
-} from '../modules/userData';
+} from '../modules/userData.js';
 // Assuming updateUserTokenUsage is still needed and exported from userData
-import { updateUserTokenUsage } from '../modules/userData'; 
+import { updateUserTokenUsage } from '../modules/userData.js'; 
 
 
 dotenv.config();
@@ -114,10 +114,13 @@ export class MessageHandler {
             // Initialize model data including consecutive_errors
             providerData.models[modelId] = { 
                 id: modelId, 
+                token_generation_speed: this.initialModelThroughputMap.get(modelId) ?? this.DEFAULT_GENERATION_SPEED,
                 response_times: [], 
                 errors: 0, 
-                avg_token_speed: this.initialModelThroughputMap.get(modelId) ?? this.DEFAULT_GENERATION_SPEED, 
-                consecutive_errors: 0 // Initialize consecutive errors
+                consecutive_errors: 0, // Initialize consecutive errors
+                avg_response_time: null,
+                avg_provider_latency: null,
+                avg_token_speed: this.initialModelThroughputMap.get(modelId) ?? this.DEFAULT_GENERATION_SPEED
             };
         }
         

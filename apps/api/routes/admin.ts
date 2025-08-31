@@ -1,7 +1,7 @@
 import HyperExpress, { Request, Response } from 'hyper-express';
-import { addOrUpdateProvider } from '../server/addProvider'; // Path to the refactored function
-import { generateUserApiKey } from '../modules/userData'; // For generating API keys
-import { logError } from '../modules/errorLogger';
+import { addOrUpdateProvider } from '../server/addProvider.js'; // Path to the refactored function
+import { generateUserApiKey } from '../modules/userData.js'; // For generating API keys
+import { logError } from '../modules/errorLogger.js';
 
 const adminRouter = new HyperExpress.Router();
 

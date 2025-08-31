@@ -27,9 +27,9 @@
 		// "moduleDetection": "auto",
 
 		/* Modules */
-		"module": "ES6",
+		"module": "NodeNext",
 		// "rootDir": "./",
-		"moduleResolution": "node",
+		"moduleResolution": "NodeNext",
 		"baseUrl": "./",
 		"paths": {
 			"*": ["app/*", "node_modules/*"]

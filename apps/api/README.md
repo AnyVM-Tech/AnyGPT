@@ -4,7 +4,7 @@ This directory contains the backend API server for AnyGPT, built with HyperExpre
 
 ## Overview
 
-The API server acts as a central gateway to various AI model providers. It manages API keys, handles request routing, provides rate limiting, logs errors, and dynamically updates model information.
+The API server acts as a central gateway to various AI model providers. It manages API keys, handles request routing, provides rate limiting, logs errors, and dynamically updates model information. The server supports both Redis and filesystem-based data storage with automatic failover.
 
 ## Project Structure
 
@@ -13,7 +13,7 @@ apps/api/
 ├── server.ts           # Main server entry point, initializes and runs the API
 ├── package.json        # Project dependencies and scripts
 ├── tsconfig.json       # TypeScript configuration
-├── .env.example        # Example environment variables (create .env from this)
+├── .env                # Environment variables (created from .env.example)
 ├── providers.json      # Stores provider configurations and statistics
 ├── models.json         # Stores available model details, updated dynamically
 ├── keys.json           # Stores user API keys and associated data
@@ -28,7 +28,9 @@ apps/api/
 │   ├── anthropic.ts    # Anthropic compatible API endpoints
 │   ├── gemini.ts       # Gemini compatible API endpoints
 │   ├── groq.ts         # Groq compatible API endpoints
-│   └── ...             # Potentially other provider-specific or utility routes
+│   ├── openrouter.ts   # OpenRouter compatible API endpoints
+│   ├── ollama.ts       # Ollama compatible API endpoints
+│   └── ...             # Other provider-specific routes
 |
 ├── providers/          # Logic for interacting with specific AI provider APIs
 │   ├── handler.ts      # Core message handling, provider selection, and stats updates
@@ -38,36 +40,47 @@ apps/api/
 │   └── ...             # Other provider client implementations
 |
 ├── modules/            # Reusable modules for various functionalities
-│   ├── dataManager.ts  # Manages loading and saving of JSON data files (models, providers, keys)
+│   ├── dataManager.ts  # Manages dual-source data (Redis/filesystem) with automatic failover
 │   ├── modelUpdater.ts # Handles automatic updates to models.json based on provider data
-│   ├── errorLogger.ts  # Centralized error logging to file (logs/api-error.jsonl)
+│   ├── errorLogger.ts  # Centralized error logging to file and Redis
 │   ├── userData.ts     # Manages user API key generation, validation, and usage tracking
 │   ├── compute.ts      # Computes provider statistics, scores, and applies EMA
-│   ├── db.ts           # (Potentially for future database interactions - currently Redis example)
+│   ├── db.ts           # Redis database connection and operations
 │   └── typeguards.ts   # TypeScript type guards
 |
-├── logs/               # Directory for log files
+├── logs/               # Directory for log files (filesystem fallback)
 │   └── api-error.jsonl # Detailed error logs in JSON Lines format
 |
-├── dev/                # Development related utilities
-│   └── testApi.ts      # Script for testing API endpoints
+├── dev/                # Development and testing utilities
+│   ├── testApi.ts      # Main API testing script
+│   ├── testSetup.ts    # Test environment setup and cleanup
+│   ├── mockProvider.ts # Configurable mock AI provider server
+│   ├── testMockProvider.ts # Mock provider testing script
+│   ├── MOCK_SERVER_CONFIG.md # Mock server configuration documentation
+│   ├── models.ts       # Model management utilities
+│   ├── updatemodels.ts # Model update scripts
+│   ├── updateproviders.ts # Provider update scripts
+│   └── ...             # Other development utilities
 |
-└── server/             # CLI scripts (some functionality being migrated to API routes)
-    ├── addProvider.ts  # Script to add/update providers (refactored into an API module)
-    └── ...
+└── server/             # CLI scripts (legacy, being migrated to API routes)
+    ├── addProvider.ts  # Script to add/update providers
+    └── generateApiKey.ts # Script to generate API keys
 ```
 
 ## Features
 
-*   **Multi-Provider Support**: Integrates with various AI model providers (OpenAI, Anthropic, Gemini, Groq, etc.).
+*   **Multi-Provider Support**: Integrates with various AI model providers (OpenAI, Anthropic, Gemini, Groq, OpenRouter, Ollama, etc.).
+*   **Dual Data Storage**: Supports both Redis and filesystem-based data storage with automatic failover and preference configuration.
 *   **Dynamic Model Management**: Automatically updates `models.json` with provider counts based on active providers in `providers.json`.
-*   **OpenWebUI Compatibility**: `models.json` format is designed for compatibility.
+*   **OpenWebUI Compatibility**: `models.json` format is designed for compatibility with OpenWebUI.
 *   **Environment-Driven Configuration**: Enable/disable specific provider routers via environment variables.
 *   **Tier-Based Rate Limiting**: Implements RPS, RPM, RPD limits based on user tiers defined in `tiers.json`.
-*   **API Key Management**: Generation and validation of user API keys.
+*   **API Key Management**: Generation and validation of user API keys with tier-based permissions.
 *   **Provider Statistics & Scoring**: Tracks provider performance (response times, error rates, token speed) and calculates a score for intelligent routing.
-*   **Error Handling & Logging**: Comprehensive error logging to `logs/api-error.jsonl` and standardized client error responses.
+*   **Error Handling & Logging**: Comprehensive error logging to both Redis and filesystem (`logs/api-error.jsonl`) with fallback support.
 *   **Admin Endpoints**: Secure endpoints for managing providers and users.
+*   **Development Testing Suite**: Comprehensive testing infrastructure with configurable mock providers.
+*   **Mock Provider Server**: Full-featured mock AI provider for testing with configurable response times, error rates, and behaviors.
 
 ## Prerequisites
 
@@ -85,48 +98,110 @@ apps/api/
     ```bash
     pnpm install
     ```
-4.  **Create a `.env` file** by copying `.env.example` (if it exists, otherwise create one) and populate it with your API keys and other configurations. Key environment variables include:
+## Setup
+
+1.  **Clone the repository.**
+2.  **Navigate to the `apps/api` directory:**
+    ```bash
+    cd apps/api
+    ```
+3.  **Install dependencies:**
+    ```bash
+    pnpm install
+    ```
+4.  **Create a `.env` file** with your configuration. Key environment variables include:
+
+    ### Core Server Configuration
     *   `PORT`: Port for the API server (default: 3000).
-    *   `ENABLE_OPENAI_ROUTES`: Set to `true` or `false` to enable/disable OpenAI routes (default: `true`).
-    *   `ENABLE_ANTHROPIC_ROUTES`: Set to `true` or `false` (default: `true`).
-    *   `ENABLE_GEMINI_ROUTES`: Set to `true` or `false` (default: `true`).
-    *   `ENABLE_GROQ_ROUTES`: Set to `true` or `false` (default: `true`).
-    *   `ENABLE_ADMIN_ROUTES`: Set to `true` or `false` (default: `true`).
-    *   `ENABLE_MODELS_ROUTES`: Set to `true` or `false` (default: `true`).
+    
+    ### Data Storage Configuration
+    *   `DATA_SOURCE_PREFERENCE`: Set to `redis` or `filesystem` (default: `redis`).
+    *   `REDIS_URL`: Redis Cloud connection URL (format: `host:port`).
+    *   `REDIS_USERNAME`: Redis username (default: `default`).
+    *   `REDIS_PASSWORD`: Redis password.
+    *   `REDIS_DB`: Redis database number (default: 0).
+    *   `REDIS_TLS`: Set to `true` for SSL/TLS connections (default: `false`).
+    *   `ERROR_LOG_TO_REDIS`: Enable error logging to Redis (default: `true`).
 
-    Refer to `server.ts` for the exact `ENABLE_<ROUTER_NAME>_ROUTES` variable names.
+    ### Router Configuration
+    *   `ENABLE_OPENAI_ROUTES`: Enable/disable OpenAI routes (default: `true`).
+    *   `ENABLE_ANTHROPIC_ROUTES`: Enable/disable Anthropic routes (default: `true`).
+    *   `ENABLE_GEMINI_ROUTES`: Enable/disable Gemini routes (default: `true`).
+    *   `ENABLE_GROQ_ROUTES`: Enable/disable Groq routes (default: `true`).
+    *   `ENABLE_OPENROUTER_ROUTES`: Enable/disable OpenRouter routes (default: `true`).
+    *   `ENABLE_OLLAMA_ROUTES`: Enable/disable Ollama routes (default: `true`).
+    *   `ENABLE_ADMIN_ROUTES`: Enable/disable admin routes (default: `true`).
+    *   `ENABLE_MODELS_ROUTES`: Enable/disable models routes (default: `true`).
 
-5.  **Initial Data Files**: The server will attempt to create `providers.json`, `models.json`, and `keys.json` if they don't exist with default structures. You will need to populate `providers.json` with your provider configurations and `keys.json` with initial admin keys if necessary.
+    ### Default Admin Configuration
+    *   `DEFAULT_ADMIN_USER_ID`: Default admin user ID for auto-creation.
+    *   `DEFAULT_ADMIN_API_KEY`: Default admin API key.
+
+    ### Mock Server Configuration (for testing)
+    *   `MOCK_BASE_DELAY`: Base response delay in milliseconds (default: 200).
+    *   `MOCK_DELAY_VARIANCE`: Random delay variance (default: 100).
+    *   `MOCK_ERROR_RATE`: Error simulation rate 0-1 (default: 0.15).
+    *   `MOCK_TIMEOUT_RATE`: Timeout simulation rate 0-1 (default: 0.05).
+    *   `MOCK_TOKEN_SPEED`: Simulated tokens per second (default: 25).
+    *   `MOCK_ENABLE_LOGS`: Enable mock server logging (default: `true`).
+
+5.  **Initial Data Files**: The server will attempt to create `providers.json`, `models.json`, and `keys.json` if they don't exist. The data will be stored in Redis if configured, with filesystem fallback.
 
 ## Running the Server
 
-*   **Development Mode (with hot-reloading via `tsx`):
+*   **Development Mode** (with hot-reloading via `tsx`):
     ```bash
     pnpm run dev
     ```
-    This command runs `server.ts` directly.
+    This runs `server.ts` directly with TypeScript support.
 
 *   **Production Build & Start:**
-    1.  Build the TypeScript code:
-        ```bash
-        pnpm run build
-        ```
-        This will output JavaScript files to `dist/api`.
-    2.  Run the built server (you might need to adjust the start script in `package.json` or use `node dist/api/server.js`):
-        The current `pnpm start` script in `package.json` points to `tsx routes/openai.ts` which is likely for isolated testing of OpenAI routes. For production, you should run the main `server.ts` (or its compiled version `dist/api/server.js`).
-        **Recommended update to `package.json` for production start:**
-        ```json
-        "scripts": {
-          // ... other scripts
-          "start": "node ../../dist/api/server.js", // If running from apps/api
-          "dev": "tsx server.ts",
-          // ...
-        }
-        ```
-        Then run:
-        ```bash
-        pnpm start
-        ```
+    ```bash
+    # Build the TypeScript code
+    pnpm run build
+    
+    # Start the compiled server
+    pnpm start
+    ```
+    The build process outputs JavaScript files to `dist/` and the start script runs `./dist/server.js`.
+
+## Testing
+
+The project includes a comprehensive testing suite with both unit tests and integration tests using a configurable mock provider.
+
+### Running Tests
+
+*   **Full Test Suite** (recommended):
+    ```bash
+    pnpm test
+    ```
+    This runs the mock provider, API server, and test runner concurrently, then cleans up automatically.
+
+*   **Individual Test Components**:
+    ```bash
+    # Run only the mock provider
+    pnpm run test:mock
+    
+    # Run only the API server in test mode
+    pnpm run test:dev
+    
+    # Run only the test scripts (requires servers to be running)
+    pnpm run test:run
+    ```
+
+### Mock Provider Testing
+
+The mock provider supports runtime configuration for realistic testing scenarios:
+
+```bash
+# Test the mock provider configuration
+pnpm exec tsx ./dev/testMockProvider.ts
+
+# Run the mock provider standalone
+pnpm run test:mock
+```
+
+See `dev/MOCK_SERVER_CONFIG.md` for detailed documentation on configuring response times, error rates, and other mock behaviors.
 
 ## API Endpoints
 
@@ -143,21 +218,61 @@ The server exposes several sets of endpoints:
     *   `POST /api/admin/providers`: Adds or updates a provider configuration in `providers.json` and fetches its models.
     *   `POST /api/admin/users/generate-key`: Generates a new API key for a user.
 
+## Data Storage
+
+The API server supports dual data storage modes with automatic failover:
+
+### Redis Storage (Recommended)
+- Primary storage method for production deployments
+- Supports Redis Cloud and self-hosted Redis instances
+- Automatic connection retry and error handling
+- Faster access times and better scalability
+
+### Filesystem Storage (Fallback)
+- Automatic fallback when Redis is unavailable
+- Stores data in JSON files (`providers.json`, `models.json`, `keys.json`)
+- Suitable for development and single-instance deployments
+
+### Configuration
+Set `DATA_SOURCE_PREFERENCE=redis` or `DATA_SOURCE_PREFERENCE=filesystem` in your `.env` file. The system will automatically fall back to filesystem storage if Redis connection fails.
+
 ## Key Management & Tiers
 
-*   API keys are managed in `keys.json`.
+*   API keys are managed in `keys.json` (filesystem) or Redis.
 *   User tiers and their associated rate limits (RPS, RPM, RPD) and provider score preferences are defined in `tiers.json`.
 *   The `generalAuthMiddleware` in `server.ts` handles initial API key validation, and specific middlewares in provider routes (`openai.ts`, etc.) or admin routes (`admin.ts`) enforce authentication and authorization.
+*   Default admin users can be auto-created using the `DEFAULT_ADMIN_USER_ID` and `DEFAULT_ADMIN_API_KEY` environment variables.
 
-## Logging
+## Logging & Monitoring
 
-*   Server startup and request information are logged to the console.
-*   Detailed errors are logged in JSON Lines format to `logs/api-error.jsonl`. Each entry includes a timestamp, request details (if applicable), error message, stack trace, and other context.
+*   **Console Logging**: Server startup, request information, and general operational logs.
+*   **Error Logging**: Detailed errors are logged in JSON Lines format to:
+    - Redis (if `ERROR_LOG_TO_REDIS=true` and Redis is available)
+    - Filesystem fallback (`logs/api-error.jsonl`)
+*   **Provider Statistics**: Response times, error rates, and performance metrics are continuously tracked and stored.
+*   **Request Tracking**: All API requests are logged with timestamps, response times, and usage statistics.
+
+## Development Tools
+
+### Mock Provider Server
+- Full OpenAI-compatible mock server for testing
+- Configurable response times, error rates, and behaviors
+- Runtime configuration via REST endpoints
+- Environment variable configuration support
+- See `dev/MOCK_SERVER_CONFIG.md` for detailed usage
+
+### Testing Scripts
+- `dev/testApi.ts`: Main API integration testing
+- `dev/testMockProvider.ts`: Mock provider functionality testing
+- `dev/testSetup.ts`: Test environment setup and cleanup
+- Automatic test data preservation and cleanup
 
 ## Contributing
 
-(Add guidelines for contributing if this is an open project).
+me, myself, and i 
+
+GG or owner of the fabled goldai (helped getting me into this space thats now dying)
 
 ## License
 
-(Specify the license for the project).
+Elastic License 2.0
