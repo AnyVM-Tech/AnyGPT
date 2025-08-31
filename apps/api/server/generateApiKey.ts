@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { Command } from 'commander';
-import { generateAdminApiKey } from '../modules/userData';
+import { generateAdminApiKey } from '../modules/userData.js';
 
 const program = new Command();
 

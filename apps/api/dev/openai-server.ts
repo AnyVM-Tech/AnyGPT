@@ -9,8 +9,8 @@ const port = 3080;
 const config = {
   // Artificial delay in ms to simulate network latency
   responseDelay: 500,
-  // Random failure rate (0-1)
-  failureRate: 0.05,
+  // Random failure rate (0-1) - disabled for testing
+  failureRate: 0,
   // Token generation speed (tokens per second)
   tokenGenerationSpeed: 20,
 };
