@@ -10,5 +10,11 @@
     "tokenUsage": 393,
     "role": "admin",
     "tier": "enterprise"
+  },
+  "test-key-for-mock-provider": {
+    "userId": "test-user",
+    "tokenUsage": 0,
+    "role": "user",
+    "tier": "enterprise"
   }
 }

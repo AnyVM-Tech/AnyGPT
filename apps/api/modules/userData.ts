@@ -4,9 +4,9 @@ import crypto from 'crypto';
 import path from 'path';
 import { Request } from 'hyper-express';
 // Import the singleton DataManager instance
-import { dataManager } from './dataManager'; 
+import { dataManager } from './dataManager.js'; 
 // Import tiers data directly (static configuration)
-import tiersData from '../tiers.json'; 
+import tiersData from '../tiers.json' with { type: 'json' }; 
 
 // --- Type Definitions --- 
 // Export interfaces for use in other modules

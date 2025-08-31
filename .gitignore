@@ -22,7 +22,7 @@ Thumbs.db
 
 # Build directories
 /dist
-
+apps/api/dist
 # Specific files
 vite.config.ts.timestamp*
 pnpm-lock.yaml

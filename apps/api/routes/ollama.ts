@@ -1,13 +1,13 @@
 import HyperExpress, { Request, Response } from 'hyper-express';
 import dotenv from 'dotenv';
-import { messageHandler } from '../providers/handler'; 
-import { IMessage } from '../providers/interfaces'; 
+import { messageHandler } from '../providers/handler.js'; 
+import { IMessage } from '../providers/interfaces.js'; 
 import { 
     updateUserTokenUsage, // Now async
     validateApiKeyAndUsage, // Now async
     TierData, // Import TierData type
     // We don\'t use extractMessageFromRequest for Ollama format
-} from '../modules/userData';
+} from '../modules/userData.js';
 
 dotenv.config();
 

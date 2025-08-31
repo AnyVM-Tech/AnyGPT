@@ -2,7 +2,7 @@
 	"compilerOptions": {
 	  "target": "ES2022",
 	  "module": "ESNext",
-	  "outDir": "../../dist/api",
+	  "outDir": "./dist",
 	  "strict": true,
 	  "esModuleInterop": true,
 	  "skipLibCheck": true,
@@ -11,12 +11,14 @@
 	  "paths": { 
 		"*": ["*", "./node_modules/*"]
 	  },
-	  "moduleResolution": "node", 
+	  "moduleResolution": "bundler", 
 	  "resolveJsonModule": true, 
 	  "allowSyntheticDefaultImports": true,
-	  "allowImportingTsExtensions": true,
-	  "noEmit": true,
+	  "noEmit": false,
+	  "declaration": true,
+	  "emitDeclarationOnly": false,
+	  "noEmitOnError": false
 	},
 	"include": ["./**/*"], 
-	"exclude": ["node_modules", "dev/tps.ts"]
+	"exclude": ["node_modules", "dev/tps.ts", "dist"]
   }

@@ -1,14 +1,14 @@
 import HyperExpress, { Request, Response } from 'hyper-express';
 import dotenv from 'dotenv';
-import { messageHandler } from '../providers/handler'; 
-import { IMessage } from '../providers/interfaces'; 
+import { messageHandler } from '../providers/handler.js'; 
+import { IMessage } from '../providers/interfaces.js'; 
 import { 
     generateUserApiKey, // Now async
     updateUserTokenUsage, // Now async
     validateApiKeyAndUsage, // Now async
     TierData // Import TierData type
-} from '../modules/userData';
-import { logError } from '../modules/errorLogger'; // Changed import
+} from '../modules/userData.js';
+import { logError } from '../modules/errorLogger.js'; // Changed import
 
 dotenv.config();
 

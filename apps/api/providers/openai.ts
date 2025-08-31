@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { IAIProvider, IMessage } from './interfaces'; // Only import necessary interfaces
+import { IAIProvider, IMessage } from './interfaces.js'; // Only import necessary interfaces
 // Removed imports related to compute and Provider state
 
 export class OpenAI implements IAIProvider {

@@ -65,8 +65,7 @@
 		"vaul": "^0.9.0",
 		"vite-plugin-static-copy": "^1.0.1",
 		"wisp-server-node": "^1.0.2",
-		"ws": "^8.16.0",
-		"x": "^0.1.2"
+		"ws": "^8.16.0"
 	},
 	"devDependencies": {
 		"@remix-run/dev": "^2.8.1",

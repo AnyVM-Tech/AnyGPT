@@ -1,7 +1,7 @@
 import axios from 'axios';
-import { dataManager, LoadedProviders } from '../modules/dataManager';
+import { dataManager, LoadedProviders } from '../modules/dataManager.js';
 // Ensure this path is correct based on your project structure for these shared interfaces
-import type { Provider, Model } from '../providers/interfaces';
+import type { Provider, Model } from '../providers/interfaces.js';
 
 interface AddProviderPayload {
     providerBaseUrl: string;
@@ -108,23 +108,14 @@ export async function addOrUpdateProvider(payload: AddProviderPayload): Promise<
         provider_score: null,
     };
 
-    // When pushing to `providers` (which is LoadedProviders, expecting LoadedProviderData[]),
-    // we need to ensure the object conforms to LoadedProviderData.
-    // LoadedProviderData expects `apiKey?: string` (i.e. string | undefined).
-    // The `Provider` type for newProviderEntry has `apiKey: string | null`.
-    // To bridge this, we create an object that fits LoadedProviderData.
-    const entryForSave: any = {
-        ...newProviderEntry,
-        apiKey: newProviderEntry.apiKey === null ? undefined : newProviderEntry.apiKey,
-    };
-
     // 3. Add or Update Provider in the list
+    // Now that interfaces are aligned, we can use the provider entry directly
     const existingIdx = providers.findIndex((p) => p.id === providerId);
     if (existingIdx >= 0) {
-        providers[existingIdx] = entryForSave;
+        providers[existingIdx] = newProviderEntry;
         console.log(`Updated existing provider entry with ID: ${providerId}`);
     } else {
-        providers.push(entryForSave);
+        providers.push(newProviderEntry);
         console.log(`Added new provider entry with ID: ${providerId}`);
     }
 

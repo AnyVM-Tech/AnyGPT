@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import * as fs from 'fs';
 import axios from 'axios';
-import { Provider, Model } from '../providers/interfaces';
+import { Provider, Model } from '../providers/interfaces.js';
 
 async function fetchModels(apiKey: string, modelsEndpoint: string): Promise<string[]> {
   try {
@@ -21,7 +21,7 @@ async function fetchModels(apiKey: string, modelsEndpoint: string): Promise<stri
   }
 }
 
-async function updateDevModels(
+async function updateProviders(
   apiKey: string, 
   chatEndpoint: string, 
   modelsEndpoint: string,
@@ -41,14 +41,22 @@ async function updateDevModels(
       models: models.reduce((acc, id) => ({
         ...acc,
         [id]: {
-          response_time: null
+          id: id,
+          token_generation_speed: 50,
+          response_times: [],
+          errors: 0,
+          consecutive_errors: 0,
+          avg_response_time: null,
+          avg_provider_latency: null,
+          avg_token_speed: null
         }
       }), {}),
       // Set additional fields to null or 0
       avg_response_time: null,
       avg_provider_latency: null,
       errors: 0,
-      provider_score: null
+      provider_score: null,
+      disabled: false // Add required disabled field
     };
 
     const filePath = './providers.json';
@@ -119,7 +127,7 @@ program
   .requiredOption('-m, --models-endpoint <url>', 'Models endpoint')
   .requiredOption('-i, --id <provider-id>', 'Provider ID (name)')
   .action(async (options) => {
-    await updateDevModels(
+    await updateProviders(
       options.apiKey,
       options.chatEndpoint,
       options.modelsEndpoint,

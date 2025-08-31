@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import HyperExpress from 'hyper-express'; // For Request type, if used
-import redis from '../modules/db'; // Import redis client
+import redis from '../modules/db.js'; // Import redis client
 
 const logDirectory = path.resolve(process.cwd(), 'logs'); // Logs at the workspace root
 const errorLogFilePath = path.join(logDirectory, 'api-error.jsonl'); // Changed to .jsonl
