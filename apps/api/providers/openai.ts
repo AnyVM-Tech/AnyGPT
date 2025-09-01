@@ -94,4 +94,53 @@ export class OpenAI implements IAIProvider {
       throw new Error(`API call failed: ${errorMessage}`);
     }
   }
+
+  async *sendMessageStream(message: IMessage): AsyncGenerator<{ chunk: string; latency: number; response: string; anystream: any; }, void, unknown> {
+    const startTime = Date.now();
+    const url = this.endpointUrl;
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+
+    if (this.apiKey) {
+      headers['Authorization'] = `Bearer ${this.apiKey}`;
+    }
+
+    const data = {
+      model: message.model.id,
+      messages: [{ role: 'user', content: message.content }],
+      stream: true,
+    };
+
+    try {
+      const response = await axios.post(url, data, { headers, responseType: 'stream' });
+      let fullResponse = '';
+      for await (const value of response.data) {
+        const lines = value.toString('utf8').split('\n').filter((line: string) => line.trim().startsWith('data: '));
+        for (const line of lines) {
+          const message = line.replace(/^data: /, '');
+          if (message === '[DONE]') {
+            const latency = Date.now() - startTime;
+            yield { chunk: '', latency, response: fullResponse, anystream: response.data };
+            return;
+          }
+          try {
+            const parsed = JSON.parse(message);
+            const chunk = parsed.choices[0]?.delta?.content || '';
+            fullResponse += chunk;
+            const latency = Date.now() - startTime;
+            yield { chunk, latency, response: fullResponse, anystream: response.data };
+          } catch (error) {
+            console.error('Error parsing stream chunk:', error);
+          }
+        }
+      }
+    } catch (error: any) {
+      const latency = Date.now() - startTime;
+      console.error(`Error during sendMessageStream to ${url} (Latency: ${latency}ms):`, error);
+      const errorMessage = error.response?.data?.error?.message || error.message || 'Unknown API error';
+      throw new Error(`API stream call failed: ${errorMessage}`);
+    }
+  }
 }

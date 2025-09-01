@@ -114,4 +114,34 @@ export class GeminiAI implements IAIProvider {
       throw new Error(`Gemini API call failed: ${errorMessage}`);
     }
   }
+
+  async *sendMessageStream(message: IMessage): AsyncGenerator<{ chunk: string; latency: number; response: string; anystream: any; }, void, unknown> {
+    if (message.model.id !== this.modelId) {
+      console.warn(`GeminiAI instance for ${this.modelId} received message intended for ${message.model.id}. Processing anyway.`);
+    }
+
+    const startTime = Date.now();
+
+    try {
+      const chatSession = this.modelInstance.startChat({
+        generationConfig,
+        safetySettings,
+        history: [],
+      });
+
+      const result = await chatSession.sendMessageStream(message.content);
+      let fullResponse = '';
+      for await (const chunk of result.stream) {
+        const chunkText = chunk.text();
+        fullResponse += chunkText;
+        const latency = Date.now() - startTime;
+        yield { chunk: chunkText, latency, response: fullResponse, anystream: result.stream };
+      }
+    } catch (error: any) {
+      const latency = Date.now() - startTime;
+      console.error(`Error during sendMessageStream with Gemini model ${this.modelId} (Latency: ${latency}ms):`, error);
+      const errorMessage = error.message || 'Unknown Gemini API error';
+      throw new Error(`Gemini API stream call failed: ${errorMessage}`);
+    }
+  }
 }

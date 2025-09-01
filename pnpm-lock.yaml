@@ -63,6 +63,9 @@ importers:
       dotenv:
         specifier: ^16.4.5
         version: 16.4.7
+      eventsource:
+        specifier: ^2.0.2
+        version: 2.0.2
       express:
         specifier: ^4.19.2
         version: 4.21.2
@@ -77,10 +80,13 @@ importers:
         version: 4.85.4(ws@8.18.1(bufferutil@4.0.9)(utf-8-validate@6.0.5))
       selenium-webdriver:
         specifier: ^4.26.0
-        version: 4.29.0(bufferutil@4.0.9)(utf-8-validate@6.0.5)
+        version: 4.29.0(bufferutil@4.0.9)
       uuid:
         specifier: ^11.1.0
         version: 11.1.0
+      ws:
+        specifier: ^8.18.0
+        version: 8.18.1(bufferutil@4.0.9)(utf-8-validate@6.0.5)
     devDependencies:
       '@types/jest':
         specifier: ^27.0.2
@@ -88,6 +94,9 @@ importers:
       '@types/node':
         specifier: ^16.11.7
         version: 16.18.126
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
       concurrently:
         specifier: ^8.2.2
         version: 8.2.2
@@ -96,13 +105,13 @@ importers:
         version: 8.57.1
       jest:
         specifier: ^27.2.5
-        version: 27.5.1(bufferutil@4.0.9)(ts-node@10.9.2(@types/node@16.18.126)(typescript@5.7.3))(utf-8-validate@6.0.5)
+        version: 27.5.1(bufferutil@4.0.9)(ts-node@10.9.2(@types/node@16.18.126)(typescript@5.7.3))
       rimraf:
         specifier: ^5.0.5
         version: 5.0.10
       ts-jest:
         specifier: ^29.1.5
-        version: 29.2.6(@babel/core@7.26.9)(@jest/types@29.6.3)(jest@27.5.1(bufferutil@4.0.9)(ts-node@10.9.2(@types/node@16.18.126)(typescript@5.7.3))(utf-8-validate@6.0.5))(typescript@5.7.3)
+        version: 29.2.6(@babel/core@7.26.9)(@jest/types@29.6.3)(jest@27.5.1(bufferutil@4.0.9)(ts-node@10.9.2(@types/node@16.18.126)(typescript@5.7.3)))(typescript@5.7.3)
       ts-node-dev:
         specifier: ^1.1.8
         version: 1.1.8(typescript@5.7.3)
@@ -2151,6 +2160,9 @@ packages:
   '@types/unist@2.0.11':
     resolution: {integrity: sha512-CmBKiL6NNo/OqgmMn95Fk9Whlp2mtvIv+KNpQKN2F4SjvrEesubTRWGYSg+BnWZOnlCaSTU1sMpsBOzgbYhnsA==}
 
+  '@types/ws@8.18.1':
+    resolution: {integrity: sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg==}
+
   '@types/yargs-parser@21.0.3':
     resolution: {integrity: sha512-I4q9QU9MQv4oEOz4tAHJtNz1cwuLxn2F3xcc2iV5WdqLPpUnj30aUuxt1mAxYTG+oe8CZMV/+6rU4S4gRDzqtQ==}
 
@@ -3226,6 +3238,10 @@ packages:
   event-target-shim@5.0.1:
     resolution: {integrity: sha512-i/2XbnSz/uxRCU6+NdVJgKWDTM427+MqYbkQzD321DuCQJUqOuJKIA0IM2+W2xtYHdKOmZ4dR6fExsd4SXL+WQ==}
     engines: {node: '>=6'}
+
+  eventsource@2.0.2:
+    resolution: {integrity: sha512-IzUmBGPR3+oUG9dUeXynyNmf91/3zUSJg1lCktzKw47OXuhco54U3r9B7O4XX+Rb1Itm9OZ2b0RkTs10bICOxA==}
+    engines: {node: '>=12.0.0'}
 
   execa@5.1.1:
     resolution: {integrity: sha512-8uSpZZocAZRBAPIEINJj3Lo9HyGitllczc27Eh5YYojjMFMn8yHMDMaUHE2Jqfq05D/wucwI4JGURyXt1vchyg==}
@@ -6914,7 +6930,7 @@ snapshots:
       jest-util: 27.5.1
       slash: 3.0.0
 
-  '@jest/core@27.5.1(bufferutil@4.0.9)(ts-node@10.9.2(@types/node@16.18.126)(typescript@5.7.3))(utf-8-validate@6.0.5)':
+  '@jest/core@27.5.1(bufferutil@4.0.9)(ts-node@10.9.2(@types/node@16.18.126)(typescript@5.7.3))':
     dependencies:
       '@jest/console': 27.5.1
       '@jest/reporters': 27.5.1
@@ -6928,13 +6944,13 @@ snapshots:
       exit: 0.1.2
       graceful-fs: 4.2.11
       jest-changed-files: 27.5.1
-      jest-config: 27.5.1(bufferutil@4.0.9)(ts-node@10.9.2(@types/node@16.18.126)(typescript@5.7.3))(utf-8-validate@6.0.5)
+      jest-config: 27.5.1(bufferutil@4.0.9)(ts-node@10.9.2(@types/node@16.18.126)(typescript@5.7.3))
       jest-haste-map: 27.5.1
       jest-message-util: 27.5.1
       jest-regex-util: 27.5.1
       jest-resolve: 27.5.1
       jest-resolve-dependencies: 27.5.1
-      jest-runner: 27.5.1(bufferutil@4.0.9)(utf-8-validate@6.0.5)
+      jest-runner: 27.5.1(bufferutil@4.0.9)
       jest-runtime: 27.5.1
       jest-snapshot: 27.5.1
       jest-util: 27.5.1
@@ -8063,6 +8079,10 @@ snapshots:
   '@types/strip-json-comments@0.0.30': {}
 
   '@types/unist@2.0.11': {}
+
+  '@types/ws@8.18.1':
+    dependencies:
+      '@types/node': 16.18.126
 
   '@types/yargs-parser@21.0.3': {}
 
@@ -9420,6 +9440,8 @@ snapshots:
 
   event-target-shim@5.0.1: {}
 
+  eventsource@2.0.2: {}
+
   execa@5.1.1:
     dependencies:
       cross-spawn: 7.0.6
@@ -10179,16 +10201,16 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  jest-cli@27.5.1(bufferutil@4.0.9)(ts-node@10.9.2(@types/node@16.18.126)(typescript@5.7.3))(utf-8-validate@6.0.5):
+  jest-cli@27.5.1(bufferutil@4.0.9)(ts-node@10.9.2(@types/node@16.18.126)(typescript@5.7.3)):
     dependencies:
-      '@jest/core': 27.5.1(bufferutil@4.0.9)(ts-node@10.9.2(@types/node@16.18.126)(typescript@5.7.3))(utf-8-validate@6.0.5)
+      '@jest/core': 27.5.1(bufferutil@4.0.9)(ts-node@10.9.2(@types/node@16.18.126)(typescript@5.7.3))
       '@jest/test-result': 27.5.1
       '@jest/types': 27.5.1
       chalk: 4.1.2
       exit: 0.1.2
       graceful-fs: 4.2.11
       import-local: 3.2.0
-      jest-config: 27.5.1(bufferutil@4.0.9)(ts-node@10.9.2(@types/node@16.18.126)(typescript@5.7.3))(utf-8-validate@6.0.5)
+      jest-config: 27.5.1(bufferutil@4.0.9)(ts-node@10.9.2(@types/node@16.18.126)(typescript@5.7.3))
       jest-util: 27.5.1
       jest-validate: 27.5.1
       prompts: 2.4.2
@@ -10200,7 +10222,7 @@ snapshots:
       - ts-node
       - utf-8-validate
 
-  jest-config@27.5.1(bufferutil@4.0.9)(ts-node@10.9.2(@types/node@16.18.126)(typescript@5.7.3))(utf-8-validate@6.0.5):
+  jest-config@27.5.1(bufferutil@4.0.9)(ts-node@10.9.2(@types/node@16.18.126)(typescript@5.7.3)):
     dependencies:
       '@babel/core': 7.26.9
       '@jest/test-sequencer': 27.5.1
@@ -10212,13 +10234,13 @@ snapshots:
       glob: 7.2.3
       graceful-fs: 4.2.11
       jest-circus: 27.5.1
-      jest-environment-jsdom: 27.5.1(bufferutil@4.0.9)(utf-8-validate@6.0.5)
+      jest-environment-jsdom: 27.5.1(bufferutil@4.0.9)
       jest-environment-node: 27.5.1
       jest-get-type: 27.5.1
       jest-jasmine2: 27.5.1
       jest-regex-util: 27.5.1
       jest-resolve: 27.5.1
-      jest-runner: 27.5.1(bufferutil@4.0.9)(utf-8-validate@6.0.5)
+      jest-runner: 27.5.1(bufferutil@4.0.9)
       jest-util: 27.5.1
       jest-validate: 27.5.1
       micromatch: 4.0.8
@@ -10253,7 +10275,7 @@ snapshots:
       jest-util: 27.5.1
       pretty-format: 27.5.1
 
-  jest-environment-jsdom@27.5.1(bufferutil@4.0.9)(utf-8-validate@6.0.5):
+  jest-environment-jsdom@27.5.1(bufferutil@4.0.9):
     dependencies:
       '@jest/environment': 27.5.1
       '@jest/fake-timers': 27.5.1
@@ -10261,7 +10283,7 @@ snapshots:
       '@types/node': 16.18.126
       jest-mock: 27.5.1
       jest-util: 27.5.1
-      jsdom: 16.7.0(bufferutil@4.0.9)(utf-8-validate@6.0.5)
+      jsdom: 16.7.0(bufferutil@4.0.9)
     transitivePeerDependencies:
       - bufferutil
       - canvas
@@ -10374,7 +10396,7 @@ snapshots:
       resolve.exports: 1.1.1
       slash: 3.0.0
 
-  jest-runner@27.5.1(bufferutil@4.0.9)(utf-8-validate@6.0.5):
+  jest-runner@27.5.1(bufferutil@4.0.9):
     dependencies:
       '@jest/console': 27.5.1
       '@jest/environment': 27.5.1
@@ -10386,7 +10408,7 @@ snapshots:
       emittery: 0.8.1
       graceful-fs: 4.2.11
       jest-docblock: 27.5.1
-      jest-environment-jsdom: 27.5.1(bufferutil@4.0.9)(utf-8-validate@6.0.5)
+      jest-environment-jsdom: 27.5.1(bufferutil@4.0.9)
       jest-environment-node: 27.5.1
       jest-haste-map: 27.5.1
       jest-leak-detector: 27.5.1
@@ -10505,11 +10527,11 @@ snapshots:
       merge-stream: 2.0.0
       supports-color: 8.1.1
 
-  jest@27.5.1(bufferutil@4.0.9)(ts-node@10.9.2(@types/node@16.18.126)(typescript@5.7.3))(utf-8-validate@6.0.5):
+  jest@27.5.1(bufferutil@4.0.9)(ts-node@10.9.2(@types/node@16.18.126)(typescript@5.7.3)):
     dependencies:
-      '@jest/core': 27.5.1(bufferutil@4.0.9)(ts-node@10.9.2(@types/node@16.18.126)(typescript@5.7.3))(utf-8-validate@6.0.5)
+      '@jest/core': 27.5.1(bufferutil@4.0.9)(ts-node@10.9.2(@types/node@16.18.126)(typescript@5.7.3))
       import-local: 3.2.0
-      jest-cli: 27.5.1(bufferutil@4.0.9)(ts-node@10.9.2(@types/node@16.18.126)(typescript@5.7.3))(utf-8-validate@6.0.5)
+      jest-cli: 27.5.1(bufferutil@4.0.9)(ts-node@10.9.2(@types/node@16.18.126)(typescript@5.7.3))
     transitivePeerDependencies:
       - bufferutil
       - canvas
@@ -10538,7 +10560,7 @@ snapshots:
     dependencies:
       argparse: 2.0.1
 
-  jsdom@16.7.0(bufferutil@4.0.9)(utf-8-validate@6.0.5):
+  jsdom@16.7.0(bufferutil@4.0.9):
     dependencies:
       abab: 2.0.6
       acorn: 8.14.0
@@ -11954,7 +11976,7 @@ snapshots:
     dependencies:
       loose-envify: 1.4.0
 
-  selenium-webdriver@4.29.0(bufferutil@4.0.9)(utf-8-validate@6.0.5):
+  selenium-webdriver@4.29.0(bufferutil@4.0.9):
     dependencies:
       '@bazel/runfiles': 6.3.1
       jszip: 3.10.1
@@ -12420,12 +12442,12 @@ snapshots:
 
   ts-interface-checker@0.1.13: {}
 
-  ts-jest@29.2.6(@babel/core@7.26.9)(@jest/types@29.6.3)(jest@27.5.1(bufferutil@4.0.9)(ts-node@10.9.2(@types/node@16.18.126)(typescript@5.7.3))(utf-8-validate@6.0.5))(typescript@5.7.3):
+  ts-jest@29.2.6(@babel/core@7.26.9)(@jest/types@29.6.3)(jest@27.5.1(bufferutil@4.0.9)(ts-node@10.9.2(@types/node@16.18.126)(typescript@5.7.3)))(typescript@5.7.3):
     dependencies:
       bs-logger: 0.2.6
       ejs: 3.1.10
       fast-json-stable-stringify: 2.1.0
-      jest: 27.5.1(bufferutil@4.0.9)(ts-node@10.9.2(@types/node@16.18.126)(typescript@5.7.3))(utf-8-validate@6.0.5)
+      jest: 27.5.1(bufferutil@4.0.9)(ts-node@10.9.2(@types/node@16.18.126)(typescript@5.7.3))
       jest-util: 29.7.0
       json5: 2.2.3
       lodash.memoize: 4.1.2

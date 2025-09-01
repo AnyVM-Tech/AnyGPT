@@ -87,7 +87,7 @@ async function authAndUsageMiddleware(request: Request, response: Response, next
       
       // In async middleware for HyperExpress, typically you DON'T call next()
       // if you want subsequent route handlers matching the path to run.
-      // If you NEED sequential middleware execution guarantee, chaining promises or
+      // if you NEED sequential middleware execution guarantee, chaining promises or
       // restructuring might be required. Let's assume for now not calling next() works.
       // If requests hang, this is the place to investigate HyperExpress async middleware patterns.
        // next(); // REMOVED next() call - let flow continue naturally after await
@@ -230,50 +230,109 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
   try {
     const userApiKey = request.apiKey!; 
     const tierLimits = request.tierLimits!; 
-    const { messages: rawMessages, model: modelId } = await extractMessageFromRequest(request);
+    const result = await extractMessageFromRequest(request);
+    const { messages: rawMessages, model: modelId } = result;
+    // Extract stream from request body directly since it's not in the result type
+    const requestBody = await request.json();
+    const stream = Boolean(requestBody.stream);
     
     // Per-request token check logic (remains commented out or implement as needed)
 
     const formattedMessages: IMessage[] = rawMessages.map(msg => ({ content: msg.content, model: { id: modelId } }));
  
-    // messageHandler call is already async
-    const result = await messageHandler.handleMessages(formattedMessages, modelId, userApiKey);
- 
-    const totalTokensUsed = typeof result.tokenUsage === 'number' ? result.tokenUsage : 0;
-    if (totalTokensUsed > 0) {
-        // --- Use await ---
-        await updateUserTokenUsage(totalTokensUsed, userApiKey); 
-    } else {
-        console.warn(`Token usage not reported/zero for key ${userApiKey.substring(0, 6)}...`);
-    }
- 
-    // --- Format response strictly like OpenAI --- 
-    const openaiResponse = {
-        id: `chatcmpl-${Date.now()}-${Math.random().toString(36).substring(2)}`,
-        object: "chat.completion",
-        created: Math.floor(Date.now() / 1000), // Unix timestamp
-        model: modelId,
-        // system_fingerprint: null, // OpenAI typically includes this. Set to null if not available.
-        choices: [
-            {
-                index: 0,
-                message: {
-                    role: "assistant",
-                    content: result.response,
-                },
-                logprobs: null, // OpenAI includes this, set to null if not applicable
-                finish_reason: "stop", // Assuming stop as default
-            }
-        ],
-        usage: {
-            // prompt_tokens: result.promptTokens, // Include if available from messageHandler
-            // completion_tokens: result.completionTokens, // Include if available from messageHandler
-            total_tokens: totalTokensUsed
-        }
-        // Custom fields _latency_ms and _provider_id are removed
-    };
+    if (stream) {
+        response.setHeader('Content-Type', 'text/event-stream');
+        response.setHeader('Cache-Control', 'no-cache');
+        response.setHeader('Connection', 'keep-alive');
+        
+        const streamHandler = messageHandler.handleStreamingMessages(formattedMessages, modelId, userApiKey);
+        const started = Date.now();
+        const requestId = `chatcmpl-${Date.now()}`;
+        
+        let totalTokenUsage = 0;
 
-    response.json(openaiResponse);
+        for await (const result of streamHandler) {
+            if (result.type === 'chunk') {
+                const openaiStreamChunk = {
+                    id: requestId,
+                    object: 'chat.completion.chunk',
+                    created: Math.floor(started / 1000),
+                    model: modelId,
+                    choices: [{
+                        index: 0,
+                        delta: { content: result.chunk },
+                        finish_reason: null
+                    }]
+                };
+                response.write(`data: ${JSON.stringify(openaiStreamChunk)}\n\n`);
+            } else if (result.type === 'final') {
+                // Capture final metrics from the stream
+                if (result.tokenUsage) totalTokenUsage = result.tokenUsage;
+            }
+        }
+        
+        // Update token usage if available
+        if (totalTokenUsage > 0) {
+            await updateUserTokenUsage(totalTokenUsage, userApiKey);
+        } else {
+            console.warn(`Token usage not reported/zero for streaming key ${userApiKey.substring(0, 6)}...`);
+        }
+        
+        const finalChunk = {
+            id: requestId,
+            object: 'chat.completion.chunk',
+            created: Math.floor(started / 1000),
+            model: modelId,
+            choices: [{
+                index: 0,
+                delta: {},
+                finish_reason: 'stop'
+            }]
+        };
+        response.write(`data: ${JSON.stringify(finalChunk)}\n\n`);
+        response.write(`data: [DONE]\n\n`);
+        return response.end();
+
+    } else {
+        // messageHandler call is already async
+        const result = await messageHandler.handleMessages(formattedMessages, modelId, userApiKey);
+    
+        const totalTokensUsed = typeof result.tokenUsage === 'number' ? result.tokenUsage : 0;
+        if (totalTokensUsed > 0) {
+            // --- Use await ---
+            await updateUserTokenUsage(totalTokensUsed, userApiKey); 
+        } else {
+            console.warn(`Token usage not reported/zero for key ${userApiKey.substring(0, 6)}...`);
+        }
+    
+        // --- Format response strictly like OpenAI --- 
+        const openaiResponse = {
+            id: `chatcmpl-${Date.now()}-${Math.random().toString(36).substring(2)}`,
+            object: "chat.completion",
+            created: Math.floor(Date.now() / 1000), // Unix timestamp
+            model: modelId,
+            // system_fingerprint: null, // OpenAI typically includes this. Set to null if not available.
+            choices: [
+                {
+                    index: 0,
+                    message: {
+                        role: "assistant",
+                        content: result.response,
+                    },
+                    logprobs: null, // OpenAI includes this, set to null if not applicable
+                    finish_reason: "stop", // Assuming stop as default
+                }
+            ],
+            usage: {
+                // prompt_tokens: result.promptTokens, // Include if available from messageHandler
+                // completion_tokens: result.completionTokens, // Include if available from messageHandler
+                total_tokens: totalTokensUsed
+            }
+            // Custom fields _latency_ms and _provider_id are removed
+        };
+
+        response.json(openaiResponse);
+    }
  
   } catch (error: any) { 
     await logError(error, request);

@@ -23,6 +23,7 @@ export interface LoadedProviderData {
     id: string; 
     apiKey: string | null; // Make consistent with Provider interface
     provider_url: string; // Make required, consistent with Provider interface
+    streamingCompatible?: boolean;
     models: { [key: string]: ProviderModelData };
     disabled: boolean; // Make required with default false
     avg_response_time: number | null;

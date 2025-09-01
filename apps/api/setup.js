@@ -42,7 +42,7 @@ function parseRedisCloudConnection(connectionString) {
       url: `${host}:${port}`,
       username: username,
       password: password,
-      tls: true, // Redis Cloud typically uses TLS
+      tls: false, // Redis Cloud defaults to no TLS unless specified
       db: 0
     };
   } catch (error) {
@@ -55,12 +55,11 @@ function generateEnvContent(config) {
   const envTemplate = `# API Server Configuration
 PORT=${config.port}
 
-
-#add providers or api keys via route 
+# Data Source Configuration
+DATA_SOURCE_PREFERENCE=${config.redis.enabled ? 'redis' : 'filesystem'} # filesystem or redis
 
 # --- Router Enabling/Disabling ---
-# Set to true to enable the routes, false to disable.
-# If the variable is not present, the server typically defaults to true.
+# Set to true to enable routes, false to disable
 ENABLE_MODELS_ROUTES=${config.enableModelsRoutes}
 ENABLE_ADMIN_ROUTES=${config.enableAdminRoutes}
 ENABLE_OPENAI_ROUTES=${config.enableOpenAIRoutes}
@@ -70,34 +69,44 @@ ENABLE_GROQ_ROUTES=${config.enableGroqRoutes}
 ENABLE_OPENROUTER_ROUTES=${config.enableOpenRouterRoutes}
 ENABLE_OLLAMA_ROUTES=${config.enableOllamaRoutes}
 
-
-${config.redis.enabled ? `# Should contain only host:port
-REDIS_URL=${config.redis.url}
+# --- Redis Configuration ---
+${config.redis.enabled ? `REDIS_URL=${config.redis.url}
 REDIS_USERNAME=${config.redis.username}
 REDIS_PASSWORD=${config.redis.password}
-REDIS_DB=${config.redis.db} # Or your specific DB ID
-REDIS_TLS=${config.redis.tls} # Set to true if your Redis Cloud requires SSL/TLS (highly likely)
-ERROR_LOG_TO_REDIS=${config.redis.errorLogging}` : `# Should contain only host:port
-#REDIS_URL=
-#REDIS_USERNAME=
-#REDIS_PASSWORD=
-#REDIS_DB=0 # Or your specific DB ID
-#REDIS_TLS=false # Set to true if your Redis Cloud requires SSL/TLS (highly likely)
-#ERROR_LOG_TO_REDIS=false`}
+REDIS_DB=${config.redis.db}
+REDIS_TLS=${config.redis.tls}
+ERROR_LOG_TO_REDIS=${config.redis.errorLogging}
+REDIS_ERROR_LOG_KEY=api_errors
+REDIS_ERROR_LOG_MAX_ENTRIES=1000` : `# REDIS_URL=
+# REDIS_USERNAME=
+# REDIS_PASSWORD=
+# REDIS_DB=0
+# REDIS_TLS=false
+# ERROR_LOG_TO_REDIS=false
+# REDIS_ERROR_LOG_KEY=api_errors
+# REDIS_ERROR_LOG_MAX_ENTRIES=1000`}
 
-DATA_SOURCE_PREFERENCE=${config.redis.enabled ? 'redis' : 'filesystem'} #filesystem or redis
+# --- Logging Configuration ---
+LOG_LEVEL=${config.logLevel}
 
-# Remove or comment out REDIS_HOST and REDIS_PORT if you use the above method
-# REDIS_HOST=...
-# REDIS_PORT=...
+# --- Testing Configuration (uncomment for testing) ---
+# TEST_API_KEY=test-key-for-mock-provider
+# WS_URL=ws://localhost:3000/ws
 
-# --- Optional: Logging Configuration ---
-LOG_LEVEL="${config.logLevel}" # Example levels: "debug", "info", "warn", "error"
+# --- Mock Provider Configuration (for development/testing) ---
+# MOCK_BASE_DELAY=50
+# MOCK_DELAY_VARIANCE=20
+# MOCK_ERROR_RATE=0.1
+# MOCK_TIMEOUT_RATE=0.05
+# MOCK_SLOW_RATE=0.1
+# MOCK_SLOW_DELAY=2000
+# MOCK_TOKEN_SPEED=50
+# MOCK_ENABLE_LOGS=false
 
-# --- Optional: Default Admin User for Auto-Creation (if implemented) ---
-${config.adminUser.enabled ? `DEFAULT_ADMIN_USER_ID="${config.adminUser.id}"
-DEFAULT_ADMIN_API_KEY="${config.adminUser.apiKey}"` : `# DEFAULT_ADMIN_USER_ID="admin"
-# DEFAULT_ADMIN_API_KEY="your-predefined-strong-admin-key"`}
+# --- Optional: Default Admin User ---
+${config.adminUser.enabled ? `DEFAULT_ADMIN_USER_ID=${config.adminUser.id}
+DEFAULT_ADMIN_API_KEY=${config.adminUser.apiKey}` : `# DEFAULT_ADMIN_USER_ID=admin
+# DEFAULT_ADMIN_API_KEY=your-admin-api-key`}
 `;
   
   return envTemplate;
@@ -225,7 +234,8 @@ async function main() {
           config.redis.url = await question(chalk.white('Redis URL (host:port): '));
           config.redis.username = await question(chalk.white('Redis Username (default): ')) || 'default';
           config.redis.password = await question(chalk.white('Redis Password: '));
-          config.redis.tls = (await question(chalk.white('Use TLS? (Y/n): '))).toLowerCase() !== 'n';
+          const tlsFallbackInput = await question(chalk.white('Use TLS? (y/N): '));
+          config.redis.tls = tlsFallbackInput.toLowerCase() === 'y' || tlsFallbackInput.toLowerCase() === 'yes';
         }
       } else {
         // Manual configuration
