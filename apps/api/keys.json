@@ -3,17 +3,17 @@
     "userId": "test",
     "tokenUsage": 19218,
     "role": "user",
-    "tier": "enterprise"
+    "tier": "free"
   },
   "f94b06121fcae0383f1284f4609a9783b2a60f1277b6670ec6edde62739edb35": {
-    "userId": "initial_admin_user",
-    "tokenUsage": 393,
+    "userId": "initial_admin_user_change_key",
+    "tokenUsage": 775,
     "role": "admin",
     "tier": "enterprise"
   },
   "test-key-for-mock-provider": {
     "userId": "test-user",
-    "tokenUsage": 0,
+    "tokenUsage": 28,
     "role": "user",
     "tier": "enterprise"
   }

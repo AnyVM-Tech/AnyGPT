@@ -23,6 +23,7 @@ export function setupMockProviderConfig() {
     id: 'openai-mock', // Use existing provider ID to override it
     apiKey: 'mock-api-key-for-testing',
     provider_url: 'http://localhost:3001/v1/chat/completions', // Point to our mock
+    streamingCompatible: true, // Mock provider supports streaming
     models: {
       'gpt-3.5-turbo': {
         id: 'gpt-3.5-turbo',

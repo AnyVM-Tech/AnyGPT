@@ -81,6 +81,7 @@ apps/api/
 *   **Admin Endpoints**: Secure endpoints for managing providers and users.
 *   **Development Testing Suite**: Comprehensive testing infrastructure with configurable mock providers.
 *   **Mock Provider Server**: Full-featured mock AI provider for testing with configurable response times, error rates, and behaviors.
+*   **WebSocket Endpoint**: Unified `/ws` endpoint for authenticated real-time chat completions (extensible for streaming & other actions).
 
 ## Prerequisites
 
@@ -217,6 +218,62 @@ The server exposes several sets of endpoints:
 *   **Admin Endpoints** (prefixed with `/api/admin`, require admin privileges):
     *   `POST /api/admin/providers`: Adds or updates a provider configuration in `providers.json` and fetches its models.
     *   `POST /api/admin/users/generate-key`: Generates a new API key for a user.
+
+## WebSocket Usage
+
+The server exposes a unified WebSocket endpoint at `ws://<host>:<port>/ws` for chat-style completions and future real-time features.
+
+### Message Flow
+
+1. Connect to `/ws`.
+2. Send auth message:
+```json
+{ "type": "auth", "apiKey": "YOUR_ANYGPT_API_KEY" }
+```
+3. On `{ "type": "auth.ok" }`, send a chat request:
+```json
+{
+    "type": "chat.completions",
+    "requestId": "req-123",
+    "model": "gpt-4o",
+    "messages": [ { "role": "user", "content": "Hello from WS" } ]
+}
+```
+4. Receive sequence:
+```json
+{ "type": "chat.start", "requestId": "req-123" }
+{ "type": "chat.complete", "requestId": "req-123", "response": "...assistant reply...", "usage": { "total_tokens": 42 }, "latencyMs": 512, "providerId": "openai-main" }
+```
+
+### Supported Message Types (Inbound)
+- `auth` – Authenticate with API key.
+- `chat.completions` – Single-shot chat completion (non-streaming for now).
+- `ping` – Liveness check (responds with `pong`).
+
+### Outbound Types
+- `auth.ok`
+- `error` (fields: `code`, `message`, optional `requestId`)
+- `chat.start`
+- `chat.complete`
+- `pong`
+
+### Rate Limiting
+WebSocket messages share per-connection tracking and enforce tier limits (RPS/RPM/RPD) similarly to REST endpoints. Exceeding limits yields:
+```json
+{ "type": "error", "code": "rate_limited", "message": "Rate limit exceeded" }
+```
+
+### Example Node Test Scripts
+ See `dev/testWs.ts`:
+ ```bash
+ TEST_API_KEY=YOUR_KEY pnpm exec tsx ./dev/testWs.ts
+ ```
+A REST streaming test can be performed with `curl` as shown above.
+
+ ### Planned Extensions
+ - Streaming partial responses via `chat.delta` frames
+ - Multiplex provider admin actions over WS
+ - Real-time usage and provider stats push updates
 
 ## Data Storage
 

@@ -100,7 +100,14 @@ export async function logError(error: any, request?: HyperExpress.Request): Prom
 
     const logLine = JSON.stringify(logEntry);
 
+    // Always log to console first
+    console.error(`[ErrorLogger] ${logEntry.errorMessage}`);
+    if (logEntry.errorStack) {
+        console.error(`[ErrorLogger] Stack: ${logEntry.errorStack}`);
+    }
+
     let loggedToRedis = false;
+    // Log to Redis if available and enabled
     if (logToRedis && redis && redis.status === 'ready') {
         try {
             console.log(`[ErrorLogger] Attempting to log to Redis key: ${redisLogKey}`);
@@ -109,23 +116,25 @@ export async function logError(error: any, request?: HyperExpress.Request): Prom
             loggedToRedis = true;
             console.log(`[ErrorLogger] Successfully logged to Redis key: ${redisLogKey}`);
         } catch (redisErr: any) {
-            console.error(`[ErrorLogger] Failed to log error to Redis key ${redisLogKey}. Error: ${redisErr.message}. Falling back to file.`, redisErr);
+            console.error(`[ErrorLogger] Failed to log error to Redis key ${redisLogKey}. Error: ${redisErr.message}`, redisErr);
         }
     }
 
-    // Fallback to file if Redis logging is disabled, not ready, or failed
-    if (!loggedToRedis) {
-        console.log(`[ErrorLogger] Attempting to append to log file: ${errorLogFilePath}`);
-        console.log(`[ErrorLogger] Log line content: ${logLine.trim()}`);
-        try {
-            await fs.promises.appendFile(errorLogFilePath, logLine + '\n', 'utf8');
-            console.log(`[ErrorLogger] Successfully wrote to JSON error log: ${errorLogFilePath}`);
-        } catch (fileErr: any) {
-             console.error(`[ErrorLogger] CRITICAL: Failed to write to JSON error log file: ${errorLogFilePath}. Error: ${fileErr.message}`, fileErr);
-             // If both Redis and file logging fail, we might have lost the log
-             if (logToRedis) {
-                 console.error('[ErrorLogger] Logging failed for both Redis and Filesystem.');
-             }
-        }
+    // Always log to file as well (not just as fallback)
+    console.log(`[ErrorLogger] Attempting to append to log file: ${errorLogFilePath}`);
+    try {
+        await fs.promises.appendFile(errorLogFilePath, logLine + '\n', 'utf8');
+        console.log(`[ErrorLogger] Successfully wrote to JSON error log: ${errorLogFilePath}`);
+    } catch (fileErr: any) {
+         console.error(`[ErrorLogger] CRITICAL: Failed to write to JSON error log file: ${errorLogFilePath}. Error: ${fileErr.message}`, fileErr);
+    }
+
+    // Summary of logging results
+    if (logToRedis && loggedToRedis) {
+        console.log(`[ErrorLogger] Error logged to both console and Redis`);
+    } else if (logToRedis) {
+        console.log(`[ErrorLogger] Error logged to console and file (Redis failed or not ready)`);
+    } else {
+        console.log(`[ErrorLogger] Error logged to console and file (Redis disabled)`);
     }
 } 
