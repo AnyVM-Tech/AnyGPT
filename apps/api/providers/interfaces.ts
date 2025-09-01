@@ -37,6 +37,7 @@ export interface Provider {
   id: string;
   apiKey: string | null;
   provider_url: string;
+  streamingCompatible?: boolean;
   models: { [modelId: string]: Model }; // Map of model IDs to their runtime state
   avg_response_time: number | null;
   avg_provider_latency: number | null;
@@ -47,6 +48,7 @@ export interface Provider {
 
 export interface IAIProvider {
   sendMessage(message: IMessage): Promise<{ response: string; latency: number }>;
+  sendMessageStream?(message: IMessage): AsyncGenerator<{ chunk: string; latency: number; response: string; anystream: any; }, void, unknown>;
 }
 
 export interface IMessage {

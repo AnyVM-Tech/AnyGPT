@@ -2,6 +2,11 @@ import HyperExpress, { Request, Response } from 'hyper-express';
 import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
+
+// Load environment variables based on NODE_ENV
+const envFile = process.env.NODE_ENV === 'test' ? '.env.test' : '.env';
+dotenv.config({ path: path.resolve(process.cwd(), envFile) });
+
 // import { Model, Provider, UserData, KeysFile } from './providers/interfaces.js'; // Keep if needed for init
 import { modelsRouter } from './routes/models.js';
 import { adminRouter } from './routes/admin.js'; // Import the admin router
@@ -25,8 +30,7 @@ import geminiRouter from './routes/gemini.js';
 import groqRouter from './routes/groq.js';
 import ollamaRouter from './routes/ollama.js';
 import openrouterRouter from './routes/openrouter.js';
-
-dotenv.config();
+import { attachWebSocket } from './ws/wsServer.js';
 
 const defaultModels = {
   object: 'list',
@@ -260,40 +264,48 @@ async function startServer() {
     }
 
     if (isRouterEnabled('ANTHROPIC')) {
-        app.use('/anthropic', anthropicRouter);
-        console.log('  ✓ Anthropic compatible routes enabled: /anthropic');
+        app.use('/v3', anthropicRouter);
+        console.log('  ✓ Anthropic compatible routes enabled: /v3');
     } else {
         console.log('  𐄂 Anthropic compatible routes disabled.');
     }
 
     if (isRouterEnabled('GEMINI')) {
-        app.use('/gemini', geminiRouter);
-        console.log('  ✓ Gemini compatible routes enabled: /gemini');
+        app.use('/v2', geminiRouter);
+        console.log('  ✓ Gemini compatible routes enabled: /v2');
     } else {
         console.log('  𐄂 Gemini compatible routes disabled.');
     }
 
     if (isRouterEnabled('GROQ')) {
-        app.use('/groq', groqRouter);
-        console.log('  ✓ Groq compatible routes enabled: /groq');
+        app.use('/v4', groqRouter);
+        console.log('  ✓ Groq compatible routes enabled: /v4');
     } else {
         console.log('  𐄂 Groq compatible routes disabled.');
     }
 
     if (isRouterEnabled('OLLAMA')) {
-        app.use('/ollama', ollamaRouter);
-        console.log('  ✓ Ollama compatible routes enabled: /ollama');
+        app.use('/v5', ollamaRouter);
+        console.log('  ✓ Ollama compatible routes enabled: /v5');
     } else {
         console.log('  𐄂 Ollama compatible routes disabled.');
     }
 
     if (isRouterEnabled('OPENROUTER')) {
-        app.use('/openrouter', openrouterRouter);
-        console.log('  ✓ OpenRouter compatible routes enabled: /openrouter');
+        app.use('/v6', openrouterRouter);
+        console.log('  ✓ OpenRouter compatible routes enabled: /v6');
     } else {
         console.log('  𐄂 OpenRouter compatible routes disabled.');
     }
     console.log(''); // Newline for cleaner log output
+
+    // --- WebSocket Endpoint ---
+    try {
+        attachWebSocket(app);
+        console.log('  ✓ WebSocket endpoint enabled: /ws');
+    } catch (e:any) {
+        console.warn('  𐄂 Failed to initialize WebSocket endpoint:', e.message);
+    }
 
     // --- Global Error Handler ---
     // This handler will catch errors from route handlers or middleware that call next(error)
