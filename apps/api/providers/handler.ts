@@ -270,7 +270,8 @@ export class MessageHandler {
                  if (result) { 
                     const inputTokens = Math.ceil(messages[messages.length - 1].content.length / 4); 
                     const outputTokens = Math.ceil(result.response.length / 4);
-                    let providerLatency: number | null = null; let observedSpeedTps: number | null = null;
+                    let providerLatency: number | null = null;
+                    let observedSpeedTps: number | null = null;
                     const expectedGenerationTimeMs = outputTokens > 0 && currentTokenGenerationSpeed > 0 ? (outputTokens / currentTokenGenerationSpeed) * 1000 : 0;
                     if (!isNaN(expectedGenerationTimeMs) && isFinite(expectedGenerationTimeMs)) providerLatency = Math.max(0, Math.round(result.latency - expectedGenerationTimeMs));
                     if (providerLatency !== null && outputTokens > 0) {
@@ -323,6 +324,150 @@ export class MessageHandler {
          console.error(`All attempts failed for model ${modelId}. Last error: ${lastError?.message || 'Unknown error'}`);
          throw new Error("Failed to process request: All available providers failed or were unsuitable."); // Generic error
     }
+
+    async *handleStreamingMessages(messages: IMessage[], modelId: string, apiKey: string): AsyncGenerator<any, void, unknown> {
+        if (!messages?.length || !modelId || !apiKey) throw new Error("Invalid arguments for streaming");
+        if (!messageHandler) throw new Error("Service temporarily unavailable.");
+
+        const validationResult = await validateApiKeyAndUsage(apiKey);
+        if (!validationResult.valid || !validationResult.userData || !validationResult.tierLimits) {
+            throw new Error(`Unauthorized: ${validationResult.error || 'Invalid key/config.'}`);
+        }
+
+        const allProvidersOriginal = await dataManager.load<LoadedProviders>('providers');
+        let activeProviders = allProvidersOriginal.filter(p => !p.disabled);
+        if (activeProviders.length === 0) throw new Error("All providers are currently disabled.");
+
+        let compatibleProviders = activeProviders.filter(p => p.models && modelId in p.models);
+        if (compatibleProviders.length === 0) throw new Error(`No active provider supports model ${modelId}.`);
+
+        // Simple selection for now: pick the first compatible provider.
+        // TODO: Reuse the sophisticated provider selection logic from handleMessages.
+        const selectedProviderData = compatibleProviders[0];
+        const providerId = selectedProviderData.id;
+        const providerConfig = providerConfigs[providerId];
+
+        if (!providerConfig) {
+            throw new Error(`Internal config error for provider: ${providerId}.`);
+        }
+
+        const providerInstance = new providerConfig.class(...(providerConfig.args || []));
+
+        // NATIVE STREAMING
+        if (selectedProviderData.streamingCompatible && typeof providerInstance.sendMessageStream === 'function') {
+            try {
+                const streamStart = Date.now();
+                const stream = providerInstance.sendMessageStream(messages[messages.length - 1]);
+                let fullResponse = '';
+                let totalLatency = 0;
+                let chunkCount = 0;
+                
+                for await (const { chunk, latency, response } of stream) {
+                    fullResponse = response; // Keep track of the full response for final stats
+                    totalLatency += latency || 0;
+                    chunkCount++;
+                    yield { type: 'chunk', chunk, latency };
+                }
+                
+                // Calculate the total response time for the stream
+                const totalResponseTime = Date.now() - streamStart;
+                
+                // After stream is done, update stats with the final result
+                const inputTokens = estimateTokens(messages[messages.length - 1].content);
+                const outputTokens = estimateTokens(fullResponse);
+                
+                // Calculate provider latency for streaming (similar to non-streaming logic)
+                const modelStats = selectedProviderData.models[modelId];
+                const currentTokenGenerationSpeed = modelStats?.avg_token_speed ?? this.initialModelThroughputMap.get(modelId) ?? this.DEFAULT_GENERATION_SPEED;
+                
+                let providerLatency: number | null = null;
+                let observedSpeedTps: number | null = null;
+                
+                const expectedGenerationTimeMs = outputTokens > 0 && currentTokenGenerationSpeed > 0 ? 
+                    (outputTokens / currentTokenGenerationSpeed) * 1000 : 0;
+                
+                if (!isNaN(expectedGenerationTimeMs) && isFinite(expectedGenerationTimeMs)) {
+                    providerLatency = Math.max(0, Math.round(totalResponseTime - expectedGenerationTimeMs));
+                }
+                
+                if (providerLatency !== null && outputTokens > 0) {
+                    const actualGenerationTimeMs = Math.max(1, totalResponseTime - providerLatency);
+                    const calculatedSpeed = outputTokens / (actualGenerationTimeMs / 1000);
+                    if (!isNaN(calculatedSpeed) && isFinite(calculatedSpeed)) {
+                        observedSpeedTps = calculatedSpeed;
+                    }
+                }
+                
+                const responseEntry: ResponseEntry = {
+                    timestamp: Date.now(),
+                    response_time: totalResponseTime,
+                    input_tokens: inputTokens,
+                    output_tokens: outputTokens,
+                    tokens_generated: inputTokens + outputTokens,
+                    provider_latency: providerLatency,
+                    observed_speed_tps: observedSpeedTps,
+                    apiKey: apiKey
+                };
+                // Update stats in the background
+                this.updateStatsInBackground(providerId, modelId, responseEntry, false);
+
+                // Yield final metrics for WebSocket/REST to consume
+                yield { 
+                    type: 'final', 
+                    tokenUsage: inputTokens + outputTokens, 
+                    providerId: providerId,
+                    latency: totalResponseTime,
+                    providerLatency: providerLatency,
+                    observedSpeedTps: observedSpeedTps
+                };
+
+            } catch (error: any) {
+                this.updateStatsInBackground(providerId, modelId, null, true);
+                throw new Error(`Stream failed for provider ${providerId}: ${error.message}`);
+            }
+        }
+        // SIMULATED STREAMING
+        else {
+            console.log(`Provider ${providerId} is not streaming compatible. Simulating stream.`);
+            const result = await this.handleMessages(messages, modelId, apiKey);
+            const responseText = result.response;
+            const chunkSize = 5; // characters
+            for (let i = 0; i < responseText.length; i += chunkSize) {
+                const chunk = responseText.substring(i, i + chunkSize);
+                yield { type: 'chunk', chunk, latency: result.latency };
+                await new Promise(resolve => setTimeout(resolve, 2)); // small delay
+            }
+            
+            // For simulated streaming, the metrics are already calculated in handleMessages
+            // Just pass them through directly
+            yield { 
+                type: 'final', 
+                tokenUsage: result.tokenUsage || 0, 
+                providerId: result.providerId,
+                latency: result.latency
+            };
+        }
+    }
+
+    private async updateStatsInBackground(providerId: string, modelId: string, responseEntry: ResponseEntry | null, isError: boolean) {
+        try {
+            let currentProvidersData = await dataManager.load<LoadedProviders>('providers');
+            const updatedProviderDataList = this.updateStatsInProviderList(
+                currentProvidersData,
+                providerId,
+                modelId,
+                responseEntry,
+                isError
+            );
+            await dataManager.save<LoadedProviders>('providers', updatedProviderDataList);
+        } catch (statsError: any) {
+            console.error(`Error updating/saving stats in background for provider ${providerId}/${modelId}. Error:`, statsError);
+        }
+    }
+}
+
+function estimateTokens(text: string): number {
+    return Math.ceil((text || '').length / 4);
 }
 
 export { messageHandler };

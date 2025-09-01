@@ -1,7 +1,16 @@
+import dotenv from 'dotenv';
+import path from 'path';
+
+// Load test environment variables
+const envFile = process.env.NODE_ENV === 'test' ? '.env.test' : '.env';
+dotenv.config({ path: path.resolve(process.cwd(), envFile) });
+
 import HyperExpress from 'hyper-express';
 import { randomUUID } from 'crypto';
 
 const app = new HyperExpress.Server();
+
+
 const port = 3001; // Different port from main API
 
 // Configurable mock settings
@@ -100,7 +109,7 @@ app.post('/v1/chat/completions', async (request, response) => {
     console.log('[MOCK] Received chat completion request:', JSON.stringify(body, null, 2));
   }
   
-  const { model, messages, max_tokens = 150, temperature = 0.7 } = body;
+  const { model, messages, max_tokens = 150, temperature = 0.7, stream = true } = body;
   
   if (!messages || !Array.isArray(messages) || messages.length === 0) {
     return response.status(400).json({
@@ -192,6 +201,80 @@ Code connects all worlds.`;
   // Calculate realistic response delay
   const processingDelay = calculateResponseDelay(outputTokens);
   
+  // Handle streaming requests
+  if (stream) {
+    if (mockConfig.enableLogs) {
+      console.log('[MOCK] Handling streaming request');
+    }
+    
+    response.setHeader('Content-Type', 'text/event-stream');
+    response.setHeader('Cache-Control', 'no-cache');
+    response.setHeader('Connection', 'keep-alive');
+    
+    const requestId = `chatcmpl-${randomUUID()}`;
+    const created = Math.floor(Date.now() / 1000);
+    const modelName = model || 'mock-gpt-3.5-turbo';
+    
+    // Split content into chunks for streaming
+    const chunkSize = 3; // characters per chunk
+    const chunks: string[] = [];
+    for (let i = 0; i < mockContent.length; i += chunkSize) {
+      chunks.push(mockContent.substring(i, i + chunkSize));
+    }
+    
+    setTimeout(async () => {
+      try {
+        // Send chunks
+        for (let i = 0; i < chunks.length; i++) {
+          const chunk = chunks[i];
+          const streamChunk = {
+            id: requestId,
+            object: 'chat.completion.chunk',
+            created: created,
+            model: modelName,
+            choices: [{
+              index: 0,
+              delta: { content: chunk },
+              finish_reason: null
+            }]
+          };
+          
+          response.write(`data: ${JSON.stringify(streamChunk)}\n\n`);
+          
+          // Small delay between chunks to simulate real streaming
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        
+        // Send final chunk
+        const finalChunk = {
+          id: requestId,
+          object: 'chat.completion.chunk',
+          created: created,
+          model: modelName,
+          choices: [{
+            index: 0,
+            delta: {},
+            finish_reason: 'stop'
+          }]
+        };
+        
+        response.write(`data: ${JSON.stringify(finalChunk)}\n\n`);
+        response.write(`data: [DONE]\n\n`);
+        response.end();
+        
+        if (mockConfig.enableLogs) {
+          console.log(`[MOCK] Streaming response completed for request ${requestId}`);
+        }
+      } catch (error) {
+        console.error('[MOCK] Error during streaming:', error);
+        response.end();
+      }
+    }, processingDelay);
+    
+    return;
+  }
+  
+  // Handle non-streaming requests
   setTimeout(() => {
     const responseData = {
       id: `chatcmpl-${randomUUID()}`,
