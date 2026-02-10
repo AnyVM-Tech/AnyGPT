@@ -14,9 +14,6 @@ importers:
       commander:
         specifier: ^12.1.0
         version: 12.1.0
-      hyper-express:
-        specifier: ^6.17.2
-        version: 6.17.3
       pnpm:
         specifier: ^10.5.2
         version: 10.5.2
@@ -69,9 +66,6 @@ importers:
       express:
         specifier: ^4.19.2
         version: 4.21.2
-      hyper-express:
-        specifier: ^6.16.3
-        version: 6.17.3
       ioredis:
         specifier: ^5.5.0
         version: 5.5.0
@@ -81,6 +75,9 @@ importers:
       selenium-webdriver:
         specifier: ^4.26.0
         version: 4.29.0(bufferutil@4.0.9)
+      uWebSockets.js:
+        specifier: github:uNetworking/uWebSockets.js#v20.51.0
+        version: https://codeload.github.com/uNetworking/uWebSockets.js/tar.gz/6609a88ffa9a16ac5158046761356ce03250a0df
       uuid:
         specifier: ^11.1.0
         version: 11.1.0
@@ -4504,6 +4501,7 @@ packages:
   next@15.2.0:
     resolution: {integrity: sha512-VaiM7sZYX8KIAHBrRGSFytKknkrexNfGb8GlG6e93JqueCspuGte8i4ybn8z4ww1x3f2uzY4YpTaBEW4/hvsoQ==}
     engines: {node: ^18.18.0 || ^19.8.0 || >= 20.0.0}
+    deprecated: This version has a security vulnerability. Please upgrade to a patched version. See https://nextjs.org/blog/CVE-2025-66478 for more details.
     hasBin: true
     peerDependencies:
       '@opentelemetry/api': ^1.1.0

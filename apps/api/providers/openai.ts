@@ -63,23 +63,30 @@ export class OpenAI implements IAIProvider {
       const response = await axios.post(url, data, { headers });
       const endTime = Date.now();
       const latency = endTime - startTime;
-      // Removed lastLatency update
 
-      if (response.data?.choices?.[0]?.message?.content) {
-        const responseText = response.data.choices[0].message.content;
-
-        // Removed all internal state updates (token calculation, updateProviderData, compute calls)
-
-        // Return only the response and latency
-        return {
-          response: responseText,
-          latency: latency,
-        };
-      } else {
-        // Handle cases where the response structure is unexpected
+      const raw = response.data?.choices?.[0]?.message?.content;
+      if (!raw) {
         console.error('Unexpected response structure from API:', response.data);
         throw new Error('Unexpected response structure from the API');
       }
+
+      const normalizeContent = (val: any): string => {
+        if (typeof val === 'string') return val;
+        if (Array.isArray(val)) {
+          for (const part of val) {
+            if (part?.type === 'image_url' && part.image_url?.url) return part.image_url.url;
+            if (part?.type === 'text' && typeof part.text === 'string') return part.text;
+          }
+        }
+        return typeof val === 'object' ? JSON.stringify(val) : String(val);
+      };
+
+      const responseText = normalizeContent(raw);
+
+      return {
+        response: responseText,
+        latency: latency,
+      };
     } catch (error: any) {
       // Removed busy flag management
       // Removed internal state updates on error

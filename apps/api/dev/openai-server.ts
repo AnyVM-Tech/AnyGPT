@@ -1,4 +1,4 @@
-import { Server, Router } from 'hyper-express';
+import { Server, Router } from '../lib/uws-compat.js';
 import { v4 as uuidv4 } from 'uuid';
 
 const app = new Server();
@@ -118,7 +118,7 @@ router.get('/v1/models', (req, res) => {
 
 // Health check endpoint
 router.get('/health', (req, res) => {
-  return res.send('OK');
+  return res.end('OK');
 });
 
 // Register router
@@ -131,7 +131,7 @@ app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   
   if (req.method === 'OPTIONS') {
-    return res.status(200).send();
+    return res.status(200).end();
   }
   
   return next();

@@ -2,7 +2,6 @@ import crypto from 'crypto';
 // Remove direct fs import if no longer needed
 // import fs from 'fs'; 
 import path from 'path';
-import { Request } from 'hyper-express';
 // Import the singleton DataManager instance
 import { dataManager } from './dataManager.js'; 
 // Import tiers data directly (static configuration)
@@ -120,26 +119,58 @@ export async function getTierLimits(apiKey: string): Promise<TierData | null> {
    return limits;
 }
 
-// extractMessageFromRequest remains synchronous (no data access)
-export async function extractMessageFromRequest(request: Request): Promise<{ messages: { role: string; content: string }[]; model: string; max_tokens?: number }> { 
-    // ... implementation remains same ...
-    try {
-        const requestBody = await request.json();
-        if (!requestBody || typeof requestBody !== 'object') throw new Error('Invalid body.');
-        if (!Array.isArray(requestBody.messages)) throw new Error('Invalid messages format.');
-        if (typeof requestBody.model !== 'string' || !requestBody.model) console.warn("Default model used.");
+// Parse and validate request body for chat/completions; caller supplies the already-parsed body.
+export function extractMessageFromRequestBody(requestBody: any): { messages: { role: string; content: any }[]; model: string; max_tokens?: number } { 
+  try {
+    if (!requestBody || typeof requestBody !== 'object') throw new Error('Invalid body.');
+    if (!Array.isArray(requestBody.messages)) throw new Error('Invalid messages format.');
+    if (typeof requestBody.model !== 'string' || !requestBody.model) console.warn("Default model used.");
+
+    // Basic validation for content: allow string or an array of typed parts
+    const normalizedMessages = requestBody.messages.map((m: any) => {
+      if (!m || typeof m !== 'object' || typeof m.role !== 'string') {
+        throw new Error('Each message must include a role.');
+      }
+      const content = m.content;
+      const isStringContent = typeof content === 'string';
+      const isArrayContent = Array.isArray(content);
+      if (!isStringContent && !isArrayContent) {
+        throw new Error('Message content must be a string or an array of content parts.');
+      }
+      if (isArrayContent) {
+        content.forEach((part: any) => {
+          if (!part || typeof part !== 'object' || typeof part.type !== 'string') {
+            throw new Error('Invalid content part: missing type.');
+          }
+          if (part.type === 'text' && typeof part.text !== 'string') {
+            throw new Error('Text parts require a text field.');
+          }
+          if (part.type === 'image_url') {
+            if (!part.image_url || typeof part.image_url.url !== 'string') {
+              throw new Error('image_url parts require image_url.url.');
+            }
+          }
+          if (part.type === 'input_audio') {
+            if (!part.input_audio || typeof part.input_audio.data !== 'string' || typeof part.input_audio.format !== 'string') {
+              throw new Error('input_audio parts require base64 data and format.');
+            }
+          }
+        });
+      }
+      return { role: m.role, content };
+    });
     
-        let maxTokens: number | undefined = undefined;
-        if (requestBody.max_tokens !== undefined && requestBody.max_tokens !== null) {
-            const parsedTokens = parseInt(requestBody.max_tokens, 10);
-            if (isNaN(parsedTokens) || parsedTokens <= 0) throw new Error('Invalid max_tokens.');
-            maxTokens = parsedTokens;
-        }
-        return { messages: requestBody.messages, model: requestBody.model || 'defaultModel', max_tokens: maxTokens };
-    } catch(error) {
-        console.error("Error parsing request:", error);
-        throw new Error(`Request parse failed: ${error instanceof Error ? error.message : String(error)}`);
+    let maxTokens: number | undefined = undefined;
+    if (requestBody.max_tokens !== undefined && requestBody.max_tokens !== null) {
+      const parsedTokens = parseInt(requestBody.max_tokens, 10);
+      if (isNaN(parsedTokens) || parsedTokens <= 0) throw new Error('Invalid max_tokens.');
+      maxTokens = parsedTokens;
     }
+    return { messages: normalizedMessages, model: requestBody.model || 'defaultModel', max_tokens: maxTokens };
+  } catch(error) {
+    console.error("Error parsing request:", error);
+    throw new Error(`Request parse failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 // Becomes async due to dataManager load/save

@@ -105,6 +105,11 @@ Once setup is complete:
 
 The setup script creates a `.env` file in `apps/api/.env` with your chosen configuration. You can manually edit this file later if needed.
 
+For OpenRouter support, ensure these are set (defaults provided by the setup script):
+
+- OPENROUTER_REFERRER=https://gpt.anyvm.tech
+- OPENROUTER_TITLE=AnyGPT
+
 ### Redis Cloud Connection String Format
 
 The setup script can parse Redis Cloud connection strings in these formats:

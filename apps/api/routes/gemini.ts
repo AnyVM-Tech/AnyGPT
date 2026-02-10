@@ -1,4 +1,4 @@
-import HyperExpress, { Request, Response } from 'hyper-express';
+import HyperExpress, { Request, Response } from '../lib/uws-compat.js';
 import dotenv from 'dotenv';
 import { messageHandler } from '../providers/handler.js'; 
 import { IMessage } from '../providers/interfaces.js'; 
@@ -144,8 +144,8 @@ function rateLimitMiddleware(request: Request, response: Response, next: () => v
  
 // --- Routes ---
  
-// Gemini Generate Content Route
-router.post('/v2/models/:modelId/generateContent', authAndUsageMiddleware, rateLimitMiddleware, async (request: Request, response: Response) => {
+// Gemini Generate Content Route (router mounted at /v2 in server.ts, so keep path relative here)
+router.post('/models/:modelId/generateContent', authAndUsageMiddleware, rateLimitMiddleware, async (request: Request, response: Response) => {
    const routeTimestamp = new Date().toISOString(); // Timestamp for this specific route handler context
    if (!request.apiKey || !request.tierLimits || !request.params.modelId) {
         const errDetail = { message: 'Bad Request: Missing API key, tier limits, or model ID after middleware.', code: 400, status: 'INVALID_ARGUMENT' };

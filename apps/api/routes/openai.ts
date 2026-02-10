@@ -1,10 +1,10 @@
-import HyperExpress, { Request, Response } from 'hyper-express';
+import HyperExpress, { Request, Response } from '../lib/uws-compat.js';
 import dotenv from 'dotenv';
 import { messageHandler } from '../providers/handler.js'; 
 import { IMessage } from '../providers/interfaces.js'; 
 import { 
     generateUserApiKey, // Now async
-    extractMessageFromRequest, 
+    extractMessageFromRequestBody, 
     updateUserTokenUsage, // Now async
     validateApiKeyAndUsage, // Now async
 } from '../modules/userData.js';
@@ -21,7 +21,7 @@ interface RequestTimestamps { [apiKey: string]: number[]; }
 const requestTimestamps: RequestTimestamps = {};
  
 // --- Request Extension ---
-declare module 'hyper-express' {
+declare module '../lib/uws-compat.js' {
   interface Request {
     apiKey?: string; userId?: string; userRole?: string;
     userTokenUsage?: number; userTier?: string; 
@@ -230,10 +230,9 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
   try {
     const userApiKey = request.apiKey!; 
     const tierLimits = request.tierLimits!; 
-    const result = await extractMessageFromRequest(request);
-    const { messages: rawMessages, model: modelId } = result;
-    // Extract stream from request body directly since it's not in the result type
     const requestBody = await request.json();
+    const result = extractMessageFromRequestBody(requestBody);
+    const { messages: rawMessages, model: modelId } = result;
     const stream = Boolean(requestBody.stream);
     
     // Per-request token check logic (remains commented out or implement as needed)
@@ -394,7 +393,8 @@ openaiRouter.post('/deployments/:deploymentId/chat/completions', authAndUsageMid
 
     try {
         // Extract messages using the same logic as the standard route
-        const { messages: rawMessages } = await extractMessageFromRequest(request); 
+        const requestBody = await request.json();
+        const { messages: rawMessages } = extractMessageFromRequestBody(requestBody); 
 
         // Use deploymentId as model identifier for the handler
         const formattedMessages: IMessage[] = rawMessages.map(msg => ({ content: msg.content, model: { id: deploymentId } }));

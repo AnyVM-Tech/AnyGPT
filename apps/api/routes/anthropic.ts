@@ -1,4 +1,4 @@
-import HyperExpress, { Request, Response } from 'hyper-express';
+import HyperExpress, { Request, Response } from '../lib/uws-compat.js';
 import dotenv from 'dotenv';
 import { messageHandler } from '../providers/handler.js'; 
 import { IMessage } from '../providers/interfaces.js'; 

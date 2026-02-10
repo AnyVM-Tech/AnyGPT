@@ -5,7 +5,7 @@ import path from 'path';
 const envFile = process.env.NODE_ENV === 'test' ? '.env.test' : '.env';
 dotenv.config({ path: path.resolve(process.cwd(), envFile) });
 
-import HyperExpress from 'hyper-express';
+import HyperExpress from '../lib/uws-compat.js';
 import { randomUUID } from 'crypto';
 
 const app = new HyperExpress.Server();
@@ -344,12 +344,15 @@ app.get('/health', async (request, response) => {
 });
 
 // Start the mock provider server
-app.listen(port, () => {
+app.listen(port).then(() => {
   console.log(`🎭 Mock Provider Server running on http://localhost:${port}`);
   console.log(`Available endpoints:`);
   console.log(`  POST /v1/chat/completions - Mock chat completions`);
   console.log(`  GET  /v1/models - Mock models list`);
   console.log(`  GET  /health - Health check`);
+}).catch((error) => {
+  console.error('Failed to start Mock Provider Server:', error);
+  process.exit(1);
 });
 
 // Graceful shutdown

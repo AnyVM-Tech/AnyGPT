@@ -1,4 +1,4 @@
-import HyperExpress, { Request, Response } from 'hyper-express';
+import HyperExpress, { Request, Response } from '../lib/uws-compat.js';
 import dotenv from 'dotenv';
 import { messageHandler } from '../providers/handler.js'; 
 import { IMessage } from '../providers/interfaces.js'; 
@@ -7,7 +7,7 @@ import {
     updateUserTokenUsage, // Now async
     validateApiKeyAndUsage, // Now async
     TierData, // Import TierData type
-    extractMessageFromRequest // Import helper
+    extractMessageFromRequestBody // Import helper
 } from '../modules/userData.js';
 
 dotenv.config();
@@ -112,7 +112,8 @@ router.post('/v6/chat/completions', authAndUsageMiddleware, rateLimitMiddleware,
 
    try {
         // Use the standard OpenAI-style extractor
-        const { messages: rawMessages, model } = await extractMessageFromRequest(request);
+        const requestBody = await request.json();
+        const { messages: rawMessages, model } = extractMessageFromRequestBody(requestBody);
         originalModelId = model; // Store the requested model name
 
         if (!originalModelId) {

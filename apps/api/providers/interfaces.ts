@@ -1,4 +1,6 @@
 // Interface for the structure of data in models.json
+export type ModelCapability = 'text' | 'image_input' | 'image_output' | 'audio_input' | 'audio_output';
+
 export interface ModelDefinition {
   id: string;
   object?: string;
@@ -6,6 +8,7 @@ export interface ModelDefinition {
   owned_by?: string;
   providers?: number;
   throughput?: number; // Represents tokens per second from the static file
+  capabilities?: ModelCapability[]; // Supported modalities for the model
 }
 
 // Removed TokenSpeedEntry interface
@@ -51,8 +54,13 @@ export interface IAIProvider {
   sendMessageStream?(message: IMessage): AsyncGenerator<{ chunk: string; latency: number; response: string; anystream: any; }, void, unknown>;
 }
 
+export type ContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string; detail?: string } }
+  | { type: 'input_audio'; input_audio: { data: string; format: string } };
+
 export interface IMessage {
-  content: string;
+  content: string | ContentPart[];
   model: {
     id: string;
   };

@@ -28,3 +28,5 @@ vite.config.ts.timestamp*
 pnpm-lock.yaml
 package-lock.json
 .turbo
+apps/api/providers.json
+apps/api/logs/admin-keys.json
