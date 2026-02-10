@@ -54,6 +54,7 @@ export interface ModelDefinition {
     owned_by: string; // Add owned_by field
     providers: number; // Add providers field
     throughput?: number | null;
+    capabilities?: string[];
 }
 // FIX: Add export
 export interface ModelsFileStructure { object: string; data: ModelDefinition[]; }
@@ -73,6 +74,21 @@ const redisKeys: Record<DataType, string> = {
     keys: 'api:keys_data',
     models: 'api:models_data', 
 };
+
+// In-memory cache to avoid re-hitting Redis/filesystem on every request, and to provide a
+// fast fallback when Redis is slow or temporarily unavailable.
+const inMemoryCache: Partial<Record<DataType, { value: ManagedDataStructure; ts: number }>> = {};
+const CACHE_TTL_MS = 5_000; // keep data warm for a few seconds between requests
+
+// Utility: wrap an async call with a timeout to avoid hanging on slow Redis responses.
+function withTimeout<T>(promise: Promise<T>, ms: number, onTimeoutMessage: string): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error(onTimeoutMessage)), ms);
+        promise
+            .then((val) => { clearTimeout(timer); resolve(val); })
+            .catch((err) => { clearTimeout(timer); reject(err); });
+    });
+}
 const defaultEmptyData: Record<DataType, any> = {
     providers: [],
     keys: {},
@@ -115,6 +131,13 @@ class DataManager {
      }
 
     async load<T extends ManagedDataStructure>(dataType: DataType): Promise<T> {
+        // Serve from warm cache if fresh to avoid hitting Redis for every request and to survive brief Redis hiccups.
+        const cached = inMemoryCache[dataType];
+        const now = Date.now();
+        if (cached && now - cached.ts < CACHE_TTL_MS) {
+            return cached.value as T;
+        }
+
         const redisKey = redisKeys[dataType];
         const filePath = filePaths[dataType];
         const defaultValue = defaultEmptyData[dataType] as T;
@@ -128,7 +151,11 @@ class DataManager {
                 return null;
             }
             try {
-                const redisData = await this.redisClient!.get(redisKey);
+                const redisData = await withTimeout(
+                    this.redisClient!.get(redisKey),
+                    750,
+                    `[DataManager] Redis GET timed out for ${dataType}`
+                );
                 if (redisData) {
                     console.log(`[DataManager] Data loaded successfully from Redis for: ${dataType}`);
                     return JSON.parse(redisData) as T; 
@@ -206,6 +233,8 @@ class DataManager {
                     console.error(`[DataManager] Error initiating save for ${dataType} back after fallback load:`, saveErr);
                 }
             }
+            // Update cache on successful load
+            inMemoryCache[dataType] = { value: loadedData, ts: Date.now() };
             return loadedData;
         }
 
@@ -217,10 +246,18 @@ class DataManager {
         } catch (saveErr) {
             console.error(`[DataManager] CRITICAL: Failed to save default value for ${dataType} during initial load. Error:`, saveErr);
         }
+        // Cache the default as well to avoid thrashing repeated fallbacks
+        inMemoryCache[dataType] = { value: defaultValue, ts: Date.now() };
         return defaultValue;
     }
 
     async save<T extends ManagedDataStructure>(dataType: DataType, data: T): Promise<void> {
+        // Safety guard: never overwrite providers.json with an empty array
+        if (dataType === 'providers' && Array.isArray(data) && data.length === 0) {
+            console.error('[DataManager] Refusing to save providers.json because data array is empty. Aborting save to prevent destruction.');
+            return;
+        }
+
         const redisKey = redisKeys[dataType];
         const filePath = filePaths[dataType];
         let stringifiedData: string;

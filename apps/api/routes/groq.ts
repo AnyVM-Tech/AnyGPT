@@ -1,13 +1,13 @@
-import HyperExpress, { Request, Response } from 'hyper-express';
+import HyperExpress, { Request, Response } from '../lib/uws-compat.js';
 import dotenv from 'dotenv';
-import { messageHandler } from '../providers/handler.js'; 
-import { IMessage } from '../providers/interfaces.js'; 
-import { 
+import { messageHandler } from '../providers/handler.js';
+import { IMessage } from '../providers/interfaces.js';
+import {
     generateUserApiKey, // Now async
     updateUserTokenUsage, // Now async
     validateApiKeyAndUsage, // Now async
     TierData, // Import TierData type
-    extractMessageFromRequest // Import helper
+    extractMessageFromRequestBody // Import helper
 } from '../modules/userData.js';
 import { logError } from '../modules/errorLogger.js'; // Changed import
 
@@ -157,11 +157,11 @@ router.post('/v4/chat/completions', authAndUsageMiddleware, rateLimitMiddleware,
 
    const userApiKey = request.apiKey!;
    let modelId: string = '';
-   let requestBody: any; // For error logging if needed
+    let requestBody: any; // For error logging if needed
 
    try {
-        requestBody = await extractMessageFromRequest(request); // Use the body from here
-        const { messages: rawMessages, model } = requestBody;
+       requestBody = await request.json();
+       const { messages: rawMessages, model } = extractMessageFromRequestBody(requestBody);
         
         if (!model) {
              const errDetail = { message: 'Missing \'model\' field in request body.', type: 'invalid_request_error', code: 'missing_field' };

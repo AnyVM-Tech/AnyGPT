@@ -1,4 +1,4 @@
-import HyperExpress, { Request, Response } from 'hyper-express';
+import HyperExpress, { Request, Response } from './lib/uws-compat.js';
 import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
@@ -116,7 +116,7 @@ function isRouterEnabled(routerName: string, defaultValue = true): boolean {
 // Extend HyperExpress Request interface if not already globally available
 // The declaration in openai.ts should make this global, but re-declaring parts
 // needed by generalAuthMiddleware here for clarity if this file were isolated.
-declare module 'hyper-express' {
+declare module './lib/uws-compat.js' {
     interface Request {
         apiKey?: string;
         userId?: string;
@@ -241,17 +241,24 @@ async function startServer() {
     console.log('\nRegistering API routers:');
 
     if (isRouterEnabled('MODELS')) {
+        // Mount at both /api and root so clients can hit /v1/models directly
         app.use('/api', modelsRouter);
-        console.log('  ✓ Models routes enabled: /api');
+        app.use('/', modelsRouter);
+        console.log('  ✓ Models routes enabled: /api and /');
     } else {
         console.log('  𐄂 Models routes disabled.');
     }
 
     // Admin routes require general authentication first to populate user context
     if (isRouterEnabled('ADMIN')) {
-        // The adminRouter itself contains adminOnlyMiddleware that checks request.userRole
-        app.use('/api/admin', generalAuthMiddleware, adminRouter);
-        console.log('  ✓ Admin routes enabled: /api/admin (general auth applied)');
+        app.use('/api/admin', generalAuthMiddleware);
+        app.use('/api/admin', adminRouter);
+
+        // Also expose admin routes at /admin for convenience
+        app.use('/admin', generalAuthMiddleware);
+        app.use('/admin', adminRouter);
+
+        console.log('  ✓ Admin routes enabled: /api/admin and /admin (general auth applied)');
     } else {
         console.log('  𐄂 Admin routes disabled.');
     }

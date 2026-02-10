@@ -15,7 +15,14 @@
             "created": { "type": "number" },
             "owned_by": { "type": "string" },
             "providers": { "type": "number" },
-            "throughput": { "type": "number" }
+            "throughput": { "type": "number" },
+            "capabilities": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": ["text", "image_input", "image_output", "audio_input", "audio_output"]
+              }
+            }
           }
         }
       }

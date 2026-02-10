@@ -1,0 +1,14 @@
+[Unit]
+Description=AnyGPT API Service
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/skullcmd/AnyGPT/apps/api
+ExecStart=/usr/bin/npm run dev
+Restart=always
+RestartSec=5
+User=root
+
+[Install]
+WantedBy=multi-user.target

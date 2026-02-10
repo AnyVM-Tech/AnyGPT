@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
-import HyperExpress from 'hyper-express'; // For Request type, if used
 import redis from '../modules/db.js'; // Import redis client
+import type { Request } from '../lib/uws-compat.js';
 
 const logDirectory = path.resolve(process.cwd(), 'logs'); // Logs at the workspace root
 const errorLogFilePath = path.join(logDirectory, 'api-error.jsonl'); // Changed to .jsonl
@@ -36,6 +36,7 @@ if (!fs.existsSync(logDirectory)) {
 interface ErrorLogEntry {
     timestamp: string;
     apiKey?: string;
+    originIp?: string;
     requestMethod?: string;
     requestUrl?: string;
     errorMessage: string;
@@ -44,7 +45,7 @@ interface ErrorLogEntry {
 }
 
 // Renamed function to reflect potential Redis logging
-export async function logError(error: any, request?: HyperExpress.Request): Promise<void> {
+export async function logError(error: any, request?: Request): Promise<void> {
     const timestamp = new Date().toISOString();
     console.log(`[ErrorLogger] logError called at ${timestamp}`);
 
@@ -56,6 +57,7 @@ export async function logError(error: any, request?: HyperExpress.Request): Prom
     if (request) {
         logEntry.requestMethod = request.method;
         logEntry.requestUrl = request.url;
+        logEntry.originIp = request.ip || request.headers?.['x-forwarded-for'] || request.headers?.['x-real-ip'];
         // Assuming apiKey is attached to the request object as defined in your openai.ts middleware
         if (request.apiKey && typeof request.apiKey === 'string') {
             logEntry.apiKey = request.apiKey; // Capture API key

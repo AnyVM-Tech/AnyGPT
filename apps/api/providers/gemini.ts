@@ -5,7 +5,7 @@ import {
   HarmBlockThreshold,
   GenerativeModel
 } from '@google/generative-ai';
-import { IAIProvider, IMessage } from './interfaces.js'; // Only import necessary interfaces
+import { IAIProvider, IMessage, ContentPart } from './interfaces.js'; // Only import necessary interfaces
 // Removed imports related to compute and Provider state
 
 dotenv.config();
@@ -52,6 +52,31 @@ export class GeminiAI implements IAIProvider {
     // Removed providerData initialization and initializeModelData call
   }
 
+  private toGeminiContent(content: string | ContentPart[]) {
+    if (typeof content === 'string') return content;
+    return content.map((part) => {
+      if (part.type === 'text') return { text: part.text };
+      if (part.type === 'image_url') {
+        // If the client sent a data URL, send inlineData; otherwise use fileData URI.
+        const url = part.image_url.url;
+        if (url.startsWith('data:')) {
+          const match = url.match(/^data:([^;]+);base64,(.+)$/);
+          const mimeType = match?.[1] || 'image/jpeg';
+          const data = match?.[2] || '';
+          return { inlineData: { data, mimeType } };
+        }
+        return { fileData: { fileUri: url, mimeType: 'image/jpeg' } };
+      }
+      if (part.type === 'input_audio') {
+        const mimeType = part.input_audio.format.startsWith('audio/')
+          ? part.input_audio.format
+          : `audio/${part.input_audio.format}`;
+        return { inlineData: { data: part.input_audio.data, mimeType } };
+      }
+      return { text: '' };
+    });
+  }
+
   // Removed isBusy, getLatency, getProviderData, initializeModelData methods
 
   /**
@@ -79,14 +104,21 @@ export class GeminiAI implements IAIProvider {
         history: [], // Assuming simple, stateless requests
       });
 
-      // Send the message content
-      const result = await chatSession.sendMessage(message.content);
+        // Send the message content
+        const result = await chatSession.sendMessage(this.toGeminiContent(message.content));
 
-      // Ensure response and text() method exist before calling
-      if (!result?.response?.text) {
+        // Try to extract inlineData image first, otherwise fall back to text
+        let responseText = '';
+        const parts = result?.response?.candidates?.[0]?.content?.parts || [];
+        const inlineImage = Array.isArray(parts) ? parts.find((p: any) => p?.inlineData?.data) : null;
+        if (inlineImage?.inlineData?.data) {
+          const mime = inlineImage.inlineData.mimeType || 'image/png';
+          responseText = `data:${mime};base64,${inlineImage.inlineData.data}`;
+        } else if (typeof result?.response?.text === 'function') {
+          responseText = await result.response.text();
+        } else {
           throw new Error('Invalid response structure received from Gemini API');
-      }
-      const responseText = await result.response.text();
+        }
 
       const endTime = Date.now();
       const latency = endTime - startTime;
@@ -129,7 +161,7 @@ export class GeminiAI implements IAIProvider {
         history: [],
       });
 
-      const result = await chatSession.sendMessageStream(message.content);
+      const result = await chatSession.sendMessageStream(this.toGeminiContent(message.content));
       let fullResponse = '';
       for await (const chunk of result.stream) {
         const chunkText = chunk.text();

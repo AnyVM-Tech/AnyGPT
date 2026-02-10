@@ -35,6 +35,11 @@ function guessOwnedBy(modelId: string): string {
  * 4. Removes models where their only provider is disabled or doesn't exist
  */
 export async function refreshProviderCountsInModelsFile(): Promise<void> {
+    const disableSync = (process.env.DISABLE_MODEL_SYNC || '').toLowerCase() !== 'false';
+    if (disableSync) {
+        console.log('Model sync is disabled (set DISABLE_MODEL_SYNC=false to enable). Skipping models.json update.');
+        return;
+    }
     console.log('Attempting to synchronize models.json with active providers...');
     try {
         // Load the current providers data
