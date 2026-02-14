@@ -4,18 +4,18 @@ import { messageHandler } from '../providers/handler.js';
 import { IMessage } from '../providers/interfaces.js'; 
 import { 
     updateUserTokenUsage, // Now async
-    validateApiKeyAndUsage, // Now async
     TierData, // Import TierData type
     // We don\'t use extractMessageFromRequest for Ollama format
 } from '../modules/userData.js';
+import { RequestTimestampStore } from '../modules/rateLimit.js';
+import { runAuthMiddleware, runRateLimitMiddleware } from '../modules/middlewareFactory.js';
 
 dotenv.config();
 
 const router = new HyperExpress.Router(); // Use Router for modularity
 
 // --- Rate Limiting Store --- 
-interface RequestTimestamps { [apiKey: string]: number[]; }
-const requestTimestamps: RequestTimestamps = {}; 
+const requestTimestamps: RequestTimestampStore = {}; 
 
 // --- Request Extension --- 
 // Assumed globally declared
@@ -24,61 +24,37 @@ const requestTimestamps: RequestTimestamps = {};
 
 // AUTH Middleware (Using Bearer token for consistency)
 async function authAndUsageMiddleware(request: Request, response: Response, next: () => void) {
-  const authHeader = request.headers['authorization'] || request.headers['Authorization'];
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-     // Generic 401 for missing key
-     return response.status(401).json({ error: 'Unauthorized: Missing or invalid Bearer token.' });
-  }
-  const apiKey = authHeader.slice(7);
-  
-  try {
-      const validationResult = await validateApiKeyAndUsage(apiKey); 
-      if (!validationResult.valid || !validationResult.userData || !validationResult.tierLimits) {
-          const statusCode = validationResult.error?.includes('limit reached') ? 429 : 401; 
-          const message = `Unauthorized: ${validationResult.error || 'Invalid API Key'}`;
-          return response.status(statusCode).json({ error: message }); 
-      }
-
-      // Attach data
-      request.apiKey = apiKey;
-      request.userId = validationResult.userData.userId;
-      request.userRole = validationResult.userData.role;
-      request.userTokenUsage = validationResult.userData.tokenUsage; 
-      request.userTier = validationResult.userData.tier; 
-      request.tierLimits = validationResult.tierLimits; 
-      
-      // Let flow continue
-
-  } catch (error) {
-       console.error("Ollama Route - Error during auth/usage check:", error);
-       return response.status(500).json({ error: 'Internal server error during validation.' }); 
-  }
+    return runAuthMiddleware(request, response, next, {
+        callNext: false,
+        extractApiKey: (req) => {
+            const authHeader = req.headers['authorization'] || req.headers['Authorization'];
+            return authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+        },
+        onMissingApiKey: () => ({ status: 401, body: { error: 'Unauthorized: Missing or invalid Bearer token.' } }),
+        onInvalidApiKey: (_req, details) => ({ status: details.statusCode, body: { error: `Unauthorized: ${details.error || 'Invalid API Key'}` } }),
+        onInternalError: (_req, error) => {
+            console.error('Ollama Route - Error during auth/usage check:', error);
+            return { status: 500, body: { error: 'Internal server error during validation.' } };
+        },
+    });
 }
 
 // RATE LIMIT Middleware
 function rateLimitMiddleware(request: Request, response: Response, next: () => void) {
-    if (!request.apiKey || !request.tierLimits) { 
-        console.error('Ollama Route - Internal Error: API Key or Tier Limits missing.');
-        return response.status(500).json({ error: 'Internal server error affecting rate limits.' }); 
-    }
-    const apiKey = request.apiKey;
-    const tierLimits = request.tierLimits; 
-    const now = Date.now();
-    requestTimestamps[apiKey] = requestTimestamps[apiKey] || [];
-    const timestamps = requestTimestamps[apiKey];
-    const oneMinuteAgo = now - 60000;
-    const recentTimestamps = timestamps.filter(ts => ts > oneMinuteAgo);
-    const requestsLastMinute = recentTimestamps.length;
-
-    // Primary limit: RPM
-    if (requestsLastMinute >= tierLimits.rpm) {
-        return response.status(429).json({ error: `Rate limit exceeded: You are limited to ${tierLimits.rpm} requests per minute.` }); 
-    }
-    
-    // Keep track
-    requestTimestamps[apiKey] = recentTimestamps;
-    requestTimestamps[apiKey].push(now);
-    next(); 
+        return runRateLimitMiddleware(request, response, next, requestTimestamps, {
+            onMissingContext: () => {
+                console.error('Ollama Route - Internal Error: API Key or Tier Limits missing.');
+                return { status: 500, body: { error: 'Internal server error affecting rate limits.' } };
+            },
+            onDenied: (_req, details) => {
+                const windowLabel = details.window === 'rps'
+                    ? 'requests per second'
+                    : details.window === 'rpm'
+                        ? 'requests per minute'
+                        : 'requests per day';
+                return { status: 429, body: { error: `Rate limit exceeded: You are limited to ${details.limit} ${windowLabel}.` } };
+            }
+        });
 }
  
 // --- Routes ---
@@ -127,15 +103,10 @@ router.post('/v5/api/chat', authAndUsageMiddleware, rateLimitMiddleware, async (
         const result = await messageHandler.handleMessages(formattedMessages, modelId, userApiKey);
  
         const totalTokensUsed = typeof result.tokenUsage === 'number' ? result.tokenUsage : 0;
-        // Estimate prompt/eval counts (very rough)
-        const promptTokens = Math.ceil(lastUserContent.length / 4); 
-        const completionTokens = Math.max(0, totalTokensUsed - promptTokens); 
+        const promptTokens = typeof result.promptTokens === 'number' ? result.promptTokens : Math.ceil(lastUserContent.length / 4); 
+        const completionTokens = typeof result.completionTokens === 'number' ? result.completionTokens : Math.max(0, totalTokensUsed - promptTokens); 
 
-        if (totalTokensUsed > 0) {
-            await updateUserTokenUsage(totalTokensUsed, userApiKey); 
-        } else {
-            console.warn(`Ollama Route - Token usage not reported/zero for key ${userApiKey.substring(0, 6)}...`);
-        }
+        await updateUserTokenUsage(totalTokensUsed, userApiKey); 
         
         // --- Format response like Ollama ---
         const ollamaResponse = {

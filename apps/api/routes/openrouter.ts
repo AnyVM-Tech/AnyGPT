@@ -5,18 +5,18 @@ import { IMessage } from '../providers/interfaces.js';
 import { 
     generateUserApiKey, // Now async
     updateUserTokenUsage, // Now async
-    validateApiKeyAndUsage, // Now async
     TierData, // Import TierData type
     extractMessageFromRequestBody // Import helper
 } from '../modules/userData.js';
+import { RequestTimestampStore } from '../modules/rateLimit.js';
+import { runAuthMiddleware, runRateLimitMiddleware } from '../modules/middlewareFactory.js';
 
 dotenv.config();
 
 const router = new HyperExpress.Router(); // Use Router for modularity
 
 // --- Rate Limiting Store --- 
-interface RequestTimestamps { [apiKey: string]: number[]; }
-const requestTimestamps: RequestTimestamps = {}; 
+const requestTimestamps: RequestTimestampStore = {}; 
 
 // --- Request Extension --- 
 // Assumed globally declared
@@ -25,78 +25,37 @@ const requestTimestamps: RequestTimestamps = {};
 
 // AUTH Middleware (OpenAI/OpenRouter Style: Authorization Bearer)
 async function authAndUsageMiddleware(request: Request, response: Response, next: () => void) {
-  const authHeader = request.headers['authorization'] || request.headers['Authorization'];
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-     // Mimic OpenRouter 401
-     return response.status(401).json({ error: { message: 'Invalid Authentication header', code: 'invalid_auth_header' } });
-  }
-  const apiKey = authHeader.slice(7);
-  
-  try {
-      const validationResult = await validateApiKeyAndUsage(apiKey); 
-      if (!validationResult.valid || !validationResult.userData || !validationResult.tierLimits) {
-          const statusCode = validationResult.error?.includes('limit reached') ? 429 : 401; 
-          const code = statusCode === 429 ? 'rate_limit_exceeded' : 'invalid_api_key';
-          const message = `Unauthorized: ${validationResult.error || 'Invalid API Key'}`;
-          return response.status(statusCode).json({ error: { message: message, code: code } }); 
-      }
-
-      // Attach data
-      request.apiKey = apiKey;
-      request.userId = validationResult.userData.userId;
-      request.userRole = validationResult.userData.role;
-      request.userTokenUsage = validationResult.userData.tokenUsage; 
-      request.userTier = validationResult.userData.tier; 
-      request.tierLimits = validationResult.tierLimits; 
-      
-      // Let flow continue
-
-  } catch (error) {
-       console.error("OpenRouter Route - Error during auth/usage check:", error);
-       return response.status(500).json({ error: { message: 'Internal server error during validation.', code: 'internal_server_error' }}); 
-  }
+    return runAuthMiddleware(request, response, next, {
+        callNext: false,
+        extractApiKey: (req) => {
+            const authHeader = req.headers['authorization'] || req.headers['Authorization'];
+            return authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+        },
+        onMissingApiKey: () => ({ status: 401, body: { error: { message: 'Invalid Authentication header', code: 'invalid_auth_header' } } }),
+        onInvalidApiKey: (_req, details) => {
+            const code = details.statusCode === 429 ? 'rate_limit_exceeded' : 'invalid_api_key';
+            const message = `Unauthorized: ${details.error || 'Invalid API Key'}`;
+            return { status: details.statusCode, body: { error: { message, code } } };
+        },
+        onInternalError: (_req, error) => {
+            console.error('OpenRouter Route - Error during auth/usage check:', error);
+            return { status: 500, body: { error: { message: 'Internal server error during validation.', code: 'internal_server_error' } } };
+        },
+    });
 }
 
 // RATE LIMIT Middleware (Standard RPM/RPS/RPD checks)
 function rateLimitMiddleware(request: Request, response: Response, next: () => void) {
-    if (!request.apiKey || !request.tierLimits) { 
-        console.error('OpenRouter Route - Internal Error: API Key or Tier Limits missing.');
-        return response.status(500).json({ error: { message: 'Internal server error affecting rate limits.', code: 'internal_server_error' }}); 
-    }
-    const apiKey = request.apiKey;
-    const tierLimits = request.tierLimits; 
-    const now = Date.now();
-    requestTimestamps[apiKey] = requestTimestamps[apiKey] || [];
-    const timestamps = requestTimestamps[apiKey];
-    const oneDayAgo = now - 86400000; 
-    const oneMinuteAgo = now - 60000;
-    const oneSecondAgo = now - 1000;
-    
-    const recentTimestamps = timestamps.filter(ts => ts > oneDayAgo);
-    requestTimestamps[apiKey] = recentTimestamps; 
-
-    const requestsLastSecond = recentTimestamps.filter(ts => ts > oneSecondAgo).length;
-    if (requestsLastSecond >= tierLimits.rps) {
-         response.setHeader('Retry-After', '1'); 
-         return response.status(429).json({ error: { message: `Rate limit exceeded. Limit: ${tierLimits.rps} RPS.`, code: 'rate_limit_exceeded' } });
-    }
-    
-    const requestsLastMinute = recentTimestamps.filter(ts => ts > oneMinuteAgo).length;
-     if (requestsLastMinute >= tierLimits.rpm) {
-         const retryAfterSeconds = Math.ceil(Math.max(0, (recentTimestamps[recentTimestamps.length - tierLimits.rpm] + 60000 - now) / 1000));
-         response.setHeader('Retry-After', String(retryAfterSeconds)); 
-        return response.status(429).json({ error: { message: `Rate limit exceeded. Limit: ${tierLimits.rpm} RPM.`, code: 'rate_limit_exceeded' } });
-    }
-
-    const requestsLastDay = recentTimestamps.length; 
-    if (requestsLastDay >= tierLimits.rpd) {
-         const retryAfterSeconds = Math.ceil(Math.max(0,(recentTimestamps[0] + 86400000 - now) / 1000)); 
-        response.setHeader('Retry-After', String(retryAfterSeconds)); 
-        return response.status(429).json({ error: { message: `Rate limit exceeded. Limit: ${tierLimits.rpd} RPD.`, code: 'rate_limit_exceeded' } });
-    }
-    
-    requestTimestamps[apiKey].push(now); 
-    next(); 
+    return runRateLimitMiddleware(request, response, next, requestTimestamps, {
+        onMissingContext: () => {
+            console.error('OpenRouter Route - Internal Error: API Key or Tier Limits missing.');
+            return { status: 500, body: { error: { message: 'Internal server error affecting rate limits.', code: 'internal_server_error' } } };
+        },
+        onDenied: (_req, details) => {
+            const windowLabel = details.window.toUpperCase();
+            return { status: 429, body: { error: { message: `Rate limit exceeded. Limit: ${details.limit} ${windowLabel}.`, code: 'rate_limit_exceeded' } } };
+        }
+    });
 }
  
 // --- Routes ---
@@ -131,15 +90,10 @@ router.post('/v6/chat/completions', authAndUsageMiddleware, rateLimitMiddleware,
         const result = await messageHandler.handleMessages(formattedMessages, baseModelId, userApiKey);
  
         const totalTokensUsed = typeof result.tokenUsage === 'number' ? result.tokenUsage : 0;
-        // Rough estimates for prompt/completion tokens
-        const promptTokens = Math.ceil(formattedMessages[formattedMessages.length - 1].content.length / 4); 
-        const completionTokens = Math.max(0, totalTokensUsed - promptTokens);
+        const promptTokens = typeof result.promptTokens === 'number' ? result.promptTokens : Math.ceil(String(formattedMessages[formattedMessages.length - 1].content || '').length / 4);
+        const completionTokens = typeof result.completionTokens === 'number' ? result.completionTokens : Math.max(0, totalTokensUsed - promptTokens);
 
-        if (totalTokensUsed > 0) {
-            await updateUserTokenUsage(totalTokensUsed, userApiKey); 
-        } else {
-            console.warn(`OpenRouter Route - Token usage not reported/zero for key ${userApiKey.substring(0, 6)}...`);
-        }
+        await updateUserTokenUsage(totalTokensUsed, userApiKey); 
         
         // --- Format response like OpenRouter (OpenAI compatible) ---
         const openRouterResponse = {

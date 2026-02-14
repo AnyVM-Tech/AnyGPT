@@ -1,8 +1,7 @@
 import HyperExpress from '../lib/uws-compat.js';
 import { refreshProviderCountsInModelsFile } from '../modules/modelUpdater.js';
-import { dataManager } from '../modules/dataManager.js'; // For serving the main models.json
+import { dataManager, ModelsFileStructure } from '../modules/dataManager.js'; // For serving the main models.json
 import { logError } from '../modules/errorLogger.js'; // Changed import
-import path from 'path';
 
 const modelsRouter = new HyperExpress.Router();
 
@@ -18,10 +17,8 @@ modelsRouter.get('/debug/ip', (request, response) => {
 
 async function sendModelsResponse(request: any, response: any) {
     try {
-        const filePath = path.resolve('models.json');
-        const fileContentString = await dataManager.readFile(filePath);
-        const jsonData = JSON.parse(fileContentString);
-        response.json(jsonData);
+        const modelsData = await dataManager.load<ModelsFileStructure>('models');
+        response.json(modelsData);
     } catch (error) {
         await logError(error, request);
         console.error('Error serving models.json:', error);

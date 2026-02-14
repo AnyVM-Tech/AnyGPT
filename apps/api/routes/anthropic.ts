@@ -5,18 +5,18 @@ import { IMessage } from '../providers/interfaces.js';
 import { 
     generateUserApiKey, // Now async
     updateUserTokenUsage, // Now async
-    validateApiKeyAndUsage, // Now async
     TierData // Import TierData type
 } from '../modules/userData.js';
 import { logError } from '../modules/errorLogger.js'; // Changed import
+import { RequestTimestampStore } from '../modules/rateLimit.js';
+import { runAuthMiddleware, runRateLimitMiddleware } from '../modules/middlewareFactory.js';
 
 dotenv.config();
 
 const router = new HyperExpress.Router(); // Use Router for modularity
 
 // --- Rate Limiting Store (Separate or Centralized?) ---
-interface RequestTimestamps { [apiKey: string]: number[]; }
-const requestTimestamps: RequestTimestamps = {}; // Local store for this route for now
+const requestTimestamps: RequestTimestampStore = {}; // Local store for this route for now
 
 // --- Request Extension --- 
 // Assumed globally declared, otherwise re-declare or centralize
@@ -25,118 +25,46 @@ const requestTimestamps: RequestTimestamps = {}; // Local store for this route f
 
 // AUTH Middleware (Adapted for Anthropic x-api-key)
 async function authAndUsageMiddleware(request: Request, response: Response, next: () => void) {
-  const apiKey = request.headers['x-api-key'] as string; // Anthropic uses x-api-key
   const timestamp = new Date().toISOString();
 
-  if (!apiKey) {
-     const errDetail = { message: 'Missing API key (x-api-key header required).' };
-     await logError(errDetail, request); // Renamed and added await
-     if (!response.completed) {
-       return response.status(401).json({ type: 'error', error: { type: 'authentication_error', message: errDetail.message }, timestamp }); 
-     } else { return; }
-  }
-  
-  try {
-      const validationResult = await validateApiKeyAndUsage(apiKey); 
-      if (!validationResult.valid || !validationResult.userData || !validationResult.tierLimits) {
-          const statusCode = validationResult.error?.includes('limit reached') ? 429 : 401; 
-          const errorType = statusCode === 429 ? 'rate_limit_error' : 'authentication_error';
-          const clientMessage = statusCode === 429 ? 'Rate limit reached' : 'Invalid API Key';
-          const logMsg = `${clientMessage}. ${validationResult.error || ''}`.trim();
-          await logError({ message: logMsg, details: validationResult.error, apiKey }, request); // Renamed and added await
-          if (!response.completed) {
-            return response.status(statusCode).json({ type: 'error', error: { type: errorType, message: logMsg }, timestamp }); 
-          } else { return; }
-      }
-
-      // Attach data
-      request.apiKey = apiKey;
-      request.userId = validationResult.userData.userId;
-      request.userRole = validationResult.userData.role;
-      request.userTokenUsage = validationResult.userData.tokenUsage; 
-      request.userTier = validationResult.userData.tier; 
-      request.tierLimits = validationResult.tierLimits; 
-      
-      // Let flow continue
-      next();
-
-  } catch (error: any) {
-       await logError(error, request); // Renamed and added await
-       console.error("Anthropic Route - Error during auth/usage check:", error);
-       if (!response.completed) {
-          return response.status(500).json({ 
-             error: 'Internal Server Error', 
-             reference: 'Error during authentication processing.',
-             timestamp 
-          }); 
-       } else { return; }
-  }
+  return runAuthMiddleware(request, response, next, {
+    extractApiKey: (req) => req.headers['x-api-key'] as string || null,
+    onMissingApiKey: async (req) => {
+      const errDetail = { message: 'Missing API key (x-api-key header required).' };
+      await logError(errDetail, req);
+      return { status: 401, body: { type: 'error', error: { type: 'authentication_error', message: errDetail.message }, timestamp } };
+    },
+    onInvalidApiKey: async (req, details) => {
+      const errorType = details.statusCode === 429 ? 'rate_limit_error' : 'authentication_error';
+      const clientMessage = details.statusCode === 429 ? 'Rate limit reached' : 'Invalid API Key';
+      const logMsg = `${clientMessage}. ${details.error || ''}`.trim();
+      await logError({ message: logMsg, details: details.error, apiKey: details.apiKey }, req);
+      return { status: details.statusCode, body: { type: 'error', error: { type: errorType, message: logMsg }, timestamp } };
+    },
+    onInternalError: async (req, error) => {
+      await logError(error, req);
+      console.error('Anthropic Route - Error during auth/usage check:', error);
+      return { status: 500, body: { error: 'Internal Server Error', reference: 'Error during authentication processing.', timestamp } };
+    },
+  });
 }
 
 // RATE LIMIT Middleware (Adapted for Anthropic)
 function rateLimitMiddleware(request: Request, response: Response, next: () => void) {
     const timestamp = new Date().toISOString();
-    if (!request.apiKey || !request.tierLimits) { 
+    return runRateLimitMiddleware(request, response, next, requestTimestamps, {
+      onMissingContext: (req) => {
         const errMsg = 'Internal Error: API Key or Tier Limits missing after auth (Anthropic rateLimitMiddleware).';
-        logError({ message: errMsg, requestPath: request.path }, request).catch(e => console.error("Failed background log:",e)); // Log but don't wait
+        logError({ message: errMsg, requestPath: req.path }, req).catch(e => console.error('Failed background log:', e));
         console.error(errMsg);
-        if (!response.completed) {
-          return response.status(500).json({ 
-             error: 'Internal Server Error', 
-             reference: 'Configuration error for rate limiting.', 
-             timestamp 
-          });
-        } else { return; }
-    }
-    const apiKey = request.apiKey;
-    const tierLimits = request.tierLimits; 
-    const now = Date.now();
-    requestTimestamps[apiKey] = requestTimestamps[apiKey] || [];
-    const currentApiKeyTimestamps = requestTimestamps[apiKey];
-    
-    // Filter timestamps for RPD, RPM, RPS checks
-    const oneDayAgo = now - 86400000; // 24 * 60 * 60 * 1000
-    const oneMinuteAgo = now - 60000;
-    const oneSecondAgo = now - 1000;
-
-    // Keep only relevant timestamps to avoid memory leak
-    const relevantTimestamps = currentApiKeyTimestamps.filter(ts => ts > oneDayAgo);
-    requestTimestamps[apiKey] = relevantTimestamps;
-
-    const requestsLastDay = relevantTimestamps.length; // Count for RPD directly from already filtered
-    const requestsLastMinute = relevantTimestamps.filter(ts => ts > oneMinuteAgo).length;
-    const requestsLastSecond = relevantTimestamps.filter(ts => ts > oneSecondAgo).length;
-
-    if (tierLimits.rps > 0 && requestsLastSecond >= tierLimits.rps) {
-         const errDetail = { message: `Rate limit exceeded: Max ${tierLimits.rps} RPS.`, type: 'rate_limit_error'};
-         logError(errDetail, request).catch(e => console.error("Failed background log:",e)); // Log but don't wait
-         response.setHeader('Retry-After', '1'); 
-         if (!response.completed) {
-           return response.status(429).json({ type: 'error', error: errDetail, timestamp });
-         } else { return; }
-    }
-    if (tierLimits.rpm > 0 && requestsLastMinute >= tierLimits.rpm) {
-        const errDetail = { message: `Rate limit exceeded: Max ${tierLimits.rpm} RPM.`, type: 'rate_limit_error'};
-        logError(errDetail, request).catch(e => console.error("Failed background log:",e)); // Log but don't wait
-        // Calculate Retry-After for RPM if possible, though Anthropic might not use it
-        const retryAfterSeconds = Math.max(1, Math.ceil(Math.max(0, (relevantTimestamps.find(ts => ts > oneMinuteAgo) || now) + 60000 - now) / 1000));
-        response.setHeader('Retry-After', String(retryAfterSeconds));
-        if (!response.completed) {
-          return response.status(429).json({ type: 'error', error: errDetail, timestamp });
-        } else { return; }
-    }
-    if (tierLimits.rpd > 0 && requestsLastDay >= tierLimits.rpd) {
-        const errDetail = { message: `Rate limit exceeded: Max ${tierLimits.rpd} RPD.`, type: 'rate_limit_error'};
-        logError(errDetail, request).catch(e => console.error("Failed background log:",e)); // Log but don't wait
-        const retryAfterSeconds = Math.max(1, Math.ceil(Math.max(0,(relevantTimestamps[0] || now) + 86400000 - now) / 1000));
-        response.setHeader('Retry-After', String(retryAfterSeconds)); 
-        if (!response.completed) {
-          return response.status(429).json({ type: 'error', error: errDetail, timestamp });
-        } else { return; }
-    }
-    
-    requestTimestamps[apiKey].push(now);
-    next(); 
+        return { status: 500, body: { error: 'Internal Server Error', reference: 'Configuration error for rate limiting.', timestamp } };
+      },
+      onDenied: (req, details) => {
+        const errDetail = { message: `Rate limit exceeded: Max ${details.limit} ${details.window.toUpperCase()}.`, type: 'rate_limit_error' };
+        logError(errDetail, req).catch(e => console.error('Failed background log:', e));
+        return { status: 429, body: { type: 'error', error: errDetail, timestamp } };
+      }
+    });
 }
  
 // --- Routes ---
@@ -202,15 +130,10 @@ router.post('/v3/messages', authAndUsageMiddleware, rateLimitMiddleware, async (
         const result = await messageHandler.handleMessages(formattedMessages, modelId, userApiKey);
  
         const totalTokensUsed = typeof result.tokenUsage === 'number' ? result.tokenUsage : 0;
-        // TODO: Get separate input/output tokens if handler provides them later
-        const inputTokens = Math.ceil(lastUserContent.length / 4); // Rough estimate
-        const outputTokens = Math.max(0, totalTokensUsed - inputTokens); // Rough estimate
+        const inputTokens = typeof result.promptTokens === 'number' ? result.promptTokens : Math.ceil(lastUserContent.length / 4);
+        const outputTokens = typeof result.completionTokens === 'number' ? result.completionTokens : Math.max(0, totalTokensUsed - inputTokens);
 
-        if (totalTokensUsed > 0) {
-            await updateUserTokenUsage(totalTokensUsed, userApiKey); 
-        } else {
-            console.warn(`Anthropic Route - Token usage not reported/zero for key ${userApiKey.substring(0, 6)}...`);
-        }
+        await updateUserTokenUsage(totalTokensUsed, userApiKey); 
         
         // --- Format response like Anthropic ---
         const anthropicResponse = {
