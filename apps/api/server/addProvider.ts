@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { dataManager, LoadedProviders } from '../modules/dataManager.js';
+import { upsertProviderById } from '../modules/providerUpsert.js';
 // Ensure this path is correct based on your project structure for these shared interfaces
 import type { Provider, Model } from '../providers/interfaces.js';
 
@@ -110,14 +111,8 @@ export async function addOrUpdateProvider(payload: AddProviderPayload): Promise<
 
     // 3. Add or Update Provider in the list
     // Now that interfaces are aligned, we can use the provider entry directly
-    const existingIdx = providers.findIndex((p) => p.id === providerId);
-    if (existingIdx >= 0) {
-        providers[existingIdx] = newProviderEntry;
-        console.log(`Updated existing provider entry with ID: ${providerId}`);
-    } else {
-        providers.push(newProviderEntry);
-        console.log(`Added new provider entry with ID: ${providerId}`);
-    }
+    const { action } = upsertProviderById(providers as Provider[], newProviderEntry);
+    console.log(`${action === 'updated' ? 'Updated' : 'Added'} provider entry with ID: ${providerId}`);
 
     // 4. Write Updated Data Back using dataManager
     try {
