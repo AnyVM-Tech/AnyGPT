@@ -35,3 +35,5 @@ apps/api/logs/admin-keys.json
 **/keys.json
 **/api-error.jsonl
 apps/api/logs/api-error.jsonl
+**/key-transfer-failures.json
+apps/api/logs/key-transfer-failures.json
