@@ -6,13 +6,16 @@ import {
     Provider as ProviderStateStructure,
     Model,
     ModelCapability,
+    ProviderResponse,
+    ProviderUsage,
 } from './interfaces.js'; // Removed ModelDefinition from here
 import { GeminiAI } from './gemini.js';
 import { ImagenAI } from './imagen.js';
 import { OpenAI } from './openai.js';
 import { OpenRouterAI } from './openrouter.js';
 import { DeepseekAI } from './deepseek.js';
-import { computeProviderStatsWithEMA, updateProviderData, computeProviderScore, applyTimeWindow } from '../modules/compute.js';
+import { updateProviderData, applyTimeWindow } from '../modules/compute.js';
+import { computeProviderMetricsInWorker } from '../modules/workerPool.js';
 // Import DataManager and necessary EXPORTED types
 import { 
     dataManager, 
@@ -31,12 +34,13 @@ import {
   UserData, // Assuming this is exported from userData
   TierData, // Assuming this is exported from userData
 } from '../modules/userData.js';
-// Assuming updateUserTokenUsage is still needed and exported from userData
-import { updateUserTokenUsage } from '../modules/userData.js'; 
+import { isExcludedError } from '../modules/errorExclusion.js';
 
 
 dotenv.config();
 const ajv = new Ajv();
+
+const AUTO_DISABLE_PROVIDERS = process.env.DISABLE_PROVIDER_AUTO_DISABLE !== 'true';
 
 // --- Paths & Schemas ---
 const providersSchemaPath = path.resolve('providers.schema.json');
@@ -115,6 +119,62 @@ export class MessageHandler {
     private readonly DEFAULT_GENERATION_SPEED = 50; 
     private readonly TIME_WINDOW_HOURS = 24; 
     private readonly CONSECUTIVE_ERROR_THRESHOLD = 5; // Threshold for disabling
+
+    private normalizeModelId(modelId: string): string {
+        return String(modelId || '').toLowerCase().replace(/^google\//, '');
+    }
+
+    private shouldUseImagenProvider(providerId: string, modelId: string): boolean {
+        const normalizedModelId = this.normalizeModelId(modelId);
+        const isGoogleFamilyProvider = providerId.includes('gemini') || providerId === 'google' || providerId.includes('imagen');
+        const isImagenFamilyModel = normalizedModelId.startsWith('imagen-') || normalizedModelId.startsWith('nano-banana');
+        return isGoogleFamilyProvider && isImagenFamilyModel;
+    }
+
+    private isInvalidProviderCredentialError(error: any): boolean {
+        const message = String(error?.message || error || '').toLowerCase();
+        if (!message) return false;
+
+        return (
+            message.includes('api_key_invalid') ||
+            message.includes('api key not found') ||
+            message.includes('invalid api key') ||
+            message.includes('invalid authentication') ||
+            message.includes('incorrect api key') ||
+            message.includes('unauthorized')
+        );
+    }
+
+    private isModelAccessError(error: any): boolean {
+        const message = String(error?.message || error || '').toLowerCase();
+        return (
+            message.includes('does not have access to model') ||
+            message.includes('model_not_found') ||
+            message.includes('no gemini model available') ||
+            message.includes('not found for api version')
+        );
+    }
+
+    private normalizeUsage(usage: ProviderUsage | undefined, fallbackInput: number, fallbackOutput: number) {
+        let inputTokens = typeof usage?.prompt_tokens === 'number' ? usage.prompt_tokens : fallbackInput;
+        let outputTokens = typeof usage?.completion_tokens === 'number' ? usage.completion_tokens : fallbackOutput;
+        const totalTokens = typeof usage?.total_tokens === 'number' ? usage.total_tokens : undefined;
+
+        if (totalTokens !== undefined && !Number.isNaN(totalTokens)) {
+            if (typeof usage?.prompt_tokens === 'number' && typeof usage?.completion_tokens !== 'number') {
+                outputTokens = Math.max(0, totalTokens - inputTokens);
+            } else if (typeof usage?.completion_tokens === 'number' && typeof usage?.prompt_tokens !== 'number') {
+                inputTokens = Math.max(0, totalTokens - outputTokens);
+            } else if (typeof usage?.prompt_tokens !== 'number' && typeof usage?.completion_tokens !== 'number') {
+                outputTokens = Math.max(0, totalTokens - inputTokens);
+            }
+        }
+
+        return {
+            inputTokens: Math.max(0, Math.round(inputTokens)),
+            outputTokens: Math.max(0, Math.round(outputTokens)),
+        };
+    }
 
     constructor(throughputMap: Map<string, number>, capabilitiesMap: Map<string, ModelCapability[]>) { 
         this.initialModelThroughputMap = throughputMap;
@@ -241,7 +301,14 @@ export class MessageHandler {
         return;
     }
     
-    private updateStatsInProviderList(providers: LoadedProviderData[], providerId: string, modelId: string, responseEntry: ResponseEntry | null, isError: boolean): LoadedProviderData[] { 
+    private async updateStatsInProviderList(
+        providers: LoadedProviderData[],
+        providerId: string,
+        modelId: string,
+        responseEntry: ResponseEntry | null,
+        isError: boolean,
+        attemptError?: any
+    ): Promise<LoadedProviderData[]> {
         const providerIndex = providers.findIndex(p => p.id === providerId);
         if (providerIndex === -1) return providers; 
         let providerData = providers[providerIndex]; 
@@ -272,11 +339,30 @@ export class MessageHandler {
 
         // Update consecutive errors and disabled status
         if (isError) {
-            modelData.consecutive_errors = (modelData.consecutive_errors || 0) + 1;
-            if (modelData.consecutive_errors >= this.CONSECUTIVE_ERROR_THRESHOLD) {
+            // Remove model from provider if error indicates permanent access denial
+            if (this.isModelAccessError(attemptError)) {
+                console.warn(`Removing model ${modelId} from provider ${providerId} due to permanent access restriction (Error: ${attemptError?.message || 'unknown'}).`);
+                delete providerData.models[modelId];
+                // Return immediately without incrementing errors or disabling provider
+                return providers;
+            }
+
+            // Skip error counting entirely for excluded error patterns
+            if (isExcludedError(attemptError)) {
+                // Don't increment errors or disable — treat as a non-event
+            } else if (AUTO_DISABLE_PROVIDERS && this.isInvalidProviderCredentialError(attemptError)) {
                 if (!providerData.disabled) {
-                    console.warn(`Disabling provider ${providerId} due to ${modelData.consecutive_errors} consecutive errors on model ${modelId}.`);
-                    providerData.disabled = true;
+                    console.warn(`Disabling provider ${providerId} due to invalid provider credentials.`);
+                }
+                providerData.disabled = true;
+                modelData.consecutive_errors = this.CONSECUTIVE_ERROR_THRESHOLD;
+            } else {
+                modelData.consecutive_errors = (modelData.consecutive_errors || 0) + 1;
+                if (AUTO_DISABLE_PROVIDERS && modelData.consecutive_errors >= this.CONSECUTIVE_ERROR_THRESHOLD) {
+                    if (!providerData.disabled) {
+                        console.warn(`Disabling provider ${providerId} due to ${modelData.consecutive_errors} consecutive errors on model ${modelId}.`);
+                        providerData.disabled = true;
+                    }
                 }
             }
         } else {
@@ -290,8 +376,7 @@ export class MessageHandler {
         }
 
         updateProviderData(providerData as ProviderStateStructure, modelId, responseEntry, isError); 
-        computeProviderStatsWithEMA(providerData as ProviderStateStructure, this.alpha); 
-        computeProviderScore(providerData as ProviderStateStructure, 0.7, 0.3); 
+        await computeProviderMetricsInWorker(providerData as ProviderStateStructure, this.alpha, 0.7, 0.3);
         return providers; 
     }
 
@@ -326,38 +411,59 @@ export class MessageHandler {
 
             // Inject modelId for Gemini so the SDK calls the correct model instead of a fixed default
             const args = providerConfig.args ? [...providerConfig.args] : [];
-            if (providerConfig.class === GeminiAI) {
+            let ProviderClass = providerConfig.class;
+
+            if (this.shouldUseImagenProvider(providerId, modelId)) {
+                ProviderClass = ImagenAI;
+            }
+
+            if (ProviderClass === GeminiAI) {
                 // Ensure API key stays first arg; if missing, fall back to provider's stored key
                 args[0] = args[0] ?? selectedProvider.apiKey ?? '';
                 args[1] = modelId;
             }
-            if (providerConfig.class === ImagenAI) {
+            if (ProviderClass === ImagenAI) {
                 args[0] = args[0] ?? selectedProvider.apiKey ?? '';
                 args[1] = modelId;
             }
 
-            const providerInstance = new providerConfig.class(...args);
-             const modelStats = selectedProvider.models[modelId];
-             const currentTokenGenerationSpeed = modelStats?.avg_token_speed ?? this.initialModelThroughputMap.get(modelId) ?? this.DEFAULT_GENERATION_SPEED;
-             let result: { response: string; latency: number } | null = null;
+            const providerInstance = new ProviderClass(...args);
+             let result: ProviderResponse | null = null;
              let responseEntry: ResponseEntry | null = null; 
              let sendMessageError: any = null; // Renamed from attemptError for clarity
 
              try { 
-                 result = await providerInstance.sendMessage({ content: messages[messages.length - 1].content, model: { id: modelId } });
+                 const lastMessage = messages[messages.length - 1];
+                 const messageForProvider: IMessage = { ...lastMessage, model: { id: modelId } };
+                 result = await providerInstance.sendMessage(messageForProvider);
                  if (result) { 
-                    const inputTokens = Math.ceil(messages[messages.length - 1].content.length / 4); 
-                    const outputTokens = Math.ceil(result.response.length / 4);
-                    let providerLatency: number | null = null;
+                    const estimatedInputTokens = messages.reduce((sum, msg) => {
+                        const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+                        return sum + estimateTokens(content);
+                    }, 0);
+                    const estimatedOutputTokens = estimateTokens(result.response || '');
+                    const { inputTokens, outputTokens } = this.normalizeUsage(result.usage, estimatedInputTokens, estimatedOutputTokens);
+                    const tokensGenerated = inputTokens + outputTokens;
+
+                    const providerLatency: number | null = Math.max(0, Math.round(result.latency));
                     let observedSpeedTps: number | null = null;
-                    const expectedGenerationTimeMs = outputTokens > 0 && currentTokenGenerationSpeed > 0 ? (outputTokens / currentTokenGenerationSpeed) * 1000 : 0;
-                    if (!isNaN(expectedGenerationTimeMs) && isFinite(expectedGenerationTimeMs)) providerLatency = Math.max(0, Math.round(result.latency - expectedGenerationTimeMs));
-                    if (providerLatency !== null && outputTokens > 0) {
-                         const actualGenerationTimeMs = Math.max(1, result.latency - providerLatency); 
-                         const calculatedSpeed = outputTokens / (actualGenerationTimeMs / 1000);
-                         if (!isNaN(calculatedSpeed) && isFinite(calculatedSpeed)) observedSpeedTps = calculatedSpeed;
+                    if (outputTokens > 0 && result.latency > 0) {
+                        const generationTimeSeconds = Math.max(0.001, result.latency / 1000);
+                        const calculatedSpeed = outputTokens / generationTimeSeconds;
+                        if (!isNaN(calculatedSpeed) && isFinite(calculatedSpeed) && calculatedSpeed > 0) {
+                            observedSpeedTps = calculatedSpeed;
+                        }
                     }
-                    responseEntry = { timestamp: Date.now(), response_time: result.latency, input_tokens: inputTokens, output_tokens: outputTokens, tokens_generated: inputTokens + outputTokens, provider_latency: providerLatency, observed_speed_tps: observedSpeedTps, apiKey: apiKey };
+                    responseEntry = {
+                        timestamp: Date.now(),
+                        response_time: result.latency,
+                        input_tokens: inputTokens,
+                        output_tokens: outputTokens,
+                        tokens_generated: tokensGenerated,
+                        provider_latency: providerLatency,
+                        observed_speed_tps: observedSpeedTps,
+                        apiKey: apiKey
+                    };
                  } else { 
                     sendMessageError = new Error(`Provider ${providerId} returned null result for model ${modelId}.`); 
                  }
@@ -367,17 +473,18 @@ export class MessageHandler {
              }
 
              // --- Update Stats & Save (Always, regardless of attempt outcome) ---
-             try {
-                 let currentProvidersData = await dataManager.load<LoadedProviders>('providers');
-                 const updatedProviderDataList = this.updateStatsInProviderList(
-                     currentProvidersData, 
-                     providerId, 
-                     modelId, 
-                     responseEntry, // Null if error occurred during generation or result was null
-                     !!sendMessageError // isError flag based on sendMessageError
-                 );
-                 await dataManager.save<LoadedProviders>('providers', updatedProviderDataList); 
-             } catch (statsError: any) {
+            try {
+                await dataManager.updateWithLock<LoadedProviders>('providers', async (currentProvidersData) => {
+                    return this.updateStatsInProviderList(
+                        currentProvidersData,
+                        providerId,
+                        modelId,
+                        responseEntry,
+                        !!sendMessageError,
+                        sendMessageError
+                    );
+                });
+            } catch (statsError: any) {
                  console.error(`Error updating/saving stats for provider ${providerId}/${modelId}. Attempt outcome (sendMessageError): ${sendMessageError || 'Success'}. Stats error:`, statsError);
                  // Do not let stats error stop the loop or overwrite sendMessageError if API call failed.
                  // If API call succeeded (sendMessageError is null), but stats failed, the request is still considered successful.
@@ -389,6 +496,8 @@ export class MessageHandler {
                     response: result.response, 
                     latency: result.latency, 
                     tokenUsage: responseEntry.tokens_generated,
+                    promptTokens: responseEntry.input_tokens,
+                    completionTokens: responseEntry.output_tokens,
                     providerId: providerId 
                 };
              } else {
@@ -404,7 +513,12 @@ export class MessageHandler {
          throw new Error(`Failed to process request: ${detail}`); // Surface the last provider error for debugging
     }
 
-    async *handleStreamingMessages(messages: IMessage[], modelId: string, apiKey: string): AsyncGenerator<any, void, unknown> {
+    async *handleStreamingMessages(
+        messages: IMessage[],
+        modelId: string,
+        apiKey: string,
+        options?: { disablePassthrough?: boolean }
+    ): AsyncGenerator<any, void, unknown> {
         if (!messages?.length || !modelId || !apiKey) throw new Error("Invalid arguments for streaming");
         if (!messageHandler) throw new Error("Service temporarily unavailable.");
 
@@ -434,21 +548,58 @@ export class MessageHandler {
             }
 
             const streamArgs = providerConfig.args ? [...providerConfig.args] : [];
-            if (providerConfig.class === GeminiAI) {
+            let StreamProviderClass = providerConfig.class;
+
+            if (this.shouldUseImagenProvider(providerId, modelId)) {
+                StreamProviderClass = ImagenAI;
+            }
+
+            if (StreamProviderClass === GeminiAI) {
                 streamArgs[0] = streamArgs[0] ?? selectedProviderData.apiKey ?? '';
                 streamArgs[1] = modelId;
             }
-            if (providerConfig.class === ImagenAI) {
+            if (StreamProviderClass === ImagenAI) {
                 streamArgs[0] = streamArgs[0] ?? selectedProviderData.apiKey ?? '';
                 streamArgs[1] = modelId;
             }
 
-            const providerInstance = new providerConfig.class(...streamArgs);
+            const providerInstance = new StreamProviderClass(...streamArgs);
 
             try {
+                const lastMessage = messages[messages.length - 1];
+                const messageForProvider: IMessage = { ...lastMessage, model: { id: modelId } };
+
+                if (
+                    !options?.disablePassthrough &&
+                    selectedProviderData.streamingCompatible &&
+                    typeof providerInstance.createPassthroughStream === 'function'
+                ) {
+                    try {
+                        const passthrough = await providerInstance.createPassthroughStream(messageForProvider);
+                        if (passthrough?.upstream) {
+                            const promptTokens = messages.reduce((sum, msg) => {
+                                const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+                                return sum + estimateTokens(content);
+                            }, 0);
+
+                            console.log(`[StreamPassthrough] Activated for provider ${providerId} (${passthrough.mode}).`);
+                            yield {
+                                type: 'passthrough',
+                                providerId,
+                                passthrough,
+                                promptTokens,
+                                startedAt: Date.now(),
+                            };
+                            return;
+                        }
+                    } catch (passthroughError: any) {
+                        console.warn(`[StreamPassthrough] Fallback to normalized streaming for provider ${providerId}: ${passthroughError?.message || 'unknown passthrough setup error'}`);
+                    }
+                }
+
                 if (selectedProviderData.streamingCompatible && typeof providerInstance.sendMessageStream === 'function') {
                     const streamStart = Date.now();
-                    const stream = providerInstance.sendMessageStream(messages[messages.length - 1]);
+                    const stream = providerInstance.sendMessageStream(messageForProvider);
                     let fullResponse = '';
                     let totalLatency = 0;
                     let chunkCount = 0;
@@ -461,27 +612,18 @@ export class MessageHandler {
                     }
 
                     const totalResponseTime = Date.now() - streamStart;
-                    const messageContent = messages[messages.length - 1].content;
-                    const contentString = typeof messageContent === 'string' ? messageContent : JSON.stringify(messageContent);
-                    const inputTokens = estimateTokens(contentString);
+                    const inputTokens = messages.reduce((sum, msg) => {
+                        const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+                        return sum + estimateTokens(content);
+                    }, 0);
                     const outputTokens = estimateTokens(fullResponse);
 
-                    const modelStats = selectedProviderData.models[modelId];
-                    const currentTokenGenerationSpeed = modelStats?.avg_token_speed ?? this.initialModelThroughputMap.get(modelId) ?? this.DEFAULT_GENERATION_SPEED;
-
-                    let providerLatency: number | null = null;
+                    let providerLatency: number | null = Math.max(0, Math.round(totalResponseTime));
                     let observedSpeedTps: number | null = null;
 
-                    const expectedGenerationTimeMs = outputTokens > 0 && currentTokenGenerationSpeed > 0 ?
-                        (outputTokens / currentTokenGenerationSpeed) * 1000 : 0;
-
-                    if (!isNaN(expectedGenerationTimeMs) && isFinite(expectedGenerationTimeMs)) {
-                        providerLatency = Math.max(0, Math.round(totalResponseTime - expectedGenerationTimeMs));
-                    }
-
-                    if (providerLatency !== null && outputTokens > 0) {
-                        const actualGenerationTimeMs = Math.max(1, totalResponseTime - providerLatency);
-                        const calculatedSpeed = outputTokens / (actualGenerationTimeMs / 1000);
+                    if (outputTokens > 0) {
+                        const generationTimeSeconds = Math.max(0.001, totalResponseTime / 1000);
+                        const calculatedSpeed = outputTokens / generationTimeSeconds;
                         if (!isNaN(calculatedSpeed) && isFinite(calculatedSpeed)) {
                             observedSpeedTps = calculatedSpeed;
                         }
@@ -503,6 +645,8 @@ export class MessageHandler {
                     yield {
                         type: 'final',
                         tokenUsage: inputTokens + outputTokens,
+                        promptTokens: inputTokens,
+                        completionTokens: outputTokens,
                         providerId: providerId,
                         latency: totalResponseTime,
                         providerLatency: providerLatency,
@@ -529,7 +673,7 @@ export class MessageHandler {
                 };
                 return;
             } catch (error: any) {
-                this.updateStatsInBackground(providerId, modelId, null, true);
+                this.updateStatsInBackground(providerId, modelId, null, true, error);
                 console.warn(`Stream failed for provider ${providerId}. Error: ${error.message}. Trying next provider if available...`);
                 lastError = error;
                 continue;
@@ -541,17 +685,24 @@ export class MessageHandler {
         throw new Error(`Failed to process streaming request: ${detail}`);
     }
 
-    private async updateStatsInBackground(providerId: string, modelId: string, responseEntry: ResponseEntry | null, isError: boolean) {
+    private async updateStatsInBackground(
+        providerId: string,
+        modelId: string,
+        responseEntry: ResponseEntry | null,
+        isError: boolean,
+        attemptError?: any
+    ) {
         try {
-            let currentProvidersData = await dataManager.load<LoadedProviders>('providers');
-            const updatedProviderDataList = this.updateStatsInProviderList(
-                currentProvidersData,
-                providerId,
-                modelId,
-                responseEntry,
-                isError
-            );
-            await dataManager.save<LoadedProviders>('providers', updatedProviderDataList);
+            await dataManager.updateWithLock<LoadedProviders>('providers', async (currentProvidersData) => {
+                return this.updateStatsInProviderList(
+                    currentProvidersData,
+                    providerId,
+                    modelId,
+                    responseEntry,
+                    isError,
+                    attemptError
+                );
+            });
         } catch (statsError: any) {
             console.error(`Error updating/saving stats in background for provider ${providerId}/${modelId}. Error:`, statsError);
         }
