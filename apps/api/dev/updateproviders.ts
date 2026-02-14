@@ -1,7 +1,8 @@
 import { Command } from 'commander';
-import * as fs from 'fs';
 import axios from 'axios';
 import { Provider, Model } from '../providers/interfaces.js';
+import { dataManager, LoadedProviders } from '../modules/dataManager.js';
+import { upsertProviderById } from '../modules/providerUpsert.js';
 
 async function fetchModels(apiKey: string, modelsEndpoint: string): Promise<string[]> {
   try {
@@ -59,54 +60,33 @@ async function updateProviders(
       disabled: false // Add required disabled field
     };
 
-    const filePath = './providers.json';
-    let providers: Provider[] = [];
-    
-    if (!fs.existsSync(filePath)) {
-      providers = [provider];
-      console.warn(`File not found: ${filePath}. Creating a new one.`);
-    } else {
-      try {
-        const jsonData = fs.readFileSync(filePath, 'utf-8');
-        const modelsData = JSON.parse(jsonData);
-
-        if (!modelsData || !Array.isArray(modelsData)) {
-          console.error('Invalid providers.json format. Expected an array of providers.');
-          process.exit(1);
-        }
-
-        providers = modelsData;
-      } catch (error) {
-        console.error('Error reading or parsing providers.json:', error);
-        process.exit(1);
-      }
-
-      // Update or add provider
-      const existingIdx = providers.findIndex(p => p.id === provider.id);
-      if (existingIdx >= 0) {
-        providers[existingIdx] = {
-          ...providers[existingIdx],
-          apiKey: provider.apiKey,
-          provider_url: provider.provider_url,
-          models: provider.models,
-          avg_response_time: 0, // Reset or set to default
-          avg_provider_latency: 0, // Reset or set to default
-          errors: 0, // Reset errors
-          provider_score: 0 // Initialize or reset score
-        };
-        console.log(`Updated existing provider with ID: ${provider.id}`);
-      } else {
-        providers.push(provider);
-        console.log(`Added new provider with ID: ${provider.id}`);
-      }
+    let providers = await dataManager.load<LoadedProviders>('providers');
+    if (!Array.isArray(providers)) {
+      console.error('Invalid providers data format. Expected an array of providers.');
+      process.exit(1);
     }
 
-    // Write back to providers.json
+    // Update or add provider
+    const { action } = upsertProviderById(providers as Provider[], provider, {
+      onUpdate: (existing) => ({
+        ...existing,
+        apiKey: provider.apiKey,
+        provider_url: provider.provider_url,
+        models: provider.models,
+        avg_response_time: 0,
+        avg_provider_latency: 0,
+        errors: 0,
+        provider_score: 0
+      })
+    });
+    console.log(`${action === 'updated' ? 'Updated existing' : 'Added new'} provider with ID: ${provider.id}`);
+
+    // Persist through DataManager (Redis + filesystem)
     try {
-      fs.writeFileSync(filePath, JSON.stringify(providers, null, 2), 'utf8');
-      console.log(`Successfully updated providers.json with provider ID: ${provider.id}`);
+      await dataManager.save<LoadedProviders>('providers', providers);
+      console.log(`Successfully updated providers data with provider ID: ${provider.id}`);
     } catch (writeError) {
-      console.error('Error writing to providers.json:', writeError);
+      console.error('Error saving providers data:', writeError);
       process.exit(1);
     }
 

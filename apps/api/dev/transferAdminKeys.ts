@@ -4,6 +4,10 @@ import axios from 'axios';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { createHash } from 'crypto';
 import type { Provider, Model } from '../providers/interfaces.js';
+import { dataManager, LoadedProviders } from '../modules/dataManager.js';
+import { upsertProviderById } from '../modules/providerUpsert.js';
+import { checkKey } from '../modules/keyChecker.js';
+import { redisReadyPromise } from '../modules/db.js';
 
 interface AdminKeyLogEntry {
   key?: string;
@@ -15,11 +19,11 @@ interface ValidationResult {
   models: string[];
   providerUrl: string;
   streamingCompatible?: boolean;
+  tier?: string;
 }
 
 const DEFAULT_SPEED = 50;
 const ADMIN_KEYS_PATH = path.resolve('logs/admin-keys.json');
-const PROVIDERS_PATH = path.resolve('providers.json');
 const args = process.argv.slice(2);
 const dryRun = args.includes('--dry-run');
 const limitArg = args.find((arg) => arg.startsWith('--limit='));
@@ -153,20 +157,51 @@ async function validateKey(entry: AdminKeyLogEntry): Promise<ValidationResult> {
     throw new Error(`Unsupported provider: ${provider || 'unknown'}`);
   }
 
-  if (!entry.key || !entry.key.trim()) {
+  const apiKey = entry.key ? entry.key.trim() : '';
+  if (!apiKey) {
     throw new Error('Missing key');
   }
 
-  if (provider === 'gemini') {
-    // Quick check via models list to avoid spend
-    return validateGemini(entry.key.trim());
+  // 1. Run enhanced validation (Quota, Tier, Balance check)
+  const status = await checkKey(provider, apiKey);
+  if (!status.isValid) {
+      throw new Error(`Key check failed: ${status.error || 'Invalid key'}`);
+  }
+  if (status.hasQuota === false) {
+      throw new Error('Key has no quota or insufficient balance');
   }
 
-  return validateOpenAIStyle(provider as keyof typeof providerDefaults, entry.key.trim());
+  // 2. Fetch models if not returned by checker
+  let models = status.models || [];
+  if (models.length === 0) {
+      // Fallback to basic listing
+      if (provider === 'gemini') {
+        const v = await validateGemini(apiKey);
+        models = v.models;
+      } else {
+        const v = await validateOpenAIStyle(provider as keyof typeof providerDefaults, apiKey);
+        models = v.models;
+      }
+  }
+
+  const meta = providerDefaults[provider];
+  return {
+    models,
+    providerUrl: meta.chatUrl,
+    streamingCompatible: meta.streamingCompatible,
+    tier: status.tier ? String(status.tier) : undefined
+  };
 }
 
-function makeProviderId(provider: string, tier: number | null | undefined, apiKey: string, existingIds: Set<string>): string {
-  const tierLabel = typeof tier === 'number' ? `t${tier}` : 't?';
+function makeProviderId(provider: string, tier: number | string | null | undefined, apiKey: string, existingIds: Set<string>): string {
+  let tierLabel = 't?';
+  if (typeof tier === 'number') tierLabel = `t${tier}`;
+  else if (typeof tier === 'string') {
+      // Normalize tier string from checker
+      if (tier.includes('Tier')) tierLabel = `t${tier.replace('Tier', '').trim()}`;
+      else tierLabel = `t-${tier.replace(/\s+/g, '-')}`;
+  }
+  
   const base = `${provider}-${tierLabel}-${hashId(apiKey)}`;
   if (!existingIds.has(base)) return base;
   let suffix = 1;
@@ -179,8 +214,21 @@ function makeProviderId(provider: string, tier: number | null | undefined, apiKe
 }
 
 async function main() {
+  if (redisReadyPromise) {
+    try {
+      console.log('Waiting for Redis connection...');
+      await redisReadyPromise;
+      console.log('Redis connected. DataManager will use configured preference.');
+    } catch (err) {
+      console.warn('Redis connection failed, proceeding with fallback logic:', err);
+    }
+  }
+
   const adminEntries = readJsonFile<AdminKeyLogEntry[]>(ADMIN_KEYS_PATH, []);
-  const providers = readJsonFile<Provider[]>(PROVIDERS_PATH, []);
+  const providers = await dataManager.load<LoadedProviders>('providers');
+  if (!Array.isArray(providers)) {
+    throw new Error('Invalid providers data format. Expected an array.');
+  }
 
   const existingKeyToProviders = new Map<string, Provider[]>();
   providers.forEach((p) => {
@@ -218,44 +266,67 @@ async function main() {
   console.log(`Found ${adminEntries.length} logged keys. ${skippedExisting} skipped (existing, duplicates, or filtered). Processing ${limitedCandidates.length} candidate(s).`);
 
   let refreshedCount = 0;
-  for (const entry of limitedCandidates) {
-    try {
-      const validation = await validateKey(entry);
-      const modelsMap = buildModels(validation.models);
+  const BATCH_SIZE = 20;
 
-      const existing = existingKeyToProviders.get(entry.key);
-      if (existing && existing.length) {
-        existing.forEach((providerEntry) => {
-          providerEntry.provider_url = validation.providerUrl;
-          providerEntry.streamingCompatible = validation.streamingCompatible;
-          providerEntry.models = modelsMap;
-          console.log(`♻️  refreshed ${providerEntry.id} (${Object.keys(modelsMap).length} models)`);
-        });
-        refreshedCount += existing.length;
-        continue;
-      }
+  for (let i = 0; i < limitedCandidates.length; i += BATCH_SIZE) {
+      const batch = limitedCandidates.slice(i, i + BATCH_SIZE);
+      console.log(`Processing batch ${Math.floor(i / BATCH_SIZE) + 1} / ${Math.ceil(limitedCandidates.length / BATCH_SIZE)}...`);
 
-      const providerId = makeProviderId(entry.provider, entry.tier, entry.key, existingIds);
-      const newProvider: Provider = {
-        id: providerId,
-        apiKey: entry.key,
-        provider_url: validation.providerUrl,
-        streamingCompatible: validation.streamingCompatible,
-        models: modelsMap,
-        disabled: false,
-        avg_response_time: null,
-        avg_provider_latency: null,
-        errors: 0,
-        provider_score: null,
-      };
+      await Promise.all(batch.map(async (entry) => {
+        try {
+          const validation = await validateKey(entry);
+          const modelsMap = buildModels(validation.models);
 
-      added.push(newProvider);
-      existingIds.add(providerId);
-      console.log(`✅ ${entry.provider} key ok -> ${providerId} (${Object.keys(modelsMap).length} models)`);
-    } catch (error: any) {
-      failures.push({ provider: entry.provider, key: entry.key, reason: error?.message || 'Unknown error' });
-      console.warn(`❌ ${entry.provider} key failed: ${error?.message || error}`);
-    }
+          const existing = existingKeyToProviders.get(entry.key);
+          if (existing && existing.length) {
+            existing.forEach((providerEntry) => {
+              providerEntry.provider_url = validation.providerUrl;
+              providerEntry.streamingCompatible = validation.streamingCompatible;
+              providerEntry.models = modelsMap;
+              console.log(`♻️  refreshed ${providerEntry.id} (${Object.keys(modelsMap).length} models)`);
+            });
+            refreshedCount += existing.length;
+            return;
+          }
+
+          const tierArg = validation.tier || entry.tier;
+          const providerId = makeProviderId(entry.provider, tierArg, entry.key, existingIds);
+          const newProvider: Provider = {
+            id: providerId,
+            apiKey: entry.key,
+            provider_url: validation.providerUrl,
+            streamingCompatible: validation.streamingCompatible,
+            models: modelsMap,
+            disabled: false,
+            avg_response_time: null,
+            avg_provider_latency: null,
+            errors: 0,
+            provider_score: null,
+          };
+
+          const upserted = upsertProviderById(providers as Provider[], newProvider);
+          if (upserted.action === 'added') {
+            added.push(newProvider);
+          }
+          existingIds.add(providerId);
+          console.log(`✅ ${entry.provider} key ok -> ${providerId} (${Object.keys(modelsMap).length} models)`);
+        } catch (error: any) {
+          failures.push({ provider: entry.provider, key: entry.key, reason: error?.message || 'Unknown error' });
+          console.warn(`❌ ${entry.provider} key failed: ${error?.message || error}`);
+
+          // Remove existing provider(s) with this key if validation failed (cleanup dead keys)
+          const existing = existingKeyToProviders.get(entry.key);
+          if (existing) {
+            existing.forEach(p => {
+              const idx = providers.findIndex(prov => prov.id === p.id);
+              if (idx !== -1) {
+                providers.splice(idx, 1);
+                console.log(`🗑️  Removed invalid/dead provider ${p.id} from list.`);
+              }
+            });
+          }
+        }
+      }));
   }
 
   if (dryRun) {
@@ -263,13 +334,20 @@ async function main() {
     return;
   }
 
-  const updatedProviders = [...providers, ...added];
-  fs.writeFileSync(PROVIDERS_PATH, JSON.stringify(updatedProviders, null, 2), 'utf8');
-  console.log(`Saved ${added.length} new provider(s) and refreshed ${refreshedCount} existing provider(s) in ${PROVIDERS_PATH}.`);
+  await dataManager.save<LoadedProviders>('providers', providers);
+  console.log(`Saved ${added.length} new provider(s) and refreshed ${refreshedCount} existing provider(s).`);
 
   if (failures.length) {
     console.log('Failed keys:');
     failures.forEach((f) => console.log(`- ${f.provider}: ${f.reason}`));
+
+    const failLogPath = path.resolve('logs/key-transfer-failures.json');
+    try {
+      fs.writeFileSync(failLogPath, JSON.stringify(failures, null, 2));
+      console.log(`Detailed failure log written to ${failLogPath}`);
+    } catch (err) {
+      console.error('Failed to write failure log:', err);
+    }
   }
 }
 

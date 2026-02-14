@@ -9,9 +9,9 @@ program
   .command('generate')
   .description('Generate an admin key')
   .argument('<userId>', 'User ID to generate a key for')
-  .action((userId: string) => {
+  .action(async (userId: string) => {
     try {
-      const apiKey = generateAdminApiKey(userId);
+      const apiKey = await generateAdminApiKey(userId);
       console.log('Generated API key:', apiKey);
     } catch (error: any) {
       console.error('Error generating API key:', error.message);
