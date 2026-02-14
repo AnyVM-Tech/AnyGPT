@@ -99,7 +99,7 @@ class Request {
     public ip?: string;
     public completed = false;
 
-    private bodyCache?: Promise<string>;
+    private bodyCache?: Promise<Buffer>;
     private maxBodyLength: number;
     private res: HttpResponse;
     private req: HttpRequest;
@@ -125,15 +125,19 @@ class Request {
     }
 
     async text(): Promise<string> {
-        // Body capture is initialized in the constructor; just await it here.
-        return this.bodyCache || '';
+        const buf = await this.buffer();
+        return buf.toString('utf8');
+    }
+
+    async buffer(): Promise<Buffer> {
+        return this.bodyCache || Promise.resolve(Buffer.alloc(0));
     }
 
     // Begin streaming the body immediately to avoid missing data if middlewares do async work before calling .json()
     private initBodyCapture() {
         if (this.bodyCache) return;
-        this.bodyCache = new Promise<string>((resolve, reject) => {
-            let body = '';
+        this.bodyCache = new Promise<Buffer>((resolve, reject) => {
+            const chunks: Buffer[] = [];
             let received = 0;
             this.res.onData((chunk, isLast) => {
                 received += chunk.byteLength;
@@ -141,8 +145,9 @@ class Request {
                     this.res.close();
                     return reject(new Error('Payload too large'));
                 }
-                body += Buffer.from(chunk).toString();
-                if (isLast) resolve(body);
+                // Important: Create a copy of the chunk because uWS reuses the memory buffer
+                chunks.push(Buffer.from(chunk.slice(0)));
+                if (isLast) resolve(Buffer.concat(chunks));
             });
             this.res.onAborted(() => {
                 reject(new Error('Request aborted'));
@@ -158,6 +163,16 @@ class Response {
     private headersSent = false;
     private headers: Record<string, string> = {};
     private res: HttpResponse;
+
+    private withCork(fn: () => void): void {
+        if (this.completed) return;
+        const maybeCork = (this.res as any).cork;
+        if (typeof maybeCork === 'function') {
+            maybeCork.call(this.res, fn);
+            return;
+        }
+        fn();
+    }
 
     constructor(res: HttpResponse) {
         this.res = res;
@@ -190,26 +205,32 @@ class Response {
         if (this.completed) return;
         this.setHeader('Content-Type', 'application/json');
         const body = JSON.stringify(payload);
-        this.writeHeadersIfNeeded();
-        this.res.end(body);
+        this.withCork(() => {
+            this.writeHeadersIfNeeded();
+            this.res.end(body);
+        });
         this.completed = true;
     }
 
     write(chunk: string | Buffer): this {
         if (this.completed) return this;
-        this.writeHeadersIfNeeded();
-        this.res.write(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString());
+        this.withCork(() => {
+            this.writeHeadersIfNeeded();
+            this.res.write(chunk as any);
+        });
         return this;
     }
 
     end(chunk?: string | Buffer): void {
         if (this.completed) return;
-        this.writeHeadersIfNeeded();
-        if (chunk !== undefined) {
-            this.res.end(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString());
-        } else {
-            this.res.end();
-        }
+        this.withCork(() => {
+            this.writeHeadersIfNeeded();
+            if (chunk !== undefined) {
+                this.res.end(chunk as any);
+            } else {
+                this.res.end();
+            }
+        });
         this.completed = true;
     }
 }

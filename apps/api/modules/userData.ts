@@ -23,6 +23,7 @@ const tiers: TiersFile = tiersData;
 export interface UserData {
   userId: string;
   tokenUsage: number; 
+  requestCount: number;
   role: 'admin' | 'user';
   tier: keyof TiersFile; // Use keyof TiersFile for better type safety
 }
@@ -54,7 +55,7 @@ export async function generateUserApiKey(userId: string, role: 'admin' | 'user' 
       // If a custom tier was provided but not found, and 'free' is missing, this is also an issue.
   }
 
-  currentKeys[apiKey] = { userId, tokenUsage: 0, role: role, tier: finalTier };
+  currentKeys[apiKey] = { userId, tokenUsage: 0, requestCount: 0, role: role, tier: finalTier };
   await dataManager.save<KeysFile>('keys', currentKeys); 
   console.log(`Generated key for ${userId} with role: ${role} and tier: ${finalTier}.`); 
   return apiKey;
@@ -71,7 +72,7 @@ export async function generateAdminApiKey(userId: string): Promise<string> { // 
    const adminTier: keyof TiersFile = tiers.enterprise ? 'enterprise' : (tiers.free ? 'free' : ''); 
    if (!adminTier) throw new Error("Config error: No admin tier found.");
 
-  currentKeys[apiKey] = { userId, tokenUsage: 0, role: 'admin', tier: adminTier };
+  currentKeys[apiKey] = { userId, tokenUsage: 0, requestCount: 0, role: 'admin', tier: adminTier };
   await dataManager.save<KeysFile>('keys', currentKeys); 
   console.log(`Generated admin key for ${userId}.`);
   return apiKey;
@@ -89,6 +90,13 @@ export async function validateApiKeyAndUsage(apiKey: string): Promise<{ valid: b
       console.error(`[validateApiKeyAndUsage] API key not found: ${apiKey}`);
       return { valid: false, error: 'API key not found.' };
   }
+
+    if (typeof userData.tokenUsage !== 'number' || Number.isNaN(userData.tokenUsage) || userData.tokenUsage < 0) {
+      userData.tokenUsage = 0;
+    }
+    if (typeof userData.requestCount !== 'number' || Number.isNaN(userData.requestCount) || userData.requestCount < 0) {
+      userData.requestCount = 0;
+    }
 
   const tierLimits = tiers[userData.tier]; // tiers is static import
   console.log(`[validateApiKeyAndUsage] Tier limits for user: ${JSON.stringify(tierLimits)}`);
@@ -124,7 +132,9 @@ export function extractMessageFromRequestBody(requestBody: any): { messages: { r
   try {
     if (!requestBody || typeof requestBody !== 'object') throw new Error('Invalid body.');
     if (!Array.isArray(requestBody.messages)) throw new Error('Invalid messages format.');
-    if (typeof requestBody.model !== 'string' || !requestBody.model) console.warn("Default model used.");
+    if (typeof requestBody.model !== 'string' || !requestBody.model) {
+       throw new Error('model parameter is required.');
+    }
 
     // Basic validation for content: allow string or an array of typed parts
     const normalizedMessages = requestBody.messages.map((m: any) => {
@@ -166,7 +176,7 @@ export function extractMessageFromRequestBody(requestBody: any): { messages: { r
       if (isNaN(parsedTokens) || parsedTokens <= 0) throw new Error('Invalid max_tokens.');
       maxTokens = parsedTokens;
     }
-    return { messages: normalizedMessages, model: requestBody.model || 'defaultModel', max_tokens: maxTokens };
+    return { messages: normalizedMessages, model: requestBody.model, max_tokens: maxTokens };
   } catch(error) {
     console.error("Error parsing request:", error);
     throw new Error(`Request parse failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -174,17 +184,27 @@ export function extractMessageFromRequestBody(requestBody: any): { messages: { r
 }
 
 // Becomes async due to dataManager load/save
-export async function updateUserTokenUsage(numberOfTokens: number, apiKey: string): Promise<void> {
+export async function updateUserTokenUsage(numberOfTokens: number, apiKey: string, options: { incrementRequest?: boolean } = {}): Promise<void> {
   if (typeof numberOfTokens !== 'number' || isNaN(numberOfTokens) || numberOfTokens < 0) {
       console.warn(`Invalid token count (${numberOfTokens}) for ${apiKey}.`); return;
   }
-  const currentKeys = await dataManager.load<KeysFile>('keys'); 
-  const userData = currentKeys[apiKey];
-  if (userData) {
-    userData.tokenUsage = (userData.tokenUsage || 0) + numberOfTokens; 
-    currentKeys[apiKey] = userData; 
-    await dataManager.save<KeysFile>('keys', currentKeys); 
-  } else {
+  const incrementRequest = options.incrementRequest !== false;
+  let keyFound = false;
+
+  await dataManager.updateWithLock<KeysFile>('keys', (currentKeys) => {
+    const userData = currentKeys[apiKey];
+    if (!userData) {
+      return currentKeys;
+    }
+
+    keyFound = true;
+    userData.tokenUsage = (userData.tokenUsage || 0) + numberOfTokens;
+    userData.requestCount = (userData.requestCount || 0) + (incrementRequest ? 1 : 0);
+    currentKeys[apiKey] = userData;
+    return currentKeys;
+  });
+
+  if (!keyFound) {
     console.warn(`Update token usage failed: key ${apiKey} not found.`);
   }
 }
