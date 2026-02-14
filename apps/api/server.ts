@@ -41,6 +41,7 @@ import groqRouter from './routes/groq.js';
 import ollamaRouter from './routes/ollama.js';
 import openrouterRouter from './routes/openrouter.js';
 import { attachWebSocket } from './ws/wsServer.js';
+import { attachRealtimeWebSocket } from './ws/realtime.js';
 
 const defaultModels = {
   object: 'list',
@@ -323,6 +324,8 @@ async function startServer() {
     try {
         attachWebSocket(app);
         console.log('  ✓ WebSocket endpoint enabled: /ws');
+        attachRealtimeWebSocket(app);
+        console.log('  ✓ Realtime API endpoint enabled: /v1/realtime');
     } catch (e:any) {
         console.warn('  𐄂 Failed to initialize WebSocket endpoint:', e.message);
     }

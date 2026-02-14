@@ -2,6 +2,8 @@ import { RequestContext, WSWrapper } from '../lib/uws-compat.js';
 import { messageHandler } from '../providers/handler.js';
 import { validateApiKeyAndUsage, updateUserTokenUsage } from '../modules/userData.js';
 import { logError } from '../modules/errorLogger.js';
+import redis from '../modules/db.js';
+import { incrementSharedRateLimitCounters } from '../modules/rateLimitRedis.js';
 
 // Lightweight structures for WebSocket JSON protocol
 // Incoming message shapes
@@ -80,6 +82,46 @@ type OutgoingResponse =
   | ChatCompleteResponse
   | OpenAIStreamChunk;
 
+const wsClients = new Set<WSWrapper>();
+const WS_RATE_PREFIX = 'ws:ratelimit:';
+
+const redisSubscriber = redis ? redis.duplicate() : null;
+const redisPublisher = redis ? redis.duplicate() : null;
+
+async function publishWsBroadcast(payload: any) {
+  if (!redisPublisher || redisPublisher.status !== 'ready') return;
+  try {
+    await redisPublisher.publish('anygpt:ws:broadcast', JSON.stringify(payload));
+  } catch (err) {
+    console.warn('[WS PubSub] Failed to publish broadcast:', err);
+  }
+}
+
+if (redisSubscriber) {
+  redisSubscriber.on('message', (_channel, message) => {
+    try {
+      const parsed = JSON.parse(message);
+      wsClients.forEach(ws => {
+        try { ws.send(JSON.stringify(parsed)); } catch { /* ignore */ }
+      });
+    } catch (err) {
+      console.warn('[WS PubSub] Failed to process incoming broadcast:', err);
+    }
+  });
+  redisSubscriber.subscribe('anygpt:ws:broadcast').catch(err => {
+    console.warn('[WS PubSub] Failed to subscribe to channel:', err);
+  });
+}
+
+async function checkSharedRateLimit(apiKey: string, limits: TierLimits) {
+  try {
+    return await incrementSharedRateLimitCounters(redis, WS_RATE_PREFIX, apiKey);
+  } catch (err) {
+    console.warn('[WS RateLimit] Shared counter failure, falling back to per-connection window.', err);
+    return null;
+  }
+}
+
 interface StreamResult {
   type: string;
   chunk?: string;
@@ -108,8 +150,17 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
       try { ws.send(JSON.stringify(data)); } catch { /* ignore */ }
     };
 
-    const rateCheck = (): boolean => {
+    const rateCheck = async (): Promise<boolean> => {
       if (!ctx.apiKey || !ctx.tierLimits) return true; // until auth completes
+
+      const shared = await checkSharedRateLimit(ctx.apiKey, ctx.tierLimits);
+      if (shared) {
+        if (shared.rps > ctx.tierLimits.rps) return false;
+        if (shared.rpm > ctx.tierLimits.rpm) return false;
+        if (shared.rpd > ctx.tierLimits.rpd) return false;
+        return true;
+      }
+
       const now = Date.now();
       prune(ctx.rate.second, now - 1000);
       prune(ctx.rate.minute, now - 60_000);
@@ -134,7 +185,8 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
         return send({ type: 'error', code: 'bad_json', message: 'Invalid JSON payload' });
       }
 
-      if (!rateCheck()) {
+      const allowed = await rateCheck();
+      if (!allowed) {
         return send({ type: 'error', code: 'rate_limited', message: 'Rate limit exceeded' });
       }
 
@@ -199,9 +251,7 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
                 }
               }
 
-              if (totalTokenUsage > 0) {
-                await updateUserTokenUsage(totalTokenUsage, ctx.apiKey);
-              }
+              await updateUserTokenUsage(totalTokenUsage, ctx.apiKey);
 
               const finalPayload: ChatCompleteResponse = {
                 type: 'chat.complete',
@@ -228,7 +278,7 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
           try {
             const result: MessageResult = await messageHandler.handleMessages([{ content, model: { id: model } } as any], model, ctx.apiKey);
             const totalTokens = typeof result.tokenUsage === 'number' ? result.tokenUsage : estimateTokens(result.response || '');
-            if (totalTokens > 0) await updateUserTokenUsage(totalTokens, ctx.apiKey);
+            await updateUserTokenUsage(totalTokens, ctx.apiKey);
 
             const openaiResponse: OpenAIResponse = {
               id: `chatcmpl-${requestId || Date.now()}`,
@@ -259,7 +309,11 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
     });
 
     ws.on('close', () => {
-      // Placeholder for cleanup if needed later
+      wsClients.delete(ws);
     });
+
+    wsClients.add(ws);
   });
 }
+
+export { publishWsBroadcast };
