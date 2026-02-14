@@ -5,19 +5,19 @@ import { IMessage } from '../providers/interfaces.js';
 import {
     generateUserApiKey, // Now async
     updateUserTokenUsage, // Now async
-    validateApiKeyAndUsage, // Now async
     TierData, // Import TierData type
     extractMessageFromRequestBody // Import helper
 } from '../modules/userData.js';
 import { logError } from '../modules/errorLogger.js'; // Changed import
+import { RequestTimestampStore } from '../modules/rateLimit.js';
+import { runAuthMiddleware, runRateLimitMiddleware } from '../modules/middlewareFactory.js';
 
 dotenv.config();
 
 const router = new HyperExpress.Router(); // Use Router for modularity
 
 // --- Rate Limiting Store (Separate or Centralized?) ---
-interface RequestTimestamps { [apiKey: string]: number[]; }
-const requestTimestamps: RequestTimestamps = {}; // Local store for this route for now
+const requestTimestamps: RequestTimestampStore = {}; // Local store for this route for now
 
 // --- Request Extension --- 
 // Assumed globally declared
@@ -26,120 +26,54 @@ const requestTimestamps: RequestTimestamps = {}; // Local store for this route f
 
 // AUTH Middleware (OpenAI/Groq Style: Authorization Bearer)
 async function authAndUsageMiddleware(request: Request, response: Response, next: () => void) {
-  const authHeader = request.headers['authorization'] || request.headers['Authorization'];
   const timestamp = new Date().toISOString();
 
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-     const errDetail = { message: 'Incorrect API key provided. You can find your API key at https://console.groq.com/keys.', type: 'invalid_request_error', param: null, code: 'invalid_api_key' };
-     await logError({ message: errDetail.message, type: errDetail.type, code: errDetail.code }, request); // Renamed and added await
-     if (!response.completed) {
-        return response.status(401).json({ error: errDetail, timestamp });
-     } else { return; }
-  }
-  const apiKey = authHeader.slice(7);
-  
-  try {
-      const validationResult = await validateApiKeyAndUsage(apiKey);
-      if (!validationResult.valid || !validationResult.userData || !validationResult.tierLimits) {
-          const statusCode = validationResult.error?.includes('limit reached') ? 429 : 401; 
-          const errorType = 'invalid_request_error'; 
-          const code = statusCode === 429 ? 'rate_limit_exceeded' : 'invalid_api_key';
-          const clientMessage = `${validationResult.error || 'Invalid API Key'}`;
-          await logError({ message: clientMessage, details: validationResult.error, type: errorType, code, apiKey }, request); // Renamed and added await
-          if (!response.completed) {
-            return response.status(statusCode).json({ error: { message: clientMessage, type: errorType, param: null, code: code }, timestamp }); 
-          } else { return; }
-      }
-
-      // Attach data
-      request.apiKey = apiKey;
-      request.userId = validationResult.userData.userId;
-      request.userRole = validationResult.userData.role;
-      request.userTokenUsage = validationResult.userData.tokenUsage; 
-      request.userTier = validationResult.userData.tier; 
-      request.tierLimits = validationResult.tierLimits; 
-      
-      // Let flow continue
-      next();
-
-  } catch (error: any) {
-       await logError(error, request); // Renamed and added await
-       console.error("Groq Route - Error during auth/usage check:", error);
-       if (!response.completed) {
-         return response.status(500).json({ 
-             error: 'Internal Server Error', 
-             reference: 'Error during authentication processing.',
-             timestamp 
-         }); 
-       } else { return; }
-  }
+    return runAuthMiddleware(request, response, next, {
+        extractApiKey: (req) => {
+            const authHeader = req.headers['authorization'] || req.headers['Authorization'];
+            return authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+        },
+        onMissingApiKey: async (req) => {
+            const errDetail = { message: 'Incorrect API key provided. You can find your API key at https://console.groq.com/keys.', type: 'invalid_request_error', param: null, code: 'invalid_api_key' };
+            await logError({ message: errDetail.message, type: errDetail.type, code: errDetail.code }, req);
+            return { status: 401, body: { error: errDetail, timestamp } };
+        },
+        onInvalidApiKey: async (req, details) => {
+            const errorType = 'invalid_request_error';
+            const code = details.statusCode === 429 ? 'rate_limit_exceeded' : 'invalid_api_key';
+            const clientMessage = `${details.error || 'Invalid API Key'}`;
+            await logError({ message: clientMessage, details: details.error, type: errorType, code, apiKey: details.apiKey }, req);
+            return { status: details.statusCode, body: { error: { message: clientMessage, type: errorType, param: null, code }, timestamp } };
+        },
+        onInternalError: async (req, error) => {
+            await logError(error, req);
+            console.error('Groq Route - Error during auth/usage check:', error);
+            return { status: 500, body: { error: 'Internal Server Error', reference: 'Error during authentication processing.', timestamp } };
+        },
+    });
 }
 
 // RATE LIMIT Middleware (Standard RPM/RPS/RPD checks)
 function rateLimitMiddleware(request: Request, response: Response, next: () => void) {
     const timestamp = new Date().toISOString(); // For error responses
-    if (!request.apiKey || !request.tierLimits) { 
-        const errMsg = 'Internal Error: API Key or Tier Limits missing after auth (Groq rateLimitMiddleware).';
-        logError({ message: errMsg, requestPath: request.path }, request).catch(e => console.error("Failed background log:",e)); // Log but don't wait
-        console.error(errMsg);
-        if (!response.completed) {
-          return response.status(500).json({ 
-             error: 'Internal Server Error', 
-             reference: 'Configuration error for rate limiting.', 
-             timestamp 
-          });
-        } else { return; }
-    }
-    const apiKey = request.apiKey;
-    const tierLimits = request.tierLimits; 
-    const now = Date.now();
-    requestTimestamps[apiKey] = requestTimestamps[apiKey] || [];
-    const currentApiKeyTimestamps = requestTimestamps[apiKey];
-    
-    const oneDayAgo = now - 86400000; 
-    const oneMinuteAgo = now - 60000;
-    const oneSecondAgo = now - 1000;
-    
-    const relevantTimestamps = currentApiKeyTimestamps.filter(ts => ts > oneDayAgo);
-    requestTimestamps[apiKey] = relevantTimestamps;
-
-    const requestsLastSecond = relevantTimestamps.filter(ts => ts > oneSecondAgo).length;
-    const errorType = 'invalid_request_error'; // Groq specific
-    const errorCode = 'rate_limit_exceeded';   // Groq specific
-
-    if (tierLimits.rps > 0 && requestsLastSecond >= tierLimits.rps) {
-         const errDetail = { message: `Rate limit exceeded for model. Limit: ${tierLimits.rps} RPS.`, type: errorType, code: errorCode, param: null };
-         logError(errDetail, request).catch(e => console.error("Failed background log:",e)); // Log but don't wait
-         response.setHeader('Retry-After', '1'); 
-         if (!response.completed) {
-           return response.status(429).json({ error: errDetail, timestamp });
-         } else { return; }
-    }
-    
-    const requestsLastMinute = relevantTimestamps.filter(ts => ts > oneMinuteAgo).length;
-     if (tierLimits.rpm > 0 && requestsLastMinute >= tierLimits.rpm) {
-         const errDetail = { message: `Rate limit exceeded for model. Limit: ${tierLimits.rpm} RPM.`, type: errorType, code: errorCode, param: null };
-         logError(errDetail, request).catch(e => console.error("Failed background log:",e)); // Log but don't wait
-         const retryAfterSeconds = Math.max(1, Math.ceil(Math.max(0, (relevantTimestamps.find(ts => ts > oneMinuteAgo) || now) + 60000 - now) / 1000));
-         response.setHeader('Retry-After', String(retryAfterSeconds)); 
-         if (!response.completed) {
-            return response.status(429).json({ error: errDetail, timestamp });
-         } else { return; }
-    }
-
-    const requestsLastDay = relevantTimestamps.length;
-    if (tierLimits.rpd > 0 && requestsLastDay >= tierLimits.rpd) {
-         const errDetail = { message: `Rate limit exceeded for model. Limit: ${tierLimits.rpd} RPD.`, type: errorType, code: errorCode, param: null };
-         logError(errDetail, request).catch(e => console.error("Failed background log:",e)); // Log but don't wait
-         const retryAfterSeconds = Math.max(1, Math.ceil(Math.max(0,(relevantTimestamps[0] || now) + 86400000 - now) / 1000));
-        response.setHeader('Retry-After', String(retryAfterSeconds)); 
-        if (!response.completed) {
-            return response.status(429).json({ error: errDetail, timestamp });
-        } else { return; }
-    }
-    
-    requestTimestamps[apiKey].push(now);
-    next(); 
+        return runRateLimitMiddleware(request, response, next, requestTimestamps, {
+            onMissingContext: (req) => {
+                const errMsg = 'Internal Error: API Key or Tier Limits missing after auth (Groq rateLimitMiddleware).';
+                logError({ message: errMsg, requestPath: req.path }, req).catch(e => console.error('Failed background log:', e));
+                console.error(errMsg);
+                return { status: 500, body: { error: 'Internal Server Error', reference: 'Configuration error for rate limiting.', timestamp } };
+            },
+            onDenied: (req, details) => {
+                const errDetail = {
+                    message: `Rate limit exceeded for model. Limit: ${details.limit} ${details.window.toUpperCase()}.`,
+                    type: 'invalid_request_error',
+                    code: 'rate_limit_exceeded',
+                    param: null
+                };
+                logError(errDetail, req).catch(e => console.error('Failed background log:', e));
+                return { status: 429, body: { error: errDetail, timestamp } };
+            }
+        });
 }
  
 // --- Routes ---
@@ -176,12 +110,10 @@ router.post('/v4/chat/completions', authAndUsageMiddleware, rateLimitMiddleware,
         const result = await messageHandler.handleMessages(formattedMessages, modelId, userApiKey);
  
         const totalTokensUsed = typeof result.tokenUsage === 'number' ? result.tokenUsage : 0;
-        const outputTokens = Math.ceil(result.response.length / 4);
-        const promptTokens = Math.max(0, totalTokensUsed - outputTokens);
+        const outputTokens = typeof result.completionTokens === 'number' ? result.completionTokens : Math.ceil(result.response.length / 4);
+        const promptTokens = typeof result.promptTokens === 'number' ? result.promptTokens : Math.max(0, totalTokensUsed - outputTokens);
 
-        if (totalTokensUsed > 0) {
-            await updateUserTokenUsage(totalTokensUsed, userApiKey); 
-        }
+        await updateUserTokenUsage(totalTokensUsed, userApiKey); 
         
         const groqResponse = {
             id: `chatcmpl-${Date.now()}${Math.random().toString(16).slice(2)}`,
