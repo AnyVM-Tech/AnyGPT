@@ -2,16 +2,17 @@
 	"name": "anygpt-api",
 	"version": "1.0.0",
 	"packageManager": "pnpm@10.5.2",
-		"engines": {
-			"node": "20.x || 22.x"
-		},
+	"engines": {
+		"node": "20.x || 22.x"
+	},
 	"type": "module",
 	"scripts": {
 		"clean": "rimraf dist",
-		"build": "pnpm clean && tsc -p tsconfig.json --outDir ./dist && node setup.js",
-		"build:tsgo": "pnpm clean && tsgo --project tsconfig.json --outDir ./dist --noEmit false && node setup.js",
+		"build": "pnpm clean && tsgo --project tsconfig.json --outDir ./dist --noEmit false && node setup.js",
+		"build:tsgo": "pnpm run build",
 		"start": "node ./dist/server.js",
-		"dev": "npx tsx server.ts",
+		"predev": "bash -lc 'pids=$(lsof -ti :3000 || true); if [ -n \"$pids\" ]; then kill $pids || true; sleep 1; pids2=$(lsof -ti :3000 || true); if [ -n \"$pids2\" ]; then kill -9 $pids2 || true; fi; fi'",
+		"dev": "pnpm clean && tsgo --project tsconfig.json --outDir ./dist --noEmit false && concurrently --kill-others --names \"TSGO,API\" -c \"bgBlue.bold,bgGreen.bold\" \"tsgo --project tsconfig.json --watch --outDir ./dist --noEmit false\" \"bash -lc 'source \\\"$HOME/.nvm/nvm.sh\\\" && nvm exec 22 node --watch ./dist/server.js'\"",
 		"lint": "eslint . --ext .ts",
 		"typecheck": "tsgo --noEmit",
 		"setup": "node setup.js",
@@ -33,10 +34,10 @@
 		"dotenv": "^16.4.5",
 		"eventsource": "^2.0.2",
 		"express": "^4.19.2",
-		"uWebSockets.js": "github:uNetworking/uWebSockets.js#v20.51.0",
 		"ioredis": "^5.5.0",
 		"openai": "^4.47.1",
 		"selenium-webdriver": "^4.26.0",
+		"uWebSockets.js": "github:uNetworking/uWebSockets.js#v20.51.0",
 		"uuid": "^11.1.0",
 		"ws": "^8.18.0"
 	},
@@ -44,6 +45,7 @@
 		"@types/jest": "^27.0.2",
 		"@types/node": "^16.11.7",
 		"@types/ws": "^8.18.1",
+		"@typescript/native-preview": "7.0.0-dev.20260213.1",
 		"concurrently": "^8.2.2",
 		"eslint": "^8.2.0",
 		"jest": "^27.2.5",

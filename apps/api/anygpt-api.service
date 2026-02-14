@@ -5,10 +5,13 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=/home/skullcmd/AnyGPT/apps/api
-ExecStart=/usr/bin/npm run dev
+Environment=NODE_ENV=production
+Environment=NVM_DIR=/home/skullcmd/.nvm
+ExecStartPre=/usr/bin/bash -lc 'source /home/skullcmd/.nvm/nvm.sh && nvm exec 22 /home/skullcmd/AnyGPT/apps/api/node_modules/.bin/tsgo --project tsconfig.json --outDir ./dist --noEmit false'
+ExecStart=/usr/bin/bash -lc 'source /home/skullcmd/.nvm/nvm.sh && nvm exec 22 node ./dist/server.js'
 Restart=always
 RestartSec=5
-User=root
+User=skullcmd
 
 [Install]
 WantedBy=multi-user.target

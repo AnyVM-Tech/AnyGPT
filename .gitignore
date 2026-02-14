@@ -29,4 +29,9 @@ pnpm-lock.yaml
 package-lock.json
 .turbo
 apps/api/providers.json
+apps/api/keys.json
 apps/api/logs/admin-keys.json
+**/providers.json
+**/keys.json
+**/api-error.jsonl
+apps/api/logs/api-error.jsonl
