@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { IAIProvider, IMessage } from './interfaces.js';
+import { IAIProvider, IMessage, ProviderResponse, ProviderStreamChunk, ProviderStreamPassthrough } from './interfaces.js';
 
 interface OpenRouterOptions {
   referer?: string;
@@ -33,12 +33,20 @@ export class OpenRouterAI implements IAIProvider {
     return headers;
   }
 
-  async sendMessage(message: IMessage): Promise<{ response: string; latency: number }> {
-    const start = Date.now();
-    const data = {
+  private buildRequestData(message: IMessage, stream: boolean = false) {
+    const data: any = {
       model: message.model.id,
-      messages: [{ role: 'user', content: message.content }],
+      messages: [{ role: message.role || 'user', content: message.content }],
+      stream,
     };
+    if (message.modalities) data.modalities = message.modalities;
+    if (message.audio) data.audio = message.audio;
+    return data;
+  }
+
+  async sendMessage(message: IMessage): Promise<ProviderResponse> {
+    const start = Date.now();
+    const data = this.buildRequestData(message);
 
     try {
       const res = await axios.post(this.endpointUrl, data, { headers: this.buildHeaders() });
@@ -57,7 +65,15 @@ export class OpenRouterAI implements IAIProvider {
       };
 
       const text = normalize(raw);
-      return { response: text, latency };
+      return {
+        response: text,
+        latency,
+        usage: {
+          prompt_tokens: typeof res.data?.usage?.prompt_tokens === 'number' ? res.data.usage.prompt_tokens : undefined,
+          completion_tokens: typeof res.data?.usage?.completion_tokens === 'number' ? res.data.usage.completion_tokens : undefined,
+          total_tokens: typeof res.data?.usage?.total_tokens === 'number' ? res.data.usage.total_tokens : undefined,
+        }
+      };
     } catch (error: any) {
       const latency = Date.now() - start;
       const msg = error?.response?.data?.error?.message || error.message || 'Unknown OpenRouter error';
@@ -65,13 +81,18 @@ export class OpenRouterAI implements IAIProvider {
     }
   }
 
-  async *sendMessageStream(message: IMessage): AsyncGenerator<{ chunk: string; latency: number; response: string; anystream: any }, void, unknown> {
-    const start = Date.now();
-    const data = {
-      model: message.model.id,
-      messages: [{ role: 'user', content: message.content }],
-      stream: true,
+  async createPassthroughStream(message: IMessage): Promise<ProviderStreamPassthrough | null> {
+    const data = this.buildRequestData(message, true);
+    const res = await axios.post(this.endpointUrl, data, { headers: this.buildHeaders(), responseType: 'stream' });
+    return {
+      upstream: res.data,
+      mode: 'openai-chat-sse',
     };
+  }
+
+  async *sendMessageStream(message: IMessage): AsyncGenerator<ProviderStreamChunk, void, unknown> {
+    const start = Date.now();
+    const data = this.buildRequestData(message, true);
 
     try {
       const res = await axios.post(this.endpointUrl, data, { headers: this.buildHeaders(), responseType: 'stream' });

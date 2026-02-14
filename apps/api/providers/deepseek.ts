@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { IAIProvider, IMessage } from './interfaces.js';
+import { IAIProvider, IMessage, ProviderResponse, ProviderStreamChunk, ProviderStreamPassthrough } from './interfaces.js';
 
 /**
  * DeepSeek provider (OpenAI-compatible chat completions).
@@ -21,7 +21,7 @@ export class DeepseekAI implements IAIProvider {
     } as Record<string, string>;
   }
 
-  async sendMessage(message: IMessage): Promise<{ response: string; latency: number }> {
+  async sendMessage(message: IMessage): Promise<ProviderResponse> {
     const start = Date.now();
     const payload = {
       model: message.model.id,
@@ -45,7 +45,15 @@ export class DeepseekAI implements IAIProvider {
       };
 
       const text = normalize(raw);
-      return { response: text, latency };
+      return {
+        response: text,
+        latency,
+        usage: {
+          prompt_tokens: typeof res.data?.usage?.prompt_tokens === 'number' ? res.data.usage.prompt_tokens : undefined,
+          completion_tokens: typeof res.data?.usage?.completion_tokens === 'number' ? res.data.usage.completion_tokens : undefined,
+          total_tokens: typeof res.data?.usage?.total_tokens === 'number' ? res.data.usage.total_tokens : undefined,
+        }
+      };
     } catch (error: any) {
       const latency = Date.now() - start;
       const msg = error?.response?.data?.error?.message || error.message || 'Unknown DeepSeek error';
@@ -53,7 +61,20 @@ export class DeepseekAI implements IAIProvider {
     }
   }
 
-  async *sendMessageStream(message: IMessage): AsyncGenerator<{ chunk: string; latency: number; response: string; anystream: any }, void, unknown> {
+  async createPassthroughStream(message: IMessage): Promise<ProviderStreamPassthrough | null> {
+    const payload = {
+      model: message.model.id,
+      messages: [{ role: 'user', content: message.content }],
+      stream: true,
+    };
+    const res = await axios.post(this.endpointUrl, payload, { headers: this.buildHeaders(), responseType: 'stream' });
+    return {
+      upstream: res.data,
+      mode: 'openai-chat-sse',
+    };
+  }
+
+  async *sendMessageStream(message: IMessage): AsyncGenerator<ProviderStreamChunk, void, unknown> {
     const start = Date.now();
     const payload = {
       model: message.model.id,
