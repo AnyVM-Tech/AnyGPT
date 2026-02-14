@@ -24,7 +24,7 @@
 		"@tsparticles/react": "^3.0.0",
 		"@tsparticles/slim": "^3.3.0",
 		"@types/express": "^4.17.21",
-		"axios": "^1.7.2",
+		"axios": "^1.13.5",
 		"chalk": "^5.3.0",
 		"class-variance-authority": "^0.7.0",
 		"classnames": "^2.5.1",
