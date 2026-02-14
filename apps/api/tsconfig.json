@@ -7,9 +7,8 @@
 	  "esModuleInterop": true,
 	  "skipLibCheck": true,
 	  "forceConsistentCasingInFileNames": true,
-	  "baseUrl": ".", 
 	  "paths": { 
-		"*": ["*", "./node_modules/*"]
+		"*": ["./*", "./node_modules/*"]
 	  },
 	  "moduleResolution": "bundler", 
 	  "resolveJsonModule": true, 
@@ -19,6 +18,17 @@
 	  "emitDeclarationOnly": false,
 	  "noEmitOnError": false
 	},
-	"include": ["./**/*"], 
-	"exclude": ["node_modules", "dev/tps.ts", "dist"]
+	"include": ["./**/*.ts", "./**/*.d.ts"],
+	"exclude": [
+		"node_modules",
+		"dist",
+		"logs",
+		"providers.json",
+		"keys.json",
+		"models.json",
+		"providers.schema.json",
+		"models.schema.json",
+		"tiers.json",
+		"dev/tps.ts"
+	]
   }
