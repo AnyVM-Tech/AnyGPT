@@ -46,6 +46,7 @@ export function setupMockProviderConfig() {
   const testUserKey = {
     userId: 'test-user',
     tokenUsage: 0,
+    requestCount: 0,
     role: 'user' as const,
     tier: 'enterprise'
   };

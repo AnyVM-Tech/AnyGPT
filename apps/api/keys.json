@@ -2,19 +2,43 @@
   "ad9970421fe07447bf011f78a88d72af2e7465df65d27844feeb2df9aa5f6772": {
     "userId": "test",
     "tokenUsage": 19218,
+    "requestCount": 0,
     "role": "user",
     "tier": "free"
   },
-  "f94b06121fcae0383f1284f4609a9783b2a60f1277b6670ec6edde62739edb35": {
+  "c4a9e1b7f2035de8a17c9b4e6d28f09cab3174de89f65a21b0ce48d3f7a2c61e": {
     "userId": "initial_admin_user_change_key",
-    "tokenUsage": 1916269,
+    "tokenUsage": 26311635,
+    "requestCount": 300,
     "role": "admin",
     "tier": "enterprise"
   },
   "test-key-for-mock-provider": {
     "userId": "test-user",
-    "tokenUsage": 28,
+    "tokenUsage": 54,
+    "requestCount": 4,
     "role": "user",
     "tier": "enterprise"
+  },
+  "53f5df0401a8d4f8b250816a66dd56b536d5ff104ee3a334f4fdfb72719d33a4": {
+    "userId": "enterprise_user_http",
+    "tokenUsage": 0,
+    "requestCount": 0,
+    "role": "user",
+    "tier": "free"
+  },
+  "e2e628e176bbe90114d3272b171ba069e2eccd4752367465ad18882ad3c5dd50": {
+    "userId": "enterprise_user_http2",
+    "tokenUsage": 418675,
+    "requestCount": 0,
+    "role": "user",
+    "tier": "enterprise"
+  },
+  "97b41cb53e92f7541b11fda89776834363ed1f1178928cb22af5ee7afbfa3f52": {
+    "userId": "698221698838691920",
+    "tokenUsage": 0,
+    "requestCount": 0,
+    "role": "user",
+    "tier": "free"
   }
 }

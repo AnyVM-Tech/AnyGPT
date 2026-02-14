@@ -2,10 +2,20 @@ import HyperExpress, { Request, Response } from './lib/uws-compat.js';
 import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'node:url';
+import cluster from 'node:cluster';
+import os from 'node:os';
 
 // Load environment variables based on NODE_ENV
 const envFile = process.env.NODE_ENV === 'test' ? '.env.test' : '.env';
-dotenv.config({ path: path.resolve(process.cwd(), envFile) });
+const runtimeDir = path.dirname(fileURLToPath(import.meta.url));
+const envCandidates = [
+    path.resolve(runtimeDir, envFile),
+    path.resolve(runtimeDir, '..', envFile),
+    path.resolve(process.cwd(), envFile),
+];
+const resolvedEnvPath = envCandidates.find((candidate) => fs.existsSync(candidate)) ?? envCandidates[0];
+dotenv.config({ path: resolvedEnvPath });
 
 // import { Model, Provider, UserData, KeysFile } from './providers/interfaces.js'; // Keep if needed for init
 import { modelsRouter } from './routes/models.js';
@@ -202,6 +212,9 @@ async function startServer() {
             console.log('[Server] Waiting for Redis connection to be ready...');
             await redisReadyPromise;
             console.log('[Server] Redis connection is ready. Proceeding with server startup.');
+            await dataManager.runStartupRedisMigration();
+            await dataManager.syncKeysBetweenRedisAndFilesystem();
+            await dataManager.syncProvidersBetweenRedisAndFilesystem();
         } catch (error: any) {
             // Log the error prominently. dataManager will fallback to filesystem if Redis is preferred but failed.
             console.error(`[Server] CRITICAL: Failed to connect to Redis during startup: ${error.message}.`);
@@ -344,24 +357,51 @@ async function startServer() {
                 message,
                 timestamp
             });
-        } else {
-            console.warn('[NotFoundHandler] Response already completed, could not send 404 JSON error.');
         }
+        // Silent exit if response already completed (prevent log noise)
     });
 
-    const port = parseInt(process.env.PORT || '3000', 10);
-    if (isNaN(port) || port <= 0) {
+    const configuredPort = parseInt(process.env.PORT || '3000', 10);
+    if (isNaN(configuredPort) || configuredPort <= 0) {
         const warningMsg = `Invalid PORT environment variable: ${process.env.PORT}. Defaulting to 3000.`;
         console.warn(warningMsg);
         await logError({ message: warningMsg, level: 'warn' });
         process.env.PORT = '3000';
     }
+    const basePort = isNaN(configuredPort) || configuredPort <= 0 ? 3000 : configuredPort;
+    const maxPortRetries = Math.max(0, parseInt(process.env.PORT_RETRY_COUNT || '10', 10) || 10);
+    let boundPort: number | null = null;
 
-    app.listen(port)
-        .then(async () => {
-            console.log(`\n🚀 API Server successfully started.`);
-            console.log(`Listening on port: ${port}`);
-            console.log(`Access local API at: http://localhost:${port}`);
+    for (let offset = 0; offset <= maxPortRetries; offset++) {
+        const candidatePort = basePort + offset;
+        try {
+            await app.listen(candidatePort);
+            boundPort = candidatePort;
+            break;
+        } catch (error: any) {
+            const isLastAttempt = offset === maxPortRetries;
+            if (isLastAttempt) {
+                await logError({
+                    message: 'Fatal: Server failed to start listening after retries.',
+                    basePort,
+                    attempts: maxPortRetries + 1,
+                    errorMessage: error?.message,
+                    errorStack: error?.stack,
+                });
+                console.error('Fatal: Server failed to start listening after retries.', error);
+                process.exit(1);
+            }
+            console.warn(`Port ${candidatePort} unavailable. Retrying on ${candidatePort + 1}...`);
+        }
+    }
+
+    if (boundPort === null) {
+        process.exit(1);
+    }
+
+    console.log(`\n🚀 API Server successfully started.`);
+    console.log(`Listening on port: ${boundPort}`);
+    console.log(`Access local API at: http://localhost:${boundPort}`);
             console.log('To enable/disable routers, use environment variables like:');
             console.log('  ENABLE_OPENAI_ROUTES=true/false');
             console.log('etc. Default is typically true if not set for most provider routes.');
@@ -384,13 +424,25 @@ async function startServer() {
             }
             console.log('Review console output above for important setup information and any generated credentials.');
             console.log('\nPress CTRL+C to stop the server.');
-        })
-        .catch(async (error: any) => {
-            await logError({message: 'Fatal: Server failed to start listening.', errorMessage: error.message, errorStack: error.stack});
-            console.error('Fatal: Server failed to start listening.', error);
-            process.exit(1);
-        });
 }
 
 // --- Start the server ---
-startServer();
+const requestedWorkers = Number(process.env.CLUSTER_WORKERS || '0');
+const isPrimary = (cluster as any).isPrimary ?? (cluster as any).isMaster;
+const shouldCluster = !isNaN(requestedWorkers) && requestedWorkers !== 0 && isPrimary;
+
+if (shouldCluster) {
+    const workerCount = requestedWorkers === -1 ? os.cpus().length : Math.max(1, requestedWorkers);
+    console.log(`[Cluster] Starting master with ${workerCount} workers.`);
+
+    for (let i = 0; i < workerCount; i++) {
+        cluster.fork();
+    }
+
+    cluster.on('exit', (worker) => {
+        console.warn(`[Cluster] Worker ${worker.process.pid} exited. Spawning replacement.`);
+        cluster.fork();
+    });
+} else {
+    startServer();
+}
