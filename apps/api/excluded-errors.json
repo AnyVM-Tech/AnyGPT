@@ -1,0 +1,16 @@
+{
+  "patterns": [
+    "429",
+    "RESOURCE_EXHAUSTED",
+    "rate limit",
+    "returned text instead of image",
+    "not found for API version",
+    "not supported for generateContent",
+    "not a chat model",
+    "not supported in the v1/chat/completions",
+    "does not have access to model",
+    "No available capacity",
+    "The server had an error while processing your request",
+    "server_error"
+  ]
+}

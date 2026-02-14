@@ -50,26 +50,71 @@ export interface Provider {
 }
 
 export interface IAIProvider {
-  sendMessage(message: IMessage): Promise<{ response: string; latency: number }>;
-  sendMessageStream?(message: IMessage): AsyncGenerator<{ chunk: string; latency: number; response: string; anystream: any; }, void, unknown>;
+  sendMessage(message: IMessage): Promise<ProviderResponse>;
+  sendMessageStream?(message: IMessage): AsyncGenerator<ProviderStreamChunk, void, unknown>;
+  createPassthroughStream?(message: IMessage): Promise<ProviderStreamPassthrough | null>;
+}
+
+export type StreamPassthroughMode = 'openai-chat-sse' | 'openai-responses-sse';
+
+export interface ProviderStreamPassthrough {
+  upstream: any;
+  mode: StreamPassthroughMode;
+}
+
+export interface ProviderStreamChunk {
+  chunk: string;
+  latency: number;
+  response: string;
+  anystream: any;
+  passthrough?: ProviderStreamPassthrough;
+}
+
+export interface ProviderUsage {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+}
+
+export interface ProviderResponse {
+  response: string;
+  latency: number;
+  usage?: ProviderUsage;
 }
 
 export type ContentPart =
   | { type: 'text'; text: string }
+  | { type: 'input_text'; text: string }
   | { type: 'image_url'; image_url: { url: string; detail?: string } }
   | { type: 'input_audio'; input_audio: { data: string; format: string } };
 
 export interface IMessage {
+  role?: string;
   content: string | ContentPart[];
   model: {
     id: string;
   };
+  useResponsesApi?: boolean;
+  system?: string | string[];
+  response_format?: any;
+  max_tokens?: number;
+  max_output_tokens?: number;
+  temperature?: number;
+  top_p?: number;
+  metadata?: Record<string, any>;
+  tools?: any[];
+  tool_choice?: any;
+  modalities?: string[];
+  audio?: any;
+  reasoning?: any;
+  instructions?: string;
 }
 
 // --- Potentially for user management/API key tracking --- //
 export interface UserData {
   userId: string;
   tokenUsage: number;
+  requestCount?: number;
   role: 'admin' | 'user';
 }
 
