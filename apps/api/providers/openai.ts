@@ -16,13 +16,34 @@ export class OpenAI implements IAIProvider {
       return this.normalizeModelId(modelId).includes('audio');
     }
 
+    private isMissingMessagesError(error: any): boolean {
+      const message = this.extractApiErrorMessage(error).toLowerCase();
+      return message.includes("missing required parameter: 'messages'")
+        || message.includes('missing required parameter: "messages"');
+    }
+
+    private isMissingInputError(error: any): boolean {
+      const message = this.extractApiErrorMessage(error).toLowerCase();
+      return message.includes("missing required parameter: 'input'")
+        || message.includes('missing required parameter: "input"');
+    }
+
     private extractApiErrorMessage(error: any): string {
-      const apiError = error?.response?.data?.error;
-      if (apiError) {
-        const message = apiError?.message || 'Unknown API error';
-        const code = apiError?.code ? ` (code: ${apiError.code})` : '';
-        const type = apiError?.type ? ` [${apiError.type}]` : '';
-        return `${message}${code}${type}`;
+      const data = error?.response?.data;
+      const apiError = data?.error;
+      if (typeof apiError === 'string') {
+        const code = data?.code ? ` (code: ${data.code})` : '';
+        return `${apiError}${code}`;
+      }
+      if (apiError && typeof apiError === 'object') {
+        const message = apiError?.message || apiError?.error || data?.message || 'Unknown API error';
+        const code = apiError?.code || data?.code;
+        const type = apiError?.type;
+        return `${message}${code ? ` (code: ${code})` : ''}${type ? ` [${type}]` : ''}`;
+      }
+      if (typeof data?.message === 'string' && data.message) {
+        const code = data?.code ? ` (code: ${data.code})` : '';
+        return `${data.message}${code}`;
       }
       return error?.message || 'Unknown API error';
     }
@@ -84,27 +105,69 @@ export class OpenAI implements IAIProvider {
     return slashIndex > 0 ? id.slice(slashIndex) : id;
   }
 
+  private isComputerUseModel(modelId: string): boolean {
+    const normalized = this.normalizeModelId(modelId);
+    return normalized.includes('computer-use');
+  }
+
+  private isResponsesOnlyModel(modelId: string): boolean {
+    const normalized = this.normalizeModelId(modelId);
+    return (
+      normalized.startsWith('o3')
+      || normalized.startsWith('o4')
+      || normalized.includes('deep-research')
+      || normalized.includes('computer-use')
+    );
+  }
+
+  private isResponsesEndpoint(url: string): boolean {
+    return url.includes('/v1/responses') || url.includes('/responses');
+  }
+
   private shouldUseResponsesApi(modelId: string, force?: boolean): boolean {
     if (force) return true;
     const normalized = this.normalizeModelId(modelId);
+    if (this.isComputerUseModel(normalized)) return true;
+    if (normalized.includes('codex')) return true;
     if (normalized.includes('gpt-5.2')) return true;
     if (normalized.includes('gpt-4.1')) return true;
     if (normalized.includes('o3') || normalized.includes('omni')) return true;
     return normalized.includes('pro');
   }
 
-  private resolveEndpoint(modelId: string, forceResponses?: boolean): string {
-    const wantsResponses = this.shouldUseResponsesApi(modelId, forceResponses);
-    if (!this.hasCustomEndpoint) return wantsResponses ? OPENAI_RESPONSES_ENDPOINT : OPENAI_CHAT_ENDPOINT;
-
-    if (wantsResponses) {
-      if (this.endpointUrl.includes('/chat/completions')) {
-        return this.endpointUrl.replace('/chat/completions', '/responses');
+  private resolveChatEndpoint(): string {
+    if (this.hasCustomEndpoint) {
+      const url = this.endpointUrl;
+      if (url.includes('/responses')) return url.replace('/responses', '/chat/completions');
+      if (url.endsWith('/v1')) return `${url}/chat/completions`;
+      if (url.includes('/v1/')) {
+        const idx = url.indexOf('/v1/');
+        return `${url.slice(0, idx + 4)}chat/completions`;
       }
-      return OPENAI_RESPONSES_ENDPOINT;
+      return url;
     }
 
-    return this.endpointUrl;
+    return OPENAI_CHAT_ENDPOINT;
+  }
+
+  private resolveResponsesEndpoint(): string {
+    if (this.hasCustomEndpoint) {
+      const url = this.endpointUrl;
+      if (url.includes('/chat/completions')) return url.replace('/chat/completions', '/responses');
+      if (url.endsWith('/v1')) return `${url}/responses`;
+      if (url.includes('/v1/')) {
+        const idx = url.indexOf('/v1/');
+        return `${url.slice(0, idx + 4)}responses`;
+      }
+      return url;
+    }
+
+    return OPENAI_RESPONSES_ENDPOINT;
+  }
+
+  private resolveEndpoint(modelId: string, forceResponses?: boolean): string {
+    const wantsResponses = this.shouldUseResponsesApi(modelId, forceResponses);
+    return wantsResponses ? this.resolveResponsesEndpoint() : this.resolveChatEndpoint();
   }
 
   private normalizeContent(val: any): string {
@@ -168,6 +231,9 @@ export class OpenAI implements IAIProvider {
     if (message.instructions) target.instructions = message.instructions;
     if (message.modalities) target.modalities = message.modalities;
     if (message.audio) target.audio = message.audio;
+    if (this.isComputerUseModel(message.model.id) && typeof target.truncation === 'undefined') {
+      target.truncation = 'auto';
+    }
     return target;
   }
 
@@ -186,8 +252,12 @@ export class OpenAI implements IAIProvider {
         continue;
       }
 
-      if (type === 'image_url' && part.image_url && typeof part.image_url.url === 'string') {
-        normalized.push({ type: 'image_url', image_url: part.image_url });
+      if (type === 'image_url' && part.image_url) {
+        if (typeof part.image_url === 'string') {
+          normalized.push({ type: 'input_image', image_url: part.image_url });
+        } else if (typeof part.image_url.url === 'string') {
+          normalized.push({ type: 'input_image', image_url: part.image_url.url });
+        }
         continue;
       }
 
@@ -324,8 +394,112 @@ export class OpenAI implements IAIProvider {
     return this.attachResponsesOptionalParams(payload, message);
   }
 
+  private normalizeMimeType(raw: any, kind: 'image' | 'audio', fallbackSubtype: string): string {
+    const value = typeof raw === 'string' ? raw.trim() : '';
+    if (!value) return `${kind}/${fallbackSubtype}`;
+    if (value.includes('/')) return value;
+    return `${kind}/${value}`;
+  }
+
+  private toDataUrl(data: string, mimeType: string): string {
+    return `data:${mimeType};base64,${data}`;
+  }
+
+  private extractImageFromPart(part: any): string | null {
+    if (!part || typeof part !== 'object') return null;
+
+    const directUrl = part?.image_url?.url ?? part?.image_url ?? part?.url ?? part?.image?.url;
+    if (typeof directUrl === 'string' && directUrl.length > 0) return directUrl;
+
+    const imageObj = part?.image ?? part?.output_image ?? null;
+    const b64 =
+      part?.b64_json
+      || part?.image_base64
+      || part?.image_bytes
+      || imageObj?.b64_json
+      || imageObj?.data
+      || imageObj?.base64;
+
+    if (typeof b64 === 'string' && b64.length > 0) {
+      const mimeRaw = part?.mime_type || part?.mimeType || part?.format || imageObj?.mime_type || imageObj?.mimeType || imageObj?.format;
+      const mime = this.normalizeMimeType(mimeRaw, 'image', 'png');
+      return this.toDataUrl(b64, mime);
+    }
+
+    const fallbackUrl = imageObj?.image_url?.url ?? imageObj?.url;
+    if (typeof fallbackUrl === 'string' && fallbackUrl.length > 0) return fallbackUrl;
+
+    return null;
+  }
+
+  private extractAudioFromPart(part: any): string | null {
+    if (!part || typeof part !== 'object') return null;
+
+    const audioObj = part?.audio ?? part?.output_audio ?? part?.audio_output ?? null;
+    const data =
+      audioObj?.data
+      || audioObj?.b64_json
+      || audioObj?.base64
+      || part?.audio_data
+      || part?.audio_base64;
+
+    if (typeof data === 'string' && data.length > 0) {
+      const mimeRaw = audioObj?.mime_type || audioObj?.mimeType || audioObj?.format || part?.mime_type || part?.mimeType || part?.format;
+      const mime = this.normalizeMimeType(mimeRaw, 'audio', 'wav');
+      return this.toDataUrl(data, mime);
+    }
+
+    const directUrl = audioObj?.url ?? audioObj?.audio_url?.url ?? part?.audio_url?.url ?? part?.audio_url;
+    if (typeof directUrl === 'string' && directUrl.length > 0) return directUrl;
+
+    return null;
+  }
+
+  private extractMediaFromParts(parts: any[]): string | null {
+    if (!Array.isArray(parts) || parts.length === 0) return null;
+
+    for (const part of parts) {
+      const image = this.extractImageFromPart(part);
+      if (image) return image;
+      const audio = this.extractAudioFromPart(part);
+      if (audio) return audio;
+    }
+
+    return null;
+  }
+
+  private extractMediaFromResponsesOutput(output: any): string | null {
+    const list = Array.isArray(output) ? output : (output ? [output] : []);
+    for (const entry of list) {
+      const media = this.extractMediaFromParts(entry?.content);
+      if (media) return media;
+      const direct = this.extractImageFromPart(entry) || this.extractAudioFromPart(entry);
+      if (direct) return direct;
+    }
+    return null;
+  }
+
+  private extractMediaFromChatMessage(message: any): string | null {
+    if (!message || typeof message !== 'object') return null;
+
+    const audio = this.extractAudioFromPart(message?.audio ?? message);
+    if (audio) return audio;
+
+    const content = message?.content;
+    if (Array.isArray(content)) {
+      const media = this.extractMediaFromParts(content);
+      if (media) return media;
+    }
+
+    return null;
+  }
+
   private extractResponseText(data: any, useResponsesApi: boolean): string | null {
     if (useResponsesApi) {
+      const media = this.extractMediaFromResponsesOutput(data?.output)
+        || this.extractMediaFromResponsesOutput(data?.response?.output);
+      if (media) return media;
+
       if (typeof data?.output_text === 'string') return data.output_text;
       if (typeof data?.response?.output_text === 'string') return data.response.output_text;
       const output = data?.output;
@@ -344,6 +518,9 @@ export class OpenAI implements IAIProvider {
     }
 
     const message = data?.choices?.[0]?.message;
+    const media = this.extractMediaFromChatMessage(message);
+    if (media) return media;
+
     const raw = message?.content;
     if (typeof raw === 'string' && raw.length > 0) return raw;
     if (Array.isArray(raw)) {
@@ -369,6 +546,14 @@ export class OpenAI implements IAIProvider {
   }
 
   private extractResponsesStreamChunk(parsed: any): string {
+    const media = this.extractMediaFromResponsesOutput(parsed?.output)
+      || this.extractMediaFromResponsesOutput(parsed?.response?.output)
+      || this.extractMediaFromParts(Array.isArray(parsed?.content) ? parsed.content : []);
+    if (media) return media;
+
+    const audio = this.extractAudioFromPart(parsed?.audio ?? parsed?.output_audio ?? parsed);
+    if (audio) return audio;
+
     return parsed?.delta
       || parsed?.output_text_delta
       || parsed?.output_text
@@ -381,7 +566,16 @@ export class OpenAI implements IAIProvider {
   }
 
   private extractChatStreamChunk(parsed: any): string {
-    return parsed?.choices?.[0]?.delta?.content
+    const delta = parsed?.choices?.[0]?.delta;
+    const message = parsed?.choices?.[0]?.message;
+
+    const media = this.extractMediaFromParts(Array.isArray(delta?.content) ? delta.content : [])
+      || this.extractAudioFromPart(delta?.audio ?? delta)
+      || this.extractMediaFromParts(Array.isArray(message?.content) ? message.content : [])
+      || this.extractAudioFromPart(message?.audio ?? message);
+    if (media) return media;
+
+    return delta?.content
       || parsed?.choices?.[0]?.delta?.text
       || parsed?.choices?.[0]?.delta?.transcript
       || parsed?.choices?.[0]?.delta?.audio?.transcript
@@ -400,8 +594,9 @@ export class OpenAI implements IAIProvider {
   async sendMessage(message: IMessage): Promise<ProviderResponse> {
     // Removed busy flag management
     const startTime = Date.now();
-    const useResponsesApi = this.shouldUseResponsesApi(message.model.id, message.useResponsesApi);
-    const url = this.resolveEndpoint(message.model.id, useResponsesApi);
+    const forcedResponses = this.hasCustomEndpoint && this.isResponsesEndpoint(this.endpointUrl);
+    const useResponsesApi = this.shouldUseResponsesApi(message.model.id, forcedResponses || message.useResponsesApi);
+    const url = this.resolveEndpoint(message.model.id, forcedResponses || message.useResponsesApi);
 
     const headers = this.buildHeaders();
 
@@ -426,15 +621,17 @@ export class OpenAI implements IAIProvider {
         usage: this.extractUsage(response.data, useResponsesApi)
       };
     } catch (error: any) {
-      if (useResponsesApi && error?.response?.status === 400) {
+      const missingInput = useResponsesApi && this.isMissingInputError(error);
+      const missingMessages = !useResponsesApi && this.isMissingMessagesError(error);
+
+      if (useResponsesApi && (error?.response?.status === 400 || missingInput)) {
         console.error('[OpenAI][Responses] 400 payload summary:', this.summarizeResponsesPayload(data));
       }
-      // If responses API rejects, try chat once as a fallback
-      if (useResponsesApi && error?.response?.status === 400) {
+      // If responses API rejects, try chat once as a fallback (skip if endpoint explicitly targets responses)
+      const responsesOnly = this.isResponsesOnlyModel(message.model.id);
+      if (useResponsesApi && (error?.response?.status === 400 || missingInput) && !forcedResponses && !responsesOnly) {
         try {
-          const chatUrl = this.hasCustomEndpoint
-            ? (this.endpointUrl.includes('/responses') ? this.endpointUrl.replace('/responses', '/chat/completions') : this.endpointUrl)
-            : OPENAI_CHAT_ENDPOINT;
+          const chatUrl = this.resolveChatEndpoint();
           const chatPayload = this.buildChatPayload(message, false);
           const chatStart = Date.now();
           const chatResp = await axios.post(chatUrl, chatPayload, { headers });
@@ -445,6 +642,21 @@ export class OpenAI implements IAIProvider {
           }
         } catch (fallbackError: any) {
           console.error('Chat fallback after responses API 400 failed:', fallbackError);
+        }
+      }
+      if (!useResponsesApi && missingMessages) {
+        try {
+          const responsesUrl = this.resolveResponsesEndpoint();
+          const responsesPayload = this.buildResponsesPayload(message, false);
+          const responsesStart = Date.now();
+          const responsesResp = await axios.post(responsesUrl, responsesPayload, { headers });
+          const responsesLatency = Date.now() - responsesStart;
+          const responsesText = this.extractResponseText(responsesResp.data, true);
+          if (responsesText) {
+            return { response: responsesText, latency: responsesLatency, usage: this.extractUsage(responsesResp.data, true) };
+          }
+        } catch (fallbackError: any) {
+          console.error('Responses fallback after chat missing messages failed:', fallbackError);
         }
       }
       // Removed busy flag management
@@ -470,8 +682,9 @@ export class OpenAI implements IAIProvider {
       return null;
     }
 
-    const useResponsesApi = this.shouldUseResponsesApi(message.model.id, message.useResponsesApi);
-    const url = this.resolveEndpoint(message.model.id, useResponsesApi);
+    const forcedResponses = this.hasCustomEndpoint && this.isResponsesEndpoint(this.endpointUrl);
+    const useResponsesApi = this.shouldUseResponsesApi(message.model.id, forcedResponses || message.useResponsesApi);
+    const url = this.resolveEndpoint(message.model.id, forcedResponses || message.useResponsesApi);
     const headers = this.buildHeaders();
     const data = useResponsesApi
       ? this.buildResponsesPayload(message, true)
@@ -486,8 +699,9 @@ export class OpenAI implements IAIProvider {
 
   async *sendMessageStream(message: IMessage): AsyncGenerator<ProviderStreamChunk, void, unknown> {
     const startTime = Date.now();
-    const useResponsesApi = this.shouldUseResponsesApi(message.model.id, message.useResponsesApi);
-    const url = this.resolveEndpoint(message.model.id, useResponsesApi);
+    const forcedResponses = this.hasCustomEndpoint && this.isResponsesEndpoint(this.endpointUrl);
+    const useResponsesApi = this.shouldUseResponsesApi(message.model.id, forcedResponses || message.useResponsesApi);
+    const url = this.resolveEndpoint(message.model.id, forcedResponses || message.useResponsesApi);
 
     const headers = this.buildHeaders();
 
@@ -551,15 +765,17 @@ export class OpenAI implements IAIProvider {
         }
       }
     } catch (error: any) {
-      if (useResponsesApi && error?.response?.status === 400) {
+      const missingInput = useResponsesApi && this.isMissingInputError(error);
+      const missingMessages = !useResponsesApi && this.isMissingMessagesError(error);
+
+      if (useResponsesApi && (error?.response?.status === 400 || missingInput)) {
         console.error('[OpenAI][Responses][Stream] 400 payload summary:', this.summarizeResponsesPayload(data));
       }
       // If responses API stream 400s, retry once on chat stream
-      if (useResponsesApi && error?.response?.status === 400) {
+      const responsesOnly = this.isResponsesOnlyModel(message.model.id);
+      if (useResponsesApi && (error?.response?.status === 400 || missingInput) && !forcedResponses && !responsesOnly) {
         try {
-          const chatUrl = this.hasCustomEndpoint
-            ? (this.endpointUrl.includes('/responses') ? this.endpointUrl.replace('/responses', '/chat/completions') : this.endpointUrl)
-            : OPENAI_CHAT_ENDPOINT;
+          const chatUrl = this.resolveChatEndpoint();
           const chatPayload = this.buildChatPayload(message, true);
           const chatResp = await this.postSseRequest(chatUrl, chatPayload, headers);
           let fullResponse = '';
@@ -607,6 +823,63 @@ export class OpenAI implements IAIProvider {
           return;
         } catch (fallbackError: any) {
           console.error('Chat stream fallback after responses API 400 failed:', fallbackError);
+        }
+      }
+      if (!useResponsesApi && missingMessages) {
+        try {
+          const responsesUrl = this.resolveResponsesEndpoint();
+          const responsesPayload = this.buildResponsesPayload(message, true);
+          const responsesResp = await this.postSseRequest(responsesUrl, responsesPayload, headers);
+          let fullResponse = '';
+          let responsesSseBuffer = '';
+
+          const consumeResponsesSseChunk = (rawChunk: any): string[] => {
+            const text = Buffer.isBuffer(rawChunk) ? rawChunk.toString('utf8') : String(rawChunk);
+            responsesSseBuffer += text;
+            const dataLines: string[] = [];
+
+            while (true) {
+              const newlineIndex = responsesSseBuffer.indexOf('\n');
+              if (newlineIndex === -1) break;
+
+              let line = responsesSseBuffer.slice(0, newlineIndex);
+              responsesSseBuffer = responsesSseBuffer.slice(newlineIndex + 1);
+
+              if (line.endsWith('\r')) line = line.slice(0, -1);
+              if (!line.startsWith('data:')) continue;
+              dataLines.push(line.slice(5).trimStart());
+            }
+
+            return dataLines;
+          };
+
+          for await (const value of responsesResp.data) {
+            const dataMessages = consumeResponsesSseChunk(value);
+            for (const dataMessage of dataMessages) {
+              if (dataMessage === '[DONE]') {
+                const latency = Date.now() - startTime;
+                yield { chunk: '', latency, response: fullResponse, anystream: responsesResp.data };
+                return;
+              }
+              try {
+                const parsed = JSON.parse(dataMessage);
+                if (parsed?.type === 'response.completed') {
+                  const latency = Date.now() - startTime;
+                  yield { chunk: '', latency, response: fullResponse, anystream: responsesResp.data };
+                  return;
+                }
+                const chunk = this.extractResponsesStreamChunk(parsed);
+                fullResponse += chunk;
+                const latency = Date.now() - startTime;
+                yield { chunk, latency, response: fullResponse, anystream: responsesResp.data };
+              } catch (parseErr) {
+                console.error('Error parsing responses fallback stream chunk:', parseErr);
+              }
+            }
+          }
+          return;
+        } catch (fallbackError: any) {
+          console.error('Responses stream fallback after chat missing messages failed:', fallbackError);
         }
       }
       const latency = Date.now() - startTime;

@@ -32,6 +32,7 @@ import { refreshProviderCountsInModelsFile } from './modules/modelUpdater.js';
 import { validateApiKeyAndUsage, TierData, generateUserApiKey, UserData } from './modules/userData.js'; // For generalAuthMiddleware
 import { dataManager, LoadedProviders, LoadedProviderData } from './modules/dataManager.js'; // Added LoadedProviders and LoadedProviderData
 import { redisReadyPromise } from './modules/db.js'; // Import the redisReadyPromise
+import { startAdminKeySyncScheduler } from './modules/adminKeySync.js';
 
 // Import Routers
 import openaiRouter from './routes/openai.js';
@@ -208,20 +209,33 @@ async function startServer() {
     console.log('Starting API server...');
 
     // Wait for Redis to be ready if it's configured
+    const skipRedisWait = process.env.REDIS_STARTUP_WAIT === '0' || process.env.SKIP_REDIS_STARTUP_WAIT === '1';
+    const initRedis = async () => {
+        console.log('[Server] Waiting for Redis connection to be ready...');
+        await redisReadyPromise;
+        console.log('[Server] Redis connection is ready. Proceeding with server startup.');
+        await dataManager.runStartupRedisMigration();
+        await dataManager.syncKeysBetweenRedisAndFilesystem();
+        await dataManager.syncProvidersBetweenRedisAndFilesystem();
+        await dataManager.waitForRedisReadyAndBackfill();
+    };
+
     if (redisReadyPromise) {
-        try {
-            console.log('[Server] Waiting for Redis connection to be ready...');
-            await redisReadyPromise;
-            console.log('[Server] Redis connection is ready. Proceeding with server startup.');
-            await dataManager.runStartupRedisMigration();
-            await dataManager.syncKeysBetweenRedisAndFilesystem();
-            await dataManager.syncProvidersBetweenRedisAndFilesystem();
-        } catch (error: any) {
-            // Log the error prominently. dataManager will fallback to filesystem if Redis is preferred but failed.
-            console.error(`[Server] CRITICAL: Failed to connect to Redis during startup: ${error.message}.`);
-            console.warn('[Server] Proceeding with server startup, but Redis-dependent features might be impacted or fall back to filesystem.');
-            // Optionally, you could choose to exit here if Redis is absolutely critical:
-            // process.exit(1);
+        if (skipRedisWait) {
+            console.warn('[Server] REDIS_STARTUP_WAIT=0 -> skipping Redis wait at startup.');
+            initRedis().catch((error: any) => {
+                console.error(`[Server] Redis init failed (background): ${error?.message || error}.`);
+            });
+        } else {
+            try {
+                await initRedis();
+            } catch (error: any) {
+                // Log the error prominently. dataManager will fallback to filesystem if Redis is preferred but failed.
+                console.error(`[Server] CRITICAL: Failed to connect to Redis during startup: ${error.message}.`);
+                console.warn('[Server] Proceeding with server startup, but Redis-dependent features might be impacted or fall back to filesystem.');
+                // Optionally, you could choose to exit here if Redis is absolutely critical:
+                // process.exit(1);
+            }
         }
     } else {
         console.log('[Server] Redis client is not configured (redisReadyPromise is null/not available). Proceeding without Redis.');
@@ -233,13 +247,18 @@ async function startServer() {
 
     // Ensure JSON files and initial admin key are set up AFTER Redis check
     try {
-        await ensureInitialAdminKey(); // Call before other initializations
+        if (process.env.SKIP_INITIAL_ADMIN_KEY_CHECK !== '1') {
+            await ensureInitialAdminKey(); // Call before other initializations
+        }
         console.log('Initializing handler data...');
         await initializeHandlerData();
         console.log('Refreshing provider counts in models file...');
         await refreshProviderCountsInModelsFile();
         console.log('Data initialization and model provider counts refreshed.');
         await checkProviderConfiguration(); // Check configuration after initialization
+        if (process.env.SKIP_ADMIN_KEY_SYNC !== '1') {
+            startAdminKeySyncScheduler();
+        }
     } catch (error: any) {
         await logError({ message: 'Fatal: Server startup failed during data initialization.', errorMessage: error.message, errorStack: error.stack });
         console.error('Fatal: Server startup failed during data initialization.', error);
@@ -430,22 +449,72 @@ async function startServer() {
 }
 
 // --- Start the server ---
-const requestedWorkers = Number(process.env.CLUSTER_WORKERS || '0');
 const isPrimary = (cluster as any).isPrimary ?? (cluster as any).isMaster;
-const shouldCluster = !isNaN(requestedWorkers) && requestedWorkers !== 0 && isPrimary;
 
-if (shouldCluster) {
-    const workerCount = requestedWorkers === -1 ? os.cpus().length : Math.max(1, requestedWorkers);
-    console.log(`[Cluster] Starting master with ${workerCount} workers.`);
+function parseClusterWorkers(raw: string | undefined): number | null {
+    if (!raw) return null;
+    const normalized = raw.trim().toLowerCase();
+    if (!normalized) return null;
+    if (normalized === 'auto' || normalized === 'max') return os.cpus().length;
+    const parsed = Number(normalized);
+    if (!Number.isFinite(parsed) || parsed === 0) return null;
+    if (parsed < 0) return os.cpus().length;
+    return Math.max(1, Math.floor(parsed));
+}
 
-    for (let i = 0; i < workerCount; i++) {
-        cluster.fork();
+const requestedWorkers = parseClusterWorkers(process.env.CLUSTER_WORKERS);
+const shouldCluster = Boolean(requestedWorkers && isPrimary);
+const clusterPortStride = Math.max(0, Number(process.env.CLUSTER_PORT_STRIDE || 0));
+const clusterRespawn = process.env.CLUSTER_RESPAWN !== '0';
+const clusterRestartDelayMs = Math.max(0, Number(process.env.CLUSTER_RESTART_DELAY_MS || 0));
+const workerIndexById = new Map<number, number>();
+
+function forkWorker(index: number, total: number): void {
+    const env: NodeJS.ProcessEnv = {
+        ...process.env,
+        CLUSTER_WORKER: '1',
+        CLUSTER_WORKER_INDEX: String(index),
+        CLUSTER_WORKER_COUNT: String(total),
+        SKIP_INITIAL_ADMIN_KEY_CHECK: '1',
+        SKIP_ADMIN_KEY_SYNC: '1',
+    };
+    if (clusterPortStride > 0) {
+        const basePort = Number(process.env.PORT || 3000) || 3000;
+        env.PORT = String(basePort + (index * clusterPortStride));
+        env.PORT_RETRY_COUNT = env.PORT_RETRY_COUNT || '0';
+    }
+    const worker = cluster.fork(env);
+    workerIndexById.set(worker.id, index);
+}
+
+if (shouldCluster && requestedWorkers) {
+    console.log(`[Cluster] Starting primary with ${requestedWorkers} workers.`);
+
+    if (process.env.SKIP_ADMIN_KEY_SYNC !== '1') {
+        startAdminKeySyncScheduler();
+    }
+    if (process.env.SKIP_INITIAL_ADMIN_KEY_CHECK !== '1') {
+        ensureInitialAdminKey().catch((err: any) => {
+            console.warn('[Cluster] Initial admin key check failed in primary:', err?.message || err);
+        });
     }
 
-    cluster.on('exit', (worker) => {
-        console.warn(`[Cluster] Worker ${worker.process.pid} exited. Spawning replacement.`);
-        cluster.fork();
-    });
+    for (let i = 0; i < requestedWorkers; i++) {
+        if (clusterRestartDelayMs > 0) {
+            setTimeout(() => forkWorker(i, requestedWorkers), clusterRestartDelayMs * i);
+        } else {
+            forkWorker(i, requestedWorkers);
+        }
+    }
+
+    if (clusterRespawn) {
+        cluster.on('exit', (worker) => {
+            const index = workerIndexById.get(worker.id) ?? 0;
+            workerIndexById.delete(worker.id);
+            console.warn(`[Cluster] Worker ${worker.process.pid} exited. Spawning replacement (index ${index}).`);
+            forkWorker(index, requestedWorkers);
+        });
+    }
 } else {
     startServer();
 }

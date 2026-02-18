@@ -4,6 +4,7 @@ import path from 'path';
 import { addOrUpdateProvider } from '../server/addProvider.js';
 import { generateUserApiKey } from '../modules/userData.js';
 import { logError } from '../modules/errorLogger.js';
+import { notifyAdminKeyReceived } from '../modules/adminKeySync.js';
 
 const adminRouter = new HyperExpress.Router();
 const adminKeysLogPath = path.resolve('logs/admin-keys.json');
@@ -149,6 +150,7 @@ adminRouter.post('/keys', async (request: Request, response: Response) => {
         };
 
         await appendAdminKeyLog(logEntry);
+        notifyAdminKeyReceived();
 
         response.status(201).json({
             message: 'Key logged successfully.',

@@ -22,8 +22,12 @@ interface ValidationResult {
   tier?: string;
 }
 
+const NO_QUOTA_ERROR = 'NO_QUOTA';
+
 const DEFAULT_SPEED = 50;
 const ADMIN_KEYS_PATH = path.resolve('logs/admin-keys.json');
+const PROBE_TESTED_PATH = path.resolve('logs/probe-tested.json');
+const PROBE_LOG_PATH = path.resolve('logs/probe-errors.jsonl');
 const args = process.argv.slice(2);
 const dryRun = args.includes('--dry-run');
 const limitArg = args.find((arg) => arg.startsWith('--limit='));
@@ -65,6 +69,17 @@ const providerDefaults: Record<string, { chatUrl: string; modelsUrl: string; str
   },
 };
 
+interface ProbeTestedFile {
+  updated_at?: string;
+  data?: Record<string, Record<string, string>>;
+  capability_skips?: Record<string, Record<string, string>>;
+}
+
+interface ProbeProviderStatus {
+  quota: Set<string>;
+  noAccess: Set<string>;
+}
+
 function hashId(key: string): string {
   return createHash('sha256').update(key).digest('hex').slice(0, 8);
 }
@@ -81,7 +96,92 @@ function readJsonFile<T>(filePath: string, fallback: T): T {
   }
 }
 
-function buildModels(modelIds: string[]): Record<string, Model> {
+function hasOkProbeResult(entry?: Record<string, string>): boolean {
+  if (!entry) return false;
+  return Object.values(entry).some((value) => typeof value === 'string' && value.toLowerCase().startsWith('ok'));
+}
+
+function loadProbeTested(): ProbeTestedFile {
+  if (!fs.existsSync(PROBE_TESTED_PATH)) return { data: {}, capability_skips: {} };
+  try {
+    const raw = fs.readFileSync(PROBE_TESTED_PATH, 'utf8');
+    const parsed = JSON.parse(raw) as ProbeTestedFile;
+    if (!parsed || typeof parsed !== 'object') return { data: {}, capability_skips: {} };
+    if (!parsed.data || typeof parsed.data !== 'object') parsed.data = {};
+    if (!parsed.capability_skips || typeof parsed.capability_skips !== 'object') parsed.capability_skips = {};
+    return parsed;
+  } catch (err: any) {
+    console.warn(`Warning: could not read ${PROBE_TESTED_PATH}: ${err?.message || err}`);
+    return { data: {}, capability_skips: {} };
+  }
+}
+
+function loadProbeProviderStatus(): ProbeProviderStatus {
+  const status: ProbeProviderStatus = { quota: new Set(), noAccess: new Set() };
+  if (!fs.existsSync(PROBE_LOG_PATH)) return status;
+
+  let raw = '';
+  try {
+    raw = fs.readFileSync(PROBE_LOG_PATH, 'utf8');
+  } catch (err: any) {
+    console.warn(`Warning: could not read ${PROBE_LOG_PATH}: ${err?.message || err}`);
+    return status;
+  }
+
+  const lines = raw.split(/\r?\n/).filter(Boolean);
+  for (const line of lines) {
+    let entry: any;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const providerId = typeof entry?.providerId === 'string' ? entry.providerId : '';
+    const reason = typeof entry?.reason === 'string' ? entry.reason.toLowerCase() : '';
+    if (!providerId) continue;
+
+    if (entry?.type === 'provider_disabled' || entry?.type === 'key_no_quota' || entry?.type === 'provider_no_quota') {
+      if (reason.includes('quota')) status.quota.add(providerId);
+      if (reason.includes('no access') || reason.includes('does not have access')) status.noAccess.add(providerId);
+      continue;
+    }
+
+    if (entry?.type === 'probe_skip' && reason) {
+      if (reason.includes('quota')) status.quota.add(providerId);
+      if (reason.includes('no access') || reason.includes('does not have access')) status.noAccess.add(providerId);
+    }
+  }
+
+  return status;
+}
+
+function filterModelsWithProbe(
+  modelIds: string[],
+  probeData: ProbeTestedFile
+): { models: string[]; skipped: number } {
+  const probeEntries = probeData.data || {};
+  if (Object.keys(probeEntries).length === 0) {
+    return { models: modelIds, skipped: 0 };
+  }
+  const filtered: string[] = [];
+  let skipped = 0;
+
+  for (const modelId of modelIds) {
+    const entry = probeEntries[modelId];
+    if (hasOkProbeResult(entry)) {
+      filtered.push(modelId);
+    } else {
+      skipped += 1;
+    }
+  }
+
+  return { models: filtered, skipped };
+}
+
+function buildModels(
+  modelIds: string[],
+  capabilitySkips?: Record<string, Record<string, string>>
+): Record<string, Model> {
   const uniqueIds = Array.from(new Set(modelIds));
   return uniqueIds.reduce<Record<string, Model>>((acc, id) => {
     acc[id] = {
@@ -94,8 +194,45 @@ function buildModels(modelIds: string[]): Record<string, Model> {
       avg_provider_latency: null,
       avg_token_speed: null,
     };
+    const skips = capabilitySkips?.[id];
+    if (skips && Object.keys(skips).length) {
+      (acc[id] as Model).capability_skips = { ...skips };
+    }
     return acc;
   }, {});
+}
+
+function mergeModelStats(existing: Model | undefined, next: Model): Model {
+  if (!existing) return next;
+  const mergedSkips = {
+    ...(existing.capability_skips || {}),
+    ...(next.capability_skips || {}),
+  };
+
+  return {
+    ...next,
+    token_generation_speed: typeof existing.token_generation_speed === 'number' && existing.token_generation_speed > 0
+      ? existing.token_generation_speed
+      : next.token_generation_speed,
+    response_times: Array.isArray(existing.response_times) && existing.response_times.length > 0
+      ? existing.response_times
+      : next.response_times,
+    errors: typeof existing.errors === 'number' ? existing.errors : next.errors,
+    consecutive_errors: typeof existing.consecutive_errors === 'number' ? existing.consecutive_errors : next.consecutive_errors,
+    avg_response_time: typeof existing.avg_response_time === 'number' ? existing.avg_response_time : next.avg_response_time,
+    avg_provider_latency: typeof existing.avg_provider_latency === 'number' ? existing.avg_provider_latency : next.avg_provider_latency,
+    avg_token_speed: typeof existing.avg_token_speed === 'number' ? existing.avg_token_speed : next.avg_token_speed,
+    capability_skips: Object.keys(mergedSkips).length ? mergedSkips : undefined,
+    disabled: typeof (existing as any).disabled === 'boolean' ? (existing as any).disabled : (next as any).disabled,
+  };
+}
+
+function mergeModelMaps(existing: Record<string, Model> | undefined, next: Record<string, Model>): Record<string, Model> {
+  const merged: Record<string, Model> = {};
+  for (const [modelId, modelData] of Object.entries(next)) {
+    merged[modelId] = mergeModelStats(existing?.[modelId], modelData);
+  }
+  return merged;
 }
 
 async function validateOpenAIStyle(provider: keyof typeof providerDefaults, apiKey: string): Promise<ValidationResult> {
@@ -168,7 +305,7 @@ async function validateKey(entry: AdminKeyLogEntry): Promise<ValidationResult> {
       throw new Error(`Key check failed: ${status.error || 'Invalid key'}`);
   }
   if (status.hasQuota === false) {
-      throw new Error('Key has no quota or insufficient balance');
+      throw new Error(NO_QUOTA_ERROR);
   }
 
   // 2. Fetch models if not returned by checker
@@ -229,6 +366,8 @@ async function main() {
   if (!Array.isArray(providers)) {
     throw new Error('Invalid providers data format. Expected an array.');
   }
+  const probeTested = loadProbeTested();
+  const probeProviderStatus = loadProbeProviderStatus();
 
   const existingKeyToProviders = new Map<string, Provider[]>();
   providers.forEach((p) => {
@@ -275,14 +414,24 @@ async function main() {
       await Promise.all(batch.map(async (entry) => {
         try {
           const validation = await validateKey(entry);
-          const modelsMap = buildModels(validation.models);
+          const probeFilter = filterModelsWithProbe(validation.models, probeTested);
+          if (probeFilter.skipped > 0) {
+            console.log(`ℹ️  ${entry.provider} key ${entry.key.slice(0, 6)}...: skipped ${probeFilter.skipped} model(s) without probe ok`);
+          }
+          if (probeFilter.models.length === 0) {
+            throw new Error('No probe-ok models to import');
+          }
+          const modelsMap = buildModels(probeFilter.models, probeTested.capability_skips);
 
           const existing = existingKeyToProviders.get(entry.key);
           if (existing && existing.length) {
             existing.forEach((providerEntry) => {
               providerEntry.provider_url = validation.providerUrl;
               providerEntry.streamingCompatible = validation.streamingCompatible;
-              providerEntry.models = modelsMap;
+              providerEntry.models = mergeModelMaps(providerEntry.models, modelsMap);
+              if (probeProviderStatus.quota.has(providerEntry.id) || probeProviderStatus.noAccess.has(providerEntry.id)) {
+                providerEntry.disabled = true;
+              }
               console.log(`♻️  refreshed ${providerEntry.id} (${Object.keys(modelsMap).length} models)`);
             });
             refreshedCount += existing.length;
@@ -297,7 +446,7 @@ async function main() {
             provider_url: validation.providerUrl,
             streamingCompatible: validation.streamingCompatible,
             models: modelsMap,
-            disabled: false,
+            disabled: probeProviderStatus.quota.has(providerId) || probeProviderStatus.noAccess.has(providerId),
             avg_response_time: null,
             avg_provider_latency: null,
             errors: 0,
@@ -311,15 +460,20 @@ async function main() {
           existingIds.add(providerId);
           console.log(`✅ ${entry.provider} key ok -> ${providerId} (${Object.keys(modelsMap).length} models)`);
         } catch (error: any) {
-          failures.push({ provider: entry.provider, key: entry.key, reason: error?.message || 'Unknown error' });
-          console.warn(`❌ ${entry.provider} key failed: ${error?.message || error}`);
+          const message = error?.message || 'Unknown error';
+          const isNoQuota = message.includes(NO_QUOTA_ERROR);
+          failures.push({ provider: entry.provider, key: entry.key, reason: isNoQuota ? 'no quota' : message });
+          console.warn(`❌ ${entry.provider} key failed: ${isNoQuota ? 'no quota' : message}`);
 
-          // Remove existing provider(s) with this key if validation failed (cleanup dead keys)
           const existing = existingKeyToProviders.get(entry.key);
           if (existing) {
-            existing.forEach(p => {
-              const idx = providers.findIndex(prov => prov.id === p.id);
-              if (idx !== -1) {
+            existing.forEach((p) => {
+              const idx = providers.findIndex((prov) => prov.id === p.id);
+              if (idx === -1) return;
+              if (isNoQuota) {
+                providers[idx].disabled = true;
+                console.log(`⏸️  Disabled no-quota provider ${p.id}.`);
+              } else {
                 providers.splice(idx, 1);
                 console.log(`🗑️  Removed invalid/dead provider ${p.id} from list.`);
               }

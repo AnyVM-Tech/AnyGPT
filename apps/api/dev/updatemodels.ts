@@ -20,14 +20,44 @@ type ProviderFile = Array<{
 }>;
 
 function guessOwnedBy(modelId: string): string {
-  if (modelId.startsWith('gpt')) return 'openai';
-  if (modelId.includes('claude')) return 'anthropic';
-  if (modelId.includes('gemini') || modelId.includes('gemma')) return 'google';
-  if (modelId.includes('llama')) return 'meta';
-  if (modelId.includes('mistral') || modelId.includes('ministral') || modelId.includes('mixtral')) return 'mistral.ai';
-  if (modelId.includes('qwen')) return 'alibaba';
-  if (modelId.includes('o1') || modelId.includes('chatgpt')) return 'openai';
-  if (modelId.includes('command')) return 'cohere';
+  const lower = modelId.toLowerCase();
+  const prefix = lower.includes('/') ? lower.split('/')[0] : '';
+  const prefixMap: Record<string, string> = {
+    openai: 'openai',
+    anthropic: 'anthropic',
+    google: 'google',
+    gemini: 'google',
+    gemma: 'google',
+    'meta-llama': 'meta',
+    meta: 'meta',
+    mistralai: 'mistral.ai',
+    mistral: 'mistral.ai',
+    qwen: 'alibaba',
+    deepseek: 'deepseek',
+    'x-ai': 'xai',
+    xai: 'xai',
+    cohere: 'cohere',
+    ai21: 'ai21',
+    openrouter: 'openrouter',
+    bytedance: 'bytedance',
+    baidu: 'baidu',
+    'z-ai': 'z.ai',
+    together: 'together',
+    groq: 'groq',
+    azure: 'microsoft',
+    microsoft: 'microsoft',
+    amazon: 'amazon',
+    bedrock: 'amazon',
+  };
+  if (prefix && prefixMap[prefix]) return prefixMap[prefix];
+  if (lower.startsWith('gpt')) return 'openai';
+  if (lower.includes('claude')) return 'anthropic';
+  if (lower.includes('gemini') || lower.includes('gemma')) return 'google';
+  if (lower.includes('llama')) return 'meta';
+  if (lower.includes('mistral') || lower.includes('ministral') || lower.includes('mixtral')) return 'mistral.ai';
+  if (lower.includes('qwen')) return 'alibaba';
+  if (lower.includes('o1') || lower.includes('chatgpt')) return 'openai';
+  if (lower.includes('command')) return 'cohere';
   return 'unknown';
 }
 
@@ -84,6 +114,14 @@ function main() {
       model.providers = count;
       changes = true;
       console.log(`Updated ${model.id} providers -> ${count}`);
+    }
+    if (!model.owned_by || model.owned_by === 'unknown') {
+      const guessed = guessOwnedBy(model.id);
+      if (guessed !== model.owned_by) {
+        model.owned_by = guessed;
+        changes = true;
+        console.log(`Updated ${model.id} owner -> ${guessed}`);
+      }
     }
     updatedModels.push(model);
   }

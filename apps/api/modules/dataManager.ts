@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import redis from './db.js'; 
+import redis, { redisReadyPromise } from './db.js'; 
 import { Redis } from 'ioredis'; 
 
 // --- Define or Import Data Structure Interfaces ---
@@ -15,6 +15,8 @@ interface ProviderModelData {
     avg_response_time: number | null;
     avg_provider_latency: number | null;
     avg_token_speed: number | null;
+    capability_skips?: Record<string, string>;
+    disabled?: boolean;
 }
 
 // FIX: Add export
@@ -22,6 +24,7 @@ export interface LoadedProviderData {
     id: string; 
     apiKey: string | null; // Make consistent with Provider interface
     provider_url: string; // Make required, consistent with Provider interface
+    provider_urls?: { [modelId: string]: string };
     streamingCompatible?: boolean;
     models: { [key: string]: ProviderModelData };
     disabled: boolean; // Make required with default false
@@ -113,6 +116,8 @@ console.log(`[DataManager] Data source preference set to: ${dataSourcePreference
 // --- DataManager Class ---
 class DataManager {
     private redisClient: Redis | null;
+    private pendingRedisBackfill = new Set<DataType>();
+    private redisBackfillPromise: Promise<void> | null = null;
 
     constructor(redisInstance: Redis | null) {
         this.redisClient = redisInstance;
@@ -120,6 +125,7 @@ class DataManager {
              this.redisClient.on('ready', () => console.log("DataManager: Redis client ready."));
              this.redisClient.on('error', (err) => console.error("DataManager: Redis client error:", err));
              console.log(`DataManager initialized with Redis client (${this.redisClient.status}).`);
+             this.attachRedisReadyHandler();
         } else {
             console.log("DataManager initialized without Redis client (using filesystem only).");
         }
@@ -127,6 +133,101 @@ class DataManager {
 
     private isRedisReady(): boolean {
         return !!this.redisClient && this.redisClient.status === 'ready'; 
+    }
+
+    public isReady(): boolean {
+        return !this.redisClient || this.isRedisReady();
+    }
+
+    private attachRedisReadyHandler(): void {
+        if (!redisReadyPromise) return;
+        redisReadyPromise
+            .then(() => this.backfillPendingToRedis('ready-event'))
+            .catch(() => {
+                // Redis not available; fallback to filesystem continues.
+            });
+    }
+
+    public async waitForRedisReadyAndBackfill(): Promise<void> {
+        if (!redisReadyPromise) return;
+        await redisReadyPromise;
+        await this.backfillPendingToRedis('explicit-wait');
+    }
+
+    private getCachedOrFilesystem<T extends ManagedDataStructure>(dataType: DataType): T | null {
+        const cached = inMemoryCache[dataType];
+        if (cached?.value) return cached.value as T;
+
+        const filePath = filePaths[dataType];
+        try {
+            if (!fs.existsSync(filePath)) return null;
+            const fileData = fs.readFileSync(filePath, 'utf8');
+            return JSON.parse(fileData) as T;
+        } catch (err) {
+            console.error(`[DataManager] Failed reading ${dataType} from filesystem for Redis backfill:`, err);
+            return null;
+        }
+    }
+
+    private async saveToRedisOnly<T extends ManagedDataStructure>(dataType: DataType, data: T): Promise<void> {
+        if (!this.isRedisReady()) return;
+
+        if (dataType === 'providers' && Array.isArray(data) && data.length === 0) {
+            console.warn('[DataManager] Skipping Redis backfill for providers because data array is empty.');
+            return;
+        }
+
+        try {
+            const redisStringifiedData = JSON.stringify(data);
+            const redisField = redisHashFields[dataType];
+            const legacyRedisKey = legacyRedisKeys[dataType];
+            await this.redisClient!.multi()
+                .hset(redisHashKey, redisField, redisStringifiedData)
+                .del(legacyRedisKey)
+                .exec();
+            console.log(`[DataManager] Redis backfill saved for: ${dataType}`);
+        } catch (err) {
+            console.error(`[DataManager] Redis backfill failed for ${dataType}:`, err);
+        }
+    }
+
+    private async backfillPendingToRedis(reason: string): Promise<void> {
+        if (!this.isRedisReady()) return;
+        if (this.redisBackfillPromise) return this.redisBackfillPromise;
+
+        this.redisBackfillPromise = (async () => {
+            const pendingTypes = Array.from(this.pendingRedisBackfill);
+            const targets = pendingTypes.filter((t) => t === 'models' || t === 'providers');
+            if (targets.length === 0) return;
+
+            console.log(`[DataManager] Redis ready; backfilling pending data (${targets.join(', ')}) [${reason}]...`);
+
+            if (targets.includes('models')) {
+                const modelsData = this.getCachedOrFilesystem<ModelsFileStructure>('models');
+                if (modelsData) {
+                    await this.syncModelsMirrorIfNeeded(modelsData, 'filesystem');
+                    inMemoryCache.models = { value: modelsData, ts: Date.now() };
+                } else {
+                    console.warn('[DataManager] No models data available for Redis backfill.');
+                }
+                this.pendingRedisBackfill.delete('models');
+            }
+
+            if (targets.includes('providers')) {
+                const providersData = this.getCachedOrFilesystem<LoadedProviders>('providers');
+                if (providersData) {
+                    await this.saveToRedisOnly('providers', providersData);
+                    inMemoryCache.providers = { value: providersData, ts: Date.now() };
+                } else {
+                    console.warn('[DataManager] No providers data available for Redis backfill.');
+                }
+                this.pendingRedisBackfill.delete('providers');
+            }
+        })().finally(() => {
+            this.redisBackfillPromise = null;
+        });
+
+        return this.redisBackfillPromise;
     }
 
     private cloneData<T extends ManagedDataStructure>(data: T): T {
@@ -161,6 +262,14 @@ class DataManager {
 
     private normalizeProviderModelData(raw: Partial<ProviderModelData> | undefined, modelId: string): ProviderModelData {
         const responseTimes = Array.isArray(raw?.response_times) ? raw!.response_times : [];
+        const capabilitySkipsRaw = raw?.capability_skips;
+        const capabilitySkips = (capabilitySkipsRaw && typeof capabilitySkipsRaw === 'object')
+            ? Object.fromEntries(
+                Object.entries(capabilitySkipsRaw as Record<string, unknown>)
+                    .filter(([_, value]) => typeof value === 'string' && value.trim())
+                    .map(([key, value]) => [key, String(value)])
+              )
+            : undefined;
         return {
             id: typeof raw?.id === 'string' && raw.id ? raw.id : modelId,
             token_generation_speed: typeof raw?.token_generation_speed === 'number' && !Number.isNaN(raw.token_generation_speed) ? raw.token_generation_speed : 50,
@@ -170,6 +279,8 @@ class DataManager {
             avg_response_time: typeof raw?.avg_response_time === 'number' ? raw.avg_response_time : null,
             avg_provider_latency: typeof raw?.avg_provider_latency === 'number' ? raw.avg_provider_latency : null,
             avg_token_speed: typeof raw?.avg_token_speed === 'number' ? raw.avg_token_speed : null,
+            capability_skips: capabilitySkips && Object.keys(capabilitySkips).length ? capabilitySkips : undefined,
+            disabled: Boolean((raw as any)?.disabled),
         };
     }
 
@@ -199,6 +310,10 @@ class DataManager {
     private mergeProviderModelData(fsModel: Partial<ProviderModelData> | undefined, redisModel: Partial<ProviderModelData> | undefined, modelId: string): ProviderModelData {
         const normalizedFs = this.normalizeProviderModelData(fsModel, modelId);
         const normalizedRedis = this.normalizeProviderModelData(redisModel, modelId);
+        const mergedSkips = {
+            ...(normalizedFs.capability_skips || {}),
+            ...(normalizedRedis.capability_skips || {}),
+        };
         return {
             id: normalizedRedis.id || normalizedFs.id || modelId,
             token_generation_speed: Math.max(1, normalizedRedis.token_generation_speed || normalizedFs.token_generation_speed || 50),
@@ -208,6 +323,8 @@ class DataManager {
             avg_response_time: normalizedRedis.avg_response_time ?? normalizedFs.avg_response_time,
             avg_provider_latency: normalizedRedis.avg_provider_latency ?? normalizedFs.avg_provider_latency,
             avg_token_speed: normalizedRedis.avg_token_speed ?? normalizedFs.avg_token_speed,
+            capability_skips: Object.keys(mergedSkips).length ? mergedSkips : undefined,
+            disabled: Boolean(normalizedFs.disabled || normalizedRedis.disabled),
         };
     }
 
@@ -222,6 +339,7 @@ class DataManager {
             id: typeof raw?.id === 'string' && raw.id ? raw.id : providerId,
             apiKey: typeof raw?.apiKey === 'string' ? raw.apiKey : null,
             provider_url: typeof raw?.provider_url === 'string' ? raw.provider_url : '',
+            provider_urls: typeof raw?.provider_urls === 'object' && raw.provider_urls ? (raw.provider_urls as { [modelId: string]: string }) : undefined,
             streamingCompatible: typeof raw?.streamingCompatible === 'boolean' ? raw.streamingCompatible : undefined,
             models,
             disabled: Boolean(raw?.disabled),
@@ -268,6 +386,7 @@ class DataManager {
                 id: providerId,
                 apiKey: hasFilesystemProvider ? baseFs.apiKey : (baseRedis.apiKey || null),
                 provider_url: baseRedis.provider_url || baseFs.provider_url || '',
+                provider_urls: baseRedis.provider_urls || baseFs.provider_urls,
                 streamingCompatible: typeof baseRedis.streamingCompatible === 'boolean' ? baseRedis.streamingCompatible : baseFs.streamingCompatible,
                 models: mergedModels,
                 disabled: Boolean(baseFs.disabled || baseRedis.disabled),
@@ -634,6 +753,9 @@ class DataManager {
             // If data was loaded from a fallback, save it back to ensure sync with the preferred source
             if (loadedFromFallback) {
                 console.log(`[DataManager] Data for ${dataType} loaded from fallback. Attempting to save back to synchronize sources.`);
+                if (dataSourcePreference === 'redis' && !this.isRedisReady()) {
+                    this.pendingRedisBackfill.add(dataType);
+                }
                 try {
                     // Intentionally not awaiting this promise to avoid blocking the load operation,
                     // but logging success/failure.
@@ -695,7 +817,10 @@ class DataManager {
                     const execResult = await tx.exec();
                     if (execResult !== null) {
                         inMemoryCache[dataType] = { value: updated, ts: Date.now() };
-
+                        // Mirror Redis updates back to filesystem to keep local JSON in sync.
+                        void this.saveToFilesystemOnly(dataType, updated).catch((err) => {
+                            console.warn(`[DataManager] Failed filesystem mirror after Redis update for ${dataType}:`, err);
+                        });
                         return updated;
                     }
                 } catch (err) {
@@ -711,6 +836,30 @@ class DataManager {
         const updated = await updater(this.cloneData(current));
         await this.save<T>(dataType, updated);
         return updated;
+    }
+
+    private async saveToFilesystemOnly<T extends ManagedDataStructure>(dataType: DataType, data: T): Promise<void> {
+        // Safety guard: never overwrite providers.json with an empty array
+        if (dataType === 'providers' && Array.isArray(data) && data.length === 0) {
+            console.error('[DataManager] Refusing to save providers.json because data array is empty. Aborting save to prevent destruction.');
+            return;
+        }
+
+        const filePath = filePaths[dataType];
+        let fileStringifiedData: string;
+        try {
+            if (data === null || typeof data !== 'object') throw new Error(`Invalid data type for ${dataType}: ${typeof data}`);
+            fileStringifiedData = JSON.stringify(data, null, 2);
+        } catch (err) {
+            console.error(`[DataManager] Error stringifying data for ${dataType} (filesystem mirror). Aborting save. Error:`, err);
+            return;
+        }
+
+        try {
+            await fs.promises.writeFile(filePath, fileStringifiedData, 'utf8');
+        } catch (err) {
+            console.error(`[DataManager] Failed writing ${dataType} to filesystem mirror:`, err);
+        }
     }
 
     async save<T extends ManagedDataStructure>(dataType: DataType, data: T): Promise<void> {
@@ -794,4 +943,4 @@ class DataManager {
 }
 
 export const dataManager = new DataManager(redis); 
-export function isDataManagerReady(): boolean { return true; }
+export function isDataManagerReady(): boolean { return dataManager.isReady(); }

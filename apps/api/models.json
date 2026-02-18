@@ -6,11 +6,12 @@
       "object": "model",
       "created": 1770699350370,
       "owned_by": "google",
-      "providers": 18,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
-        "image_input"
+        "image_input",
+        "audio_input"
       ]
     },
     {
@@ -18,11 +19,10 @@
       "object": "model",
       "created": 1770699350370,
       "owned_by": "google",
-      "providers": 18,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
-        "text",
-        "image_input"
+        "text"
       ]
     },
     {
@@ -30,11 +30,10 @@
       "object": "model",
       "created": 1770699350370,
       "owned_by": "google",
-      "providers": 18,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
-        "text",
-        "image_input"
+        "text"
       ]
     },
     {
@@ -42,7 +41,7 @@
       "object": "model",
       "created": 1770699350370,
       "owned_by": "openai",
-      "providers": 79,
+      "providers": 127,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -54,7 +53,7 @@
       "object": "model",
       "created": 1770699350370,
       "owned_by": "openai",
-      "providers": 76,
+      "providers": 123,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -66,7 +65,7 @@
       "object": "model",
       "created": 1770699350370,
       "owned_by": "openai",
-      "providers": 75,
+      "providers": 123,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -77,10 +76,12 @@
       "object": "model",
       "created": 1770699350370,
       "owned_by": "unknown",
-      "providers": 43,
+      "providers": 55,
       "throughput": 50,
       "capabilities": [
-        "text"
+        "text",
+        "image_output",
+        "audio_output"
       ]
     },
     {
@@ -88,10 +89,12 @@
       "object": "model",
       "created": 1770699350370,
       "owned_by": "unknown",
-      "providers": 43,
+      "providers": 55,
       "throughput": 50,
       "capabilities": [
-        "text"
+        "text",
+        "image_output",
+        "audio_output"
       ]
     },
     {
@@ -99,567 +102,660 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 71
+      "providers": 118,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "gpt-4",
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 71
+      "providers": 118,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "gpt-5.2-codex",
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 71
+      "providers": 118,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "gpt-4o-mini-tts-2025-12-15",
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 71
-    },
-    {
-      "id": "gpt-realtime-mini-2025-12-15",
-      "object": "model",
-      "created": 1770701426656,
-      "owned_by": "openai",
-      "providers": 71
+      "providers": 118,
+      "capabilities": [
+        "audio_output"
+      ]
     },
     {
       "id": "gpt-audio-mini-2025-12-15",
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 71
-    },
-    {
-      "id": "chatgpt-image-latest",
-      "object": "model",
-      "created": 1770701426656,
-      "owned_by": "openai",
-      "providers": 71
+      "providers": 118,
+      "capabilities": [
+        "text",
+        "image_output",
+        "audio_output"
+      ]
     },
     {
       "id": "davinci-002",
       "object": "model",
       "created": 1770701426656,
       "owned_by": "unknown",
-      "providers": 71
+      "providers": 118,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "babbage-002",
       "object": "model",
       "created": 1770701426656,
       "owned_by": "unknown",
-      "providers": 71
+      "providers": 118,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "gpt-3.5-turbo-instruct",
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 73
+      "providers": 120,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "gpt-3.5-turbo-instruct-0914",
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 73
-    },
-    {
-      "id": "dall-e-3",
-      "object": "model",
-      "created": 1770701426656,
-      "owned_by": "unknown",
-      "providers": 71
-    },
-    {
-      "id": "dall-e-2",
-      "object": "model",
-      "created": 1770701426656,
-      "owned_by": "unknown",
-      "providers": 73
+      "providers": 120,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "gpt-4-1106-preview",
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 71
+      "providers": 118,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "gpt-3.5-turbo-1106",
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 73
+      "providers": 120,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "tts-1-hd",
       "object": "model",
       "created": 1770701426656,
       "owned_by": "unknown",
-      "providers": 71
+      "providers": 118,
+      "capabilities": [
+        "audio_output"
+      ]
     },
     {
       "id": "tts-1-1106",
       "object": "model",
       "created": 1770701426656,
       "owned_by": "unknown",
-      "providers": 71
+      "providers": 118,
+      "capabilities": [
+        "audio_output"
+      ]
     },
     {
       "id": "tts-1-hd-1106",
       "object": "model",
       "created": 1770701426656,
       "owned_by": "unknown",
-      "providers": 71
-    },
-    {
-      "id": "text-embedding-3-small",
-      "object": "model",
-      "created": 1770701426656,
-      "owned_by": "unknown",
-      "providers": 71
-    },
-    {
-      "id": "text-embedding-3-large",
-      "object": "model",
-      "created": 1770701426656,
-      "owned_by": "unknown",
-      "providers": 71
+      "providers": 118,
+      "capabilities": [
+        "audio_output"
+      ]
     },
     {
       "id": "gpt-4-0125-preview",
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 71
+      "providers": 118,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "gpt-4-turbo-preview",
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 73
+      "providers": 120,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "gpt-3.5-turbo-0125",
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 75
+      "providers": 122,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "gpt-4-turbo",
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 73
+      "providers": 121,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "gpt-4-turbo-2024-04-09",
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 73
+      "providers": 120,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "gpt-4o-2024-05-13",
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 73
+      "providers": 120,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "gpt-4o-mini-2024-07-18",
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 73
+      "providers": 120,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "gpt-4o-2024-08-06",
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 74
-    },
-    {
-      "id": "chatgpt-4o-latest",
-      "object": "model",
-      "created": 1770701426656,
-      "owned_by": "openai",
-      "providers": 73
+      "providers": 120,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "gpt-4o-audio-preview",
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 73
-    },
-    {
-      "id": "gpt-4o-realtime-preview",
-      "object": "model",
-      "created": 1770701426656,
-      "owned_by": "openai",
-      "providers": 73
+      "providers": 120,
+      "capabilities": [
+        "text",
+        "image_output",
+        "audio_output"
+      ]
     },
     {
       "id": "omni-moderation-latest",
       "object": "model",
       "created": 1770701426656,
       "owned_by": "unknown",
-      "providers": 71
-    },
-    {
-      "id": "omni-moderation-2024-09-26",
-      "object": "model",
-      "created": 1770701426656,
-      "owned_by": "unknown",
-      "providers": 71
-    },
-    {
-      "id": "gpt-4o-realtime-preview-2024-12-17",
-      "object": "model",
-      "created": 1770701426656,
-      "owned_by": "openai",
-      "providers": 73
+      "providers": 118,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "gpt-4o-audio-preview-2024-12-17",
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 73
-    },
-    {
-      "id": "gpt-4o-mini-realtime-preview-2024-12-17",
-      "object": "model",
-      "created": 1770701426656,
-      "owned_by": "openai",
-      "providers": 73
+      "providers": 120,
+      "capabilities": [
+        "text",
+        "image_output",
+        "audio_output"
+      ]
     },
     {
       "id": "gpt-4o-mini-audio-preview-2024-12-17",
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 73
+      "providers": 120,
+      "capabilities": [
+        "text",
+        "image_output",
+        "audio_output"
+      ]
     },
     {
       "id": "o1-2024-12-17",
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 71
+      "providers": 118,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "o1",
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 71
-    },
-    {
-      "id": "gpt-4o-mini-realtime-preview",
-      "object": "model",
-      "created": 1770701426656,
-      "owned_by": "openai",
-      "providers": 73
+      "providers": 118,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "gpt-4o-mini-audio-preview",
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 73
+      "providers": 120,
+      "capabilities": [
+        "text",
+        "image_output",
+        "audio_output"
+      ]
     },
     {
       "id": "o3-mini",
       "object": "model",
       "created": 1770701426656,
       "owned_by": "unknown",
-      "providers": 71
+      "providers": 118,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "o3-mini-2025-01-31",
       "object": "model",
       "created": 1770701426656,
       "owned_by": "unknown",
-      "providers": 71
+      "providers": 118,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "gpt-4o-2024-11-20",
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 74
+      "providers": 120,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "gpt-4o-search-preview-2025-03-11",
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 73
+      "providers": 120,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "gpt-4o-search-preview",
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 73
+      "providers": 120,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "gpt-4o-mini-search-preview-2025-03-11",
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 73
+      "providers": 120,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "gpt-4o-mini-search-preview",
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 73
+      "providers": 120,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "gpt-4o-transcribe",
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 73
+      "providers": 120,
+      "capabilities": [
+        "audio_input"
+      ]
     },
     {
       "id": "gpt-4o-mini-transcribe",
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 73
+      "providers": 120,
+      "capabilities": [
+        "audio_input"
+      ]
     },
     {
       "id": "o1-pro-2025-03-19",
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 71
+      "providers": 118,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "o1-pro",
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 71
+      "providers": 118,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "gpt-4o-mini-tts",
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 73
+      "providers": 120,
+      "capabilities": [
+        "audio_output"
+      ]
     },
     {
       "id": "o3-2025-04-16",
       "object": "model",
       "created": 1770701426656,
       "owned_by": "unknown",
-      "providers": 71
+      "providers": 118,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "o4-mini-2025-04-16",
       "object": "model",
       "created": 1770701426656,
       "owned_by": "unknown",
-      "providers": 71
+      "providers": 118,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "o3",
       "object": "model",
       "created": 1770701426656,
       "owned_by": "unknown",
-      "providers": 71
+      "providers": 118,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "o4-mini",
       "object": "model",
       "created": 1770701426656,
       "owned_by": "unknown",
-      "providers": 71
+      "providers": 118,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "gpt-4.1-2025-04-14",
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 73
+      "providers": 120,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "gpt-4.1",
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 73
+      "providers": 120,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "gpt-4.1-mini-2025-04-14",
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 73
+      "providers": 120,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "gpt-4.1-mini",
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 73
+      "providers": 120,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "gpt-4.1-nano-2025-04-14",
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 73
+      "providers": 120,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "gpt-4.1-nano",
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 73
-    },
-    {
-      "id": "gpt-image-1",
-      "object": "model",
-      "created": 1770701426656,
-      "owned_by": "openai",
-      "providers": 71,
+      "providers": 120,
       "capabilities": [
         "text",
-        "image_output"
+        "image_input"
       ]
-    },
-    {
-      "id": "gpt-4o-realtime-preview-2025-06-03",
-      "object": "model",
-      "created": 1770701426656,
-      "owned_by": "openai",
-      "providers": 73
     },
     {
       "id": "gpt-4o-audio-preview-2025-06-03",
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 73
-    },
-    {
-      "id": "gpt-4o-transcribe-diarize",
-      "object": "model",
-      "created": 1770701426656,
-      "owned_by": "openai",
-      "providers": 71
+      "providers": 120,
+      "capabilities": [
+        "text",
+        "image_output",
+        "audio_output"
+      ]
     },
     {
       "id": "gpt-5-chat-latest",
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 71
+      "providers": 118,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "gpt-5-2025-08-07",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 71
+      "providers": 118,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "gpt-5",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 71
+      "providers": 119,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "gpt-5-mini-2025-08-07",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 71
+      "providers": 119,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "gpt-5-mini",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 71
+      "providers": 119,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "gpt-5-nano-2025-08-07",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 71
+      "providers": 118,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "gpt-5-nano",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 71
+      "providers": 118,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "gpt-audio-2025-08-28",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 71
-    },
-    {
-      "id": "gpt-realtime",
-      "object": "model",
-      "created": 1770701426657,
-      "owned_by": "openai",
-      "providers": 71
-    },
-    {
-      "id": "gpt-realtime-2025-08-28",
-      "object": "model",
-      "created": 1770701426657,
-      "owned_by": "openai",
-      "providers": 71
+      "providers": 118,
+      "capabilities": [
+        "text",
+        "image_output",
+        "audio_output"
+      ]
     },
     {
       "id": "gpt-audio",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 71
+      "providers": 118,
+      "capabilities": [
+        "text",
+        "image_output",
+        "audio_output"
+      ]
     },
     {
       "id": "gpt-5-codex",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 71
-    },
-    {
-      "id": "gpt-image-1-mini",
-      "object": "model",
-      "created": 1770701426657,
-      "owned_by": "openai",
-      "providers": 71,
+      "providers": 118,
       "capabilities": [
         "text",
-        "image_output"
+        "image_input"
       ]
     },
     {
@@ -667,122 +763,127 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 71
+      "providers": 118,
+      "capabilities": []
     },
     {
       "id": "gpt-5-pro",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 71
+      "providers": 118,
+      "capabilities": [
+        "image_input"
+      ]
     },
     {
       "id": "gpt-audio-mini",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 71
+      "providers": 118,
+      "capabilities": [
+        "text",
+        "image_output",
+        "audio_output"
+      ]
     },
     {
       "id": "gpt-audio-mini-2025-10-06",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 71
+      "providers": 118,
+      "capabilities": [
+        "text",
+        "image_output",
+        "audio_output"
+      ]
     },
     {
       "id": "gpt-5-search-api",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 71
-    },
-    {
-      "id": "gpt-realtime-mini",
-      "object": "model",
-      "created": 1770701426657,
-      "owned_by": "openai",
-      "providers": 71
-    },
-    {
-      "id": "gpt-realtime-mini-2025-10-06",
-      "object": "model",
-      "created": 1770701426657,
-      "owned_by": "openai",
-      "providers": 71
-    },
-    {
-      "id": "sora-2",
-      "object": "model",
-      "created": 1770701426657,
-      "owned_by": "unknown",
-      "providers": 71
-    },
-    {
-      "id": "sora-2-pro",
-      "object": "model",
-      "created": 1770701426657,
-      "owned_by": "unknown",
-      "providers": 71
+      "providers": 118,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "gpt-5-search-api-2025-10-14",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 71
+      "providers": 118,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "gpt-5.1-chat-latest",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 71
+      "providers": 118,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "gpt-5.1-2025-11-13",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 71
+      "providers": 118,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "gpt-5.1",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 71
+      "providers": 118,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "gpt-5.1-codex",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 71
+      "providers": 118,
+      "capabilities": [
+        "image_input"
+      ]
     },
     {
       "id": "gpt-5.1-codex-mini",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 71
+      "providers": 118,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "gpt-5.1-codex-max",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 71
-    },
-    {
-      "id": "gpt-image-1.5",
-      "object": "model",
-      "created": 1770701426657,
-      "owned_by": "openai",
-      "providers": 71,
+      "providers": 118,
       "capabilities": [
-        "text",
-        "image_output"
+        "image_input"
       ]
     },
     {
@@ -790,3059 +891,3754 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 71
+      "providers": 118,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "gpt-5.2",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 72
+      "providers": 119,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "gpt-5.2-pro-2025-12-11",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 71
+      "providers": 118,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "gpt-5.2-pro",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 71
+      "providers": 118,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "gpt-5.2-chat-latest",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 71
+      "providers": 118,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "gpt-4o-mini-transcribe-2025-12-15",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 71
+      "providers": 118,
+      "capabilities": [
+        "audio_input"
+      ]
     },
     {
       "id": "gpt-4o-mini-transcribe-2025-03-20",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 71
+      "providers": 118,
+      "capabilities": [
+        "audio_input"
+      ]
     },
     {
       "id": "gpt-4o-mini-tts-2025-03-20",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 71
+      "providers": 118,
+      "capabilities": [
+        "audio_output"
+      ]
     },
     {
       "id": "gpt-3.5-turbo-16k",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 73
+      "providers": 120,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "tts-1",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "unknown",
-      "providers": 71
+      "providers": 118,
+      "capabilities": [
+        "audio_output"
+      ]
     },
     {
       "id": "whisper-1",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "unknown",
-      "providers": 73
+      "providers": 120,
+      "capabilities": [
+        "audio_input"
+      ]
     },
     {
       "id": "text-embedding-ada-002",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "unknown",
-      "providers": 71
+      "providers": 118,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "qwen/qwen3-max-thinking",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "alibaba",
-      "providers": 18
-    },
-    {
-      "id": "openrouter/aurora-alpha",
-      "object": "model",
-      "created": 1770701426657,
-      "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "anthropic/claude-opus-4.6",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "anthropic",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "qwen/qwen3-coder-next",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "alibaba",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "openrouter/free",
       "object": "model",
       "created": 1770701426657,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "openrouter",
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "stepfun/step-3.5-flash:free",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "arcee-ai/trinity-large-preview:free",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "moonshotai/kimi-k2.5",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "upstage/solar-pro-3:free",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "minimax/minimax-m2-her",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "writer/palmyra-x5",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "liquid/lfm-2.5-1.2b-thinking:free",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "liquid/lfm-2.5-1.2b-instruct:free",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "openai/gpt-audio",
       "object": "model",
       "created": 1770701426657,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "openai",
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "audio_input"
+      ]
     },
     {
       "id": "openai/gpt-audio-mini",
       "object": "model",
       "created": 1770701426657,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "openai",
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "audio_input"
+      ]
     },
     {
       "id": "z-ai/glm-4.7-flash",
       "object": "model",
       "created": 1770701426657,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "z.ai",
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "openai/gpt-5.2-codex",
       "object": "model",
       "created": 1770701426657,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "openai",
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "allenai/molmo-2-8b",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "allenai/olmo-3.1-32b-instruct",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "bytedance-seed/seed-1.6-flash",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "bytedance-seed/seed-1.6",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "minimax/minimax-m2.1",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "z-ai/glm-4.7",
       "object": "model",
       "created": 1770701426657,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "z.ai",
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "google/gemini-3-flash-preview",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "google",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input",
+        "audio_input"
+      ]
     },
     {
       "id": "mistralai/mistral-small-creative",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "mistral.ai",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "allenai/olmo-3.1-32b-think",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "xiaomi/mimo-v2-flash",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "unknown",
-      "providers": 18
-    },
-    {
-      "id": "nvidia/nemotron-3-nano-30b-a3b:free",
-      "object": "model",
-      "created": 1770701426657,
-      "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "nvidia/nemotron-3-nano-30b-a3b",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "openai/gpt-5.2-chat",
       "object": "model",
       "created": 1770701426657,
-      "owned_by": "unknown",
-      "providers": 18
-    },
-    {
-      "id": "openai/gpt-5.2-pro",
-      "object": "model",
-      "created": 1770701426657,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "openai",
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "openai/gpt-5.2",
       "object": "model",
       "created": 1770701426657,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "openai",
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "mistralai/devstral-2512",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "mistral.ai",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "relace/relace-search",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "z-ai/glm-4.6v",
       "object": "model",
       "created": 1770701426657,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "z.ai",
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "nex-agi/deepseek-v3.1-nex-n1",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "essentialai/rnj-1-instruct",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "openrouter/bodybuilder",
       "object": "model",
       "created": 1770701426657,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "openrouter",
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "openai/gpt-5.1-codex-max",
       "object": "model",
       "created": 1770701426657,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "openai",
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "amazon/nova-2-lite-v1",
       "object": "model",
       "created": 1770701426657,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "amazon",
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "mistralai/ministral-14b-2512",
       "object": "model",
       "created": 1770701426657,
       "owned_by": "mistral.ai",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "mistralai/ministral-8b-2512",
       "object": "model",
       "created": 1770701426658,
       "owned_by": "mistral.ai",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "mistralai/ministral-3b-2512",
       "object": "model",
       "created": 1770701426658,
       "owned_by": "mistral.ai",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "mistralai/mistral-large-2512",
       "object": "model",
       "created": 1770701426658,
       "owned_by": "mistral.ai",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "arcee-ai/trinity-mini:free",
       "object": "model",
       "created": 1770701426658,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "arcee-ai/trinity-mini",
       "object": "model",
       "created": 1770701426658,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "deepseek/deepseek-v3.2-speciale",
       "object": "model",
       "created": 1770701426658,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "deepseek",
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "deepseek/deepseek-v3.2",
       "object": "model",
       "created": 1770701426658,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "deepseek",
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "prime-intellect/intellect-3",
       "object": "model",
       "created": 1770701426658,
       "owned_by": "unknown",
-      "providers": 18
-    },
-    {
-      "id": "tngtech/tng-r1t-chimera",
-      "object": "model",
-      "created": 1770701426658,
-      "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "anthropic/claude-opus-4.5",
       "object": "model",
       "created": 1770701426658,
       "owned_by": "anthropic",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "allenai/olmo-3-32b-think",
       "object": "model",
       "created": 1770701426658,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "allenai/olmo-3-7b-instruct",
       "object": "model",
       "created": 1770701426658,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "allenai/olmo-3-7b-think",
       "object": "model",
       "created": 1770701426658,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "google/gemini-3-pro-image-preview",
       "object": "model",
       "created": 1770701426658,
       "owned_by": "google",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input",
+        "image_output"
+      ]
     },
     {
       "id": "x-ai/grok-4.1-fast",
       "object": "model",
       "created": 1770701426658,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "xai",
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "google/gemini-3-pro-preview",
       "object": "model",
       "created": 1770701426658,
       "owned_by": "google",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input",
+        "audio_input"
+      ]
     },
     {
       "id": "deepcogito/cogito-v2.1-671b",
       "object": "model",
       "created": 1770701426658,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "openai/gpt-5.1",
       "object": "model",
       "created": 1770701426658,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "openai",
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "openai/gpt-5.1-chat",
       "object": "model",
       "created": 1770701426658,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "openai",
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "openai/gpt-5.1-codex",
       "object": "model",
       "created": 1770701426658,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "openai",
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "openai/gpt-5.1-codex-mini",
       "object": "model",
       "created": 1770701426658,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "openai",
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "kwaipilot/kat-coder-pro",
       "object": "model",
       "created": 1770701426658,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "moonshotai/kimi-k2-thinking",
       "object": "model",
       "created": 1770701426658,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "amazon/nova-premier-v1",
       "object": "model",
       "created": 1770701426658,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "amazon",
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "perplexity/sonar-pro-search",
       "object": "model",
       "created": 1770701426658,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "mistralai/voxtral-small-24b-2507",
       "object": "model",
       "created": 1770701426658,
       "owned_by": "mistral.ai",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "audio_input"
+      ]
     },
     {
       "id": "openai/gpt-oss-safeguard-20b",
       "object": "model",
       "created": 1770701426658,
-      "owned_by": "unknown",
-      "providers": 18
-    },
-    {
-      "id": "nvidia/nemotron-nano-12b-v2-vl:free",
-      "object": "model",
-      "created": 1770701426658,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "openai",
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "nvidia/nemotron-nano-12b-v2-vl",
       "object": "model",
       "created": 1770701426658,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "minimax/minimax-m2",
       "object": "model",
       "created": 1770701426658,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "qwen/qwen3-vl-32b-instruct",
       "object": "model",
       "created": 1770701426658,
       "owned_by": "alibaba",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "liquid/lfm2-8b-a1b",
       "object": "model",
       "created": 1770701426658,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "liquid/lfm-2.2-6b",
       "object": "model",
       "created": 1770701426658,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "ibm-granite/granite-4.0-h-micro",
       "object": "model",
       "created": 1770701426658,
       "owned_by": "unknown",
-      "providers": 18
-    },
-    {
-      "id": "openai/gpt-5-image-mini",
-      "object": "model",
-      "created": 1770701426658,
-      "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "anthropic/claude-haiku-4.5",
       "object": "model",
       "created": 1770701426658,
       "owned_by": "anthropic",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "qwen/qwen3-vl-8b-thinking",
       "object": "model",
       "created": 1770701426658,
       "owned_by": "alibaba",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "qwen/qwen3-vl-8b-instruct",
       "object": "model",
       "created": 1770701426658,
       "owned_by": "alibaba",
-      "providers": 18
-    },
-    {
-      "id": "openai/gpt-5-image",
-      "object": "model",
-      "created": 1770701426658,
-      "owned_by": "unknown",
-      "providers": 18
-    },
-    {
-      "id": "openai/o3-deep-research",
-      "object": "model",
-      "created": 1770701426658,
-      "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "openai/o4-mini-deep-research",
       "object": "model",
       "created": 1770701426658,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "openai",
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "nvidia/llama-3.3-nemotron-super-49b-v1.5",
       "object": "model",
       "created": 1770701426658,
       "owned_by": "meta",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "baidu/ernie-4.5-21b-a3b-thinking",
       "object": "model",
       "created": 1770701426658,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "baidu",
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "google/gemini-2.5-flash-image",
       "object": "model",
       "created": 1770701426658,
       "owned_by": "google",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input",
+        "image_output"
+      ]
     },
     {
       "id": "qwen/qwen3-vl-30b-a3b-thinking",
       "object": "model",
       "created": 1770701426658,
       "owned_by": "alibaba",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "qwen/qwen3-vl-30b-a3b-instruct",
       "object": "model",
       "created": 1770701426658,
       "owned_by": "alibaba",
-      "providers": 18
-    },
-    {
-      "id": "openai/gpt-5-pro",
-      "object": "model",
-      "created": 1770701426658,
-      "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "z-ai/glm-4.6",
       "object": "model",
       "created": 1770701426658,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "z.ai",
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "z-ai/glm-4.6:exacto",
       "object": "model",
       "created": 1770701426658,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "z.ai",
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "anthropic/claude-sonnet-4.5",
       "object": "model",
       "created": 1770701426658,
       "owned_by": "anthropic",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "deepseek/deepseek-v3.2-exp",
       "object": "model",
       "created": 1770701426658,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "deepseek",
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "thedrummer/cydonia-24b-v4.1",
       "object": "model",
       "created": 1770701426658,
       "owned_by": "unknown",
-      "providers": 18
-    },
-    {
-      "id": "relace/relace-apply-3",
-      "object": "model",
-      "created": 1770701426658,
-      "owned_by": "unknown",
-      "providers": 18
-    },
-    {
-      "id": "google/gemini-2.5-flash-preview-09-2025",
-      "object": "model",
-      "created": 1770701426658,
-      "owned_by": "google",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "google/gemini-2.5-flash-lite-preview-09-2025",
       "object": "model",
       "created": 1770701426658,
       "owned_by": "google",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input",
+        "audio_input"
+      ]
     },
     {
       "id": "qwen/qwen3-vl-235b-a22b-thinking",
       "object": "model",
       "created": 1770701426658,
       "owned_by": "alibaba",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "qwen/qwen3-vl-235b-a22b-instruct",
       "object": "model",
       "created": 1770701426658,
       "owned_by": "alibaba",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "qwen/qwen3-max",
       "object": "model",
       "created": 1770701426658,
       "owned_by": "alibaba",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "qwen/qwen3-coder-plus",
       "object": "model",
       "created": 1770701426658,
       "owned_by": "alibaba",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "openai/gpt-5-codex",
       "object": "model",
       "created": 1770701426658,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "openai",
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "deepseek/deepseek-v3.1-terminus:exacto",
       "object": "model",
       "created": 1770701426658,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "deepseek",
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "deepseek/deepseek-v3.1-terminus",
       "object": "model",
       "created": 1770701426658,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "deepseek",
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "x-ai/grok-4-fast",
       "object": "model",
       "created": 1770701426658,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "xai",
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "alibaba/tongyi-deepresearch-30b-a3b",
       "object": "model",
       "created": 1770701426658,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "qwen/qwen3-coder-flash",
       "object": "model",
       "created": 1770701426658,
       "owned_by": "alibaba",
-      "providers": 18
-    },
-    {
-      "id": "opengvlab/internvl3-78b",
-      "object": "model",
-      "created": 1770701426658,
-      "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "qwen/qwen3-next-80b-a3b-thinking",
       "object": "model",
       "created": 1770701426658,
       "owned_by": "alibaba",
-      "providers": 18
-    },
-    {
-      "id": "qwen/qwen3-next-80b-a3b-instruct:free",
-      "object": "model",
-      "created": 1770701426658,
-      "owned_by": "alibaba",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "qwen/qwen3-next-80b-a3b-instruct",
       "object": "model",
       "created": 1770701426658,
       "owned_by": "alibaba",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "meituan/longcat-flash-chat",
       "object": "model",
       "created": 1770701426658,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "qwen/qwen-plus-2025-07-28",
       "object": "model",
       "created": 1770701426658,
       "owned_by": "alibaba",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "qwen/qwen-plus-2025-07-28:thinking",
       "object": "model",
       "created": 1770701426658,
       "owned_by": "alibaba",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "nvidia/nemotron-nano-9b-v2:free",
       "object": "model",
       "created": 1770701426658,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "nvidia/nemotron-nano-9b-v2",
       "object": "model",
       "created": 1770701426659,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "moonshotai/kimi-k2-0905",
       "object": "model",
       "created": 1770701426659,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "moonshotai/kimi-k2-0905:exacto",
       "object": "model",
       "created": 1770701426659,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "qwen/qwen3-30b-a3b-thinking-2507",
       "object": "model",
       "created": 1770701426659,
       "owned_by": "alibaba",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "x-ai/grok-code-fast-1",
       "object": "model",
       "created": 1770701426659,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "xai",
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "nousresearch/hermes-4-70b",
       "object": "model",
       "created": 1770701426659,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "nousresearch/hermes-4-405b",
       "object": "model",
       "created": 1770701426659,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "deepseek/deepseek-chat-v3.1",
       "object": "model",
       "created": 1770701426659,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "deepseek",
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "openai/gpt-4o-audio-preview",
       "object": "model",
       "created": 1770701426659,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "openai",
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "audio_input"
+      ]
     },
     {
       "id": "mistralai/mistral-medium-3.1",
       "object": "model",
       "created": 1770701426659,
       "owned_by": "mistral.ai",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "baidu/ernie-4.5-21b-a3b",
       "object": "model",
       "created": 1770701426659,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "baidu",
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "baidu/ernie-4.5-vl-28b-a3b",
       "object": "model",
       "created": 1770701426659,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "baidu",
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "z-ai/glm-4.5v",
       "object": "model",
       "created": 1770701426659,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "z.ai",
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "ai21/jamba-large-1.7",
       "object": "model",
       "created": 1770701426659,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "ai21",
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "openai/gpt-5-chat",
       "object": "model",
       "created": 1770701426659,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "openai",
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "openai/gpt-5",
       "object": "model",
       "created": 1770701426659,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "openai",
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "openai/gpt-5-mini",
       "object": "model",
       "created": 1770701426659,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "openai",
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "openai/gpt-5-nano",
       "object": "model",
       "created": 1770701426659,
-      "owned_by": "unknown",
-      "providers": 18
-    },
-    {
-      "id": "openai/gpt-oss-120b:free",
-      "object": "model",
-      "created": 1770701426659,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "openai",
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "openai/gpt-oss-120b",
       "object": "model",
       "created": 1770701426659,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "openai",
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "openai/gpt-oss-120b:exacto",
       "object": "model",
       "created": 1770701426659,
-      "owned_by": "unknown",
-      "providers": 18
-    },
-    {
-      "id": "openai/gpt-oss-20b:free",
-      "object": "model",
-      "created": 1770701426659,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "openai",
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "openai/gpt-oss-20b",
       "object": "model",
       "created": 1770701426659,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "openai",
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "anthropic/claude-opus-4.1",
       "object": "model",
       "created": 1770701426659,
       "owned_by": "anthropic",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "mistralai/codestral-2508",
       "object": "model",
       "created": 1770701426659,
       "owned_by": "mistral.ai",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "qwen/qwen3-coder-30b-a3b-instruct",
       "object": "model",
       "created": 1770701426659,
       "owned_by": "alibaba",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "qwen/qwen3-30b-a3b-instruct-2507",
       "object": "model",
       "created": 1770701426659,
       "owned_by": "alibaba",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "z-ai/glm-4.5",
       "object": "model",
       "created": 1770701426659,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "z.ai",
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "z-ai/glm-4.5-air:free",
       "object": "model",
       "created": 1770701426659,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "z.ai",
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "z-ai/glm-4.5-air",
       "object": "model",
       "created": 1770701426659,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "z.ai",
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "qwen/qwen3-235b-a22b-thinking-2507",
       "object": "model",
       "created": 1770701426659,
       "owned_by": "alibaba",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "z-ai/glm-4-32b",
       "object": "model",
       "created": 1770701426659,
-      "owned_by": "unknown",
-      "providers": 18
-    },
-    {
-      "id": "qwen/qwen3-coder:free",
-      "object": "model",
-      "created": 1770701426659,
-      "owned_by": "alibaba",
-      "providers": 18
+      "owned_by": "z.ai",
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "qwen/qwen3-coder",
       "object": "model",
       "created": 1770701426659,
       "owned_by": "alibaba",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "qwen/qwen3-coder:exacto",
       "object": "model",
       "created": 1770701426659,
       "owned_by": "alibaba",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "bytedance/ui-tars-1.5-7b",
       "object": "model",
       "created": 1770701426659,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "bytedance",
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "google/gemini-2.5-flash-lite",
       "object": "model",
       "created": 1770701426659,
       "owned_by": "google",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input",
+        "audio_input"
+      ]
     },
     {
       "id": "qwen/qwen3-235b-a22b-2507",
       "object": "model",
       "created": 1770701426659,
       "owned_by": "alibaba",
-      "providers": 18
-    },
-    {
-      "id": "switchpoint/router",
-      "object": "model",
-      "created": 1770701426659,
-      "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "moonshotai/kimi-k2",
       "object": "model",
       "created": 1770701426659,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "mistralai/devstral-medium",
       "object": "model",
       "created": 1770701426659,
       "owned_by": "mistral.ai",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "mistralai/devstral-small",
       "object": "model",
       "created": 1770701426659,
       "owned_by": "mistral.ai",
-      "providers": 18
-    },
-    {
-      "id": "cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
-      "object": "model",
-      "created": 1770701426659,
-      "owned_by": "mistral.ai",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "x-ai/grok-4",
       "object": "model",
       "created": 1770701426659,
-      "owned_by": "unknown",
-      "providers": 18
-    },
-    {
-      "id": "google/gemma-3n-e2b-it:free",
-      "object": "model",
-      "created": 1770701426659,
-      "owned_by": "google",
-      "providers": 18
-    },
-    {
-      "id": "tencent/hunyuan-a13b-instruct",
-      "object": "model",
-      "created": 1770701426659,
-      "owned_by": "unknown",
-      "providers": 18
-    },
-    {
-      "id": "tngtech/deepseek-r1t2-chimera",
-      "object": "model",
-      "created": 1770701426659,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "xai",
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "morph/morph-v3-large",
       "object": "model",
       "created": 1770701426659,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "morph/morph-v3-fast",
       "object": "model",
       "created": 1770701426659,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "baidu/ernie-4.5-vl-424b-a47b",
       "object": "model",
       "created": 1770701426659,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "baidu",
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "baidu/ernie-4.5-300b-a47b",
       "object": "model",
       "created": 1770701426659,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "baidu",
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "inception/mercury",
       "object": "model",
       "created": 1770701426659,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "mistralai/mistral-small-3.2-24b-instruct",
       "object": "model",
       "created": 1770701426659,
       "owned_by": "mistral.ai",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "minimax/minimax-m1",
       "object": "model",
       "created": 1770701426659,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "google/gemini-2.5-flash",
       "object": "model",
       "created": 1770701426659,
       "owned_by": "google",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input",
+        "audio_input"
+      ]
     },
     {
       "id": "google/gemini-2.5-pro",
       "object": "model",
       "created": 1770701426659,
       "owned_by": "google",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input",
+        "audio_input"
+      ]
     },
     {
       "id": "openai/o3-pro",
       "object": "model",
       "created": 1770701426659,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "openai",
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "x-ai/grok-3-mini",
       "object": "model",
       "created": 1770701426659,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "xai",
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "x-ai/grok-3",
       "object": "model",
       "created": 1770701426659,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "xai",
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "google/gemini-2.5-pro-preview",
       "object": "model",
       "created": 1770701426659,
       "owned_by": "google",
-      "providers": 18
-    },
-    {
-      "id": "deepseek/deepseek-r1-0528:free",
-      "object": "model",
-      "created": 1770701426659,
-      "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input",
+        "audio_input"
+      ]
     },
     {
       "id": "deepseek/deepseek-r1-0528",
       "object": "model",
       "created": 1770701426659,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "deepseek",
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "anthropic/claude-opus-4",
       "object": "model",
       "created": 1770701426659,
       "owned_by": "anthropic",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "anthropic/claude-sonnet-4",
       "object": "model",
       "created": 1770701426659,
       "owned_by": "anthropic",
-      "providers": 18
-    },
-    {
-      "id": "google/gemma-3n-e4b-it:free",
-      "object": "model",
-      "created": 1770701426659,
-      "owned_by": "google",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "google/gemma-3n-e4b-it",
       "object": "model",
       "created": 1770701426659,
       "owned_by": "google",
-      "providers": 18
-    },
-    {
-      "id": "nousresearch/deephermes-3-mistral-24b-preview",
-      "object": "model",
-      "created": 1770701426659,
-      "owned_by": "mistral.ai",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "mistralai/mistral-medium-3",
       "object": "model",
       "created": 1770701426659,
       "owned_by": "mistral.ai",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "google/gemini-2.5-pro-preview-05-06",
       "object": "model",
       "created": 1770701426659,
       "owned_by": "google",
-      "providers": 18
-    },
-    {
-      "id": "arcee-ai/spotlight",
-      "object": "model",
-      "created": 1770701426659,
-      "owned_by": "unknown",
-      "providers": 18
-    },
-    {
-      "id": "arcee-ai/maestro-reasoning",
-      "object": "model",
-      "created": 1770701426659,
-      "owned_by": "unknown",
-      "providers": 18
-    },
-    {
-      "id": "arcee-ai/virtuoso-large",
-      "object": "model",
-      "created": 1770701426659,
-      "owned_by": "unknown",
-      "providers": 18
-    },
-    {
-      "id": "arcee-ai/coder-large",
-      "object": "model",
-      "created": 1770701426659,
-      "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input",
+        "audio_input"
+      ]
     },
     {
       "id": "inception/mercury-coder",
       "object": "model",
       "created": 1770701426659,
       "owned_by": "unknown",
-      "providers": 18
-    },
-    {
-      "id": "qwen/qwen3-4b:free",
-      "object": "model",
-      "created": 1770701426659,
-      "owned_by": "alibaba",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "meta-llama/llama-guard-4-12b",
       "object": "model",
       "created": 1770701426659,
       "owned_by": "meta",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "qwen/qwen3-30b-a3b",
       "object": "model",
       "created": 1770701426659,
       "owned_by": "alibaba",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "qwen/qwen3-8b",
       "object": "model",
       "created": 1770701426659,
       "owned_by": "alibaba",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "qwen/qwen3-14b",
       "object": "model",
       "created": 1770701426659,
       "owned_by": "alibaba",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "qwen/qwen3-32b",
       "object": "model",
       "created": 1770701426659,
       "owned_by": "alibaba",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "qwen/qwen3-235b-a22b",
       "object": "model",
       "created": 1770701426659,
       "owned_by": "alibaba",
-      "providers": 18
-    },
-    {
-      "id": "tngtech/deepseek-r1t-chimera",
-      "object": "model",
-      "created": 1770701426659,
-      "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "openai/o4-mini-high",
       "object": "model",
       "created": 1770701426660,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "openai",
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "openai/o3",
       "object": "model",
       "created": 1770701426660,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "openai",
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "openai/o4-mini",
       "object": "model",
       "created": 1770701426660,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "openai",
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "qwen/qwen2.5-coder-7b-instruct",
       "object": "model",
       "created": 1770701426660,
       "owned_by": "alibaba",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "openai/gpt-4.1",
       "object": "model",
       "created": 1770701426660,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "openai",
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "openai/gpt-4.1-mini",
       "object": "model",
       "created": 1770701426660,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "openai",
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "openai/gpt-4.1-nano",
       "object": "model",
       "created": 1770701426660,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "openai",
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "eleutherai/llemma_7b",
       "object": "model",
       "created": 1770701426660,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "alfredpros/codellama-7b-instruct-solidity",
       "object": "model",
       "created": 1770701426660,
       "owned_by": "meta",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "x-ai/grok-3-mini-beta",
       "object": "model",
       "created": 1770701426660,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "xai",
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "x-ai/grok-3-beta",
       "object": "model",
       "created": 1770701426660,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "xai",
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "nvidia/llama-3.1-nemotron-ultra-253b-v1",
       "object": "model",
       "created": 1770701426660,
       "owned_by": "meta",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "meta-llama/llama-4-maverick",
       "object": "model",
       "created": 1770701426660,
       "owned_by": "meta",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "meta-llama/llama-4-scout",
       "object": "model",
       "created": 1770701426660,
       "owned_by": "meta",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "qwen/qwen2.5-vl-32b-instruct",
       "object": "model",
       "created": 1770701426660,
       "owned_by": "alibaba",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "deepseek/deepseek-chat-v3-0324",
       "object": "model",
       "created": 1770701426660,
-      "owned_by": "unknown",
-      "providers": 18
-    },
-    {
-      "id": "openai/o1-pro",
-      "object": "model",
-      "created": 1770701426660,
-      "owned_by": "openai",
-      "providers": 18
-    },
-    {
-      "id": "mistralai/mistral-small-3.1-24b-instruct:free",
-      "object": "model",
-      "created": 1770701426660,
-      "owned_by": "mistral.ai",
-      "providers": 18
+      "owned_by": "deepseek",
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "mistralai/mistral-small-3.1-24b-instruct",
       "object": "model",
       "created": 1770701426660,
       "owned_by": "mistral.ai",
-      "providers": 18
-    },
-    {
-      "id": "allenai/olmo-2-0325-32b-instruct",
-      "object": "model",
-      "created": 1770701426660,
-      "owned_by": "unknown",
-      "providers": 18
-    },
-    {
-      "id": "google/gemma-3-4b-it:free",
-      "object": "model",
-      "created": 1770701426660,
-      "owned_by": "google",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "google/gemma-3-4b-it",
       "object": "model",
       "created": 1770701426660,
       "owned_by": "google",
-      "providers": 18
-    },
-    {
-      "id": "google/gemma-3-12b-it:free",
-      "object": "model",
-      "created": 1770701426660,
-      "owned_by": "google",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "google/gemma-3-12b-it",
       "object": "model",
       "created": 1770701426660,
       "owned_by": "google",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "cohere/command-a",
       "object": "model",
       "created": 1770701426660,
       "owned_by": "cohere",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "openai/gpt-4o-mini-search-preview",
       "object": "model",
       "created": 1770701426660,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "openai",
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "openai/gpt-4o-search-preview",
       "object": "model",
       "created": 1770701426660,
-      "owned_by": "unknown",
-      "providers": 18
-    },
-    {
-      "id": "google/gemma-3-27b-it:free",
-      "object": "model",
-      "created": 1770701426660,
-      "owned_by": "google",
-      "providers": 18
+      "owned_by": "openai",
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "google/gemma-3-27b-it",
       "object": "model",
       "created": 1770701426660,
       "owned_by": "google",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "thedrummer/skyfall-36b-v2",
       "object": "model",
       "created": 1770701426660,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "perplexity/sonar-reasoning-pro",
       "object": "model",
       "created": 1770701426660,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "perplexity/sonar-pro",
       "object": "model",
       "created": 1770701426660,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "perplexity/sonar-deep-research",
       "object": "model",
       "created": 1770701426660,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "qwen/qwq-32b",
       "object": "model",
       "created": 1770701426660,
       "owned_by": "alibaba",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "google/gemini-2.0-flash-lite-001",
       "object": "model",
       "created": 1770701426660,
       "owned_by": "google",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input",
+        "audio_input"
+      ]
     },
     {
       "id": "anthropic/claude-3.7-sonnet:thinking",
       "object": "model",
       "created": 1770701426660,
       "owned_by": "anthropic",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "anthropic/claude-3.7-sonnet",
       "object": "model",
       "created": 1770701426660,
       "owned_by": "anthropic",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "mistralai/mistral-saba",
       "object": "model",
       "created": 1770701426660,
       "owned_by": "mistral.ai",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "meta-llama/llama-guard-3-8b",
       "object": "model",
       "created": 1770701426660,
       "owned_by": "meta",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "openai/o3-mini-high",
       "object": "model",
       "created": 1770701426660,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "openai",
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "qwen/qwen-vl-plus",
       "object": "model",
       "created": 1770701426660,
       "owned_by": "alibaba",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "aion-labs/aion-1.0",
       "object": "model",
       "created": 1770701426660,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "aion-labs/aion-1.0-mini",
       "object": "model",
       "created": 1770701426660,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "aion-labs/aion-rp-llama-3.1-8b",
       "object": "model",
       "created": 1770701426660,
       "owned_by": "meta",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "qwen/qwen-vl-max",
       "object": "model",
       "created": 1770701426660,
       "owned_by": "alibaba",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "qwen/qwen-turbo",
       "object": "model",
       "created": 1770701426660,
       "owned_by": "alibaba",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "qwen/qwen2.5-vl-72b-instruct",
       "object": "model",
       "created": 1770701426660,
       "owned_by": "alibaba",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "qwen/qwen-plus",
       "object": "model",
       "created": 1770701426660,
       "owned_by": "alibaba",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "qwen/qwen-max",
       "object": "model",
       "created": 1770701426660,
       "owned_by": "alibaba",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "openai/o3-mini",
       "object": "model",
       "created": 1770701426660,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "openai",
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "mistralai/mistral-small-24b-instruct-2501",
       "object": "model",
       "created": 1770701426660,
       "owned_by": "mistral.ai",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "deepseek/deepseek-r1-distill-qwen-32b",
       "object": "model",
       "created": 1770701426660,
       "owned_by": "alibaba",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "perplexity/sonar",
       "object": "model",
       "created": 1770701426660,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "deepseek/deepseek-r1-distill-llama-70b",
       "object": "model",
       "created": 1770701426660,
       "owned_by": "meta",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "deepseek/deepseek-r1",
       "object": "model",
       "created": 1770701426660,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "deepseek",
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "minimax/minimax-01",
       "object": "model",
       "created": 1770701426660,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "microsoft/phi-4",
       "object": "model",
       "created": 1770701426660,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "microsoft",
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "sao10k/l3.1-70b-hanami-x1",
       "object": "model",
       "created": 1770701426660,
       "owned_by": "openai",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "deepseek/deepseek-chat",
       "object": "model",
       "created": 1770701426660,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "deepseek",
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "sao10k/l3.3-euryale-70b",
       "object": "model",
       "created": 1770701426660,
       "owned_by": "openai",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "openai/o1",
       "object": "model",
       "created": 1770701426660,
       "owned_by": "openai",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "cohere/command-r7b-12-2024",
       "object": "model",
       "created": 1770701426660,
       "owned_by": "cohere",
-      "providers": 18
-    },
-    {
-      "id": "meta-llama/llama-3.3-70b-instruct:free",
-      "object": "model",
-      "created": 1770701426660,
-      "owned_by": "meta",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "meta-llama/llama-3.3-70b-instruct",
       "object": "model",
       "created": 1770701426660,
       "owned_by": "meta",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "amazon/nova-lite-v1",
       "object": "model",
       "created": 1770701426660,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "amazon",
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "amazon/nova-micro-v1",
       "object": "model",
       "created": 1770701426660,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "amazon",
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "amazon/nova-pro-v1",
       "object": "model",
       "created": 1770701426660,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "amazon",
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "openai/gpt-4o-2024-11-20",
       "object": "model",
       "created": 1770701426660,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "openai",
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "mistralai/mistral-large-2411",
       "object": "model",
       "created": 1770701426660,
       "owned_by": "mistral.ai",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "mistralai/mistral-large-2407",
       "object": "model",
       "created": 1770701426660,
       "owned_by": "mistral.ai",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "mistralai/pixtral-large-2411",
       "object": "model",
       "created": 1770701426660,
       "owned_by": "mistral.ai",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "qwen/qwen-2.5-coder-32b-instruct",
       "object": "model",
       "created": 1770701426660,
       "owned_by": "alibaba",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "raifle/sorcererlm-8x22b",
       "object": "model",
       "created": 1770701426660,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "thedrummer/unslopnemo-12b",
       "object": "model",
       "created": 1770701426660,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "anthropic/claude-3.5-haiku",
       "object": "model",
       "created": 1770701426660,
       "owned_by": "anthropic",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "anthracite-org/magnum-v4-72b",
       "object": "model",
       "created": 1770701426660,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "anthropic/claude-3.5-sonnet",
       "object": "model",
       "created": 1770701426661,
       "owned_by": "anthropic",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "qwen/qwen-2.5-7b-instruct",
       "object": "model",
       "created": 1770701426661,
       "owned_by": "alibaba",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "nvidia/llama-3.1-nemotron-70b-instruct",
       "object": "model",
       "created": 1770701426661,
       "owned_by": "meta",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "inflection/inflection-3-pi",
       "object": "model",
       "created": 1770701426661,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "inflection/inflection-3-productivity",
       "object": "model",
       "created": 1770701426661,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "thedrummer/rocinante-12b",
       "object": "model",
       "created": 1770701426661,
       "owned_by": "unknown",
-      "providers": 18
-    },
-    {
-      "id": "meta-llama/llama-3.2-3b-instruct:free",
-      "object": "model",
-      "created": 1770701426661,
-      "owned_by": "meta",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "meta-llama/llama-3.2-3b-instruct",
       "object": "model",
       "created": 1770701426661,
       "owned_by": "meta",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "meta-llama/llama-3.2-1b-instruct",
       "object": "model",
       "created": 1770701426661,
       "owned_by": "meta",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "meta-llama/llama-3.2-11b-vision-instruct",
       "object": "model",
       "created": 1770701426661,
       "owned_by": "meta",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "qwen/qwen-2.5-72b-instruct",
       "object": "model",
       "created": 1770701426661,
       "owned_by": "alibaba",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "neversleep/llama-3.1-lumimaid-8b",
       "object": "model",
       "created": 1770701426661,
       "owned_by": "meta",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "cohere/command-r-08-2024",
       "object": "model",
       "created": 1770701426661,
       "owned_by": "cohere",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "cohere/command-r-plus-08-2024",
       "object": "model",
       "created": 1770701426661,
       "owned_by": "cohere",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "sao10k/l3.1-euryale-70b",
       "object": "model",
       "created": 1770701426661,
       "owned_by": "openai",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "qwen/qwen-2.5-vl-7b-instruct",
       "object": "model",
       "created": 1770701426661,
       "owned_by": "alibaba",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "nousresearch/hermes-3-llama-3.1-70b",
       "object": "model",
       "created": 1770701426661,
       "owned_by": "meta",
-      "providers": 18
-    },
-    {
-      "id": "nousresearch/hermes-3-llama-3.1-405b:free",
-      "object": "model",
-      "created": 1770701426661,
-      "owned_by": "meta",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "nousresearch/hermes-3-llama-3.1-405b",
       "object": "model",
       "created": 1770701426661,
       "owned_by": "meta",
-      "providers": 18
-    },
-    {
-      "id": "openai/chatgpt-4o-latest",
-      "object": "model",
-      "created": 1770701426661,
-      "owned_by": "openai",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "sao10k/l3-lunaris-8b",
       "object": "model",
       "created": 1770701426661,
       "owned_by": "openai",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "openai/gpt-4o-2024-08-06",
       "object": "model",
       "created": 1770701426661,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "openai",
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "meta-llama/llama-3.1-405b",
       "object": "model",
       "created": 1770701426661,
       "owned_by": "meta",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "meta-llama/llama-3.1-8b-instruct",
       "object": "model",
       "created": 1770701426661,
       "owned_by": "meta",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "meta-llama/llama-3.1-405b-instruct",
       "object": "model",
       "created": 1770701426661,
       "owned_by": "meta",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "meta-llama/llama-3.1-70b-instruct",
       "object": "model",
       "created": 1770701426661,
       "owned_by": "meta",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "mistralai/mistral-nemo",
       "object": "model",
       "created": 1770701426661,
       "owned_by": "mistral.ai",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "openai/gpt-4o-mini-2024-07-18",
       "object": "model",
       "created": 1770701426661,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "openai",
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "openai/gpt-4o-mini",
       "object": "model",
       "created": 1770701426661,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "openai",
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "sao10k/l3-euryale-70b",
       "object": "model",
       "created": 1770701426661,
       "owned_by": "openai",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "nousresearch/hermes-2-pro-llama-3-8b",
       "object": "model",
       "created": 1770701426661,
       "owned_by": "meta",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "mistralai/mistral-7b-instruct",
       "object": "model",
       "created": 1770701426661,
       "owned_by": "mistral.ai",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "mistralai/mistral-7b-instruct-v0.3",
       "object": "model",
       "created": 1770701426661,
       "owned_by": "mistral.ai",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "meta-llama/llama-guard-2-8b",
       "object": "model",
       "created": 1770701426661,
       "owned_by": "meta",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "openai/gpt-4o-2024-05-13",
       "object": "model",
       "created": 1770701426661,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "openai",
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "openai/gpt-4o",
       "object": "model",
       "created": 1770701426661,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "openai",
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "openai/gpt-4o:extended",
       "object": "model",
       "created": 1770701426661,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "openai",
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "meta-llama/llama-3-70b-instruct",
       "object": "model",
       "created": 1770701426661,
       "owned_by": "meta",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "meta-llama/llama-3-8b-instruct",
       "object": "model",
       "created": 1770701426661,
       "owned_by": "meta",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "mistralai/mixtral-8x22b-instruct",
       "object": "model",
       "created": 1770701426661,
       "owned_by": "mistral.ai",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "microsoft/wizardlm-2-8x22b",
       "object": "model",
       "created": 1770701426661,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "microsoft",
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "openai/gpt-4-turbo",
       "object": "model",
       "created": 1770701426661,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "openai",
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "anthropic/claude-3-haiku",
       "object": "model",
       "created": 1770701426661,
       "owned_by": "anthropic",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "mistralai/mistral-large",
       "object": "model",
       "created": 1770701426661,
       "owned_by": "mistral.ai",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "openai/gpt-3.5-turbo-0613",
       "object": "model",
       "created": 1770701426661,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "openai",
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "openai/gpt-4-turbo-preview",
       "object": "model",
       "created": 1770701426661,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "openai",
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "mistralai/mistral-7b-instruct-v0.2",
       "object": "model",
       "created": 1770701426661,
       "owned_by": "mistral.ai",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "mistralai/mixtral-8x7b-instruct",
       "object": "model",
       "created": 1770701426661,
       "owned_by": "mistral.ai",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "neversleep/noromaid-20b",
       "object": "model",
       "created": 1770701426661,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "alpindale/goliath-120b",
       "object": "model",
       "created": 1770701426661,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "openrouter/auto",
       "object": "model",
       "created": 1770701426661,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "openrouter",
+      "providers": 1,
+      "capabilities": [
+        "text",
+        "image_input",
+        "image_output",
+        "audio_input"
+      ]
     },
     {
       "id": "openai/gpt-4-1106-preview",
       "object": "model",
       "created": 1770701426661,
-      "owned_by": "unknown",
-      "providers": 18
-    },
-    {
-      "id": "openai/gpt-3.5-turbo-instruct",
-      "object": "model",
-      "created": 1770701426661,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "openai",
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "mistralai/mistral-7b-instruct-v0.1",
       "object": "model",
       "created": 1770701426661,
       "owned_by": "mistral.ai",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "openai/gpt-3.5-turbo-16k",
       "object": "model",
       "created": 1770701426661,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "openai",
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "mancer/weaver",
       "object": "model",
       "created": 1770701426661,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "undi95/remm-slerp-l2-13b",
       "object": "model",
       "created": 1770701426661,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "gryphe/mythomax-l2-13b",
       "object": "model",
       "created": 1770701426661,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "openai/gpt-4-0314",
       "object": "model",
       "created": 1770701426661,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "openai",
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "openai/gpt-4",
       "object": "model",
       "created": 1770701426661,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "openai",
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "openai/gpt-3.5-turbo",
       "object": "model",
       "created": 1770701426661,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "openai",
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "grok-2-vision-1212",
       "object": "model",
       "created": 1770701426661,
       "owned_by": "unknown",
-      "providers": 2
+      "providers": 2,
+      "capabilities": [
+        "text",
+        "image_input",
+        "image_output",
+        "audio_input",
+        "audio_output"
+      ]
     },
     {
       "id": "grok-3",
       "object": "model",
       "created": 1770701426661,
       "owned_by": "unknown",
-      "providers": 2
+      "providers": 2,
+      "capabilities": [
+        "text",
+        "image_output",
+        "audio_input",
+        "audio_output"
+      ]
     },
     {
       "id": "grok-3-mini",
       "object": "model",
       "created": 1770701426661,
       "owned_by": "unknown",
-      "providers": 2
+      "providers": 2,
+      "capabilities": [
+        "text",
+        "image_output",
+        "audio_input",
+        "audio_output"
+      ]
     },
     {
       "id": "grok-4-0709",
       "object": "model",
       "created": 1770701426661,
       "owned_by": "unknown",
-      "providers": 2
+      "providers": 2,
+      "capabilities": [
+        "text",
+        "image_input",
+        "image_output",
+        "audio_input",
+        "audio_output"
+      ]
     },
     {
       "id": "grok-4-1-fast-non-reasoning",
       "object": "model",
       "created": 1770701426661,
       "owned_by": "unknown",
-      "providers": 2
+      "providers": 2,
+      "capabilities": [
+        "text",
+        "image_input",
+        "image_output",
+        "audio_input",
+        "audio_output"
+      ]
     },
     {
       "id": "grok-4-1-fast-reasoning",
       "object": "model",
       "created": 1770701426661,
       "owned_by": "unknown",
-      "providers": 2
+      "providers": 2,
+      "capabilities": [
+        "text",
+        "image_input",
+        "image_output",
+        "audio_input",
+        "audio_output"
+      ]
     },
     {
       "id": "grok-4-fast-non-reasoning",
       "object": "model",
       "created": 1770701426661,
       "owned_by": "unknown",
-      "providers": 2
+      "providers": 2,
+      "capabilities": [
+        "text",
+        "image_input",
+        "image_output",
+        "audio_input",
+        "audio_output"
+      ]
     },
     {
       "id": "grok-4-fast-reasoning",
       "object": "model",
       "created": 1770701426661,
       "owned_by": "unknown",
-      "providers": 2
+      "providers": 2,
+      "capabilities": [
+        "text",
+        "image_input",
+        "image_output",
+        "audio_input",
+        "audio_output"
+      ]
     },
     {
       "id": "grok-code-fast-1",
       "object": "model",
       "created": 1770701426661,
       "owned_by": "unknown",
-      "providers": 2
-    },
-    {
-      "id": "grok-2-image-1212",
-      "object": "model",
-      "created": 1770701426661,
-      "owned_by": "unknown",
-      "providers": 2
-    },
-    {
-      "id": "grok-imagine-image",
-      "object": "model",
-      "created": 1770701426661,
-      "owned_by": "unknown",
-      "providers": 2
-    },
-    {
-      "id": "grok-imagine-image-pro",
-      "object": "model",
-      "created": 1770701426661,
-      "owned_by": "unknown",
-      "providers": 2
-    },
-    {
-      "id": "grok-imagine-video",
-      "object": "model",
-      "created": 1770701426661,
-      "owned_by": "unknown",
-      "providers": 2
-    },
-    {
-      "id": "o4-mini-deep-research",
-      "object": "model",
-      "created": 1770701426661,
-      "owned_by": "unknown",
-      "providers": 54
-    },
-    {
-      "id": "o4-mini-deep-research-2025-06-26",
-      "object": "model",
-      "created": 1770701426662,
-      "owned_by": "unknown",
-      "providers": 54
-    },
-    {
-      "id": "computer-use-preview",
-      "object": "model",
-      "created": 1770701426662,
-      "owned_by": "unknown",
-      "providers": 22
-    },
-    {
-      "id": "computer-use-preview-2025-03-11",
-      "object": "model",
-      "created": 1770701426662,
-      "owned_by": "unknown",
-      "providers": 22
+      "providers": 2,
+      "capabilities": [
+        "text",
+        "image_output",
+        "audio_input",
+        "audio_output"
+      ]
     },
     {
       "id": "o3-pro",
       "object": "model",
       "created": 1770701426662,
       "owned_by": "unknown",
-      "providers": 23
+      "providers": 39,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "o3-pro-2025-06-10",
       "object": "model",
       "created": 1770701426662,
       "owned_by": "unknown",
-      "providers": 23
-    },
-    {
-      "id": "o3-deep-research",
-      "object": "model",
-      "created": 1770701426662,
-      "owned_by": "unknown",
-      "providers": 23
-    },
-    {
-      "id": "o3-deep-research-2025-06-26",
-      "object": "model",
-      "created": 1770701426662,
-      "owned_by": "unknown",
-      "providers": 23
-    },
-    {
-      "id": "ft:gpt-4o-2024-08-06:whx:pdxtest001:AzGkDrT5",
-      "object": "model",
-      "created": 1770701426662,
-      "owned_by": "unknown",
-      "providers": 2
-    },
-    {
-      "id": "ft:gpt-4o-2024-08-06:whx:pdxtest001:AzGkCSv8:ckpt-step-22",
-      "object": "model",
-      "created": 1770701426662,
-      "owned_by": "unknown",
-      "providers": 2
-    },
-    {
-      "id": "ft:gpt-4o-2024-08-06:whx:pdxtest001:AzGkCExX:ckpt-step-33",
-      "object": "model",
-      "created": 1770701426662,
-      "owned_by": "unknown",
-      "providers": 2
-    },
-    {
-      "id": "davinci:ft-personal:gr8bot-2023-05-22-07-18-22",
-      "object": "model",
-      "created": 1770701426662,
-      "owned_by": "unknown",
-      "providers": 2
+      "providers": 39,
+      "capabilities": [
+        "text",
+        "image_input"
+      ]
     },
     {
       "id": "gpt-4-0314",
       "object": "model",
       "created": 1770701426662,
       "owned_by": "openai",
-      "providers": 2
-    },
-    {
-      "id": "davinci:ft-bagelcode-2023-05-30-09-40-50",
-      "object": "model",
-      "created": 1770701426662,
-      "owned_by": "unknown",
-      "providers": 2
-    },
-    {
-      "id": "davinci:ft-bagelcode-2023-05-30-10-33-49",
-      "object": "model",
-      "created": 1770701426662,
-      "owned_by": "unknown",
-      "providers": 2
-    },
-    {
-      "id": "davinci:ft-bagelcode-2023-06-01-05-08-29",
-      "object": "model",
-      "created": 1770701426662,
-      "owned_by": "unknown",
-      "providers": 2
+      "providers": 2,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "ft:gpt-3.5-turbo-0613:bagelcode::7r0jI3bd",
       "object": "model",
       "created": 1770701426662,
       "owned_by": "unknown",
-      "providers": 2
+      "providers": 2,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "ft:davinci-002:bagelcode::7qzmvH40",
       "object": "model",
       "created": 1770701426662,
       "owned_by": "unknown",
-      "providers": 2
-    },
-    {
-      "id": "curie:ft-bagelcode-2023-08-24-07-14-30",
-      "object": "model",
-      "created": 1770701426662,
-      "owned_by": "unknown",
-      "providers": 2
+      "providers": 2,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "ft:gpt-3.5-turbo-0613:bagelcode::7r1AnlKU",
       "object": "model",
       "created": 1770701426662,
       "owned_by": "unknown",
-      "providers": 2
-    },
-    {
-      "id": "curie:ft-bagelcode-2023-08-24-07-18-44",
-      "object": "model",
-      "created": 1770701426662,
-      "owned_by": "unknown",
-      "providers": 2
-    },
-    {
-      "id": "curie:ft-bagelcode-2023-08-24-07-16-25",
-      "object": "model",
-      "created": 1770701426662,
-      "owned_by": "unknown",
-      "providers": 2
+      "providers": 2,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "ft:gpt-3.5-turbo-0613:bagelcode::7r0ZVcMi",
       "object": "model",
       "created": 1770701426662,
       "owned_by": "unknown",
-      "providers": 2
+      "providers": 2,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "ft:gpt-3.5-turbo-0613:bagelcode::7qz1HR55",
       "object": "model",
       "created": 1770701426662,
       "owned_by": "unknown",
-      "providers": 2
-    },
-    {
-      "id": "gemini-2.5-flash",
-      "object": "model",
-      "created": 1770762892044,
-      "owned_by": "google",
-      "providers": 151
-    },
-    {
-      "id": "gemini-2.5-pro",
-      "object": "model",
-      "created": 1770762892044,
-      "owned_by": "google",
-      "providers": 151
+      "providers": 2,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "gemini-2.0-flash",
       "object": "model",
       "created": 1770762892044,
       "owned_by": "google",
-      "providers": 151
+      "providers": 6,
+      "capabilities": [
+        "text",
+        "image_input",
+        "audio_input"
+      ]
     },
     {
       "id": "gemini-2.0-flash-001",
       "object": "model",
       "created": 1770762892044,
       "owned_by": "google",
-      "providers": 151
+      "providers": 6,
+      "capabilities": [
+        "text",
+        "image_input",
+        "audio_input"
+      ]
     },
     {
       "id": "gemini-2.0-flash-lite-001",
       "object": "model",
       "created": 1770762892044,
       "owned_by": "google",
-      "providers": 151
+      "providers": 6,
+      "capabilities": [
+        "text",
+        "image_input",
+        "audio_input"
+      ]
     },
     {
       "id": "gemini-2.0-flash-lite",
       "object": "model",
       "created": 1770762892044,
       "owned_by": "google",
-      "providers": 151
-    },
-    {
-      "id": "gemini-exp-1206",
-      "object": "model",
-      "created": 1770762892044,
-      "owned_by": "google",
-      "providers": 151
+      "providers": 6,
+      "capabilities": [
+        "text",
+        "image_input",
+        "audio_input"
+      ]
     },
     {
       "id": "gemini-2.5-flash-preview-tts",
       "object": "model",
       "created": 1770762892044,
       "owned_by": "google",
-      "providers": 151
+      "providers": 6,
+      "capabilities": [
+        "audio_input"
+      ]
     },
     {
       "id": "gemini-2.5-pro-preview-tts",
       "object": "model",
       "created": 1770762892044,
       "owned_by": "google",
-      "providers": 151
-    },
-    {
-      "id": "gemma-3-1b-it",
-      "object": "model",
-      "created": 1770762892044,
-      "owned_by": "google",
-      "providers": 151
-    },
-    {
-      "id": "gemma-3-4b-it",
-      "object": "model",
-      "created": 1770762892044,
-      "owned_by": "google",
-      "providers": 151
+      "providers": 6,
+      "capabilities": [
+        "audio_input"
+      ]
     },
     {
       "id": "gemma-3-12b-it",
       "object": "model",
       "created": 1770762892044,
       "owned_by": "google",
-      "providers": 151
+      "providers": 6,
+      "capabilities": [
+        "text",
+        "image_input",
+        "audio_input"
+      ]
     },
     {
       "id": "gemma-3-27b-it",
       "object": "model",
       "created": 1770762892044,
       "owned_by": "google",
-      "providers": 151
+      "providers": 6,
+      "capabilities": [
+        "text",
+        "image_input",
+        "audio_input"
+      ]
     },
     {
       "id": "gemma-3n-e4b-it",
       "object": "model",
       "created": 1770762892044,
       "owned_by": "google",
-      "providers": 151
+      "providers": 6,
+      "capabilities": [
+        "text",
+        "audio_input"
+      ]
     },
     {
       "id": "gemma-3n-e2b-it",
       "object": "model",
       "created": 1770762892044,
       "owned_by": "google",
-      "providers": 151
+      "providers": 6,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "gemini-flash-latest",
       "object": "model",
       "created": 1770762892044,
       "owned_by": "google",
-      "providers": 151
+      "providers": 6,
+      "capabilities": [
+        "text",
+        "image_input",
+        "audio_input"
+      ]
     },
     {
       "id": "gemini-flash-lite-latest",
       "object": "model",
       "created": 1770762892044,
       "owned_by": "google",
-      "providers": 151
+      "providers": 6,
+      "capabilities": [
+        "text",
+        "image_input",
+        "audio_input"
+      ]
     },
     {
       "id": "gemini-pro-latest",
       "object": "model",
       "created": 1770762892044,
       "owned_by": "google",
-      "providers": 151
+      "providers": 6,
+      "capabilities": [
+        "text",
+        "image_input",
+        "audio_input"
+      ]
     },
     {
       "id": "gemini-2.5-flash-lite",
       "object": "model",
       "created": 1770762892044,
       "owned_by": "google",
-      "providers": 151
+      "providers": 6,
+      "capabilities": [
+        "text",
+        "image_input",
+        "audio_input"
+      ]
     },
     {
       "id": "gemini-2.5-flash-image",
       "object": "model",
       "created": 1770762892044,
       "owned_by": "google",
-      "providers": 151
-    },
-    {
-      "id": "gemini-2.5-flash-preview-09-2025",
-      "object": "model",
-      "created": 1770762892044,
-      "owned_by": "google",
-      "providers": 151
+      "providers": 6,
+      "capabilities": [
+        "image_input"
+      ]
     },
     {
       "id": "gemini-2.5-flash-lite-preview-09-2025",
       "object": "model",
       "created": 1770762892044,
       "owned_by": "google",
-      "providers": 151
+      "providers": 6,
+      "capabilities": [
+        "text",
+        "image_input",
+        "audio_input"
+      ]
     },
     {
       "id": "gemini-3-pro-preview",
       "object": "model",
       "created": 1770762892044,
       "owned_by": "google",
-      "providers": 151
+      "providers": 6,
+      "capabilities": [
+        "text",
+        "image_input",
+        "audio_input"
+      ]
     },
     {
       "id": "gemini-3-flash-preview",
       "object": "model",
       "created": 1770762892044,
       "owned_by": "google",
-      "providers": 151
+      "providers": 6,
+      "capabilities": [
+        "text",
+        "image_input",
+        "audio_input"
+      ]
     },
     {
       "id": "gemini-3-pro-image-preview",
       "object": "model",
       "created": 1770762892044,
       "owned_by": "google",
-      "providers": 151
+      "providers": 6,
+      "capabilities": [
+        "image_input"
+      ]
     },
     {
       "id": "nano-banana-pro-preview",
       "object": "model",
       "created": 1770762892044,
       "owned_by": "unknown",
-      "providers": 151
+      "providers": 6,
+      "capabilities": [
+        "image_input",
+        "image_output"
+      ]
     },
     {
       "id": "gemini-robotics-er-1.5-preview",
       "object": "model",
       "created": 1770762892044,
       "owned_by": "google",
-      "providers": 151
+      "providers": 6,
+      "capabilities": [
+        "text",
+        "image_input",
+        "audio_input"
+      ]
     },
     {
       "id": "gemini-2.5-computer-use-preview-10-2025",
       "object": "model",
       "created": 1770762892044,
       "owned_by": "google",
-      "providers": 151
-    },
-    {
-      "id": "deep-research-pro-preview-12-2025",
-      "object": "model",
-      "created": 1770762892044,
-      "owned_by": "unknown",
-      "providers": 151
-    },
-    {
-      "id": "gemini-embedding-001",
-      "object": "model",
-      "created": 1770762892044,
-      "owned_by": "google",
-      "providers": 151
-    },
-    {
-      "id": "aqa",
-      "object": "model",
-      "created": 1770762892044,
-      "owned_by": "unknown",
-      "providers": 151
-    },
-    {
-      "id": "imagen-4.0-generate-preview-06-06",
-      "object": "model",
-      "created": 1770762892044,
-      "owned_by": "unknown",
-      "providers": 151
-    },
-    {
-      "id": "imagen-4.0-ultra-generate-preview-06-06",
-      "object": "model",
-      "created": 1770762892044,
-      "owned_by": "unknown",
-      "providers": 151
-    },
-    {
-      "id": "imagen-4.0-generate-001",
-      "object": "model",
-      "created": 1770762892044,
-      "owned_by": "unknown",
-      "providers": 151
-    },
-    {
-      "id": "imagen-4.0-ultra-generate-001",
-      "object": "model",
-      "created": 1770762892044,
-      "owned_by": "unknown",
-      "providers": 151
-    },
-    {
-      "id": "imagen-4.0-fast-generate-001",
-      "object": "model",
-      "created": 1770762892044,
-      "owned_by": "unknown",
-      "providers": 151
-    },
-    {
-      "id": "veo-2.0-generate-001",
-      "object": "model",
-      "created": 1770762892044,
-      "owned_by": "unknown",
-      "providers": 151
-    },
-    {
-      "id": "veo-3.0-generate-001",
-      "object": "model",
-      "created": 1770762892044,
-      "owned_by": "unknown",
-      "providers": 151
-    },
-    {
-      "id": "veo-3.0-fast-generate-001",
-      "object": "model",
-      "created": 1770762892044,
-      "owned_by": "unknown",
-      "providers": 151
-    },
-    {
-      "id": "veo-3.1-generate-preview",
-      "object": "model",
-      "created": 1770762892044,
-      "owned_by": "unknown",
-      "providers": 151
-    },
-    {
-      "id": "veo-3.1-fast-generate-preview",
-      "object": "model",
-      "created": 1770762892044,
-      "owned_by": "unknown",
-      "providers": 151
+      "providers": 6,
+      "capabilities": []
     },
     {
       "id": "gemini-2.5-flash-native-audio-latest",
       "object": "model",
       "created": 1770762892044,
       "owned_by": "google",
-      "providers": 151
+      "providers": 6,
+      "capabilities": []
     },
     {
       "id": "gemini-2.5-flash-native-audio-preview-09-2025",
       "object": "model",
       "created": 1770762892044,
       "owned_by": "google",
-      "providers": 151
+      "providers": 6,
+      "capabilities": []
     },
     {
       "id": "gemini-2.5-flash-native-audio-preview-12-2025",
       "object": "model",
       "created": 1770762892049,
       "owned_by": "google",
-      "providers": 151
+      "providers": 6,
+      "capabilities": []
     },
     {
       "id": "ft:gpt-3.5-turbo-0613:personal::82iSof0M",
       "object": "model",
       "created": 1771049524336,
       "owned_by": "unknown",
-      "providers": 1
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "ft:gpt-4.1-nano-2025-04-14:personal::C2Dow4Hm",
       "object": "model",
       "created": 1771049524336,
       "owned_by": "unknown",
-      "providers": 1
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "ft:gpt-4.1-nano-2025-04-14:personal::C2Dow6xN:ckpt-step-103",
       "object": "model",
       "created": 1771049524336,
       "owned_by": "unknown",
-      "providers": 1
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "ft:gpt-4.1-nano-2025-04-14:personal::C2DowMUp:ckpt-step-206",
       "object": "model",
       "created": 1771049524336,
       "owned_by": "unknown",
-      "providers": 1
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "ft:gpt-4.1-2025-04-14:docupath:my-tes:BcXxFGjX",
       "object": "model",
       "created": 1771049524336,
       "owned_by": "unknown",
-      "providers": 1
-    },
-    {
-      "id": "ft:gpt-4.1-2025-04-14:docupath:my-tes:BcXxFRNP:ckpt-step-49",
-      "object": "model",
-      "created": 1771049524336,
-      "owned_by": "unknown",
-      "providers": 1
+      "providers": 3,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "ft:gpt-4.1-2025-04-14:docupath:my-tes:BcXxF7v0:ckpt-step-98",
       "object": "model",
       "created": 1771049524336,
       "owned_by": "unknown",
-      "providers": 1
+      "providers": 3,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "minimax/minimax-m2.5",
       "object": "model",
       "created": 1771049524336,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "z-ai/glm-5",
       "object": "model",
       "created": 1771049524336,
-      "owned_by": "unknown",
-      "providers": 18
+      "owned_by": "z.ai",
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "stepfun/step-3.5-flash",
       "object": "model",
       "created": 1771049524336,
       "owned_by": "unknown",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
     },
     {
       "id": "qwen/qwen3-4b",
       "object": "model",
       "created": 1771049524336,
       "owned_by": "alibaba",
-      "providers": 18
+      "providers": 1,
+      "capabilities": [
+        "text"
+      ]
+    },
+    {
+      "id": "gemma-3-1b-it",
+      "object": "model",
+      "created": 1771449683521,
+      "owned_by": "google",
+      "providers": 6
+    },
+    {
+      "id": "gemma-3-4b-it",
+      "object": "model",
+      "created": 1771449683521,
+      "owned_by": "google",
+      "providers": 6
     }
   ]
 }

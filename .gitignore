@@ -8,7 +8,10 @@ yarn-error.log*
 .env
 
 # Editor directories and files
-.idea
+.env
+apps/api/.env
+apps/api/.env.test
+# Do NOT ignore .env.example (template)
 .vscode
 *.swp
 *.swo
@@ -25,15 +28,37 @@ Thumbs.db
 apps/api/dist
 # Specific files
 vite.config.ts.timestamp*
-pnpm-lock.yaml
+apps/api/dist/
+apps/api/**/dist/
 package-lock.json
 .turbo
 apps/api/providers.json
 apps/api/keys.json
 apps/api/logs/admin-keys.json
 **/providers.json
+# Sensitive/generated config/data files in apps/api
+apps/api/keys.json
+apps/api/providers.json
+apps/api/models.json
+apps/api/tiers.json
+# Excluded errors (if generated)
+apps/api/excluded-errors.json
+
+# Log files (generalized)
+apps/api/logs/*.json
+apps/api/logs/*.jsonl
+
+# Redundant/specific patterns (for safety, but covered by above)
+apps/api/logs/admin-keys.json
+apps/api/logs/api-error.jsonl
+apps/api/logs/key-transfer-failures.json
+apps/api/logs/probe-tested.json
+apps/api/logs/probe-errors.jsonl
+
+# General patterns for any subfolder (if needed)
+**/providers.json
 **/keys.json
 **/api-error.jsonl
-apps/api/logs/api-error.jsonl
 **/key-transfer-failures.json
-apps/api/logs/key-transfer-failures.json
+**/probe-tested.json
+**/probe-errors.jsonl

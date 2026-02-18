@@ -11,7 +11,7 @@ import {
 
 dotenv.config();
 
-const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1';
+const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 const MODEL_CATALOG_TTL_MS = 5 * 60 * 1000;
 
 type GeminiModelCatalogItem = {
@@ -28,8 +28,6 @@ export class GeminiAI implements IAIProvider {
   private static modelCatalogCache: Map<string, GeminiModelCatalogCacheEntry> = new Map();
 
   private apiKey: string;
-  private modelId: string;
-  private apiModelId: string;
   // Removed state properties: busy, lastLatency, providerData, alpha, providerId
 
   private normalizeModelId(modelId: string): string {
@@ -38,17 +36,6 @@ export class GeminiAI implements IAIProvider {
 
   private toModelsName(modelId: string): string {
     return modelId.startsWith('models/') ? modelId : `models/${modelId}`;
-  }
-
-  private cleanRequestedModelVariants(modelId: string): string[] {
-    const variants = new Set<string>();
-    const normalized = this.normalizeModelId(modelId);
-    variants.add(normalized);
-    variants.add(normalized.replace(/-latest$/i, ''));
-    variants.add(normalized.replace(/-preview-[\w.-]+$/i, ''));
-    variants.add(normalized.replace(/-native-audio(?:-[\w.-]+)?$/i, ''));
-    variants.add(normalized.replace(/-native-audio/i, ''));
-    return [...variants].filter(Boolean);
   }
 
   private async getModelCatalog(): Promise<GeminiModelCatalogItem[]> {
@@ -63,6 +50,7 @@ export class GeminiAI implements IAIProvider {
     const response = await fetch(endpoint);
     if (!response.ok) {
       const responseText = await response.text().catch(() => '');
+      console.error(`Gemini ListModels raw error response: ${responseText}`);
       throw new Error(`Gemini ListModels failed: [${response.status} ${response.statusText}] ${responseText}`);
     }
 
@@ -92,66 +80,30 @@ export class GeminiAI implements IAIProvider {
     return models;
   }
 
-  private findBestModelForMethod(
-    requestedModelId: string,
-    method: 'generateContent' | 'streamGenerateContent',
-    models: GeminiModelCatalogItem[]
-  ): GeminiModelCatalogItem | null {
-    const methodKey = method.toLowerCase();
-    const variants = this.cleanRequestedModelVariants(requestedModelId);
-    const requestedLower = requestedModelId.toLowerCase();
-    const wantsNativeAudio = requestedLower.includes('native-audio');
-
-    const exact = models.find((entry) =>
-      variants.includes(entry.id) && entry.supportedMethods.has(methodKey)
-    );
-    if (exact) return exact;
-
-    for (const variant of variants) {
-      const startsWithMatches = models.filter((entry) =>
-        entry.id.startsWith(variant) && entry.supportedMethods.has(methodKey)
-      );
-      if (startsWithMatches.length === 0) continue;
-
-      if (wantsNativeAudio) {
-        const nativeAudioMatch = startsWithMatches.find((entry) => entry.id.includes('native-audio'));
-        if (nativeAudioMatch) return nativeAudioMatch;
-      }
-
-      return startsWithMatches[0];
-    }
-
-    if (wantsNativeAudio) {
-      const fallbackBase = variants.find((v) => v.startsWith('gemini-2.5-flash')) || 'gemini-2.5-flash';
-      const fallback = models.find((entry) =>
-        entry.id.startsWith(fallbackBase) && entry.supportedMethods.has(methodKey)
-      );
-      if (fallback) return fallback;
-    }
-
-    return null;
-  }
-
   private async resolveModelIdForMethod(
+    requestedModelId: string,
     method: 'generateContent' | 'streamGenerateContent',
     allowGenerateFallbackForStream: boolean = false
   ): Promise<{ modelId: string; usesStreamMethod: boolean }> {
+    const normalizedRequest = this.normalizeModelId(requestedModelId);
     const models = await this.getModelCatalog();
-    const best = this.findBestModelForMethod(this.apiModelId, method, models);
-    if (best) {
-      return { modelId: best.id, usesStreamMethod: method === 'streamGenerateContent' };
+    const methodKey = method.toLowerCase();
+    const exact = models.find((entry) => entry.id === normalizedRequest);
+    if (!exact) {
+      return { modelId: normalizedRequest, usesStreamMethod: method === 'streamGenerateContent' };
     }
 
-    if (allowGenerateFallbackForStream && method === 'streamGenerateContent') {
-      const generateFallback = this.findBestModelForMethod(this.apiModelId, 'generateContent', models);
-      if (generateFallback) {
-        return { modelId: generateFallback.id, usesStreamMethod: false };
-      }
+    if (exact.supportedMethods.has(methodKey)) {
+      return { modelId: normalizedRequest, usesStreamMethod: method === 'streamGenerateContent' };
+    }
+
+    if (allowGenerateFallbackForStream && method === 'streamGenerateContent' && exact.supportedMethods.has('generatecontent')) {
+      return { modelId: normalizedRequest, usesStreamMethod: false };
     }
 
     const availableExamples = models.slice(0, 5).map((entry) => entry.id).join(', ');
     throw new Error(
-      `No Gemini model available for '${this.apiModelId}' using method '${method}'. Available examples: ${availableExamples}`
+      `Gemini model '${normalizedRequest}' does not support '${method}'. Available examples: ${availableExamples}`
     );
   }
 
@@ -253,13 +205,11 @@ export class GeminiAI implements IAIProvider {
     return { promptTokens, completionTokens, totalTokens };
   }
 
-  constructor(apiKey: string, modelId: string = 'gemini-pro') { // Accept modelId in constructor
+  constructor(apiKey: string) {
     if (!apiKey) {
       throw new Error('Gemini API key is required');
     }
     this.apiKey = apiKey;
-    this.modelId = modelId; // Store the model ID this instance will handle
-    this.apiModelId = this.normalizeModelId(modelId);
     // Removed providerData initialization and initializeModelData call
   }
 
@@ -297,23 +247,12 @@ export class GeminiAI implements IAIProvider {
    * @returns A promise containing the API response content and latency.
    */
   async sendMessage(message: IMessage): Promise<ProviderResponse> {
-    // Model ID check: Ensure the message is intended for the model this instance handles.
-    // This relies on the MessageHandler routing correctly.
-    if (message.model.id !== this.modelId) {
-       console.warn(`GeminiAI instance for ${this.modelId} received message intended for ${message.model.id}. Processing anyway.`);
-       // Or optionally throw: throw new Error(`Mismatched model ID: Expected ${this.modelId}, got ${message.model.id}`);
-    }
-
     // Removed busy flag management
     const startTime = Date.now();
 
     try {
       const body = this.buildRequestBody(message);
-      const resolved = await this.resolveModelIdForMethod('generateContent');
-      if (resolved.modelId !== this.apiModelId) {
-        console.warn(`[GeminiAI] Using compatible model '${resolved.modelId}' for requested '${this.apiModelId}' (generateContent).`);
-      }
-
+      const resolved = await this.resolveModelIdForMethod(message.model.id, 'generateContent');
       const response = await this.requestGemini(resolved.modelId, 'generateContent', body);
       if (!response.ok) {
         await this.throwGeminiHttpError(response, 'generateContent');
@@ -352,7 +291,7 @@ export class GeminiAI implements IAIProvider {
 
       const endTime = Date.now();
       const latency = endTime - startTime;
-      console.error(`Error during sendMessage with Gemini model ${this.modelId} (Latency: ${latency}ms):`, error);
+      console.error(`Error during sendMessage with Gemini model ${message.model.id} (Latency: ${latency}ms):`, error);
 
       // Extract a more specific error message if possible
       const errorMessage = error.message || 'Unknown Gemini API error';
@@ -366,18 +305,11 @@ export class GeminiAI implements IAIProvider {
   }
 
   async *sendMessageStream(message: IMessage): AsyncGenerator<ProviderStreamChunk, void, unknown> {
-    if (message.model.id !== this.modelId) {
-      console.warn(`GeminiAI instance for ${this.modelId} received message intended for ${message.model.id}. Processing anyway.`);
-    }
-
     const startTime = Date.now();
 
     try {
       const body = this.buildRequestBody(message);
-      const resolved = await this.resolveModelIdForMethod('streamGenerateContent', true);
-      if (resolved.modelId !== this.apiModelId) {
-        console.warn(`[GeminiAI] Using compatible model '${resolved.modelId}' for requested '${this.apiModelId}' (streamGenerateContent).`);
-      }
+      const resolved = await this.resolveModelIdForMethod(message.model.id, 'streamGenerateContent', true);
 
       if (!resolved.usesStreamMethod) {
         const nonStreamResponse = await this.requestGemini(resolved.modelId, 'generateContent', body);
@@ -442,7 +374,7 @@ export class GeminiAI implements IAIProvider {
       }
     } catch (error: any) {
       const latency = Date.now() - startTime;
-      console.error(`Error during sendMessageStream with Gemini model ${this.modelId} (Latency: ${latency}ms):`, error);
+      console.error(`Error during sendMessageStream with Gemini model ${message.model.id} (Latency: ${latency}ms):`, error);
       const errorMessage = error.message || 'Unknown Gemini API error';
       throw new Error(`Gemini API stream call failed: ${errorMessage}`);
     }

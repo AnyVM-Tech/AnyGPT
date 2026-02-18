@@ -30,9 +30,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import Ajv from 'ajv';
 import {
-  validateApiKeyAndUsage, // Now async
-  UserData, // Assuming this is exported from userData
-  TierData, // Assuming this is exported from userData
+    validateApiKeyAndUsage, // Now async
+    UserData, // Assuming this is exported from userData
+    TierData, // Assuming this is exported from userData
 } from '../modules/userData.js';
 import { isExcludedError } from '../modules/errorExclusion.js';
 
@@ -41,6 +41,31 @@ dotenv.config();
 const ajv = new Ajv();
 
 const AUTO_DISABLE_PROVIDERS = process.env.DISABLE_PROVIDER_AUTO_DISABLE !== 'true';
+const TTFT_INPUT_TOKENS_WEIGHT = (() => {
+    const raw = process.env.TTFT_INPUT_TOKENS_WEIGHT;
+    const parsed = raw !== undefined ? Number(raw) : NaN;
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 1;
+})();
+const TTFT_OUTPUT_TOKENS_WEIGHT = (() => {
+    const raw = process.env.TTFT_OUTPUT_TOKENS_WEIGHT;
+    const parsed = raw !== undefined ? Number(raw) : NaN;
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 1;
+})();
+const NON_STREAM_MIN_GENERATION_WINDOW_MS = (() => {
+    const raw = process.env.NON_STREAM_MIN_GENERATION_WINDOW_MS;
+    const parsed = raw !== undefined ? Number(raw) : NaN;
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 250;
+})();
+const NON_STREAM_MIN_TTFT_MS = (() => {
+    const raw = process.env.NON_STREAM_MIN_TTFT_MS;
+    const parsed = raw !== undefined ? Number(raw) : NaN;
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 25;
+})();
+const STREAM_MIN_GENERATION_WINDOW_MS = (() => {
+    const raw = process.env.STREAM_MIN_GENERATION_WINDOW_MS;
+    const parsed = raw !== undefined ? Number(raw) : NaN;
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 250;
+})();
 
 // --- Paths & Schemas ---
 const providersSchemaPath = path.resolve('providers.schema.json');
@@ -82,7 +107,7 @@ export async function initializeHandlerData() {
         const throughputValue = model.throughput;
         const throughput = (throughputValue != null && !isNaN(Number(throughputValue))) ? Number(throughputValue) : NaN;
         if (model.id && !isNaN(throughput)) initialModelThroughputMap.set(model.id, throughput);
-        const caps = Array.isArray(model.capabilities) && model.capabilities.length > 0 ? model.capabilities as ModelCapability[] : ['text' as ModelCapability];
+        const caps = Array.isArray(model.capabilities) ? model.capabilities as ModelCapability[] : [];
         modelCapabilitiesMap.set(model.id, caps);
     });
 
@@ -119,6 +144,14 @@ export class MessageHandler {
     private readonly DEFAULT_GENERATION_SPEED = 50; 
     private readonly TIME_WINDOW_HOURS = 24; 
     private readonly CONSECUTIVE_ERROR_THRESHOLD = 5; // Threshold for disabling
+    private readonly DISABLE_PROVIDER_AFTER_MODELS = (() => {
+        const raw = process.env.DISABLE_PROVIDER_AFTER_MODELS;
+        const parsed = raw !== undefined ? Number(raw) : NaN;
+        if (!Number.isFinite(parsed) || parsed < 1) return 2;
+        return Math.floor(parsed);
+    })();
+    private modelCapabilitiesLastUpdated = 0;
+    private readonly MODEL_CAPS_REFRESH_MS = Math.max(1000, Number(process.env.MODEL_CAPS_REFRESH_MS ?? 5000));
 
     private normalizeModelId(modelId: string): string {
         return String(modelId || '').toLowerCase().replace(/^google\//, '');
@@ -181,6 +214,22 @@ export class MessageHandler {
         this.modelCapabilitiesMap = capabilitiesMap;
     }
 
+    private async refreshModelCapabilities(): Promise<void> {
+        const now = Date.now();
+        if (this.modelCapabilitiesMap.size > 0 && (now - this.modelCapabilitiesLastUpdated) < this.MODEL_CAPS_REFRESH_MS) {
+            return;
+        }
+        const modelsFileData = await dataManager.load<ModelsFileStructure>('models');
+        const modelData = modelsFileData.data || [];
+        const nextMap = new Map<string, ModelCapability[]>();
+        modelData.forEach((model: ModelDefinition) => {
+            const caps = Array.isArray(model.capabilities) ? model.capabilities as ModelCapability[] : [];
+            if (model.id) nextMap.set(model.id, caps);
+        });
+        this.modelCapabilitiesMap = nextMap;
+        this.modelCapabilitiesLastUpdated = now;
+    }
+
     private detectRequiredCapabilities(messages: IMessage[], modelId: string): Set<ModelCapability> {
         const required = new Set<ModelCapability>();
         messages.forEach((message) => {
@@ -188,7 +237,7 @@ export class MessageHandler {
             if (Array.isArray(content)) {
                 content.forEach((part: any) => {
                     if (!part || typeof part !== 'object') return;
-                    if (part.type === 'image_url') required.add('image_input');
+                    if (part.type === 'image_url' || part.type === 'input_image') required.add('image_input');
                     if (part.type === 'input_audio') required.add('audio_input');
                     // If the user explicitly asks for image_output, treat as required modality
                     if (part.type === 'text' && typeof part.text === 'string' && part.text.toLowerCase().includes('[image_output]')) {
@@ -196,6 +245,10 @@ export class MessageHandler {
                     }
                 });
             }
+            const modalities = Array.isArray(message?.modalities) ? message.modalities.map((m) => String(m).toLowerCase()) : [];
+            if (modalities.includes('image')) required.add('image_output');
+            if (modalities.includes('audio')) required.add('audio_output');
+            if (message?.audio) required.add('audio_output');
         });
 
         // Heuristic: if the requested model name implies image generation, demand image_output
@@ -235,12 +288,20 @@ export class MessageHandler {
             console.error("Error applying time window:", e);
         }
 
-        let compatibleProviders = activeProviders.filter((p: LoadedProviderData) => p.models && modelId in p.models);
+        let compatibleProviders = activeProviders.filter((p: LoadedProviderData) => {
+            const modelData = p.models?.[modelId];
+            return Boolean(modelData && !(modelData as any).disabled);
+        });
         if (compatibleProviders.length === 0) {
             const disabledSupporting = allProvidersOriginal.filter((p: LoadedProviderData) => p.disabled && p.models && modelId in p.models);
             if (disabledSupporting.length > 0) {
                 console.warn(`Re-enabling ${disabledSupporting.length} disabled provider(s) for model ${modelId}.`);
-                compatibleProviders = disabledSupporting.map(p => ({ ...p, disabled: false }));
+                compatibleProviders = disabledSupporting
+                    .map(p => ({ ...p, disabled: false }))
+                    .filter((p: LoadedProviderData) => {
+                        const modelData = p.models?.[modelId];
+                        return Boolean(modelData && !(modelData as any).disabled);
+                    });
             } else {
                 const anyProviderHasModel = allProvidersOriginal.some((p: LoadedProviderData) => p.models && modelId in p.models);
                 if (!anyProviderHasModel) {
@@ -296,9 +357,31 @@ export class MessageHandler {
     }
 
     private validateModelCapabilities(modelId: string, messages: IMessage[]) {
-        // Temporarily disable capability gating to allow all models through regardless of declared modalities.
-        // This bypasses checks like audio/image support while we debug provider/model metadata.
-        return;
+        const caps = modelCapabilitiesMap.get(modelId) || [];
+        if (caps.length === 0) return;
+        const required = this.detectRequiredCapabilities(messages, modelId);
+        const missing = Array.from(required).filter((cap) => !caps.includes(cap));
+        if (missing.length > 0) {
+            throw new Error(`Model ${modelId} missing required capabilities: ${missing.join(', ')}`);
+        }
+    }
+
+    private filterProvidersByCapabilitySkips(
+        providers: LoadedProviderData[],
+        modelId: string,
+        required: Set<ModelCapability>
+    ): LoadedProviderData[] {
+        if (!required || required.size === 0) return providers;
+        return providers.filter((provider) => {
+            const modelData = provider.models?.[modelId];
+            if ((modelData as any)?.disabled) return false;
+            const skips = (modelData as any)?.capability_skips as Partial<Record<ModelCapability, string>> | undefined;
+            if (!skips) return true;
+            for (const cap of required) {
+                if (skips[cap]) return false;
+            }
+            return true;
+        });
     }
     
     private async updateStatsInProviderList(
@@ -322,7 +405,8 @@ export class MessageHandler {
                 consecutive_errors: 0, // Initialize consecutive errors
                 avg_response_time: null,
                 avg_provider_latency: null,
-                avg_token_speed: this.initialModelThroughputMap.get(modelId) ?? this.DEFAULT_GENERATION_SPEED
+                avg_token_speed: this.initialModelThroughputMap.get(modelId) ?? this.DEFAULT_GENERATION_SPEED,
+                disabled: false
             };
         }
         
@@ -330,6 +414,9 @@ export class MessageHandler {
         const modelData = providerData.models[modelId];
         if (modelData.consecutive_errors === undefined) {
             modelData.consecutive_errors = 0;
+        }
+        if (modelData.disabled === undefined) {
+            modelData.disabled = false;
         }
         
         // Ensure provider data object exists and initialize disabled if missing for older data
@@ -358,16 +445,27 @@ export class MessageHandler {
                 modelData.consecutive_errors = this.CONSECUTIVE_ERROR_THRESHOLD;
             } else {
                 modelData.consecutive_errors = (modelData.consecutive_errors || 0) + 1;
-                if (AUTO_DISABLE_PROVIDERS && modelData.consecutive_errors >= this.CONSECUTIVE_ERROR_THRESHOLD) {
-                    if (!providerData.disabled) {
-                        console.warn(`Disabling provider ${providerId} due to ${modelData.consecutive_errors} consecutive errors on model ${modelId}.`);
-                        providerData.disabled = true;
+                if (modelData.consecutive_errors >= this.CONSECUTIVE_ERROR_THRESHOLD) {
+                    if (!modelData.disabled) {
+                        console.warn(`Disabling model ${modelId} in provider ${providerId} after ${modelData.consecutive_errors} consecutive errors.`);
+                    }
+                    modelData.disabled = true;
+
+                    if (AUTO_DISABLE_PROVIDERS) {
+                        const disabledModels = Object.values(providerData.models || {}).filter((m: any) => m?.disabled).length;
+                        if (disabledModels >= this.DISABLE_PROVIDER_AFTER_MODELS && !providerData.disabled) {
+                            console.warn(`Disabling provider ${providerId} after ${disabledModels} models were disabled due to consecutive errors.`);
+                            providerData.disabled = true;
+                        }
                     }
                 }
             }
         } else {
             // Reset consecutive errors on success for this model
             modelData.consecutive_errors = 0;
+            if (modelData.disabled) {
+                modelData.disabled = false;
+            }
             // Re-enable provider on any model success if it was disabled
             if (providerData.disabled) {
                  console.log(`Re-enabling provider ${providerId} after successful request for model ${modelId}.`);
@@ -376,7 +474,8 @@ export class MessageHandler {
         }
 
         updateProviderData(providerData as ProviderStateStructure, modelId, responseEntry, isError); 
-        await computeProviderMetricsInWorker(providerData as ProviderStateStructure, this.alpha, 0.7, 0.3);
+        providerData = await computeProviderMetricsInWorker(providerData as ProviderStateStructure, this.alpha, 0.7, 0.3);
+        providers[providerIndex] = providerData;
         return providers; 
     }
 
@@ -384,7 +483,9 @@ export class MessageHandler {
          if (!messages?.length || !modelId || !apiKey) throw new Error("Invalid arguments");
          if (!messageHandler) throw new Error("Service temporarily unavailable.");
 
-            // Capability gating disabled for now (see validateModelCapabilities)
+            await this.refreshModelCapabilities();
+            this.validateModelCapabilities(modelId, messages);
+            const requiredCaps = this.detectRequiredCapabilities(messages, modelId);
 
          const validationResult = await validateApiKeyAndUsage(apiKey); 
          if (!validationResult.valid || !validationResult.userData || !validationResult.tierLimits) {
@@ -395,7 +496,11 @@ export class MessageHandler {
          const tierLimits: TierData = validationResult.tierLimits; 
          const userTierName = userData.tier; 
          const allProvidersOriginal = await dataManager.load<LoadedProviders>('providers');
-         const candidateProviders = this.prepareCandidateProviders(allProvidersOriginal, modelId, tierLimits, userTierName);
+         let candidateProviders = this.prepareCandidateProviders(allProvidersOriginal, modelId, tierLimits, userTierName);
+         candidateProviders = this.filterProvidersByCapabilitySkips(candidateProviders, modelId, requiredCaps);
+         if (candidateProviders.length === 0) {
+             throw new Error(`No providers available for model ${modelId} after capability filtering.`);
+         }
 
          // --- Attempt Loop ---
          let lastError: any = null;
@@ -417,14 +522,25 @@ export class MessageHandler {
                 ProviderClass = ImagenAI;
             }
 
+            const perModelUrl = selectedProvider?.provider_urls && selectedProvider.provider_urls[modelId]
+                ? selectedProvider.provider_urls[modelId]
+                : undefined;
+
             if (ProviderClass === GeminiAI) {
                 // Ensure API key stays first arg; if missing, fall back to provider's stored key
                 args[0] = args[0] ?? selectedProvider.apiKey ?? '';
                 args[1] = modelId;
+                if (perModelUrl) args[2] = perModelUrl;
             }
             if (ProviderClass === ImagenAI) {
                 args[0] = args[0] ?? selectedProvider.apiKey ?? '';
                 args[1] = modelId;
+                if (perModelUrl) args[2] = perModelUrl;
+            }
+            if (ProviderClass === OpenAI || ProviderClass === OpenRouterAI || ProviderClass === DeepseekAI) {
+                if (perModelUrl) {
+                    args[1] = perModelUrl;
+                }
             }
 
             const providerInstance = new ProviderClass(...args);
@@ -433,30 +549,58 @@ export class MessageHandler {
              let sendMessageError: any = null; // Renamed from attemptError for clarity
 
              try { 
+                 const attemptStart = Date.now();
+                 const modelStats = selectedProvider?.models?.[modelId];
+                 const speedEstimateTps =
+                     (typeof (modelStats as any)?.avg_token_speed === 'number' && (modelStats as any).avg_token_speed > 0)
+                         ? (modelStats as any).avg_token_speed
+                         : ((typeof (modelStats as any)?.token_generation_speed === 'number' && (modelStats as any).token_generation_speed > 0)
+                             ? (modelStats as any).token_generation_speed
+                             : this.DEFAULT_GENERATION_SPEED);
                  const lastMessage = messages[messages.length - 1];
                  const messageForProvider: IMessage = { ...lastMessage, model: { id: modelId } };
                  result = await providerInstance.sendMessage(messageForProvider);
+                 const attemptDuration = Date.now() - attemptStart;
                  if (result) { 
                     const estimatedInputTokens = messages.reduce((sum, msg) => {
-                        const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
-                        return sum + estimateTokens(content);
+                        return sum + estimateTokensFromContent(msg.content);
                     }, 0);
-                    const estimatedOutputTokens = estimateTokens(result.response || '');
+                    const estimatedOutputTokens = estimateTokensFromText(result.response || '');
                     const { inputTokens, outputTokens } = this.normalizeUsage(result.usage, estimatedInputTokens, estimatedOutputTokens);
                     const tokensGenerated = inputTokens + outputTokens;
 
-                    const providerLatency: number | null = Math.max(0, Math.round(result.latency));
+                    const generationTokens = (inputTokens * TTFT_INPUT_TOKENS_WEIGHT)
+                        + (outputTokens * TTFT_OUTPUT_TOKENS_WEIGHT);
+                    const avgTps = outputTokens > 0 ? (outputTokens / Math.max(0.001, attemptDuration / 1000)) : 0;
+                    const effectiveTps = speedEstimateTps > 0
+                        ? Math.min(speedEstimateTps, Math.max(avgTps, 1))
+                        : Math.max(avgTps, 1);
+                    const estimatedGenerationMs = effectiveTps > 0
+                        ? (generationTokens / effectiveTps) * 1000
+                        : 0;
+                    let estimatedTtftMs = Math.max(0, attemptDuration - estimatedGenerationMs);
+                    const maxProviderLatency = Math.max(0, attemptDuration - NON_STREAM_MIN_GENERATION_WINDOW_MS);
+                    if (estimatedTtftMs > maxProviderLatency) {
+                        estimatedTtftMs = maxProviderLatency;
+                    }
+                    let providerLatency = Math.max(0, Math.min(Math.round(estimatedTtftMs), attemptDuration));
+                    if (providerLatency === 0 && attemptDuration > 0 && outputTokens > 0) {
+                        providerLatency = Math.min(Math.max(NON_STREAM_MIN_TTFT_MS, 1), attemptDuration);
+                    }
                     let observedSpeedTps: number | null = null;
-                    if (outputTokens > 0 && result.latency > 0) {
-                        const generationTimeSeconds = Math.max(0.001, result.latency / 1000);
-                        const calculatedSpeed = outputTokens / generationTimeSeconds;
+                    const speedWindowMs = Math.max(1, attemptDuration - (providerLatency || 0));
+                    if (outputTokens > 0 && speedWindowMs > 0) {
+                        let calculatedSpeed = outputTokens / Math.max(0.001, speedWindowMs / 1000);
+                        if (speedWindowMs < NON_STREAM_MIN_GENERATION_WINDOW_MS && avgTps > 0) {
+                            calculatedSpeed = avgTps;
+                        }
                         if (!isNaN(calculatedSpeed) && isFinite(calculatedSpeed) && calculatedSpeed > 0) {
                             observedSpeedTps = calculatedSpeed;
                         }
                     }
                     responseEntry = {
                         timestamp: Date.now(),
-                        response_time: result.latency,
+                        response_time: attemptDuration,
                         input_tokens: inputTokens,
                         output_tokens: outputTokens,
                         tokens_generated: tokensGenerated,
@@ -522,7 +666,9 @@ export class MessageHandler {
         if (!messages?.length || !modelId || !apiKey) throw new Error("Invalid arguments for streaming");
         if (!messageHandler) throw new Error("Service temporarily unavailable.");
 
-        // Capability gating disabled for now (see validateModelCapabilities)
+        await this.refreshModelCapabilities();
+        this.validateModelCapabilities(modelId, messages);
+        const requiredCaps = this.detectRequiredCapabilities(messages, modelId);
 
         const validationResult = await validateApiKeyAndUsage(apiKey);
         if (!validationResult.valid || !validationResult.userData || !validationResult.tierLimits) {
@@ -534,7 +680,11 @@ export class MessageHandler {
         const userTierName = userData.tier;
 
         const allProvidersOriginal = await dataManager.load<LoadedProviders>('providers');
-        const candidateProviders = this.prepareCandidateProviders(allProvidersOriginal, modelId, tierLimits, userTierName);
+        let candidateProviders = this.prepareCandidateProviders(allProvidersOriginal, modelId, tierLimits, userTierName);
+        candidateProviders = this.filterProvidersByCapabilitySkips(candidateProviders, modelId, requiredCaps);
+        if (candidateProviders.length === 0) {
+            throw new Error(`No providers available for model ${modelId} after capability filtering.`);
+        }
 
         let lastError: any = null;
         for (const selectedProviderData of candidateProviders) {
@@ -578,8 +728,7 @@ export class MessageHandler {
                         const passthrough = await providerInstance.createPassthroughStream(messageForProvider);
                         if (passthrough?.upstream) {
                             const promptTokens = messages.reduce((sum, msg) => {
-                                const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
-                                return sum + estimateTokens(content);
+                                return sum + estimateTokensFromContent(msg.content);
                             }, 0);
 
                             console.log(`[StreamPassthrough] Activated for provider ${providerId} (${passthrough.mode}).`);
@@ -603,26 +752,36 @@ export class MessageHandler {
                     let fullResponse = '';
                     let totalLatency = 0;
                     let chunkCount = 0;
+                    let firstChunkLatency: number | null = null;
 
                     for await (const { chunk, latency, response } of stream) {
                         fullResponse = response;
                         totalLatency += latency || 0;
                         chunkCount++;
+                        if (firstChunkLatency === null && chunk && chunk.length > 0) {
+                            firstChunkLatency = latency || 0;
+                        }
                         yield { type: 'chunk', chunk, latency };
                     }
 
                     const totalResponseTime = Date.now() - streamStart;
                     const inputTokens = messages.reduce((sum, msg) => {
-                        const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
-                        return sum + estimateTokens(content);
+                        return sum + estimateTokensFromContent(msg.content);
                     }, 0);
-                    const outputTokens = estimateTokens(fullResponse);
+                    const outputTokens = estimateTokensFromText(fullResponse);
 
-                    let providerLatency: number | null = Math.max(0, Math.round(totalResponseTime));
+                    let providerLatency: number | null = null;
+                    if (firstChunkLatency !== null && firstChunkLatency > 0) {
+                        providerLatency = Math.min(Math.round(firstChunkLatency), totalResponseTime);
+                    } else {
+                        providerLatency = Math.max(0, Math.round(totalResponseTime));
+                    }
                     let observedSpeedTps: number | null = null;
 
                     if (outputTokens > 0) {
-                        const generationTimeSeconds = Math.max(0.001, totalResponseTime / 1000);
+                        const speedWindowMs = Math.max(1, totalResponseTime - (providerLatency || 0));
+                        const generationWindow = Math.max(speedWindowMs, STREAM_MIN_GENERATION_WINDOW_MS);
+                        const generationTimeSeconds = Math.max(0.001, generationWindow / 1000);
                         const calculatedSpeed = outputTokens / generationTimeSeconds;
                         if (!isNaN(calculatedSpeed) && isFinite(calculatedSpeed)) {
                             observedSpeedTps = calculatedSpeed;
@@ -709,8 +868,113 @@ export class MessageHandler {
     }
 }
 
-function estimateTokens(text: string): number {
-    return Math.ceil((text || '').length / 4);
+const BASE64_DATA_URL_GLOBAL = /data:([^;\s]+);base64,([A-Za-z0-9+/=_-]+)/gi;
+
+const IMAGE_INPUT_TOKENS_PER_KB = readEnvNumber('IMAGE_INPUT_TOKENS_PER_KB', 4);
+const IMAGE_OUTPUT_TOKENS_PER_KB = readEnvNumber('IMAGE_OUTPUT_TOKENS_PER_KB', 8);
+const AUDIO_INPUT_TOKENS_PER_KB = readEnvNumber('AUDIO_INPUT_TOKENS_PER_KB', 2);
+const AUDIO_OUTPUT_TOKENS_PER_KB = readEnvNumber('AUDIO_OUTPUT_TOKENS_PER_KB', 4);
+const IMAGE_URL_FALLBACK_TOKENS = readEnvNumber('IMAGE_URL_FALLBACK_TOKENS', 512);
+const AUDIO_DATA_FALLBACK_TOKENS = readEnvNumber('AUDIO_DATA_FALLBACK_TOKENS', 256);
+const IMAGE_MIN_TOKENS = readEnvNumber('IMAGE_MIN_TOKENS', 0);
+const AUDIO_MIN_TOKENS = readEnvNumber('AUDIO_MIN_TOKENS', 0);
+
+function readEnvNumber(name: string, fallback: number): number {
+    const raw = process.env[name];
+    if (raw === undefined) return fallback;
+    const value = Number(raw);
+    return Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
+function estimateTokensFromBase64Payload(payload: string, tokensPerKb: number, minTokens: number): number {
+    if (!payload) return minTokens;
+    const cleaned = payload.replace(/\s+/g, '');
+    if (!cleaned) return minTokens;
+    const bytes = Math.max(0, Math.floor((cleaned.length * 3) / 4));
+    const tokens = Math.ceil((bytes / 1024) * tokensPerKb);
+    return Math.max(tokens, minTokens);
+}
+
+function estimateTokensFromDataUrl(dataUrl: string, direction: 'input' | 'output'): number {
+    const match = dataUrl.match(/^data:([^;\s]+);base64,([A-Za-z0-9+/=_-]+)$/i);
+    if (!match) return 0;
+    const mimeType = (match[1] || '').toLowerCase();
+    const payload = match[2] || '';
+
+    if (mimeType.startsWith('image/')) {
+        const perKb = direction === 'input' ? IMAGE_INPUT_TOKENS_PER_KB : IMAGE_OUTPUT_TOKENS_PER_KB;
+        return estimateTokensFromBase64Payload(payload, perKb, IMAGE_MIN_TOKENS);
+    }
+    if (mimeType.startsWith('audio/')) {
+        const perKb = direction === 'input' ? AUDIO_INPUT_TOKENS_PER_KB : AUDIO_OUTPUT_TOKENS_PER_KB;
+        return estimateTokensFromBase64Payload(payload, perKb, AUDIO_MIN_TOKENS);
+    }
+    return 0;
+}
+
+function estimateTokensFromText(text: string, direction: 'input' | 'output' = 'output'): number {
+    const value = String(text || '');
+    if (!value) return 0;
+
+    let mediaTokens = 0;
+    if (value.includes('data:')) {
+        const regex = new RegExp(BASE64_DATA_URL_GLOBAL);
+        for (const match of value.matchAll(regex)) {
+            const mimeType = (match[1] || '').toLowerCase();
+            const payload = match[2] || '';
+            if (mimeType.startsWith('image/')) {
+                const perKb = direction === 'input' ? IMAGE_INPUT_TOKENS_PER_KB : IMAGE_OUTPUT_TOKENS_PER_KB;
+                mediaTokens += estimateTokensFromBase64Payload(payload, perKb, IMAGE_MIN_TOKENS);
+            } else if (mimeType.startsWith('audio/')) {
+                const perKb = direction === 'input' ? AUDIO_INPUT_TOKENS_PER_KB : AUDIO_OUTPUT_TOKENS_PER_KB;
+                mediaTokens += estimateTokensFromBase64Payload(payload, perKb, AUDIO_MIN_TOKENS);
+            }
+        }
+    }
+
+    const stripped = value.replace(BASE64_DATA_URL_GLOBAL, '[binary-data]');
+    if (!stripped) return mediaTokens;
+    return mediaTokens + Math.ceil(stripped.length / 4);
+}
+
+function estimateTokensFromContent(content: IMessage['content']): number {
+    if (typeof content === 'string') {
+        return estimateTokensFromText(content, 'input');
+    }
+    if (!Array.isArray(content)) {
+        return estimateTokensFromText(JSON.stringify(content), 'input');
+    }
+
+    let total = 0;
+    for (const part of content) {
+        if (!part || typeof part !== 'object') continue;
+        const type = String((part as any).type || '').toLowerCase();
+        if (type === 'text' || type === 'input_text') {
+            total += estimateTokensFromText((part as any).text || '', 'input');
+            continue;
+        }
+        if (type === 'image_url') {
+            const url = (part as any)?.image_url?.url;
+            if (typeof url === 'string' && url.startsWith('data:')) {
+                total += estimateTokensFromDataUrl(url, 'input');
+            } else if (typeof url === 'string' && url.length > 0) {
+                total += IMAGE_URL_FALLBACK_TOKENS;
+            }
+            continue;
+        }
+        if (type === 'input_audio') {
+            const data = (part as any)?.input_audio?.data;
+            if (typeof data === 'string' && data.length > 0) {
+                total += estimateTokensFromBase64Payload(data, AUDIO_INPUT_TOKENS_PER_KB, AUDIO_MIN_TOKENS);
+            } else {
+                total += AUDIO_DATA_FALLBACK_TOKENS;
+            }
+            continue;
+        }
+        total += estimateTokensFromText(JSON.stringify(part), 'input');
+    }
+
+    return total;
 }
 
 export { messageHandler };

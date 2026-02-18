@@ -23,6 +23,8 @@ export interface Model {
   avg_response_time: number | null;
   avg_provider_latency: number | null;
   avg_token_speed: number | null; // Calculated average token speed (tokens/sec, e.g., EMA)
+  capability_skips?: Partial<Record<ModelCapability, string>>; // Optional per-model capability skips
+  disabled?: boolean; // Optional per-model disable flag
 }
 
 export interface ResponseEntry {

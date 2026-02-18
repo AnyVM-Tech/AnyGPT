@@ -1,7 +1,7 @@
 import HyperExpress, { Request, Response } from '../lib/uws-compat.js';
 import dotenv from 'dotenv';
 import { messageHandler } from '../providers/handler.js'; 
-import { IMessage } from '../providers/interfaces.js'; 
+import { IMessage, type ModelCapability } from '../providers/interfaces.js'; 
 import { 
     generateUserApiKey, // Now async
     extractMessageFromRequestBody, 
@@ -16,7 +16,17 @@ import tiersData from '../tiers.json' with { type: 'json' };
 import { incrementSharedRateLimitCounters } from '../modules/rateLimitRedis.js';
 import { enforceInMemoryRateLimit, evaluateSharedRateLimit, RequestTimestampStore } from '../modules/rateLimit.js';
 import { runAuthMiddleware, runRateLimitMiddleware } from '../modules/middlewareFactory.js';
-import { dataManager, LoadedProviders, LoadedProviderData } from '../modules/dataManager.js';
+import { dataManager, LoadedProviders, LoadedProviderData, type ModelsFileStructure } from '../modules/dataManager.js';
+import {
+    createInteractionToken,
+    executeGeminiInteraction,
+    getInteractionsSigningSecret,
+    normalizeDeepResearchModel,
+    verifyInteractionToken,
+    extractOpenAIResponseFormat,
+    InteractionRequest,
+    InteractionTokenClient,
+} from '../modules/interactions.js';
  
 dotenv.config();
  
@@ -25,6 +35,7 @@ const openaiRouter = new HyperExpress.Router();
 // --- Rate Limiting Store --- 
 const requestTimestamps: RequestTimestampStore = {};
 const RATE_LIMIT_KEY_PREFIX = 'api:ratelimit:';
+const INTERACTIONS_TOKEN_TTL_SECONDS = 15 * 60;
 
 async function incrementSharedCounters(apiKey: string) {
     try {
@@ -158,8 +169,112 @@ function extractResponsesRequestBody(requestBody: any): { message: IMessage; mod
     return { message, modelId, stream: Boolean(requestBody.stream) };
 }
 
-function estimateTokens(text: string): number {
-    return Math.ceil((text || '').length / 4);
+const BASE64_DATA_URL_GLOBAL = /data:([^;\s]+);base64,([A-Za-z0-9+/=_-]+)/gi;
+const IMAGE_INPUT_TOKENS_PER_KB = readEnvNumber('IMAGE_INPUT_TOKENS_PER_KB', 4);
+const IMAGE_OUTPUT_TOKENS_PER_KB = readEnvNumber('IMAGE_OUTPUT_TOKENS_PER_KB', 8);
+const AUDIO_INPUT_TOKENS_PER_KB = readEnvNumber('AUDIO_INPUT_TOKENS_PER_KB', 2);
+const AUDIO_OUTPUT_TOKENS_PER_KB = readEnvNumber('AUDIO_OUTPUT_TOKENS_PER_KB', 4);
+const IMAGE_URL_FALLBACK_TOKENS = readEnvNumber('IMAGE_URL_FALLBACK_TOKENS', 512);
+const AUDIO_DATA_FALLBACK_TOKENS = readEnvNumber('AUDIO_DATA_FALLBACK_TOKENS', 256);
+const IMAGE_MIN_TOKENS = readEnvNumber('IMAGE_MIN_TOKENS', 0);
+const AUDIO_MIN_TOKENS = readEnvNumber('AUDIO_MIN_TOKENS', 0);
+
+function readEnvNumber(name: string, fallback: number): number {
+    const raw = process.env[name];
+    if (raw === undefined) return fallback;
+    const value = Number(raw);
+    return Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
+function estimateTokensFromBase64Payload(payload: string, tokensPerKb: number, minTokens: number): number {
+    if (!payload) return minTokens;
+    const cleaned = payload.replace(/\s+/g, '');
+    if (!cleaned) return minTokens;
+    const bytes = Math.max(0, Math.floor((cleaned.length * 3) / 4));
+    const tokens = Math.ceil((bytes / 1024) * tokensPerKb);
+    return Math.max(tokens, minTokens);
+}
+
+function estimateTokensFromDataUrl(dataUrl: string, direction: 'input' | 'output'): number {
+    const match = dataUrl.match(/^data:([^;\s]+);base64,([A-Za-z0-9+/=_-]+)$/i);
+    if (!match) return 0;
+    const mimeType = (match[1] || '').toLowerCase();
+    const payload = match[2] || '';
+
+    if (mimeType.startsWith('image/')) {
+        const perKb = direction === 'input' ? IMAGE_INPUT_TOKENS_PER_KB : IMAGE_OUTPUT_TOKENS_PER_KB;
+        return estimateTokensFromBase64Payload(payload, perKb, IMAGE_MIN_TOKENS);
+    }
+    if (mimeType.startsWith('audio/')) {
+        const perKb = direction === 'input' ? AUDIO_INPUT_TOKENS_PER_KB : AUDIO_OUTPUT_TOKENS_PER_KB;
+        return estimateTokensFromBase64Payload(payload, perKb, AUDIO_MIN_TOKENS);
+    }
+    return 0;
+}
+
+function estimateTokensFromText(text: string, direction: 'input' | 'output' = 'output'): number {
+    const value = String(text || '');
+    if (!value) return 0;
+
+    let mediaTokens = 0;
+    if (value.includes('data:')) {
+        const regex = new RegExp(BASE64_DATA_URL_GLOBAL);
+        for (const match of value.matchAll(regex)) {
+            const mimeType = (match[1] || '').toLowerCase();
+            const payload = match[2] || '';
+            if (mimeType.startsWith('image/')) {
+                const perKb = direction === 'input' ? IMAGE_INPUT_TOKENS_PER_KB : IMAGE_OUTPUT_TOKENS_PER_KB;
+                mediaTokens += estimateTokensFromBase64Payload(payload, perKb, IMAGE_MIN_TOKENS);
+            } else if (mimeType.startsWith('audio/')) {
+                const perKb = direction === 'input' ? AUDIO_INPUT_TOKENS_PER_KB : AUDIO_OUTPUT_TOKENS_PER_KB;
+                mediaTokens += estimateTokensFromBase64Payload(payload, perKb, AUDIO_MIN_TOKENS);
+            }
+        }
+    }
+
+    const stripped = value.replace(BASE64_DATA_URL_GLOBAL, '[binary-data]');
+    if (!stripped) return mediaTokens;
+    return mediaTokens + Math.ceil(stripped.length / 4);
+}
+
+function estimateTokensFromContent(content: IMessage['content']): number {
+    if (typeof content === 'string') {
+        return estimateTokensFromText(content, 'input');
+    }
+    if (!Array.isArray(content)) {
+        return estimateTokensFromText(JSON.stringify(content), 'input');
+    }
+
+    let total = 0;
+    for (const part of content) {
+        if (!part || typeof part !== 'object') continue;
+        const type = String((part as any).type || '').toLowerCase();
+        if (type === 'text' || type === 'input_text') {
+            total += estimateTokensFromText((part as any).text || '', 'input');
+            continue;
+        }
+        if (type === 'image_url') {
+            const url = (part as any)?.image_url?.url;
+            if (typeof url === 'string' && url.startsWith('data:')) {
+                total += estimateTokensFromDataUrl(url, 'input');
+            } else if (typeof url === 'string' && url.length > 0) {
+                total += IMAGE_URL_FALLBACK_TOKENS;
+            }
+            continue;
+        }
+        if (type === 'input_audio') {
+            const data = (part as any)?.input_audio?.data;
+            if (typeof data === 'string' && data.length > 0) {
+                total += estimateTokensFromBase64Payload(data, AUDIO_INPUT_TOKENS_PER_KB, AUDIO_MIN_TOKENS);
+            } else {
+                total += AUDIO_DATA_FALLBACK_TOKENS;
+            }
+            continue;
+        }
+        total += estimateTokensFromText(JSON.stringify(part), 'input');
+    }
+
+    return total;
 }
 
 function extractUsageTokens(usage: any): { promptTokens?: number; completionTokens?: number; totalTokens?: number } {
@@ -214,11 +329,35 @@ function isImageModelId(modelId: string): boolean {
     return normalized.includes('imagen') || normalized.includes('image') || normalized.includes('nano-banana');
 }
 
+function isNanoBananaModel(modelId: string): boolean {
+    const normalized = String(modelId || '').toLowerCase();
+    return normalized.includes('nano-banana');
+}
+
+function ensureNanoBananaModalities(modalities: any): string[] {
+    const raw = Array.isArray(modalities) ? modalities : [];
+    const normalized = raw.map((m) => String(m).toLowerCase().trim()).filter(Boolean);
+    const set = new Set<string>(normalized);
+    set.add('image');
+    set.add('text');
+    return Array.from(set);
+}
+
 function isNonChatModel(modelId: string): 'tts' | 'stt' | 'image-gen' | 'embedding' | false {
     const n = String(modelId || '').toLowerCase();
     if (n.startsWith('tts-') || n.includes('-tts')) return 'tts';
     if (n.startsWith('whisper') || n.includes('transcribe')) return 'stt';
-    if (n.startsWith('dall-e')) return 'image-gen';
+    if (
+        n.startsWith('dall-e') ||
+        n.startsWith('gpt-image') ||
+        n.includes('gpt-image') ||
+        n.includes('chatgpt-image') ||
+        n.includes('image-gen') ||
+        n.includes('imagegen') ||
+        n.startsWith('imagen') ||
+        n.includes('imagen') ||
+        n.includes('nano-banana')
+    ) return 'image-gen';
     if (n.includes('embedding')) return 'embedding';
     return false;
 }
@@ -229,6 +368,93 @@ function formatAssistantContent(raw: string): string {
         return `![generated image](${raw})`;
     }
     return raw;
+}
+
+function extractTextFromContent(content: any): string {
+    if (typeof content === 'string') return content;
+    if (Array.isArray(content)) {
+        const textPart = content.find((part: any) =>
+            part && (part.type === 'text' || part.type === 'input_text') && typeof part.text === 'string'
+        );
+        if (textPart?.text) return textPart.text;
+    }
+    return '';
+}
+
+function extractInputAudioFromContent(content: any): { data: string; format: string } | null {
+    if (!Array.isArray(content)) return null;
+    const audioPart = content.find((part: any) =>
+        part && part.type === 'input_audio' && part.input_audio
+        && typeof part.input_audio.data === 'string'
+        && typeof part.input_audio.format === 'string'
+    );
+    if (!audioPart) return null;
+    return { data: audioPart.input_audio.data, format: audioPart.input_audio.format };
+}
+
+function extractTextFromMessages(rawMessages: any[]): string {
+    if (!Array.isArray(rawMessages)) return '';
+    const lastUser = rawMessages.filter(m => m?.role === 'user').pop();
+    if (!lastUser) return '';
+    return extractTextFromContent(lastUser.content);
+}
+
+function extractInputAudioFromMessages(rawMessages: any[]): { data: string; format: string } | null {
+    if (!Array.isArray(rawMessages)) return null;
+    for (let i = rawMessages.length - 1; i >= 0; i -= 1) {
+        const msg = rawMessages[i];
+        const audio = extractInputAudioFromContent(msg?.content);
+        if (audio) return audio;
+    }
+    return null;
+}
+
+function extractTextFromResponsesInput(input: any): string {
+    if (typeof input === 'string') return input;
+    if (Array.isArray(input)) {
+        for (const item of input) {
+            const content = item?.content ?? item;
+            const text = extractTextFromContent(content);
+            if (text) return text;
+        }
+    }
+    return '';
+}
+
+function extractInputAudioFromResponsesInput(input: any): { data: string; format: string } | null {
+    if (Array.isArray(input)) {
+        for (const item of input) {
+            const content = item?.content ?? item;
+            const audio = extractInputAudioFromContent(content);
+            if (audio) return audio;
+        }
+    }
+    return null;
+}
+
+function normalizeInputAudio(audio: { data: string; format: string }): { buffer: Buffer; mimeType: string; extension: string } | null {
+    let { data, format } = audio;
+    let mimeType = format;
+
+    if (typeof data === 'string' && data.startsWith('data:')) {
+        const match = data.match(/^data:([^;]+);base64,(.+)$/);
+        if (match) {
+            mimeType = match[1];
+            data = match[2];
+        }
+    }
+
+    if (!mimeType) mimeType = 'audio/wav';
+    if (!mimeType.includes('/')) mimeType = `audio/${mimeType}`;
+    const extension = mimeType.split('/')[1] || 'wav';
+
+    try {
+        const buffer = Buffer.from(data, 'base64');
+        if (buffer.length === 0) return null;
+        return { buffer, mimeType, extension };
+    } catch {
+        return null;
+    }
 }
 
 async function inlineImageUrls(messages: any[], authHeader?: string) {
@@ -451,6 +677,7 @@ openaiRouter.use('/', authAndUsageMiddleware);
 // Fix: Remove '/v1' prefix from the path
 openaiRouter.use('/chat/completions', rateLimitMiddleware); 
 openaiRouter.use('/responses', rateLimitMiddleware);
+openaiRouter.use('/interactions', rateLimitMiddleware);
 openaiRouter.use('/audio', rateLimitMiddleware);
 openaiRouter.use('/images', rateLimitMiddleware);
 openaiRouter.use('/embeddings', rateLimitMiddleware);
@@ -639,84 +866,59 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
 
     const stream = Boolean(requestBody.stream);
 
+    if (requestBody?.interaction) {
+        const interactionBody = requestBody.interaction;
+        const input = typeof interactionBody?.input === 'string'
+            ? interactionBody.input
+            : (typeof interactionBody?.input === 'object' ? JSON.stringify(interactionBody.input) : '');
+        const modelRaw = typeof interactionBody?.model === 'string'
+            ? interactionBody.model
+            : (typeof requestBody?.model === 'string' ? requestBody.model : '');
+        if (!modelRaw || !input) {
+            if (!response.completed) return response.status(400).json({ error: 'Bad Request: model and input are required for interactions mapping', timestamp: new Date().toISOString() });
+            return;
+        }
+
+        const normalized = normalizeDeepResearchModel(modelRaw, typeof interactionBody?.agent === 'string' ? interactionBody.agent : undefined);
+        const interactionRequest: InteractionRequest = {
+            model: normalized.model,
+            input,
+            tools: Array.isArray(interactionBody.tools) ? interactionBody.tools : undefined,
+            response_format: interactionBody.response_format && typeof interactionBody.response_format === 'object' ? interactionBody.response_format : undefined,
+            generation_config: interactionBody.generation_config && typeof interactionBody.generation_config === 'object' ? interactionBody.generation_config : undefined,
+            agent: normalized.agent,
+        };
+
+        const secret = getInteractionsSigningSecret();
+        const interactionId = createInteractionToken(
+            interactionRequest,
+            request.apiKey,
+            'openai-chat',
+            INTERACTIONS_TOKEN_TTL_SECONDS,
+            secret,
+            modelRaw
+        );
+
+        const responseBody = {
+            id: `chatcmpl_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+            object: 'chat.completion',
+            created: Math.floor(Date.now() / 1000),
+            model: modelRaw,
+            choices: [{
+                index: 0,
+                message: { role: 'assistant', content: '' },
+                finish_reason: 'in_progress',
+            }],
+            interaction: { id: interactionId },
+        };
+
+        return response.json(responseBody);
+    }
+
     // --- Block non-chat models with helpful error ---
     const nonChatType = isNonChatModel(modelId);
     if (nonChatType) {
-        // Allow image generation models to work in chat by adapting the request
-        if (nonChatType === 'image-gen') {
-            try {
-                const lastUserMessage = rawMessages.filter(m => m.role === 'user').pop();
-                const prompt = typeof lastUserMessage?.content === 'string' 
-                    ? lastUserMessage.content 
-                    : (Array.isArray(lastUserMessage?.content) 
-                        ? (lastUserMessage.content as any[]).find((p: any) => p.type === 'text')?.text 
-                        : '');
-
-                if (!prompt) {
-                    if (!response.completed) return response.status(400).json({ error: 'Bad Request: No prompt found in user messages for image generation.', timestamp: new Date().toISOString() });
-                    return;
-                }
-
-                const provider = await pickOpenAIProviderKey(modelId);
-                if (!provider) {
-                    if (!response.completed) return response.status(503).json({ error: 'No available provider for image generation', timestamp: new Date().toISOString() });
-                    return;
-                }
-
-                const upstreamUrl = `${provider.baseUrl}/v1/images/generations`;
-                const upstreamRes = await fetch(upstreamUrl, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${provider.apiKey}`,
-                    },
-                    body: JSON.stringify({
-                        model: modelId,
-                        prompt,
-                        n: 1,
-                        size: '1024x1024'
-                    }),
-                });
-
-                if (!upstreamRes.ok) {
-                    const errText = await upstreamRes.text().catch(() => '');
-                    if (!response.completed) return response.status(upstreamRes.status).json({ error: `Image generation upstream error: ${errText || upstreamRes.statusText}`, timestamp: new Date().toISOString() });
-                    return;
-                }
-
-                const resJson = await upstreamRes.json();
-                const imageUrl = resJson.data?.[0]?.url;
-                const revisedPrompt = resJson.data?.[0]?.revised_prompt;
-                
-                const assistantContent = imageUrl 
-                    ? `![Generated Image](${imageUrl})\n\n*${revisedPrompt || prompt}*`
-                    : 'Failed to generate image URL.';
-
-                const tokenEstimate = Math.ceil(prompt.length / 4) + 500;
-                await updateUserTokenUsage(tokenEstimate, userApiKey);
-
-                const openaiResponse = {
-                    id: `chatcmpl-${Date.now()}`,
-                    object: "chat.completion",
-                    created: Math.floor(Date.now() / 1000),
-                    model: modelId,
-                    choices: [{
-                        index: 0,
-                        message: { role: "assistant", content: assistantContent },
-                        finish_reason: "stop"
-                    }],
-                    usage: { prompt_tokens: Math.ceil(prompt.length / 4), completion_tokens: 0, total_tokens: tokenEstimate }
-                };
-                response.json(openaiResponse);
-                return;
-
-            } catch (adapterError: any) {
-                console.error('Chat-to-Image adapter error:', adapterError);
-                if (!response.completed) return response.status(500).json({ error: 'Internal Server Error during image generation adapter.', timestamp: new Date().toISOString() });
-                return;
-            }
-        }
-
+        if (!(nonChatType === 'image-gen' && isNanoBananaModel(modelId))) {
         const endpointMap: Record<string, string> = {
             tts: '/v1/audio/speech',
             stt: '/v1/audio/transcriptions',
@@ -734,6 +936,7 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
             timestamp: new Date().toISOString(),
         });
         return;
+        }
     }
 
     const effectiveStream = stream && !isImageModelId(modelId);
@@ -755,6 +958,9 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
         reasoning: requestBody.reasoning,
         instructions: requestBody.instructions,
     };
+    if (isNanoBananaModel(modelId)) {
+        sharedMessageOptions.modalities = ensureNanoBananaModalities(sharedMessageOptions.modalities);
+    }
 
     const formattedMessages: IMessage[] = rawMessages.map(msg => ({
         role: msg.role,
@@ -869,10 +1075,9 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
         if (passthroughHandled) {
             if (totalTokenUsage <= 0) {
                 const promptEstimate = typeof promptTokensFromUsage === 'number' ? promptTokensFromUsage : formattedMessages.reduce((sum, msg) => {
-                    const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
-                    return sum + estimateTokens(content);
+                    return sum + estimateTokensFromContent(msg.content);
                 }, 0);
-                const completionEstimate = typeof completionTokensFromUsage === 'number' ? completionTokensFromUsage : estimateTokens(streamOutputText);
+                const completionEstimate = typeof completionTokensFromUsage === 'number' ? completionTokensFromUsage : estimateTokensFromText(streamOutputText);
                 totalTokenUsage = promptEstimate + completionEstimate;
             }
 
@@ -983,7 +1188,83 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
     try {
         const userApiKey = request.apiKey!;
         const requestBody = await request.json();
+
+        if (requestBody?.interaction) {
+            const interactionBody = requestBody.interaction;
+            const input = typeof interactionBody?.input === 'string'
+                ? interactionBody.input
+                : (typeof interactionBody?.input === 'object' ? JSON.stringify(interactionBody.input) : '');
+            const modelRaw = typeof interactionBody?.model === 'string'
+                ? interactionBody.model
+                : (typeof requestBody?.model === 'string' ? requestBody.model : '');
+            if (!modelRaw || !input) {
+                if (!response.completed) return response.status(400).json({ error: 'Bad Request: model and input are required for interactions mapping', timestamp: new Date().toISOString() });
+                return;
+            }
+
+            const normalized = normalizeDeepResearchModel(modelRaw, typeof interactionBody?.agent === 'string' ? interactionBody.agent : undefined);
+            const responseFormat = extractOpenAIResponseFormat(requestBody?.response_format);
+            const interactionRequest: InteractionRequest = {
+                model: normalized.model,
+                input,
+                tools: Array.isArray(interactionBody.tools) ? interactionBody.tools : undefined,
+                response_format: responseFormat,
+                generation_config: interactionBody.generation_config && typeof interactionBody.generation_config === 'object' ? interactionBody.generation_config : undefined,
+                agent: normalized.agent,
+            };
+
+            const secret = getInteractionsSigningSecret();
+            const interactionId = createInteractionToken(
+                interactionRequest,
+                request.apiKey,
+                'openai-responses',
+                INTERACTIONS_TOKEN_TTL_SECONDS,
+                secret,
+                modelRaw
+            );
+
+            const responseBody = {
+                id: `resp_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+                object: 'response',
+                created: Math.floor(Date.now() / 1000),
+                model: modelRaw,
+                status: 'in_progress',
+                interaction: { id: interactionId },
+                output: [],
+                output_text: '',
+            };
+            return response.json(responseBody);
+        }
+
         const { message, modelId, stream } = extractResponsesRequestBody(requestBody);
+        if (isNanoBananaModel(modelId)) {
+            message.modalities = ensureNanoBananaModalities(message.modalities);
+        }
+
+        const nonChatType = isNonChatModel(modelId);
+        if (nonChatType) {
+            if (!(nonChatType === 'image-gen' && isNanoBananaModel(modelId))) {
+            const endpointMap: Record<string, string> = {
+                tts: '/v1/audio/speech',
+                stt: '/v1/audio/transcriptions',
+                'image-gen': '/v1/images/generations',
+                embedding: '/v1/embeddings',
+            };
+            const correctEndpoint = endpointMap[nonChatType] || 'the dedicated endpoint';
+            if (!response.completed) {
+                return response.status(400).json({
+                    error: {
+                        message: `'${modelId}' is not a responses model and cannot be used with /v1/responses. Use ${correctEndpoint} instead.`,
+                        type: 'invalid_request_error',
+                        param: 'model',
+                        code: 'model_not_supported',
+                    },
+                    timestamp: new Date().toISOString(),
+                });
+            }
+            return;
+            }
+        }
         const effectiveStream = stream && !isImageModelId(modelId);
 
         const responseId = `resp_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
@@ -1113,8 +1394,8 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
 
             if (passthroughHandled) {
                 if (totalTokenUsage <= 0) {
-                    const promptEstimate = typeof promptTokensFromUsage === 'number' ? promptTokensFromUsage : estimateTokens(JSON.stringify(message.content));
-                    const completionEstimate = typeof completionTokensFromUsage === 'number' ? completionTokensFromUsage : estimateTokens(fullText);
+                    const promptEstimate = typeof promptTokensFromUsage === 'number' ? promptTokensFromUsage : estimateTokensFromContent(message.content);
+                    const completionEstimate = typeof completionTokensFromUsage === 'number' ? completionTokensFromUsage : estimateTokensFromText(fullText);
                     totalTokenUsage = promptEstimate + completionEstimate;
                 }
 
@@ -1182,6 +1463,99 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
                 response.status(statusCode).json({ error: clientMessage, timestamp });
             }
         } else { return; }
+    }
+});
+
+// --- Interactions (OpenAI-style mapping) ---
+openaiRouter.post('/interactions', async (request: Request, response: Response) => {
+    if (!request.apiKey || !request.tierLimits) {
+        await logError({ message: 'Authentication or configuration failed in /v1/interactions after middleware' }, request);
+        if (!response.completed) return response.status(401).json({ error: 'Authentication or configuration failed', timestamp: new Date().toISOString() });
+        return;
+    }
+
+    try {
+        const body = await request.json();
+        const model = typeof body?.model === 'string' ? body.model.trim() : '';
+        const input = typeof body?.input === 'string'
+            ? body.input
+            : (typeof body?.input === 'object' ? JSON.stringify(body.input) : '');
+        if (!model || !input) {
+            if (!response.completed) return response.status(400).json({ error: 'Bad Request: model and input are required', timestamp: new Date().toISOString() });
+            return;
+        }
+
+        const normalized = normalizeDeepResearchModel(model, typeof body?.agent === 'string' ? body.agent : undefined);
+        const interactionRequest: InteractionRequest = {
+            model: normalized.model,
+            input,
+            tools: Array.isArray(body.tools) ? body.tools : undefined,
+            response_format: body.response_format && typeof body.response_format === 'object' ? body.response_format : undefined,
+            generation_config: body.generation_config && typeof body.generation_config === 'object' ? body.generation_config : undefined,
+            agent: normalized.agent,
+        };
+
+        const secret = getInteractionsSigningSecret();
+        const interactionId = createInteractionToken(
+            interactionRequest,
+            request.apiKey,
+            'openai-responses',
+            INTERACTIONS_TOKEN_TTL_SECONDS,
+            secret,
+            model
+        );
+
+        const responseBody = {
+            id: interactionId,
+            status: 'processing',
+        };
+        return response.json(responseBody);
+    } catch (error: any) {
+        await logError(error, request);
+        if (!response.completed) {
+            response.status(500).json({ error: 'Internal Server Error', reference: 'Failed to create interaction.', timestamp: new Date().toISOString() });
+        }
+    }
+});
+
+openaiRouter.get('/interactions/:interactionId', async (request: Request, response: Response) => {
+    if (!request.apiKey || !request.tierLimits || !request.params.interactionId) {
+        await logError({ message: 'Authentication or configuration failed in /v1/interactions poll after middleware' }, request);
+        if (!response.completed) return response.status(401).json({ error: 'Authentication or configuration failed', timestamp: new Date().toISOString() });
+        return;
+    }
+
+    try {
+        const secret = getInteractionsSigningSecret();
+        const payload = verifyInteractionToken(request.params.interactionId, request.apiKey, secret);
+        const result = await executeGeminiInteraction(payload.request);
+        const outputs = Array.isArray(result?.outputs) ? result.outputs : [];
+        const outputText = typeof outputs?.[0]?.text === 'string' ? outputs[0].text : '';
+        const usage = result?.usage || {};
+        const totalTokensUsed = typeof usage.total_tokens === 'number'
+            ? usage.total_tokens
+            : (typeof result?.usageMetadata?.totalTokenCount === 'number' ? result.usageMetadata.totalTokenCount : 0);
+        if (totalTokensUsed > 0) {
+            await updateUserTokenUsage(totalTokensUsed, request.apiKey);
+        }
+
+        const responseBody = {
+            id: request.params.interactionId,
+            status: 'completed',
+            outputs,
+            output_text: outputText,
+            usage,
+        };
+        return response.json(responseBody);
+    } catch (error: any) {
+        await logError(error, request);
+        let statusCode = 500;
+        let clientMessage = 'Internal Server Error';
+        if (String(error?.message || '').includes('expired')) statusCode = 410;
+        if (String(error?.message || '').includes('Invalid')) statusCode = 400;
+        if (!response.completed) {
+            response.status(statusCode).json({ error: clientMessage, timestamp: new Date().toISOString() });
+        }
     }
 });
 
@@ -1300,16 +1674,84 @@ function extractOrigin(urlStr: string): string {
     }
 }
 
-async function pickOpenAIProviderKey(modelId: string): Promise<{ apiKey: string; baseUrl: string } | null> {
+const MODEL_CAPS_CACHE_MS = Math.max(1000, Number(process.env.MODEL_CAPS_CACHE_MS ?? 5000));
+let modelCapsCache: { expiresAt: number; map: Map<string, ModelCapability[]> } | null = null;
+
+function normalizeModelIdVariants(modelId: string): string[] {
+    const raw = String(modelId || '').trim();
+    if (!raw) return [];
+    const variants = new Set<string>([raw]);
+    const slashIndex = raw.indexOf('/');
+    if (slashIndex > 0 && slashIndex + 1 < raw.length) {
+        variants.add(raw.slice(slashIndex + 1));
+    }
+    return Array.from(variants);
+}
+
+async function getModelCapabilities(modelId: string): Promise<ModelCapability[] | null> {
+    const now = Date.now();
+    if (!modelCapsCache || now > modelCapsCache.expiresAt) {
+        const modelsFile = await dataManager.load<ModelsFileStructure>('models');
+        const map = new Map<string, ModelCapability[]>();
+        for (const model of modelsFile.data || []) {
+            const caps = Array.isArray(model.capabilities) ? model.capabilities as ModelCapability[] : [];
+            if (caps.length > 0 && model.id) {
+                map.set(model.id, caps);
+            }
+        }
+        modelCapsCache = { map, expiresAt: now + MODEL_CAPS_CACHE_MS };
+    }
+
+    for (const variant of normalizeModelIdVariants(modelId)) {
+        const caps = modelCapsCache.map.get(variant);
+        if (caps) return caps;
+    }
+    return null;
+}
+
+async function enforceModelCapabilities(
+    modelId: string,
+    requiredCaps: ModelCapability[],
+    response: Response
+): Promise<boolean> {
+    if (!requiredCaps || requiredCaps.length === 0) return true;
+    const caps = await getModelCapabilities(modelId);
+    if (!caps || caps.length === 0) return true;
+    const missing = requiredCaps.filter((cap) => !caps.includes(cap));
+    if (missing.length === 0) return true;
+    if (!response.completed) {
+        response.status(400).json({
+            error: `Model ${modelId} missing required capabilities: ${missing.join(', ')}`,
+            timestamp: new Date().toISOString()
+        });
+    }
+    return false;
+}
+
+async function pickOpenAIProviderKey(
+    modelId: string,
+    requiredCaps: ModelCapability[] = []
+): Promise<{ apiKey: string; baseUrl: string } | null> {
     const providers = await dataManager.load<LoadedProviders>('providers');
-    const candidates = providers.filter((p: LoadedProviderData) =>
+    const requiresCaps = Array.isArray(requiredCaps) && requiredCaps.length > 0;
+    const matches = providers.filter((p: LoadedProviderData) =>
         !p.disabled &&
         p.id.includes('openai') &&
         p.apiKey &&
         p.models &&
         modelId in p.models
     );
+    const candidates = requiresCaps
+        ? matches.filter((p: LoadedProviderData) => {
+            const modelData = p.models?.[modelId];
+            const skips = (modelData as any)?.capability_skips as Partial<Record<ModelCapability, string>> | undefined;
+            if (!skips) return true;
+            return !requiredCaps.some((cap) => Boolean(skips[cap]));
+        })
+        : matches;
+
     if (candidates.length === 0) {
+        if (matches.length > 0) return null;
         // Fallback: any non-disabled openai provider with an API key
         const fallback = providers.find((p: LoadedProviderData) =>
             !p.disabled && p.id.includes('openai') && p.apiKey
@@ -1320,7 +1762,6 @@ async function pickOpenAIProviderKey(modelId: string): Promise<{ apiKey: string;
     const pick = candidates[Math.floor(Math.random() * candidates.length)];
     return { apiKey: pick.apiKey!, baseUrl: extractOrigin(pick.provider_url || 'https://api.openai.com') };
 }
-
 // --- Audio format content-type map ---
 const AUDIO_CONTENT_TYPES: Record<string, string> = {
     mp3: 'audio/mpeg',
@@ -1330,6 +1771,140 @@ const AUDIO_CONTENT_TYPES: Record<string, string> = {
     wav: 'audio/wav',
     pcm: 'audio/pcm',
 };
+
+async function forwardTtsToOpenAI(options: {
+    modelId: string;
+    input: string;
+    voice?: string;
+    responseFormat?: string;
+    speed?: number;
+    stream?: boolean;
+    userApiKey: string;
+    response: Response;
+}) {
+    const { modelId, input, voice, responseFormat, speed, stream, userApiKey, response } = options;
+
+    if (!input) {
+        if (!response.completed) response.status(400).json({ error: 'Bad Request: input is required for TTS', timestamp: new Date().toISOString() });
+        return;
+    }
+
+    const capsOk = await enforceModelCapabilities(modelId, ['audio_output'], response);
+    if (!capsOk) return;
+
+    const provider = await pickOpenAIProviderKey(modelId, ['audio_output']);
+    if (!provider) {
+        if (!response.completed) response.status(503).json({ error: 'No available provider for TTS', timestamp: new Date().toISOString() });
+        return;
+    }
+
+    const upstreamUrl = `${provider.baseUrl}/v1/audio/speech`;
+    const upstreamRes = await fetch(upstreamUrl, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${provider.apiKey}`,
+        },
+        body: JSON.stringify({
+            model: modelId,
+            input,
+            voice: voice || 'alloy',
+            response_format: responseFormat || 'mp3',
+            speed,
+            stream: Boolean(stream),
+        }),
+    });
+
+    if (!upstreamRes.ok) {
+        const errText = await upstreamRes.text().catch(() => '');
+        if (!response.completed) response.status(upstreamRes.status).json({ error: `TTS upstream error: ${errText || upstreamRes.statusText}`, timestamp: new Date().toISOString() });
+        return;
+    }
+
+    const upstreamContentType = upstreamRes.headers.get('content-type');
+    const contentType = upstreamContentType || AUDIO_CONTENT_TYPES[(responseFormat || 'mp3').toLowerCase()] || 'audio/mpeg';
+    response.setHeader('Content-Type', contentType);
+
+    if (stream && upstreamRes.body) {
+        const reader = upstreamRes.body.getReader();
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (value && value.length > 0) response.write(Buffer.from(value));
+        }
+        response.end();
+    } else {
+        const arrayBuffer = await upstreamRes.arrayBuffer();
+        response.end(Buffer.from(arrayBuffer));
+    }
+
+    await updateUserTokenUsage(Math.ceil(input.length / 4), userApiKey);
+}
+
+async function forwardSttToOpenAI(options: {
+    modelId: string;
+    audio: { data: string; format: string };
+    language?: string;
+    prompt?: string;
+    temperature?: number;
+    responseFormat?: string;
+    userApiKey: string;
+    response: Response;
+}) {
+    const { modelId, audio, language, prompt, temperature, responseFormat, userApiKey, response } = options;
+
+    const normalized = normalizeInputAudio(audio);
+    if (!normalized) {
+        if (!response.completed) response.status(400).json({ error: 'Bad Request: invalid input audio', timestamp: new Date().toISOString() });
+        return;
+    }
+
+    const capsOk = await enforceModelCapabilities(modelId, ['audio_input'], response);
+    if (!capsOk) return;
+
+    const provider = await pickOpenAIProviderKey(modelId, ['audio_input']);
+    if (!provider) {
+        if (!response.completed) response.status(503).json({ error: 'No available provider for STT', timestamp: new Date().toISOString() });
+        return;
+    }
+
+
+    const FormDataCtor = (globalThis as any).FormData;
+    const BlobCtor = (globalThis as any).Blob;
+    if (!FormDataCtor || !BlobCtor) {
+        throw new Error('FormData/Blob not available in this Node runtime.');
+    }
+    const form = new FormDataCtor();
+    form.append('model', modelId);
+    form.append('file', new BlobCtor([normalized.buffer], { type: normalized.mimeType }), `audio.${normalized.extension}`);
+    if (typeof language === 'string') form.append('language', language);
+    if (typeof prompt === 'string') form.append('prompt', prompt);
+    if (typeof temperature === 'number') form.append('temperature', temperature.toString());
+    if (typeof responseFormat === 'string') form.append('response_format', responseFormat);
+
+    const upstreamUrl = `${provider.baseUrl}/v1/audio/transcriptions`;
+    const upstreamRes = await fetch(upstreamUrl, {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${provider.apiKey}`,
+        },
+        body: form,
+    });
+
+    const resContentType = upstreamRes.headers.get('content-type') || 'application/json';
+    response.setHeader('Content-Type', resContentType);
+
+    if (!upstreamRes.ok) {
+        const errText = await upstreamRes.text().catch(() => '');
+        if (!response.completed) response.status(upstreamRes.status).end(errText || upstreamRes.statusText);
+        return;
+    }
+
+    const resBody = await upstreamRes.text();
+    response.end(resBody);
+
+    await updateUserTokenUsage(100, userApiKey);
+}
 
 // --- TTS: /v1/audio/speech ---
 openaiRouter.post('/audio/speech', async (request: Request, response: Response) => {
@@ -1347,6 +1922,16 @@ openaiRouter.post('/audio/speech', async (request: Request, response: Response) 
             return;
         }
         const model = body.model;
+        const nonChatType = isNonChatModel(model);
+        if (nonChatType !== 'tts') {
+            if (!response.completed) {
+                return response.status(400).json({
+                    error: `Bad Request: '${model}' is not a TTS model. Use /v1/chat/completions or /v1/responses for text models.`,
+                    timestamp: new Date().toISOString()
+                });
+            }
+            return;
+        }
         const input = typeof body?.input === 'string' ? body.input : '';
         const voice = typeof body?.voice === 'string' ? body.voice : 'alloy';
         const responseFormat = typeof body?.response_format === 'string' ? body.response_format : 'mp3';
@@ -1358,7 +1943,10 @@ openaiRouter.post('/audio/speech', async (request: Request, response: Response) 
             return;
         }
 
-        const provider = await pickOpenAIProviderKey(model);
+        const capsOk = await enforceModelCapabilities(model, ['audio_output'], response);
+        if (!capsOk) return;
+
+        const provider = await pickOpenAIProviderKey(model, ['audio_output']);
         if (!provider) {
             if (!response.completed) return response.status(503).json({ error: 'No available provider for TTS', timestamp: new Date().toISOString() });
             return;
@@ -1418,8 +2006,21 @@ openaiRouter.post('/audio/transcriptions', async (request: Request, response: Re
              if (!response.completed) return response.status(400).json({ error: 'Bad Request: model is required (query param)', timestamp: new Date().toISOString() });
              return;
         }
+        const nonChatType = isNonChatModel(model);
+        if (nonChatType !== 'stt') {
+            if (!response.completed) {
+                return response.status(400).json({
+                    error: `Bad Request: '${model}' is not a transcription model. Use /v1/chat/completions or /v1/responses for text models.`,
+                    timestamp: new Date().toISOString()
+                });
+            }
+            return;
+        }
 
-        const provider = await pickOpenAIProviderKey(model);
+        const capsOk = await enforceModelCapabilities(model, ['audio_input'], response);
+        if (!capsOk) return;
+
+        const provider = await pickOpenAIProviderKey(model, ['audio_input']);
         if (!provider) {
             if (!response.completed) return response.status(503).json({ error: 'No available provider for STT', timestamp: new Date().toISOString() });
             return;
@@ -1467,12 +2068,25 @@ openaiRouter.post('/images/generations', async (request: Request, response: Resp
             if (!response.completed) return response.status(400).json({ error: 'Bad Request: model is required', timestamp: new Date().toISOString() });
             return;
         }
+        const nonChatType = isNonChatModel(model);
+        if (nonChatType !== 'image-gen') {
+            if (!response.completed) {
+                return response.status(400).json({
+                    error: `Bad Request: '${model}' is not an image generation model. Use /v1/chat/completions or /v1/responses for text models.`,
+                    timestamp: new Date().toISOString()
+                });
+            }
+            return;
+        }
         if (!prompt) {
             if (!response.completed) return response.status(400).json({ error: 'Bad Request: prompt is required', timestamp: new Date().toISOString() });
             return;
         }
 
-        const provider = await pickOpenAIProviderKey(model);
+        const capsOk = await enforceModelCapabilities(model, ['image_output'], response);
+        if (!capsOk) return;
+
+        const provider = await pickOpenAIProviderKey(model, ['image_output']);
         if (!provider) {
             if (!response.completed) return response.status(503).json({ error: 'No available provider for image generation', timestamp: new Date().toISOString() });
             return;
@@ -1565,7 +2179,9 @@ openaiRouter.post('/embeddings', async (request: Request, response: Response) =>
         response.json(resJson);
 
         // Estimate usage if upstream didn't provide it, otherwise use upstream
-        const tokensUsed = resJson.usage?.total_tokens || (Array.isArray(input) ? input.reduce((acc: number, s: string) => acc + estimateTokens(s), 0) : estimateTokens(String(input)));
+        const tokensUsed = resJson.usage?.total_tokens || (Array.isArray(input)
+            ? input.reduce((acc: number, s: string) => acc + estimateTokensFromText(String(s), 'input'), 0)
+            : estimateTokensFromText(String(input), 'input'));
         await updateUserTokenUsage(tokensUsed, request.apiKey!);
 
     } catch (error: any) {
@@ -1600,6 +2216,16 @@ openaiRouter.post('/images/edits', async (request: Request, response: Response) 
             if (!response.completed) return response.status(400).json({ error: 'Bad Request: model is required', timestamp: new Date().toISOString() });
             return;
         }
+        const nonChatType = isNonChatModel(model);
+        if (nonChatType !== 'image-gen') {
+            if (!response.completed) {
+                return response.status(400).json({
+                    error: `Bad Request: '${model}' is not an image generation model. Use /v1/chat/completions or /v1/responses for text models.`,
+                    timestamp: new Date().toISOString()
+                });
+            }
+            return;
+        }
 
         if (!prompt) {
              if (!response.completed) return response.status(400).json({ error: 'Bad Request: prompt is required', timestamp: new Date().toISOString() });
@@ -1612,7 +2238,10 @@ openaiRouter.post('/images/edits', async (request: Request, response: Response) 
              return;
         }
 
-        const provider = await pickOpenAIProviderKey(model);
+        const capsOk = await enforceModelCapabilities(model, ['image_input', 'image_output'], response);
+        if (!capsOk) return;
+
+        const provider = await pickOpenAIProviderKey(model, ['image_input', 'image_output']);
         if (!provider) {
             if (!response.completed) return response.status(503).json({ error: 'No available provider for image edits', timestamp: new Date().toISOString() });
             return;

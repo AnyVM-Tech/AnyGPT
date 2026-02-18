@@ -11,6 +11,9 @@
     "does not have access to model",
     "No available capacity",
     "The server had an error while processing your request",
-    "server_error"
+    "server_error",
+    "This model only supports Interactions API.",
+    "experiencing high demand",
+    "spikes in demand are usually temporary"
   ]
 }

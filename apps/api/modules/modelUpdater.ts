@@ -4,23 +4,55 @@ import { dataManager, LoadedProviders, ModelsFileStructure } from './dataManager
  * Guess the owner/company of a model based on its ID
  */
 function guessOwnedBy(modelId: string): string {
-    if (modelId.startsWith('gpt')) {
+    const lower = modelId.toLowerCase();
+    const prefix = lower.includes('/') ? lower.split('/')[0] : '';
+    const prefixMap: Record<string, string> = {
+        openai: 'openai',
+        anthropic: 'anthropic',
+        google: 'google',
+        gemini: 'google',
+        gemma: 'google',
+        'meta-llama': 'meta',
+        meta: 'meta',
+        mistralai: 'mistral.ai',
+        mistral: 'mistral.ai',
+        qwen: 'alibaba',
+        deepseek: 'deepseek',
+        'x-ai': 'xai',
+        xai: 'xai',
+        cohere: 'cohere',
+        ai21: 'ai21',
+        openrouter: 'openrouter',
+        bytedance: 'bytedance',
+        baidu: 'baidu',
+        'z-ai': 'z.ai',
+        together: 'together',
+        groq: 'groq',
+        azure: 'microsoft',
+        microsoft: 'microsoft',
+        amazon: 'amazon',
+        bedrock: 'amazon',
+    };
+    if (prefix && prefixMap[prefix]) {
+        return prefixMap[prefix];
+    }
+    if (lower.startsWith('gpt')) {
         return 'openai';
-    } else if (modelId.includes('claude')) {
+    } else if (lower.includes('claude')) {
         return 'anthropic';
-    } else if (modelId.includes('gemini') || modelId.includes('gemma')) {
+    } else if (lower.includes('gemini') || lower.includes('gemma')) {
         return 'google';
-    } else if (modelId.includes('llama')) {
+    } else if (lower.includes('llama')) {
         return 'meta';
-    } else if (modelId.includes('mistral') || modelId.includes('ministral') || modelId.includes('mixtral')) {
+    } else if (lower.includes('mistral') || lower.includes('ministral') || lower.includes('mixtral')) {
         return 'mistral.ai';
-    } else if (modelId.includes('qwen')) {
+    } else if (lower.includes('qwen')) {
         return 'alibaba';
-    } else if (modelId.includes('o1')) {
+    } else if (lower.includes('o1')) {
         return 'openai';
-    } else if (modelId.includes('command')) {
+    } else if (lower.includes('command')) {
         return 'cohere';
-    } else if (modelId.includes('chatgpt')) {
+    } else if (lower.includes('chatgpt')) {
         return 'openai';
     } else {
         return 'unknown';
@@ -84,6 +116,14 @@ export async function refreshProviderCountsInModelsFile(): Promise<void> {
                     model.providers = newProviderCount;
                     changesMade = true;
                     console.log(`Updated provider count for ${model.id}: ${model.providers} -> ${newProviderCount}`);
+                }
+                if (!model.owned_by || model.owned_by === 'unknown') {
+                    const guessedOwner = guessOwnedBy(model.id);
+                    if (guessedOwner !== model.owned_by) {
+                        model.owned_by = guessedOwner;
+                        changesMade = true;
+                        console.log(`Updated owner for ${model.id}: ${guessedOwner}`);
+                    }
                 }
                 updatedModels.push(model);
             } else {

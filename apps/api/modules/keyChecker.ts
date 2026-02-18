@@ -18,6 +18,13 @@ export interface KeyStatus {
   error?: string;
 }
 
+type ApiErrorInfo = {
+  message?: string;
+  code?: string;
+  type?: string;
+  status?: string;
+};
+
 const OAI_TIERS: Record<string, { tpm: number; rpm: number }> = {
     'Tier 1': { tpm: 500000, rpm: 500 },
     'Tier 2': { tpm: 1000000, rpm: 5000 },
@@ -25,6 +32,75 @@ const OAI_TIERS: Record<string, { tpm: number; rpm: number }> = {
     'Tier 4': { tpm: 4000000, rpm: 10000 },
     'Tier 5': { tpm: 40000000, rpm: 15000 }
 };
+
+const OAI_RESPONSES_MODEL_PREFERENCE = [
+    'gpt-4o-mini',
+    'gpt-4o',
+    'gpt-4.1-mini',
+    'gpt-4.1',
+    'gpt-5.2',
+    'gpt-5',
+    'o3-mini',
+    'o3',
+    'o1',
+    'gpt-4.1-nano',
+    'gpt-3.5-turbo'
+];
+
+function parseRateLimitHeaders(headers: Record<string, any>): { rpm?: number; tpm?: number } {
+    const rpm = parseInt(headers['x-ratelimit-limit-requests'] || '0', 10);
+    const tpm = parseInt(headers['x-ratelimit-limit-tokens'] || headers['x-ratelimit-limit-tokens-per-minute'] || '0', 10);
+    return {
+        rpm: rpm > 0 ? rpm : undefined,
+        tpm: tpm > 0 ? tpm : undefined,
+    };
+}
+
+function pickOpenAIProbeModel(models?: string[]): string | null {
+    if (!Array.isArray(models) || models.length === 0) return null;
+    for (const candidate of OAI_RESPONSES_MODEL_PREFERENCE) {
+        const found = models.find((m) => m === candidate || m.endsWith(`/${candidate}`));
+        if (found) return found;
+    }
+    return models[0] || null;
+}
+
+function extractErrorInfo(payload: any): ApiErrorInfo {
+    const err = payload?.error || payload;
+    if (!err || typeof err !== 'object') return {};
+    return {
+        message: typeof err.message === 'string' ? err.message : undefined,
+        code: typeof err.code === 'string' ? err.code : undefined,
+        type: typeof err.type === 'string' ? err.type : undefined,
+        status: typeof err.status === 'string' ? err.status : undefined,
+    };
+}
+
+function isQuotaExhausted(info: ApiErrorInfo): boolean {
+    const message = (info.message || '').toLowerCase();
+    const code = (info.code || '').toLowerCase();
+    const type = (info.type || '').toLowerCase();
+    const status = (info.status || '').toLowerCase();
+
+    if (message.includes('rate limit') || message.includes('rate_limit')) return false;
+    if (code === 'rate_limit_exceeded' || type === 'rate_limit_exceeded') return false;
+
+    if (code === 'insufficient_quota' || type === 'insufficient_quota') return true;
+    if (code === 'billing_hard_limit_reached' || type === 'billing_hard_limit_reached') return true;
+    if (code === 'quota_exceeded' || type === 'quota_exceeded') return true;
+    if (status === 'resource_exhausted') return true;
+
+    if (message.includes('exceeded your current quota')) return true;
+    if (message.includes('quota exceeded')) return true;
+    if (message.includes('insufficient quota')) return true;
+    if (message.includes('credit balance is too low')) return true;
+    if (message.includes('balance is too low')) return true;
+    if (message.includes('billing hard limit')) return true;
+    if (message.includes('resource exhausted')) return true;
+    if (message.includes('insufficient credits')) return true;
+
+    return false;
+}
 
 export async function checkOpenAI(apiKey: string): Promise<KeyStatus> {
     const status: KeyStatus = { isValid: false, provider: 'openai', hasQuota: true };
@@ -44,27 +120,30 @@ export async function checkOpenAI(apiKey: string): Promise<KeyStatus> {
              // 403 on models might still be usable for chat if project scoped?
              // But usually implies restrictions. We'll mark as valid but limited.
              status.isValid = true; // Maybe?
+             status.error = 'Forbidden from listing models';
         }
 
-        // 2. Check Quota / Tier via dry-run
-        // Use gpt-3.5-turbo or similar low cost model if available, or just check headers on 400
-        const chatRes = await axios.post('https://api.openai.com/v1/chat/completions', 
-            { model: 'gpt-3.5-turbo', messages: [{ role: 'user', content: '' }], max_tokens: 1 },
+        // 2. Check Quota / Tier via minimal Responses call (modern endpoint)
+        const probeModel = pickOpenAIProbeModel(status.models) || 'gpt-4o-mini';
+        const responsesRes = await axios.post(
+            'https://api.openai.com/v1/responses',
+            {
+                model: probeModel,
+                input: [{ role: 'user', content: [{ type: 'input_text', text: 'ping' }] }],
+                max_output_tokens: 1,
+            },
             { headers: { Authorization: `Bearer ${apiKey}` }, validateStatus: () => true, timeout: 10000 }
         );
 
-        if (chatRes.status === 401) return { ...status, isValid: false, error: 'Unauthorized' };
-        
-        // Headers often present even on error
-        const rpm = parseInt(chatRes.headers['x-ratelimit-limit-requests'] || '0', 10);
-        const tpm = parseInt(chatRes.headers['x-ratelimit-limit-tokens'] || '0', 10);
-        
-        if (rpm > 0) status.rpm = rpm;
-        if (tpm > 0) {
-            status.tpm = tpm;
-            // Infer tier
+        if (responsesRes.status === 401) return { ...status, isValid: false, error: 'Unauthorized' };
+        const responsesErr = extractErrorInfo(responsesRes.data);
+
+        const rateLimits = parseRateLimitHeaders(responsesRes.headers || {});
+        if (rateLimits.rpm) status.rpm = rateLimits.rpm;
+        if (rateLimits.tpm) {
+            status.tpm = rateLimits.tpm;
             for (const [tier, limits] of Object.entries(OAI_TIERS)) {
-                if (limits.tpm === tpm) {
+                if (limits.tpm === rateLimits.tpm) {
                     status.tier = tier;
                     break;
                 }
@@ -72,10 +151,12 @@ export async function checkOpenAI(apiKey: string): Promise<KeyStatus> {
             if (!status.tier) status.tier = 'Tier Unknown';
         }
 
-        if (chatRes.status === 429) {
-            const err = chatRes.data?.error;
-            if (err?.code === 'insufficient_quota') {
+        if (responsesRes.status >= 400) {
+            if (isQuotaExhausted(responsesErr)) {
                 status.hasQuota = false;
+            }
+            if (responsesRes.status !== 401) {
+                status.isValid = true;
             }
         }
         
@@ -128,6 +209,12 @@ export async function checkAnthropic(apiKey: string): Promise<KeyStatus> {
             return { ...status, error: 'Unauthorized' };
         }
 
+        const errInfo = extractErrorInfo(res.data);
+        if (isQuotaExhausted(errInfo)) {
+            status.hasQuota = false;
+            status.isValid = true;
+        }
+
         const limit = res.headers['anthropic-ratelimit-requests-limit'];
         if (limit) {
             const rpm = parseInt(limit, 10);
@@ -147,7 +234,7 @@ export async function checkAnthropic(apiKey: string): Promise<KeyStatus> {
 }
 
 export async function checkGemini(apiKey: string): Promise<KeyStatus> {
-     const status: KeyStatus = { isValid: false, provider: 'gemini' };
+     const status: KeyStatus = { isValid: false, provider: 'gemini', hasQuota: true };
      try {
          const modelsRes = await axios.get(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`, { validateStatus: () => true, timeout: 10000 });
          if (modelsRes.status === 200 && modelsRes.data?.models) {
@@ -159,7 +246,7 @@ export async function checkGemini(apiKey: string): Promise<KeyStatus> {
                 { instances: [{ prompt: "" }] },
                 { validateStatus: () => true, timeout: 10000 }
              );
-             
+             const billErr = extractErrorInfo(billRes.data);
              if (billRes.status === 400) {
                  const msg = billRes.data?.error?.message || '';
                  if (!msg.includes('only accessible to billed users')) {
@@ -167,10 +254,25 @@ export async function checkGemini(apiKey: string): Promise<KeyStatus> {
                  } else {
                      status.billingEnabled = false;
                      status.tier = 'Free Tier';
+                     status.hasQuota = false;
                  }
+             } else if (billRes.status === 429) {
+                 status.billingEnabled = false;
+                 status.hasQuota = false;
              } else if (billRes.status === 200) {
                  status.billingEnabled = true;
              }
+             if (isQuotaExhausted(billErr)) {
+                 status.hasQuota = false;
+             }
+         } else if (modelsRes.status === 429) {
+             status.isValid = true;
+             status.hasQuota = false;
+             status.error = modelsRes.data?.error?.message || 'Gemini quota exceeded';
+         } else if (isQuotaExhausted(extractErrorInfo(modelsRes.data))) {
+             status.isValid = true;
+             status.hasQuota = false;
+             status.error = modelsRes.data?.error?.message || 'Gemini quota exceeded';
          } else {
              status.error = modelsRes.data?.error?.message || modelsRes.statusText;
          }
@@ -181,7 +283,7 @@ export async function checkGemini(apiKey: string): Promise<KeyStatus> {
 }
 
 export async function checkOpenRouter(apiKey: string): Promise<KeyStatus> {
-    const status: KeyStatus = { isValid: false, provider: 'openrouter' };
+    const status: KeyStatus = { isValid: false, provider: 'openrouter', hasQuota: true };
     try {
         const res = await axios.get('https://openrouter.ai/api/v1/auth/key', {
             headers: { Authorization: `Bearer ${apiKey}` },
@@ -192,12 +294,31 @@ export async function checkOpenRouter(apiKey: string): Promise<KeyStatus> {
         if (res.status === 200 && res.data?.data) {
             status.isValid = true;
             const d = res.data.data;
-            status.balance = d.limit ? (d.limit - d.usage) : undefined; // Rough calc
+            const limit = typeof d.limit === 'number' ? d.limit : undefined;
+            const usage = typeof d.usage === 'number' ? d.usage : undefined;
+            const computedBalance = (limit !== undefined && usage !== undefined) ? (limit - usage) : undefined;
+            status.balance = computedBalance;
             status.isFreeTier = d.is_free_tier;
+            if (limit !== undefined && usage !== undefined) {
+                status.hasQuota = usage < limit;
+            }
+            const directBalance =
+              typeof d.balance === 'number'
+                ? d.balance
+                : (typeof d.credits === 'number' ? d.credits : undefined);
+            if (directBalance !== undefined) {
+                status.balance = directBalance;
+                if (directBalance <= 0) status.hasQuota = false;
+            }
+            if (computedBalance !== undefined && computedBalance <= 0) {
+                status.hasQuota = false;
+            }
             if (d.rate_limit) {
                 status.rpm = parseInt(d.rate_limit.requests); // interval usually 10s or 1s? Python script assumes and calcs.
                 // We'll just store raw or 0 for now.
             }
+        } else if (res.status === 401 || res.status === 403) {
+            status.error = 'Unauthorized';
         }
     } catch (e: any) {
         status.error = e.message;
@@ -206,7 +327,7 @@ export async function checkOpenRouter(apiKey: string): Promise<KeyStatus> {
 }
 
 export async function checkDeepseek(apiKey: string): Promise<KeyStatus> {
-    const status: KeyStatus = { isValid: false, provider: 'deepseek' };
+    const status: KeyStatus = { isValid: false, provider: 'deepseek', hasQuota: true };
     try {
         const res = await axios.get('https://api.deepseek.com/user/balance', {
              headers: { Authorization: `Bearer ${apiKey}` },
@@ -224,9 +345,15 @@ export async function checkDeepseek(apiKey: string): Promise<KeyStatus> {
                      return acc + amount;
                  }, 0) || 0;
                  status.balance = total;
+                 if (total <= 0) status.hasQuota = false;
             } else {
                 status.hasQuota = false;
             }
+        } else if (res.status === 401 || res.status === 403) {
+            status.error = 'Unauthorized';
+        } else if (res.status === 402 || res.status === 429) {
+            status.isValid = true;
+            status.hasQuota = false;
         }
     } catch (e: any) {
         status.error = e.message;
@@ -248,6 +375,8 @@ export async function checkXAI(apiKey: string): Promise<KeyStatus> {
                  status.isValid = true;
                  // Validation prompt?
              }
+         } else if (res.status === 401 || res.status === 403) {
+             status.error = 'Unauthorized';
          }
      } catch (e: any) {
          status.error = e.message;

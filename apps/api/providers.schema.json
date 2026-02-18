@@ -19,6 +19,11 @@
           "id": { "type": "string", "description": "Unique identifier for the provider (e.g., 'openai', 'google')." },
           "apiKey": { "type": ["string", "null"], "description": "API key for the provider." },
           "provider_url": { "type": "string", "description": "Base URL for the provider's API." },
+          "provider_urls": {
+            "type": "object",
+            "description": "Optional per-model endpoint overrides (modelId -> base URL or endpoint URL).",
+            "additionalProperties": { "type": "string" }
+          },
           "streamingCompatible": {
             "type": "boolean",
             "default": false,
@@ -97,6 +102,11 @@
           "avg_token_speed": { 
             "type": ["number", "null"],
             "description": "Calculated average token speed (tokens/sec, e.g., EMA)."
+          },
+          "disabled": {
+            "type": "boolean",
+            "default": false,
+            "description": "If true, this model is disabled for this provider."
           }
         }
       },

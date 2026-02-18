@@ -10,6 +10,14 @@ import {
 import { logError } from '../modules/errorLogger.js'; // Changed import
 import { RequestTimestampStore } from '../modules/rateLimit.js';
 import { runAuthMiddleware, runRateLimitMiddleware } from '../modules/middlewareFactory.js';
+import {
+    createInteractionToken,
+    executeGeminiInteraction,
+    getInteractionsSigningSecret,
+    normalizeDeepResearchModel,
+    verifyInteractionToken,
+    InteractionRequest,
+} from '../modules/interactions.js';
 
 dotenv.config();
 
@@ -17,6 +25,7 @@ const router = new HyperExpress.Router(); // Use Router for modularity
 
 // --- Rate Limiting Store (Consider sharing or centralizing if needed across routes) --- 
 const requestTimestamps: RequestTimestampStore = {};
+const INTERACTIONS_TOKEN_TTL_SECONDS = 15 * 60;
 
 function mapGeminiInputPart(part: any): ContentPart | null {
     if (!part || typeof part !== 'object') return null;
@@ -147,6 +156,7 @@ router.post('/models/:modelId/generateContent', authAndUsageMiddleware, rateLimi
 
    const userApiKey = request.apiKey!;
    const modelId = request.params.modelId;
+
    let body: any; // For use in error handling if body parsing fails or modelId isn't found from body
 
    try {
@@ -278,6 +288,124 @@ router.post('/models/:modelId/generateContent', authAndUsageMiddleware, rateLimi
           }
         } else { return; }
    }
+});
+
+// --- Gemini Interactions API ---
+router.post('/interactions', authAndUsageMiddleware, rateLimitMiddleware, async (request: Request, response: Response) => {
+    const timestamp = new Date().toISOString();
+    if (!request.apiKey || !request.tierLimits) {
+        const errDetail = { message: 'Bad Request: Missing API key or tier limits after middleware.', code: 400, status: 'INVALID_ARGUMENT' };
+        await logError(errDetail, request);
+        if (!response.completed) return response.status(400).json({ error: errDetail, timestamp });
+        return;
+    }
+
+    try {
+        const body = await request.json();
+        if (!body || typeof body !== 'object') {
+            const errDetail = { message: 'Invalid request body.', code: 400, status: 'INVALID_ARGUMENT' };
+            await logError(errDetail, request);
+            if (!response.completed) return response.status(400).json({ error: errDetail, timestamp });
+            return;
+        }
+
+        const model = typeof body.model === 'string' ? body.model.trim() : '';
+        const input = typeof body.input === 'string' ? body.input : '';
+        if (!model || !input) {
+            const errDetail = { message: 'model and input are required.', code: 400, status: 'INVALID_ARGUMENT' };
+            await logError(errDetail, request);
+            if (!response.completed) return response.status(400).json({ error: errDetail, timestamp });
+            return;
+        }
+
+        const agent = typeof body.agent === 'string' ? body.agent : undefined;
+        const normalized = normalizeDeepResearchModel(model, agent);
+
+        const interactionRequest: InteractionRequest = {
+            model: normalized.model,
+            input,
+            tools: Array.isArray(body.tools) ? body.tools : undefined,
+            response_format: body.response_format && typeof body.response_format === 'object' ? body.response_format : undefined,
+            generation_config: body.generation_config && typeof body.generation_config === 'object' ? body.generation_config : undefined,
+            agent: normalized.agent,
+        };
+
+        const secret = getInteractionsSigningSecret();
+        const interactionId = createInteractionToken(
+            interactionRequest,
+            request.apiKey,
+            'gemini',
+            INTERACTIONS_TOKEN_TTL_SECONDS,
+            secret,
+            model
+        );
+
+        // Stateless: respond with processing and interaction_id; polling will execute.
+        const responseBody = {
+            id: interactionId,
+            status: 'processing',
+        };
+        return response.json(responseBody);
+    } catch (error: any) {
+        await logError(error, request);
+        const responseTimestamp = new Date().toISOString();
+        if (!response.completed) {
+            response.status(500).json({ error: 'Internal Server Error', reference: 'Failed to create interaction.', timestamp: responseTimestamp });
+        }
+    }
+});
+
+router.get('/interactions/:interactionId', authAndUsageMiddleware, rateLimitMiddleware, async (request: Request, response: Response) => {
+    const timestamp = new Date().toISOString();
+    if (!request.apiKey || !request.tierLimits || !request.params.interactionId) {
+        const errDetail = { message: 'Bad Request: Missing API key or interaction id.', code: 400, status: 'INVALID_ARGUMENT' };
+        await logError(errDetail, request);
+        if (!response.completed) return response.status(400).json({ error: errDetail, timestamp });
+        return;
+    }
+
+    try {
+        const secret = getInteractionsSigningSecret();
+        const payload = verifyInteractionToken(request.params.interactionId, request.apiKey, secret);
+        const result = await executeGeminiInteraction(payload.request);
+
+        const usage = result?.usage || {};
+        const totalTokensUsed = typeof usage.total_tokens === 'number'
+            ? usage.total_tokens
+            : (typeof result?.usageMetadata?.totalTokenCount === 'number' ? result.usageMetadata.totalTokenCount : 0);
+        if (totalTokensUsed > 0) {
+            await updateUserTokenUsage(totalTokensUsed, request.apiKey);
+        }
+
+        const responseBody = {
+            id: request.params.interactionId,
+            status: 'completed',
+            outputs: Array.isArray(result?.outputs) ? result.outputs : [],
+            usage: result?.usage,
+        };
+        return response.json(responseBody);
+    } catch (error: any) {
+        await logError(error, request);
+        const responseTimestamp = new Date().toISOString();
+        let statusCode = 500;
+        let statusText = 'INTERNAL';
+        let clientMessage = 'Internal server error.';
+
+        if (error instanceof SyntaxError || String(error?.message || '').includes('Invalid')) {
+            statusCode = 400; statusText = 'INVALID_ARGUMENT'; clientMessage = error.message;
+        } else if (String(error?.message || '').includes('expired')) {
+            statusCode = 410; statusText = 'FAILED_PRECONDITION'; clientMessage = error.message;
+        } else if (String(error?.message || '').includes('Unauthorized') || String(error?.message || '').includes('API key not valid')) {
+            statusCode = 401; statusText = 'UNAUTHENTICATED'; clientMessage = error.message;
+        }
+
+        if (!response.completed) {
+            response.status(statusCode).json({
+                error: { code: statusCode, message: clientMessage, status: statusText },
+                timestamp: responseTimestamp,
+            });
+        }
+    }
 });
 
 const geminiRouter = router;

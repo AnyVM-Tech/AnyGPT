@@ -66,7 +66,7 @@ export function computeEMA(
 
 export function computeProviderStatsWithEMA(
   providerData: Provider,
-  alpha: number
+  _alpha: number
 ): void {
   let totalResponseTime = 0;
   let totalProviderLatency = 0;
@@ -90,33 +90,40 @@ export function computeProviderStatsWithEMA(
     if (Array.isArray(model.response_times)) {
         let modelTotalResponseTime = 0;
         let modelTotalProviderLatency = 0;
+        let modelTotalSpeed = 0;
         let modelValidRequests = 0;
         let modelValidProviderResponses = 0;
+        let modelValidSpeedSamples = 0;
 
         for (const response of model.response_times) {
             if (!response || typeof response.response_time !== 'number' || isNaN(response.response_time)) {
                 continue;
             }
-            // --- Calculate Response Time EMA --- 
-            model.avg_response_time = computeEMA(model.avg_response_time, response.response_time, alpha);
             modelTotalResponseTime += response.response_time;
             modelValidRequests++;
 
-            // --- Calculate Provider Latency EMA --- 
             if (typeof response.provider_latency === 'number' && !isNaN(response.provider_latency)) {
-                model.avg_provider_latency = computeEMA(model.avg_provider_latency, response.provider_latency, alpha);
                 modelTotalProviderLatency += response.provider_latency;
                 modelValidProviderResponses++;
-            } else {
-                model.avg_provider_latency = computeEMA(model.avg_provider_latency, 0, alpha);
             }
 
-            // --- Calculate Token Speed EMA (using observed_speed_tps) --- 
             if (response.observed_speed_tps !== undefined && response.observed_speed_tps !== null &&
                 typeof response.observed_speed_tps === 'number' && !isNaN(response.observed_speed_tps) && response.observed_speed_tps > 0) {
-                model.avg_token_speed = computeEMA(model.avg_token_speed, response.observed_speed_tps, alpha);
+                modelTotalSpeed += response.observed_speed_tps;
+                modelValidSpeedSamples++;
             }
         } // End loop through response_times
+
+        if (modelValidRequests > 0) {
+            model.avg_response_time = Math.round((modelTotalResponseTime / modelValidRequests) * 100) / 100;
+        }
+        if (modelValidProviderResponses > 0) {
+            model.avg_provider_latency = Math.round((modelTotalProviderLatency / modelValidProviderResponses) * 100) / 100;
+        }
+        if (modelValidSpeedSamples > 0) {
+            model.avg_token_speed = Math.round((modelTotalSpeed / modelValidSpeedSamples) * 100) / 100;
+            model.token_generation_speed = model.avg_token_speed;
+        }
 
         // Accumulate provider totals
         totalResponseTime += modelTotalResponseTime;
@@ -137,10 +144,10 @@ export function computeProviderStatsWithEMA(
   providerData.avg_provider_latency = null;
 
   if (validModelRequests > 0) {
-    providerData.avg_response_time = computeEMA(null, totalResponseTime / validModelRequests, alpha);
+    providerData.avg_response_time = Math.round((totalResponseTime / validModelRequests) * 100) / 100;
   }
   if (validProviderResponses > 0) {
-    providerData.avg_provider_latency = computeEMA(null, totalProviderLatency / validProviderResponses, alpha);
+    providerData.avg_provider_latency = Math.round((totalProviderLatency / validProviderResponses) * 100) / 100;
   }
 }
 
