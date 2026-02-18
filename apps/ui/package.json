@@ -39,7 +39,7 @@
 		"geist": "^1.2.2",
 		"hyper-express": "^6.16.3",
 		"i18next": "^23.10.1",
-		"i18next-browser-languagedetector": "^7.2.0",
+		"i18next-browser-languagedetector": "^8.2.1",
 		"isbot": "^5.1.35",
 		"jsx-runtime": "^1.2.0",
 		"localforage": "^1.10.0",
