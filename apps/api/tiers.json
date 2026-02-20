@@ -1,16 +1,16 @@
 {
   "free": {
-    "rps": 5,
-    "rpm": 100,
-    "rpd": 1000,
-    "max_tokens": 1000000,
+    "rps": 20,
+    "rpm": 1000,
+    "rpd": 10000,
+    "max_tokens": 5000000,
     "min_provider_score": 0,
     "max_provider_score": 70 
   },
   "pro": {
-    "rps": 20,
-    "rpm": 1000,
-    "rpd": 10000,
+    "rps": 50,
+    "rpm": 10000,
+    "rpd": 100000,
     "max_tokens": 10000000,
     "min_provider_score": 50,
     "max_provider_score": null 

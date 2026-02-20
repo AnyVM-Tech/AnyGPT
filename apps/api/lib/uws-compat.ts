@@ -298,7 +298,8 @@ class Router {
 
             const applicableMiddlewares: Handler[] = [];
             for (const m of inherited) {
-                if (fullPath.startsWith(joinPaths(basePrefix, m.path))) {
+                const inheritedPath = normalizePath(m.path);
+                if (inheritedPath === '/' || fullPath.startsWith(inheritedPath)) {
                     applicableMiddlewares.push(...m.handlers);
                 }
             }
