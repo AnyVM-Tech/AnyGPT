@@ -23,7 +23,7 @@ function findProjectRoot(startDir: string): string {
 
 const BASE_DIR = findProjectRoot(__dirname);
 
-const ADMIN_KEYS_PATH = path.resolve(BASE_DIR, 'logs', 'admin-keys.json');
+const ADMIN_KEYS_PATH = path.resolve(BASE_DIR, 'logs', 'admin-keys.jsonl');
 const TSX_PATH = path.resolve(BASE_DIR, 'node_modules', '.bin', 'tsx');
 const NODE_PATH = process.execPath;
 const RUNNER = String(process.env.ADMIN_KEY_SYNC_RUNNER || 'tsgo').toLowerCase();

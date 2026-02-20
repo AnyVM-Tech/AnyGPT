@@ -10,6 +10,7 @@ import {
 import { logError } from '../modules/errorLogger.js'; // Changed import
 import { RequestTimestampStore } from '../modules/rateLimit.js';
 import { runAuthMiddleware, runRateLimitMiddleware } from '../modules/middlewareFactory.js';
+import { redactToken } from '../modules/redaction.js';
 
 dotenv.config();
 
@@ -38,7 +39,7 @@ async function authAndUsageMiddleware(request: Request, response: Response, next
       const errorType = details.statusCode === 429 ? 'rate_limit_error' : 'authentication_error';
       const clientMessage = details.statusCode === 429 ? 'Rate limit reached' : 'Invalid API Key';
       const logMsg = `${clientMessage}. ${details.error || ''}`.trim();
-      await logError({ message: logMsg, details: details.error, apiKey: details.apiKey }, req);
+      await logError({ message: logMsg, details: details.error, apiKey: redactToken(details.apiKey) }, req);
       return { status: details.statusCode, body: { type: 'error', error: { type: errorType, message: logMsg }, timestamp } };
     },
     onInternalError: async (req, error) => {

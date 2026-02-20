@@ -1,5 +1,7 @@
 import HyperExpress, { Request, Response } from '../lib/uws-compat.js';
 import dotenv from 'dotenv';
+import dns from 'node:dns/promises';
+import net from 'node:net';
 import { messageHandler } from '../providers/handler.js'; 
 import { IMessage, type ModelCapability } from '../providers/interfaces.js'; 
 import { 
@@ -17,6 +19,9 @@ import { incrementSharedRateLimitCounters } from '../modules/rateLimitRedis.js';
 import { enforceInMemoryRateLimit, evaluateSharedRateLimit, RequestTimestampStore } from '../modules/rateLimit.js';
 import { runAuthMiddleware, runRateLimitMiddleware } from '../modules/middlewareFactory.js';
 import { dataManager, LoadedProviders, LoadedProviderData, type ModelsFileStructure } from '../modules/dataManager.js';
+import { logger } from '../modules/logger.js';
+import { redactAuthorizationHeader, redactToken } from '../modules/redaction.js';
+import { fetchWithTimeout } from '../modules/http.js';
 import {
     createInteractionToken,
     executeGeminiInteraction,
@@ -59,9 +64,9 @@ declare module '../lib/uws-compat.js' {
  
 // MUST be async because it calls await validateApiKeyAndUsage
 async function authAndUsageMiddleware(request: Request, response: Response, next: () => void) {
-    console.log(`[AuthMiddleware] Request received at ${request.path} with method ${request.method}`);
-    console.log(`[AuthMiddleware] Authorization header: ${request.headers['authorization'] || 'None'}`);
-    console.log(`[AuthMiddleware] x-api-key header: ${request.headers['x-api-key'] || 'None'}`);
+    logger.debug(`[AuthMiddleware] Request received at ${request.path} with method ${request.method}`);
+    logger.debug(`[AuthMiddleware] Authorization header: ${redactAuthorizationHeader(request.headers['authorization'] as string | undefined) || 'None'}`);
+    logger.debug(`[AuthMiddleware] x-api-key header: ${redactToken(request.headers['x-api-key'] as string | undefined) || 'None'}`);
 
     return runAuthMiddleware(request, response, next, {
         callNext: true,
@@ -77,7 +82,7 @@ async function authAndUsageMiddleware(request: Request, response: Response, next
         },
         onInvalidApiKey: async (req, details) => {
             const errorMessage = `Unauthorized: ${details.error || 'Invalid key/config.'}`;
-            await logError({ message: errorMessage, statusCode: details.statusCode, apiKey: details.apiKey }, req);
+            await logError({ message: errorMessage, statusCode: details.statusCode, apiKey: redactToken(details.apiKey) }, req);
             return { status: details.statusCode, body: { error: errorMessage, timestamp: new Date().toISOString() } };
         },
         onInternalError: async (req, error) => {
@@ -104,7 +109,7 @@ async function rateLimitMiddleware(request: Request, response: Response, next: (
             },
             onDenied: (req, details) => {
                 const windowLabel = details.window.toUpperCase();
-                logError({ message: `Rate limit exceeded: Max ${details.limit} ${windowLabel}.`, apiKey: req.apiKey }, req).catch(e => console.error('Failed background log:', e));
+                logError({ message: `Rate limit exceeded: Max ${details.limit} ${windowLabel}.`, apiKey: redactToken(req.apiKey) }, req).catch(e => console.error('Failed background log:', e));
                 return { status: 429, body: { error: `Rate limit exceeded: Max ${details.limit} ${windowLabel}.`, timestamp: new Date().toISOString() } };
             },
             sharedDecisionProvider: async (_req, apiKey, limits) => {
@@ -178,12 +183,37 @@ const IMAGE_URL_FALLBACK_TOKENS = readEnvNumber('IMAGE_URL_FALLBACK_TOKENS', 512
 const AUDIO_DATA_FALLBACK_TOKENS = readEnvNumber('AUDIO_DATA_FALLBACK_TOKENS', 256);
 const IMAGE_MIN_TOKENS = readEnvNumber('IMAGE_MIN_TOKENS', 0);
 const AUDIO_MIN_TOKENS = readEnvNumber('AUDIO_MIN_TOKENS', 0);
+const LOG_SENSITIVE_PAYLOADS = readEnvBool('LOG_SENSITIVE_PAYLOADS', false);
+const UPSTREAM_TIMEOUT_MS = readEnvNumber('UPSTREAM_TIMEOUT_MS', 120_000);
+const IMAGE_FETCH_TIMEOUT_MS = readEnvNumber('IMAGE_FETCH_TIMEOUT_MS', 15_000);
+const IMAGE_FETCH_MAX_BYTES = readEnvNumber('IMAGE_FETCH_MAX_BYTES', 8 * 1024 * 1024);
+const IMAGE_FETCH_MAX_REDIRECTS = readEnvNumber('IMAGE_FETCH_MAX_REDIRECTS', 3);
+const IMAGE_FETCH_ALLOW_PRIVATE = readEnvBool('IMAGE_FETCH_ALLOW_PRIVATE', false);
+const IMAGE_FETCH_FORWARD_AUTH = readEnvBool('IMAGE_FETCH_FORWARD_AUTH', false);
+const IMAGE_FETCH_ALLOWED_PROTOCOLS = (readEnvCsv('IMAGE_FETCH_ALLOWED_PROTOCOLS') ?? ['http', 'https']).map((p) => p.toLowerCase());
+const IMAGE_FETCH_ALLOWED_HOSTS = readEnvCsv('IMAGE_FETCH_ALLOWED_HOSTS');
 
 function readEnvNumber(name: string, fallback: number): number {
     const raw = process.env[name];
     if (raw === undefined) return fallback;
     const value = Number(raw);
     return Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
+function readEnvBool(name: string, fallback: boolean): boolean {
+    const raw = process.env[name];
+    if (raw === undefined) return fallback;
+    const normalized = raw.trim().toLowerCase();
+    if (['1', 'true', 'yes', 'y', 'on'].includes(normalized)) return true;
+    if (['0', 'false', 'no', 'n', 'off'].includes(normalized)) return false;
+    return fallback;
+}
+
+function readEnvCsv(name: string): string[] | null {
+    const raw = process.env[name];
+    if (!raw) return null;
+    const items = raw.split(',').map((item) => item.trim()).filter(Boolean);
+    return items.length > 0 ? items : null;
 }
 
 function estimateTokensFromBase64Payload(payload: string, tokensPerKb: number, minTokens: number): number {
@@ -457,30 +487,247 @@ function normalizeInputAudio(audio: { data: string; format: string }): { buffer:
     }
 }
 
+function summarizeUrlForLog(rawUrl: string): string {
+    try {
+        const u = new URL(rawUrl);
+        const host = u.host || u.hostname;
+        const path = u.pathname || '/';
+        return `${u.protocol}//${host}${path}`;
+    } catch {
+        return rawUrl.slice(0, 120);
+    }
+}
+
+function hostMatchesAllowlist(host: string): boolean {
+    if (!IMAGE_FETCH_ALLOWED_HOSTS || IMAGE_FETCH_ALLOWED_HOSTS.length === 0) return true;
+    const needle = host.toLowerCase();
+    return IMAGE_FETCH_ALLOWED_HOSTS.some((entry) => {
+        const allowed = entry.toLowerCase();
+        if (!allowed) return false;
+        if (allowed.startsWith('.')) {
+            const suffix = allowed.slice(1);
+            return needle === suffix || needle.endsWith(`.${suffix}`);
+        }
+        return needle === allowed;
+    });
+}
+
+function isLocalHostname(host: string): boolean {
+    const normalized = host.toLowerCase();
+    return normalized === 'localhost' || normalized.endsWith('.localhost') || normalized.endsWith('.local');
+}
+
+function isPrivateIpv4(ip: string): boolean {
+    const parts = ip.split('.').map((n) => Number(n));
+    if (parts.length !== 4 || parts.some((n) => Number.isNaN(n))) return false;
+    const [a, b, c, d] = parts;
+    if (a === 10) return true;
+    if (a === 127) return true;
+    if (a === 169 && b === 254) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 0) return true;
+    if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
+    if (a === 192 && b === 0 && c === 0) return true; // IETF protocol assignments
+    if (a === 192 && b === 0 && c === 2) return true; // TEST-NET-1
+    if (a === 198 && (b === 18 || b === 19)) return true; // benchmarking
+    if (a === 198 && b === 51 && c === 100) return true; // TEST-NET-2
+    if (a === 203 && b === 0 && c === 113) return true; // TEST-NET-3
+    if (a >= 224) return true; // multicast/reserved
+    return false;
+}
+
+function isPrivateIpv6(ip: string): boolean {
+    const normalized = ip.toLowerCase();
+    if (normalized === '::' || normalized === '::1') return true;
+    if (normalized.startsWith('fe80:') || normalized.startsWith('fe9') || normalized.startsWith('fea') || normalized.startsWith('feb')) return true;
+    if (normalized.startsWith('fc') || normalized.startsWith('fd')) return true; // unique local
+    if (normalized.startsWith('ff')) return true; // multicast
+    if (normalized.startsWith('2001:db8')) return true; // documentation
+    if (normalized.startsWith('::ffff:')) {
+        const ipv4 = normalized.slice('::ffff:'.length);
+        if (ipv4) return isPrivateIpv4(ipv4);
+    }
+    return false;
+}
+
+function isPrivateIp(ip: string): boolean {
+    const family = net.isIP(ip);
+    if (family === 4) return isPrivateIpv4(ip);
+    if (family === 6) return isPrivateIpv6(ip);
+    return false;
+}
+
+async function resolveHostAddresses(host: string): Promise<string[]> {
+    try {
+        const results = await dns.lookup(host, { all: true, verbatim: true });
+        return results.map((entry) => entry.address).filter(Boolean);
+    } catch {
+        return [];
+    }
+}
+
+async function validateImageFetchUrl(rawUrl: string): Promise<{ ok: boolean; reason?: string; parsed?: URL }> {
+    let parsed: URL;
+    try {
+        parsed = new URL(rawUrl);
+    } catch {
+        return { ok: false, reason: 'invalid_url' };
+    }
+
+    const protocol = parsed.protocol.replace(':', '').toLowerCase();
+    if (!IMAGE_FETCH_ALLOWED_PROTOCOLS.includes(protocol)) {
+        return { ok: false, reason: 'protocol_not_allowed' };
+    }
+
+    const hostname = parsed.hostname;
+    if (!hostname) return { ok: false, reason: 'missing_host' };
+    if (!hostMatchesAllowlist(hostname)) return { ok: false, reason: 'host_not_allowed' };
+
+    if (!IMAGE_FETCH_ALLOW_PRIVATE) {
+        if (isLocalHostname(hostname)) return { ok: false, reason: 'local_hostname' };
+        const directIpType = net.isIP(hostname);
+        if (directIpType) {
+            if (isPrivateIp(hostname)) return { ok: false, reason: 'private_ip' };
+        } else {
+            const addresses = await resolveHostAddresses(hostname);
+            if (addresses.length === 0) return { ok: false, reason: 'dns_failed' };
+            if (addresses.some((addr) => isPrivateIp(addr))) return { ok: false, reason: 'private_ip' };
+        }
+    }
+
+    return { ok: true, parsed };
+}
+
+async function readResponseBodyWithLimit(
+    response: globalThis.Response,
+    maxBytes: number,
+    controller?: AbortController
+): Promise<Buffer> {
+    const contentLength = response.headers.get('content-length');
+    if (maxBytes > 0 && contentLength) {
+        const declared = Number(contentLength);
+        if (Number.isFinite(declared) && declared > maxBytes) {
+            controller?.abort(new Error('Image exceeds max size.'));
+            throw new Error('Image exceeds max size.');
+        }
+    }
+
+    if (!response.body) {
+        return Buffer.alloc(0);
+    }
+
+    const reader = response.body.getReader();
+    const chunks: Buffer[] = [];
+    let total = 0;
+
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (!value || value.length === 0) continue;
+        const chunk = Buffer.from(value);
+        total += chunk.length;
+        if (maxBytes > 0 && total > maxBytes) {
+            try { await reader.cancel(); } catch {}
+            controller?.abort(new Error('Image exceeds max size.'));
+            throw new Error('Image exceeds max size.');
+        }
+        chunks.push(chunk);
+    }
+
+    return Buffer.concat(chunks);
+}
+
+async function fetchImageAsDataUrl(imageUrl: string, authHeader?: string): Promise<{ dataUrl: string; contentType: string; bytes: number } | null> {
+    const validation = await validateImageFetchUrl(imageUrl);
+    if (!validation.ok || !validation.parsed) {
+        console.warn(`[ImageProxy] Skipping image fetch (${validation.reason || 'blocked'}): ${summarizeUrlForLog(imageUrl)}`);
+        return null;
+    }
+
+    const initialHost = validation.parsed.hostname.toLowerCase();
+    let currentUrl = validation.parsed.toString();
+    const controller = new AbortController();
+    const timeoutId = IMAGE_FETCH_TIMEOUT_MS > 0
+        ? setTimeout(() => controller.abort(new Error('Image fetch timed out.')), IMAGE_FETCH_TIMEOUT_MS)
+        : null;
+
+    try {
+        for (let hop = 0; hop <= IMAGE_FETCH_MAX_REDIRECTS; hop++) {
+            const currentValidation = hop === 0 ? validation : await validateImageFetchUrl(currentUrl);
+            if (!currentValidation.ok || !currentValidation.parsed) {
+                console.warn(`[ImageProxy] Redirect blocked (${currentValidation.reason || 'blocked'}): ${summarizeUrlForLog(currentUrl)}`);
+                return null;
+            }
+
+            const headers: Record<string, string> = {};
+            const currentHost = currentValidation.parsed.hostname.toLowerCase();
+            if (IMAGE_FETCH_FORWARD_AUTH && authHeader && currentHost === initialHost) {
+                headers['Authorization'] = authHeader;
+            }
+
+            if (LOG_SENSITIVE_PAYLOADS) {
+                console.log(`[ImageProxy] Fetching image from URL: ${currentUrl}`);
+            } else {
+                console.log(`[ImageProxy] Fetching image from host: ${currentHost}`);
+            }
+
+            const res = await fetch(currentUrl, {
+                method: 'GET',
+                headers,
+                redirect: 'manual',
+                signal: controller.signal,
+            });
+
+            if (res.status >= 300 && res.status < 400) {
+                const location = res.headers.get('location');
+                if (!location) {
+                    console.warn(`[ImageProxy] Redirect without location header from ${summarizeUrlForLog(currentUrl)}`);
+                    return null;
+                }
+                currentUrl = new URL(location, currentUrl).toString();
+                continue;
+            }
+
+            if (!res.ok) {
+                console.warn(`[ImageProxy] Failed to fetch image: ${res.status} ${res.statusText}`);
+                return null;
+            }
+
+            const buffer = await readResponseBodyWithLimit(res, IMAGE_FETCH_MAX_BYTES, controller);
+            const contentType = res.headers.get('content-type') || detectMimeTypeFromBuffer(buffer) || 'image/jpeg';
+            const base64 = buffer.toString('base64');
+            return {
+                dataUrl: `data:${contentType};base64,${base64}`,
+                contentType,
+                bytes: buffer.length,
+            };
+        }
+
+        console.warn(`[ImageProxy] Too many redirects for ${summarizeUrlForLog(imageUrl)}`);
+        return null;
+    } catch (err: any) {
+        if (controller.signal.aborted) {
+            console.warn(`[ImageProxy] Aborted fetch for ${summarizeUrlForLog(imageUrl)}: ${err?.message || 'aborted'}`);
+        } else {
+            console.error(`[ImageProxy] Error fetching image:`, err);
+        }
+        return null;
+    } finally {
+        if (timeoutId) clearTimeout(timeoutId);
+    }
+}
+
 async function inlineImageUrls(messages: any[], authHeader?: string) {
     if (!messages || !Array.isArray(messages)) return;
     for (const msg of messages) {
         if (Array.isArray(msg.content)) {
             for (const part of msg.content) {
                 if (part && part.type === 'image_url' && typeof part.image_url?.url === 'string' && part.image_url.url.startsWith('http')) {
-                    try {
-                        console.log(`[ImageProxy] Fetching image from URL: ${part.image_url.url}`);
-                        const headers: Record<string, string> = {};
-                        if (authHeader) headers['Authorization'] = authHeader;
-                        
-                        const res = await fetch(part.image_url.url, { headers });
-                        if (res.ok) {
-                            const arrayBuffer = await res.arrayBuffer();
-                            const buffer = Buffer.from(arrayBuffer);
-                            const contentType = res.headers.get('content-type') || detectMimeTypeFromBuffer(buffer) || 'image/jpeg';
-                            const base64 = buffer.toString('base64');
-                            part.image_url.url = `data:${contentType};base64,${base64}`;
-                            console.log(`[ImageProxy] Successfully inlined image. Type: ${contentType}, Size: ${buffer.length}`);
-                        } else {
-                            console.warn(`[ImageProxy] Failed to fetch image: ${res.status} ${res.statusText}`);
-                        }
-                    } catch (err) {
-                        console.error(`[ImageProxy] Error fetching image:`, err);
+                    const result = await fetchImageAsDataUrl(part.image_url.url, authHeader);
+                    if (result) {
+                        part.image_url.url = result.dataUrl;
+                        console.log(`[ImageProxy] Successfully inlined image. Type: ${result.contentType}, Size: ${result.bytes}`);
                     }
                 }
             }
@@ -726,7 +973,11 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
                         if (Array.isArray(lastMsg.content)) {
                             parsed.files.forEach(f => {
                                 const base64Data = f.data.toString('base64');
-                                console.log(`[Multipart] Injecting image. Type: ${f.type}, Base64Len: ${base64Data.length}, Prefix: ${base64Data.substring(0, 50)}...`);
+                                if (LOG_SENSITIVE_PAYLOADS) {
+                                    console.log(`[Multipart] Injecting image. Type: ${f.type}, Base64Len: ${base64Data.length}, Prefix: ${base64Data.substring(0, 50)}...`);
+                                } else {
+                                    console.log(`[Multipart] Injecting image. Type: ${f.type}, Size: ${f.data.length}`);
+                                }
                                 lastMsg.content.push({
                                     type: 'image_url',
                                     image_url: { url: `data:${f.type};base64,${base64Data}` }
@@ -745,7 +996,11 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
             // Check if it's raw base64 or raw binary
             try {
                 const rawBuffer = await request.buffer();
-                console.log(`[RawFallback] Buffer size: ${rawBuffer.length}, First 50 bytes: ${rawBuffer.subarray(0, 50).toString('hex')}`);
+                if (LOG_SENSITIVE_PAYLOADS) {
+                    console.log(`[RawFallback] Buffer size: ${rawBuffer.length}, First 50 bytes: ${rawBuffer.subarray(0, 50).toString('hex')}`);
+                } else {
+                    console.log(`[RawFallback] Buffer size: ${rawBuffer.length}`);
+                }
                 if (rawBuffer.length > 10) {
                     const firstChar = rawBuffer[0];
                     // Check if JSON-like start ({ or [)
@@ -792,7 +1047,11 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
                         mimeType = detectMimeTypeFromBuffer(rawBuffer) || 'image/jpeg';
                     }
 
-                    console.log(`[RawFallback] Type: ${mimeType}, Base64Len: ${base64Data.length}, Prefix: ${base64Data.substring(0, 50)}...`);
+                    if (LOG_SENSITIVE_PAYLOADS) {
+                        console.log(`[RawFallback] Type: ${mimeType}, Base64Len: ${base64Data.length}, Prefix: ${base64Data.substring(0, 50)}...`);
+                    } else {
+                        console.log(`[RawFallback] Type: ${mimeType}, Base64Len: ${base64Data.length}`);
+                    }
 
                     // Use model from query if available, otherwise fail
                     const queryModel = (request.query && typeof request.query.model === 'string' && request.query.model) 
@@ -1799,7 +2058,7 @@ async function forwardTtsToOpenAI(options: {
     }
 
     const upstreamUrl = `${provider.baseUrl}/v1/audio/speech`;
-    const upstreamRes = await fetch(upstreamUrl, {
+    const upstreamRes = await fetchWithTimeout(upstreamUrl, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -1813,7 +2072,7 @@ async function forwardTtsToOpenAI(options: {
             speed,
             stream: Boolean(stream),
         }),
-    });
+    }, UPSTREAM_TIMEOUT_MS);
 
     if (!upstreamRes.ok) {
         const errText = await upstreamRes.text().catch(() => '');
@@ -1883,13 +2142,13 @@ async function forwardSttToOpenAI(options: {
     if (typeof responseFormat === 'string') form.append('response_format', responseFormat);
 
     const upstreamUrl = `${provider.baseUrl}/v1/audio/transcriptions`;
-    const upstreamRes = await fetch(upstreamUrl, {
+    const upstreamRes = await fetchWithTimeout(upstreamUrl, {
         method: 'POST',
         headers: {
             'Authorization': `Bearer ${provider.apiKey}`,
         },
         body: form,
-    });
+    }, UPSTREAM_TIMEOUT_MS);
 
     const resContentType = upstreamRes.headers.get('content-type') || 'application/json';
     response.setHeader('Content-Type', resContentType);
@@ -1953,14 +2212,14 @@ openaiRouter.post('/audio/speech', async (request: Request, response: Response) 
         }
 
         const upstreamUrl = `${provider.baseUrl}/v1/audio/speech`;
-        const upstreamRes = await fetch(upstreamUrl, {
+        const upstreamRes = await fetchWithTimeout(upstreamUrl, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${provider.apiKey}`,
             },
             body: JSON.stringify({ model, input, voice, response_format: responseFormat, speed, stream }),
-        });
+        }, UPSTREAM_TIMEOUT_MS);
 
         if (!upstreamRes.ok) {
             const errText = await upstreamRes.text().catch(() => '');
@@ -2029,14 +2288,14 @@ openaiRouter.post('/audio/transcriptions', async (request: Request, response: Re
         // Read raw body as Buffer via the buffer() method
         const rawBody = await request.buffer();
         const upstreamUrl = `${provider.baseUrl}/v1/audio/transcriptions`;
-        const upstreamRes = await fetch(upstreamUrl, {
+        const upstreamRes = await fetchWithTimeout(upstreamUrl, {
             method: 'POST',
             headers: {
                 'Content-Type': contentType,
                 'Authorization': `Bearer ${provider.apiKey}`,
             },
             body: rawBody as any,
-        });
+        }, UPSTREAM_TIMEOUT_MS);
 
         const resContentType = upstreamRes.headers.get('content-type') || 'application/json';
         response.setHeader('Content-Type', resContentType);
@@ -2093,7 +2352,7 @@ openaiRouter.post('/images/generations', async (request: Request, response: Resp
         }
 
         const upstreamUrl = `${provider.baseUrl}/v1/images/generations`;
-        const upstreamRes = await fetch(upstreamUrl, {
+        const upstreamRes = await fetchWithTimeout(upstreamUrl, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -2108,7 +2367,7 @@ openaiRouter.post('/images/generations', async (request: Request, response: Resp
                 style: typeof body?.style === 'string' ? body.style : undefined,
                 response_format: typeof body?.response_format === 'string' ? body.response_format : undefined,
             }),
-        });
+        }, UPSTREAM_TIMEOUT_MS);
 
         if (!upstreamRes.ok) {
             const errText = await upstreamRes.text().catch(() => '');
@@ -2160,14 +2419,14 @@ openaiRouter.post('/embeddings', async (request: Request, response: Response) =>
         }
 
         const upstreamUrl = `${provider.baseUrl}/v1/embeddings`;
-        const upstreamRes = await fetch(upstreamUrl, {
+        const upstreamRes = await fetchWithTimeout(upstreamUrl, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${provider.apiKey}`,
             },
             body: JSON.stringify({ model, input, encoding_format: body.encoding_format, dimensions: body.dimensions, user: body.user }),
-        });
+        }, UPSTREAM_TIMEOUT_MS);
 
         if (!upstreamRes.ok) {
             const errText = await upstreamRes.text().catch(() => '');
@@ -2250,14 +2509,14 @@ openaiRouter.post('/images/edits', async (request: Request, response: Response) 
         const upstreamUrl = `${provider.baseUrl}/v1/images/edits`;
         
         // Forward raw body directly to preserve binary integrity
-        const upstreamRes = await fetch(upstreamUrl, {
+        const upstreamRes = await fetchWithTimeout(upstreamUrl, {
             method: 'POST',
             headers: {
                 'Content-Type': contentType, // Pass original content-type with boundary
                 'Authorization': `Bearer ${provider.apiKey}`,
             },
             body: rawBody as any,
-        });
+        }, UPSTREAM_TIMEOUT_MS);
 
         if (!upstreamRes.ok) {
             const errText = await upstreamRes.text().catch(() => '');

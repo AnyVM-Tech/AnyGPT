@@ -11,6 +11,7 @@ import {
 import { logError } from '../modules/errorLogger.js'; // Changed import
 import { RequestTimestampStore } from '../modules/rateLimit.js';
 import { runAuthMiddleware, runRateLimitMiddleware } from '../modules/middlewareFactory.js';
+import { redactToken } from '../modules/redaction.js';
 
 dotenv.config();
 
@@ -42,7 +43,7 @@ async function authAndUsageMiddleware(request: Request, response: Response, next
             const errorType = 'invalid_request_error';
             const code = details.statusCode === 429 ? 'rate_limit_exceeded' : 'invalid_api_key';
             const clientMessage = `${details.error || 'Invalid API Key'}`;
-            await logError({ message: clientMessage, details: details.error, type: errorType, code, apiKey: details.apiKey }, req);
+            await logError({ message: clientMessage, details: details.error, type: errorType, code, apiKey: redactToken(details.apiKey) }, req);
             return { status: details.statusCode, body: { error: { message: clientMessage, type: errorType, param: null, code }, timestamp } };
         },
         onInternalError: async (req, error) => {

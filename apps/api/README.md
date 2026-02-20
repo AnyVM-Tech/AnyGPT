@@ -78,10 +78,11 @@ apps/api/
 *   **API Key Management**: Generation and validation of user API keys with tier-based permissions.
 *   **Provider Statistics & Scoring**: Tracks provider performance (response times, error rates, token speed) and calculates a score for intelligent routing.
 *   **Error Handling & Logging**: Comprehensive error logging to both Redis and filesystem (`logs/api-error.jsonl`) with fallback support.
-*   **Admin Endpoints**: Secure endpoints for managing providers and users.
+*   **Admin Endpoints**: Secure endpoints for managing providers, API keys, and metrics.
 *   **Development Testing Suite**: Comprehensive testing infrastructure with configurable mock providers.
 *   **Mock Provider Server**: Full-featured mock AI provider for testing with configurable response times, error rates, and behaviors.
 *   **WebSocket Endpoint**: Unified `/ws` endpoint for authenticated real-time chat completions (extensible for streaming & other actions).
+*   **OpenAPI Spec**: Served at `/openapi.json` for client integration.
 
 ## Prerequisites
 
@@ -145,6 +146,19 @@ apps/api/
     *   `MOCK_TIMEOUT_RATE`: Timeout simulation rate 0-1 (default: 0.05).
     *   `MOCK_TOKEN_SPEED`: Simulated tokens per second (default: 25).
     *   `MOCK_ENABLE_LOGS`: Enable mock server logging (default: `true`).
+
+    ### Logging & Security
+    *   `LOG_LEVEL`: `debug`, `info`, `warn`, `error`, or `silent` (default: `debug` in dev, `info` in production).
+    *   `API_KEY_HASH_SECRET`: Secret used to hash API keys in logs (default: `anygpt-api`).
+    *   `RATE_LIMIT_HASH_SECRET`: Secret used to hash API keys for Redis rate-limiting keys (default: `anygpt-rate-limit`).
+    *   `ADMIN_KEYS_LOG_MAX_ENTRIES`: Maximum number of admin key log entries returned (default: 1000).
+    *   `ADMIN_KEYS_LOG_MAX_BYTES`: Rotate admin key log file when it exceeds this size in bytes (default: 5242880).
+    *   `ADMIN_KEYS_RATE_LIMIT_RPS`: Rate limit for open admin key ingest endpoint (default: 5).
+    *   `ADMIN_KEYS_RATE_LIMIT_RPM`: Rate limit for open admin key ingest endpoint (default: 60).
+    *   `ADMIN_KEYS_RATE_LIMIT_RPD`: Rate limit for open admin key ingest endpoint (default: 1000).
+    *   `ADMIN_KEYS_MAX_BODY_BYTES`: Max body size for open admin key ingest endpoint (default: 4096).
+    *   `ADMIN_KEYS_ALLOWED_PROVIDERS`: Optional comma-separated allowlist for provider IDs (default: unset, allows any provider).
+    *   `ADMIN_METRICS_MAX_ERROR_LINES`: Max error log lines scanned for metrics (default: 200000).
 
 5.  **Initial Data Files**: The server will attempt to create `providers.json`, `models.json`, and `keys.json` if they don't exist. The data will be stored in Redis if configured, with filesystem fallback.
 

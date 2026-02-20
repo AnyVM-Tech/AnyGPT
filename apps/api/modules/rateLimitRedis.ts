@@ -1,4 +1,6 @@
+import crypto from 'crypto';
 import type { Redis } from 'ioredis';
+import { logger } from './logger.js';
 
 export interface SharedRateCounts {
   rps: number;
@@ -46,6 +48,17 @@ redis.call('EXPIRE', key, ttl)
 return {s_count, m_count, d_count}
 `;
 
+const RATE_LIMIT_HASH_SECRET = process.env.RATE_LIMIT_HASH_SECRET || process.env.API_KEY_HASH_SECRET || 'anygpt-rate-limit';
+let warnedDefaultSecret = false;
+
+function hashApiKey(apiKey: string): string {
+  if (!process.env.RATE_LIMIT_HASH_SECRET && !process.env.API_KEY_HASH_SECRET && !warnedDefaultSecret) {
+    warnedDefaultSecret = true;
+    logger.warn('[RateLimit] RATE_LIMIT_HASH_SECRET is not set; using default hash secret.');
+  }
+  return crypto.createHmac('sha256', RATE_LIMIT_HASH_SECRET).update(apiKey).digest('hex');
+}
+
 export async function incrementSharedRateLimitCounters(
   redisClient: Redis | null,
   keyPrefix: string,
@@ -57,7 +70,7 @@ export async function incrementSharedRateLimitCounters(
   const secondBucket = Math.floor(nowMs / 1000).toString();
   const minuteBucket = Math.floor(nowMs / 60_000).toString();
   const dayBucket = Math.floor(nowMs / 86_400_000).toString();
-  const key = `${keyPrefix}${apiKey}`;
+  const key = `${keyPrefix}${hashApiKey(apiKey)}`;
 
   try {
     const result = await redisClient.eval(

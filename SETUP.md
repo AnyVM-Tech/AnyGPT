@@ -95,7 +95,7 @@ Once setup is complete:
    pnpm dev
    ```
 
-3. (Optional) Start the UI:
+3. (Optional) Start the UI (LibreChat):
    ```bash
    cd ../ui
    pnpm dev
@@ -135,7 +135,8 @@ redis://username:password@host:port
 
 #### Missing Dependencies
 - Run `pnpm install` in the root directory
-- Run `pnpm install` in `apps/api` and `apps/ui`
+- Run `pnpm install` in `apps/api`
+- LibreChat runs via Docker; see `apps/ui/README.md` for setup
 
 ### Re-running Setup
 

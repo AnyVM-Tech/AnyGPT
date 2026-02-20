@@ -88,7 +88,13 @@ const redisMigrationMarkerField = '__legacy_migrated_v1';
 // In-memory cache to avoid re-hitting Redis/filesystem on every request, and to provide a
 // fast fallback when Redis is slow or temporarily unavailable.
 const inMemoryCache: Partial<Record<DataType, { value: ManagedDataStructure; ts: number }>> = {};
-const CACHE_TTL_MS = 5_000; // keep data warm for a few seconds between requests
+const CACHE_TTL_MS = Math.max(
+    0,
+    Number(
+        process.env.DATA_CACHE_TTL_MS ??
+            (process.env.NODE_ENV === 'test' ? '0' : '5000')
+    )
+); // keep data warm for a few seconds between requests (disabled in tests)
 
 // Utility: wrap an async call with a timeout to avoid hanging on slow Redis responses.
 function withTimeout<T>(promise: Promise<T>, ms: number, onTimeoutMessage: string): Promise<T> {
@@ -154,17 +160,18 @@ class DataManager {
         await this.backfillPendingToRedis('explicit-wait');
     }
 
-    private getCachedOrFilesystem<T extends ManagedDataStructure>(dataType: DataType): T | null {
+    private async getCachedOrFilesystem<T extends ManagedDataStructure>(dataType: DataType): Promise<T | null> {
         const cached = inMemoryCache[dataType];
         if (cached?.value) return cached.value as T;
 
         const filePath = filePaths[dataType];
         try {
-            if (!fs.existsSync(filePath)) return null;
-            const fileData = fs.readFileSync(filePath, 'utf8');
+            const fileData = await fs.promises.readFile(filePath, 'utf8');
             return JSON.parse(fileData) as T;
-        } catch (err) {
-            console.error(`[DataManager] Failed reading ${dataType} from filesystem for Redis backfill:`, err);
+        } catch (err: any) {
+            if (err?.code !== 'ENOENT') {
+                console.error(`[DataManager] Failed reading ${dataType} from filesystem for Redis backfill:`, err);
+            }
             return null;
         }
     }
@@ -203,7 +210,7 @@ class DataManager {
             console.log(`[DataManager] Redis ready; backfilling pending data (${targets.join(', ')}) [${reason}]...`);
 
             if (targets.includes('models')) {
-                const modelsData = this.getCachedOrFilesystem<ModelsFileStructure>('models');
+                const modelsData = await this.getCachedOrFilesystem<ModelsFileStructure>('models');
                 if (modelsData) {
                     await this.syncModelsMirrorIfNeeded(modelsData, 'filesystem');
                     inMemoryCache.models = { value: modelsData, ts: Date.now() };
@@ -214,7 +221,7 @@ class DataManager {
             }
 
             if (targets.includes('providers')) {
-                const providersData = this.getCachedOrFilesystem<LoadedProviders>('providers');
+                const providersData = await this.getCachedOrFilesystem<LoadedProviders>('providers');
                 if (providersData) {
                     await this.saveToRedisOnly('providers', providersData);
                     inMemoryCache.providers = { value: providersData, ts: Date.now() };
@@ -406,12 +413,12 @@ class DataManager {
 
         let fsKeys: KeysFile = {};
         try {
-            if (fs.existsSync(filePath)) {
-                const raw = fs.readFileSync(filePath, 'utf8');
-                fsKeys = JSON.parse(raw || '{}') as KeysFile;
+            const raw = await fs.promises.readFile(filePath, 'utf8');
+            fsKeys = JSON.parse(raw || '{}') as KeysFile;
+        } catch (err: any) {
+            if (err?.code !== 'ENOENT') {
+                console.error('[DataManager] Failed reading keys from filesystem for sync:', err);
             }
-        } catch (err) {
-            console.error('[DataManager] Failed reading keys from filesystem for sync:', err);
         }
 
         let redisKeys: KeysFile = {};
@@ -459,12 +466,12 @@ class DataManager {
 
         let fsProviders: LoadedProviders = [];
         try {
-            if (fs.existsSync(filePath)) {
-                const raw = fs.readFileSync(filePath, 'utf8');
-                fsProviders = JSON.parse(raw || '[]') as LoadedProviders;
+            const raw = await fs.promises.readFile(filePath, 'utf8');
+            fsProviders = JSON.parse(raw || '[]') as LoadedProviders;
+        } catch (err: any) {
+            if (err?.code !== 'ENOENT') {
+                console.error('[DataManager] Failed reading providers from filesystem for sync:', err);
             }
-        } catch (err) {
-            console.error('[DataManager] Failed reading providers from filesystem for sync:', err);
         }
 
         let redisProviders: LoadedProviders = [];
@@ -689,15 +696,14 @@ class DataManager {
                 }
             }
              try {
-                 if (fs.existsSync(filePath)) {
-                     const fileData = fs.readFileSync(filePath, 'utf8');
-                     console.log(`[DataManager] Data loaded successfully from Filesystem for: ${dataType}`);
-                     return JSON.parse(fileData) as T;
-                 } else {
+                 const fileData = await fs.promises.readFile(filePath, 'utf8');
+                 console.log(`[DataManager] Data loaded successfully from Filesystem for: ${dataType}`);
+                 return JSON.parse(fileData) as T;
+             } catch (err: any) {
+                 if (err?.code === 'ENOENT') {
                      console.warn(`[DataManager] File not found: ${filePath}. Cannot load ${dataType} from filesystem.`);
                      return null;
                  }
-             } catch (err) {
                  console.error(`[DataManager] Error loading/parsing file ${filePath}. Error:`, err);
                  return null;
             }

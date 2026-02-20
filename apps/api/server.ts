@@ -41,6 +41,7 @@ import geminiRouter from './routes/gemini.js';
 import groqRouter from './routes/groq.js';
 import ollamaRouter from './routes/ollama.js';
 import openrouterRouter from './routes/openrouter.js';
+import openapiRouter from './routes/openapi.js';
 import { attachWebSocket } from './ws/wsServer.js';
 import { attachRealtimeWebSocket } from './ws/realtime.js';
 
@@ -54,25 +55,25 @@ const defaultKeys: Record<string, any> = {}; // Using Record<string, any>
 const modelsJsonPath = path.resolve('models.json'); // Adjusted path
 const keysJsonPath = path.resolve('keys.json'); // Adjusted path
 
-function initializeJsonFile<T>(filePath: string, defaultContent: T): void {
-  if (!fs.existsSync(filePath)) {
-    fs.mkdirSync(path.dirname(filePath), { recursive: true }); // Ensure directory exists
-    fs.writeFileSync(filePath, JSON.stringify(defaultContent, null, 2), 'utf8');
-    console.log(`Created ${filePath} with default content.`);
-  } else {
-    try {
-      const data = fs.readFileSync(filePath, 'utf8');
-      JSON.parse(data);
-    } catch (error) {
-      console.error(`Invalid JSON format in ${filePath}. Re-initializing... Error: ${(error as Error).message}`);
-      fs.writeFileSync(filePath, JSON.stringify(defaultContent, null, 2), 'utf8');
+async function initializeJsonFile<T>(filePath: string, defaultContent: T): Promise<void> {
+  try {
+    const data = await fs.promises.readFile(filePath, 'utf8');
+    JSON.parse(data);
+  } catch (error: any) {
+    const isMissing = error?.code === 'ENOENT';
+    if (!isMissing) {
+      console.error(`Invalid JSON format in ${filePath}. Re-initializing... Error: ${error?.message || String(error)}`);
     }
+    await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.promises.writeFile(filePath, JSON.stringify(defaultContent, null, 2), 'utf8');
+    console.log(`Created ${filePath} with default content.`);
   }
 }
 
-// Initialize JSON files first
-initializeJsonFile(modelsJsonPath, defaultModels);
-initializeJsonFile(keysJsonPath, defaultKeys);
+async function initializeJsonFiles(): Promise<void> {
+  await initializeJsonFile(modelsJsonPath, defaultModels);
+  await initializeJsonFile(keysJsonPath, defaultKeys);
+}
 
 // Function to ensure an initial admin key exists
 async function ensureInitialAdminKey() {
@@ -272,6 +273,11 @@ async function startServer() {
     // HyperExpress has built-in body parsing, accessible via await request.json(), request.text(), etc.
 
     console.log('\nRegistering API routers:');
+
+    // OpenAPI spec (no auth)
+    app.use('/', openapiRouter);
+    app.use('/api', openapiRouter);
+    console.log('  ✓ OpenAPI spec enabled: /openapi.json and /api/openapi.json');
 
     if (isRouterEnabled('MODELS')) {
         // Mount at both /api and root so clients can hit /v1/models directly
@@ -487,34 +493,45 @@ function forkWorker(index: number, total: number): void {
     workerIndexById.set(worker.id, index);
 }
 
-if (shouldCluster && requestedWorkers) {
-    console.log(`[Cluster] Starting primary with ${requestedWorkers} workers.`);
+async function boot(): Promise<void> {
+    await initializeJsonFiles();
 
-    if (process.env.SKIP_ADMIN_KEY_SYNC !== '1') {
-        startAdminKeySyncScheduler();
-    }
-    if (process.env.SKIP_INITIAL_ADMIN_KEY_CHECK !== '1') {
-        ensureInitialAdminKey().catch((err: any) => {
-            console.warn('[Cluster] Initial admin key check failed in primary:', err?.message || err);
-        });
-    }
+    if (shouldCluster && requestedWorkers) {
+        console.log(`[Cluster] Starting primary with ${requestedWorkers} workers.`);
 
-    for (let i = 0; i < requestedWorkers; i++) {
-        if (clusterRestartDelayMs > 0) {
-            setTimeout(() => forkWorker(i, requestedWorkers), clusterRestartDelayMs * i);
-        } else {
-            forkWorker(i, requestedWorkers);
+        if (process.env.SKIP_ADMIN_KEY_SYNC !== '1') {
+            startAdminKeySyncScheduler();
         }
-    }
+        if (process.env.SKIP_INITIAL_ADMIN_KEY_CHECK !== '1') {
+            try {
+                await ensureInitialAdminKey();
+            } catch (err: any) {
+                console.warn('[Cluster] Initial admin key check failed in primary:', err?.message || err);
+            }
+        }
 
-    if (clusterRespawn) {
-        cluster.on('exit', (worker) => {
-            const index = workerIndexById.get(worker.id) ?? 0;
-            workerIndexById.delete(worker.id);
-            console.warn(`[Cluster] Worker ${worker.process.pid} exited. Spawning replacement (index ${index}).`);
-            forkWorker(index, requestedWorkers);
-        });
+        for (let i = 0; i < requestedWorkers; i++) {
+            if (clusterRestartDelayMs > 0) {
+                setTimeout(() => forkWorker(i, requestedWorkers), clusterRestartDelayMs * i);
+            } else {
+                forkWorker(i, requestedWorkers);
+            }
+        }
+
+        if (clusterRespawn) {
+            cluster.on('exit', (worker) => {
+                const index = workerIndexById.get(worker.id) ?? 0;
+                workerIndexById.delete(worker.id);
+                console.warn(`[Cluster] Worker ${worker.process.pid} exited. Spawning replacement (index ${index}).`);
+                forkWorker(index, requestedWorkers);
+            });
+        }
+    } else {
+        await startServer();
     }
-} else {
-    startServer();
 }
+
+boot().catch((err) => {
+    console.error('[Server] Fatal startup error:', err);
+    process.exit(1);
+});

@@ -11,7 +11,7 @@ import { randomUUID } from 'crypto';
 const app = new HyperExpress.Server();
 
 
-const port = 3001; // Different port from main API
+const port = parseInt(process.env.MOCK_PROVIDER_PORT || '3001', 10); // Different port from main API
 
 // Configurable mock settings
 interface MockConfig {

@@ -25,7 +25,7 @@ interface ValidationResult {
 const NO_QUOTA_ERROR = 'NO_QUOTA';
 
 const DEFAULT_SPEED = 50;
-const ADMIN_KEYS_PATH = path.resolve('logs/admin-keys.json');
+const ADMIN_KEYS_PATH = path.resolve('logs/admin-keys.jsonl');
 const PROBE_TESTED_PATH = path.resolve('logs/probe-tested.json');
 const PROBE_LOG_PATH = path.resolve('logs/probe-errors.jsonl');
 const args = process.argv.slice(2);
@@ -93,6 +93,27 @@ function readJsonFile<T>(filePath: string, fallback: T): T {
       console.warn(`Warning: could not read ${filePath}: ${error.message}`);
     }
     return fallback;
+  }
+}
+
+function readJsonLines<T>(filePath: string): T[] {
+  try {
+    const raw = fs.readFileSync(filePath, 'utf8');
+    const lines = raw.split(/\r?\n/).filter(Boolean);
+    const entries: T[] = [];
+    for (const line of lines) {
+      try {
+        entries.push(JSON.parse(line) as T);
+      } catch {
+        // Skip malformed line
+      }
+    }
+    return entries;
+  } catch (error: any) {
+    if (error.code !== 'ENOENT') {
+      console.warn(`Warning: could not read ${filePath}: ${error.message}`);
+    }
+    return [];
   }
 }
 
@@ -361,7 +382,7 @@ async function main() {
     }
   }
 
-  const adminEntries = readJsonFile<AdminKeyLogEntry[]>(ADMIN_KEYS_PATH, []);
+  const adminEntries = readJsonLines<AdminKeyLogEntry>(ADMIN_KEYS_PATH);
   const providers = await dataManager.load<LoadedProviders>('providers');
   if (!Array.isArray(providers)) {
     throw new Error('Invalid providers data format. Expected an array.');

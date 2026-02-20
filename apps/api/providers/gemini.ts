@@ -7,6 +7,7 @@ import {
   ProviderStreamChunk,
   ProviderStreamPassthrough
 } from './interfaces.js'; // Only import necessary interfaces
+import { fetchWithTimeout } from '../modules/http.js';
 // Removed imports related to compute and Provider state
 
 dotenv.config();
@@ -47,7 +48,7 @@ export class GeminiAI implements IAIProvider {
     }
 
     const endpoint = `${GEMINI_API_BASE}/models?key=${encodeURIComponent(this.apiKey)}`;
-    const response = await fetch(endpoint);
+    const response = await fetchWithTimeout(endpoint);
     if (!response.ok) {
       const responseText = await response.text().catch(() => '');
       console.error(`Gemini ListModels raw error response: ${responseText}`);
@@ -168,7 +169,7 @@ export class GeminiAI implements IAIProvider {
   private async requestGemini(modelId: string, endpointSuffix: string, body: Record<string, any>): Promise<Response> {
     const separator = endpointSuffix.includes('?') ? '&' : '?';
     const endpoint = `${GEMINI_API_BASE}/${this.toModelsName(encodeURIComponent(modelId))}:${endpointSuffix}${separator}key=${encodeURIComponent(this.apiKey)}`;
-    return fetch(endpoint, {
+    return fetchWithTimeout(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),

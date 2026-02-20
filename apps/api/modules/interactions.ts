@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { dataManager, LoadedProviders, LoadedProviderData } from './dataManager.js';
+import { fetchWithTimeout } from './http.js';
 
 export type InteractionRequest = {
     model: string;
@@ -155,7 +156,7 @@ export async function executeGeminiInteraction(request: InteractionRequest, prov
         body.generation_config = request.generation_config;
     }
 
-    const response = await fetch(`${GEMINI_API_BASE}/interactions`, {
+    const response = await fetchWithTimeout(`${GEMINI_API_BASE}/interactions`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',

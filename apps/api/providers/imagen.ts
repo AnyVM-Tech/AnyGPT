@@ -1,5 +1,6 @@
 import dotenv from 'dotenv';
 import { IAIProvider, IMessage, ProviderResponse } from './interfaces.js';
+import { fetchWithTimeout } from '../modules/http.js';
 
 dotenv.config();
 
@@ -95,7 +96,7 @@ export class ImagenAI implements IAIProvider {
     if (cached && cached.expiresAt > now) return cached.models;
 
     const endpoint = `${baseUrl}/models?key=${encodeURIComponent(this.apiKey)}`;
-    const response = await fetch(endpoint);
+    const response = await fetchWithTimeout(endpoint);
     if (!response.ok) {
       ImagenAI.modelCatalogCache.set(cacheKey, { expiresAt: now + MODEL_CATALOG_TTL_MS, models: [] });
       return [];
@@ -204,7 +205,7 @@ export class ImagenAI implements IAIProvider {
         parameters: { sampleCount: 1 },
       };
 
-      const res = await fetch(endpoint, {
+      const res = await fetchWithTimeout(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(predictBody),
@@ -239,7 +240,7 @@ export class ImagenAI implements IAIProvider {
         contents: [{ role: 'user', parts: [{ text: `Generate an image of: ${safePrompt}` }] }],
       };
 
-      const response = await fetch(endpoint, {
+      const response = await fetchWithTimeout(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -279,7 +280,7 @@ export class ImagenAI implements IAIProvider {
       body.model = `models/${generateImagesModelId}`;
 
       const endpoint = `${baseUrl}/models/${encodeURIComponent(generateImagesModelId)}:generateImages?key=${encodeURIComponent(this.apiKey)}`;
-      const res = await fetch(endpoint, {
+      const res = await fetchWithTimeout(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),

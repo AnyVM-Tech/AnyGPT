@@ -9,12 +9,16 @@ import chalk from 'chalk'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 
-const rl = createInterface({
-  input: process.stdin,
-  output: process.stdout,
-})
+let rl = null
+let question = null
 
-const question = (query) => new Promise((resolve) => rl.question(query, resolve))
+function initPrompt() {
+  rl = createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  })
+  question = (query) => new Promise((resolve) => rl.question(query, resolve))
+}
 
 function parseRedisCloudConnection(connectionString) {
   let redisUrl = connectionString
@@ -105,10 +109,27 @@ DEFAULT_ADMIN_API_KEY=${config.adminUser.apiKey}` : `# DEFAULT_ADMIN_USER_ID=adm
 }
 
 async function main() {
+  const envPath = join(__dirname, '.env')
+  const skipSetup =
+    process.env.SKIP_SETUP === '1' ||
+    process.env.CI === 'true' ||
+    process.env.NODE_ENV === 'test' ||
+    !process.stdin.isTTY
+
+  if (skipSetup) {
+    if (existsSync(envPath)) {
+      console.log(chalk.gray('Setup skipped (non-interactive or CI/test environment).'))
+      return
+    }
+    console.log(chalk.yellow('Setup skipped; .env not found. Run `pnpm setup` to generate one.'))
+    return
+  }
+
+  initPrompt()
+
   console.log(chalk.blue.bold('\n🚀 Welcome to AnyGPT Setup!\n'))
   console.log(chalk.gray('This script will help you configure your environment for first-time use.\n'))
 
-  const envPath = join(__dirname, '.env')
   if (existsSync(envPath)) {
     console.log(chalk.yellow('⚠️  .env file already exists!'))
     const overwrite = await question(chalk.yellow('Do you want to overwrite it? (y/N): '))
@@ -304,6 +325,6 @@ async function main() {
 
 main().catch((error) => {
   console.error(chalk.red('❌ Setup failed:'), error.message)
-  rl.close()
+  if (rl) rl.close()
   process.exit(1)
 })

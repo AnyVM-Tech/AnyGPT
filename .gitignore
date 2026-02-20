@@ -62,3 +62,6 @@ apps/api/logs/probe-errors.jsonl
 **/key-transfer-failures.json
 **/probe-tested.json
 **/probe-errors.jsonl
+
+# LibreChat repo (cloned into apps/ui)
+apps/ui/librechat/

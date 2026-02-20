@@ -10,6 +10,7 @@ import {
 import { logError } from '../modules/errorLogger.js'; // Changed import
 import { RequestTimestampStore } from '../modules/rateLimit.js';
 import { runAuthMiddleware, runRateLimitMiddleware } from '../modules/middlewareFactory.js';
+import { redactToken } from '../modules/redaction.js';
 import {
     createInteractionToken,
     executeGeminiInteraction,
@@ -107,7 +108,7 @@ async function authAndUsageMiddleware(request: Request, response: Response, next
         onInvalidApiKey: async (req, details) => {
             const statusText = details.statusCode === 429 ? 'RESOURCE_EXHAUSTED' : 'UNAUTHENTICATED';
             const logMsg = `API key not valid. ${details.error || 'Please pass a valid API key.'}`;
-            await logError({ message: logMsg, details: details.error, apiKey: details.apiKey, code: details.statusCode, status: statusText }, req);
+            await logError({ message: logMsg, details: details.error, apiKey: redactToken(details.apiKey), code: details.statusCode, status: statusText }, req);
             return { status: details.statusCode, body: { error: { code: details.statusCode, message: logMsg, status: statusText }, timestamp } };
         },
         onInternalError: async (req, error) => {

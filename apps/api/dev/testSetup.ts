@@ -3,6 +3,8 @@ import path from 'path';
 
 // Create a test configuration that sets up providers.json to use the mock provider
 export function setupMockProviderConfig() {
+  const mockPort = Number(process.env.MOCK_PROVIDER_PORT || '3001');
+  const testApiKey = process.env.TEST_API_KEY || 'test-key-for-mock-provider';
   const providersFilePath = path.resolve('./providers.json');
   const keysFilePath = path.resolve('./keys.json');
   const backupProvidersPath = path.resolve('./providers.json.backup');
@@ -22,7 +24,7 @@ export function setupMockProviderConfig() {
   const mockProvider = {
     id: 'openai-mock', // Use existing provider ID to override it
     apiKey: 'mock-api-key-for-testing',
-    provider_url: 'http://localhost:3001/v1/chat/completions', // Point to our mock
+    provider_url: `http://localhost:${mockPort}/v1/chat/completions`, // Point to our mock
     streamingCompatible: true, // Mock provider supports streaming
     models: {
       'gpt-3.5-turbo': {
@@ -78,7 +80,7 @@ export function setupMockProviderConfig() {
 
   const updatedKeys = {
     ...existingKeys,
-    'test-key-for-mock-provider': testUserKey
+    [testApiKey]: testUserKey
   };
 
   fs.writeFileSync(keysFilePath, JSON.stringify(updatedKeys, null, 2));

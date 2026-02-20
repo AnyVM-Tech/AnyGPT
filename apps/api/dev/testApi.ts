@@ -13,14 +13,19 @@ import { setupMockProviderConfig, restoreProviderConfig } from './testSetup.js';
 config();
 
 async function testApiWithMockProvider() {
-  // Setup mock provider configuration
-  setupMockProviderConfig();
+  const manageSetup = process.env.TEST_SETUP_MODE !== 'external';
+  if (manageSetup) {
+    // Setup mock provider configuration
+    setupMockProviderConfig();
+  }
   
-  const apiUrl = 'http://localhost:3000/v1/chat/completions';
+  const port = process.env.PORT || '3000';
+  const baseUrl = process.env.TEST_API_BASE_URL || `http://localhost:${port}`;
+  const apiUrl = `${baseUrl}/v1/chat/completions`;
   const modelId = 'gpt-3.5-turbo';
   const testPrompt = 'Write a short haiku about APIs.';
   // Use an existing admin API key that we know is valid
-  const apiKey = 'test-key-for-mock-provider';
+  const apiKey = process.env.TEST_API_KEY || 'test-key-for-mock-provider';
 
   console.log(`[TEST] Testing API endpoint: ${apiUrl}`);
   console.log(`[TEST] Using model: ${modelId}`);
@@ -102,7 +107,7 @@ async function testApiWithMockProvider() {
         console.error('[TEST] Status Code:', error.response.status);
         console.error('[TEST] Response Data:', error.response.data);
       } else if (error.code === 'ECONNREFUSED') {
-        console.error('[TEST] Connection refused - is the API server running on localhost:3000?');
+        console.error(`[TEST] Connection refused - is the API server running on ${baseUrl}?`);
       }
     } else {
       console.error('[TEST] An unexpected error occurred:', error);

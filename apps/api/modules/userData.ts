@@ -1,11 +1,12 @@
 import crypto from 'crypto';
 // Remove direct fs import if no longer needed
 // import fs from 'fs'; 
-import path from 'path';
 // Import the singleton DataManager instance
 import { dataManager } from './dataManager.js'; 
 // Import tiers data directly (static configuration)
 import tiersData from '../tiers.json' with { type: 'json' }; 
+import { logger } from './logger.js';
+import { hashToken } from './redaction.js';
 
 // --- Type Definitions --- 
 // Export interfaces for use in other modules
@@ -80,14 +81,15 @@ export async function generateAdminApiKey(userId: string): Promise<string> { // 
 
 // Becomes async due to dataManager.load
 export async function validateApiKeyAndUsage(apiKey: string): Promise<{ valid: boolean; userData?: UserData; tierLimits?: TierData, error?: string }> {
-  console.log(`[validateApiKeyAndUsage] Validating API key: ${apiKey}`);
+  const apiKeyHash = hashToken(apiKey).slice(0, 12);
+  logger.debug(`[validateApiKeyAndUsage] Validating API key hash: ${apiKeyHash}`);
   const currentKeys = await dataManager.load<KeysFile>('keys'); 
-  console.log(`[validateApiKeyAndUsage] Loaded keys: ${JSON.stringify(currentKeys)}`);
+  logger.debug(`[validateApiKeyAndUsage] Loaded keys count: ${Object.keys(currentKeys).length}`);
   const userData = currentKeys[apiKey];
-  console.log(`[validateApiKeyAndUsage] User data for API key: ${JSON.stringify(userData)}`);
+  logger.debug(`[validateApiKeyAndUsage] User data for API key hash: ${apiKeyHash} => ${userData ? 'found' : 'missing'}`);
 
   if (!userData) {
-      console.error(`[validateApiKeyAndUsage] API key not found: ${apiKey}`);
+      logger.warn(`[validateApiKeyAndUsage] API key not found (hash: ${apiKeyHash})`);
       return { valid: false, error: 'API key not found.' };
   }
 
@@ -99,21 +101,21 @@ export async function validateApiKeyAndUsage(apiKey: string): Promise<{ valid: b
     }
 
   const tierLimits = tiers[userData.tier]; // tiers is static import
-  console.log(`[validateApiKeyAndUsage] Tier limits for user: ${JSON.stringify(tierLimits)}`);
+  logger.debug(`[validateApiKeyAndUsage] Tier limits resolved for API key hash: ${apiKeyHash}`);
 
   if (!tierLimits) {
       const errorMsg = `Invalid tier ('${userData.tier}') for key ${apiKey.substring(0,6)}...`;
-      console.error(`[validateApiKeyAndUsage] ${errorMsg}`);
+      logger.warn(`[validateApiKeyAndUsage] ${errorMsg}`);
       return { valid: false, error: errorMsg, userData };
   }
 
   if (tierLimits.max_tokens !== null && userData.tokenUsage >= tierLimits.max_tokens) {
       const errorMsg = `Token limit (${tierLimits.max_tokens}) reached for key ${apiKey.substring(0,6)}...`;
-      console.error(`[validateApiKeyAndUsage] ${errorMsg}`);
+      logger.warn(`[validateApiKeyAndUsage] ${errorMsg}`);
       return { valid: false, error: errorMsg, userData, tierLimits };
   }
 
-  console.log(`[validateApiKeyAndUsage] Validation successful for API key: ${apiKey}`);
+  logger.debug(`[validateApiKeyAndUsage] Validation successful for API key hash: ${apiKeyHash}`);
   return { valid: true, userData, tierLimits }; 
 }
 
@@ -186,7 +188,7 @@ export function extractMessageFromRequestBody(requestBody: any): { messages: { r
 // Becomes async due to dataManager load/save
 export async function updateUserTokenUsage(numberOfTokens: number, apiKey: string, options: { incrementRequest?: boolean } = {}): Promise<void> {
   if (typeof numberOfTokens !== 'number' || isNaN(numberOfTokens) || numberOfTokens < 0) {
-      console.warn(`Invalid token count (${numberOfTokens}) for ${apiKey}.`); return;
+      logger.warn(`Invalid token count (${numberOfTokens}) for key ${hashToken(apiKey).slice(0, 12)}.`); return;
   }
   const incrementRequest = options.incrementRequest !== false;
   let keyFound = false;
@@ -205,6 +207,6 @@ export async function updateUserTokenUsage(numberOfTokens: number, apiKey: strin
   });
 
   if (!keyFound) {
-    console.warn(`Update token usage failed: key ${apiKey} not found.`);
+    logger.warn(`Update token usage failed: key ${hashToken(apiKey).slice(0, 12)} not found.`);
   }
 }

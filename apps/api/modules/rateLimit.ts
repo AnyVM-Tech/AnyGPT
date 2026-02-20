@@ -44,7 +44,11 @@ export function enforceInMemoryRateLimit(
   const oneSecondAgo = now - 1000;
 
   const recent = store[apiKey].filter((timestamp) => timestamp > oneDayAgo);
-  store[apiKey] = recent;
+  if (recent.length === 0) {
+    delete store[apiKey];
+  } else {
+    store[apiKey] = recent;
+  }
 
   const secondTimestamps = recent.filter((timestamp) => timestamp > oneSecondAgo);
   if (limits.rps > 0 && secondTimestamps.length >= limits.rps) {
@@ -63,6 +67,9 @@ export function enforceInMemoryRateLimit(
     return { allowed: false, window: 'rpd', limit: limits.rpd, retryAfterSeconds };
   }
 
+  if (!store[apiKey]) {
+    store[apiKey] = [];
+  }
   store[apiKey].push(now);
   return { allowed: true };
 }

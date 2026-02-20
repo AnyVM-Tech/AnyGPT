@@ -6,7 +6,7 @@
       "object": "model",
       "created": 1770699350370,
       "owned_by": "google",
-      "providers": 2,
+      "providers": 5,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -19,7 +19,7 @@
       "object": "model",
       "created": 1770699350370,
       "owned_by": "google",
-      "providers": 2,
+      "providers": 5,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -30,7 +30,7 @@
       "object": "model",
       "created": 1770699350370,
       "owned_by": "google",
-      "providers": 2,
+      "providers": 5,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -41,7 +41,7 @@
       "object": "model",
       "created": 1770699350370,
       "owned_by": "openai",
-      "providers": 128,
+      "providers": 133,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -53,7 +53,7 @@
       "object": "model",
       "created": 1770699350370,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 129,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -65,7 +65,7 @@
       "object": "model",
       "created": 1770699350370,
       "owned_by": "openai",
-      "providers": 125,
+      "providers": 130,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -76,7 +76,7 @@
       "object": "model",
       "created": 1770699350370,
       "owned_by": "unknown",
-      "providers": 55,
+      "providers": 66,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -89,7 +89,7 @@
       "object": "model",
       "created": 1770699350370,
       "owned_by": "unknown",
-      "providers": 55,
+      "providers": 66,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -102,7 +102,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 119,
+      "providers": 124,
       "capabilities": [
         "text"
       ]
@@ -112,7 +112,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 119,
+      "providers": 124,
       "capabilities": [
         "text"
       ]
@@ -122,7 +122,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 119,
+      "providers": 124,
       "capabilities": [
         "text"
       ]
@@ -132,7 +132,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 119,
+      "providers": 124,
       "capabilities": [
         "audio_output"
       ]
@@ -142,7 +142,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 119,
+      "providers": 124,
       "capabilities": [
         "text",
         "image_output",
@@ -154,7 +154,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "unknown",
-      "providers": 119,
+      "providers": 124,
       "capabilities": [
         "text"
       ]
@@ -164,7 +164,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "unknown",
-      "providers": 119,
+      "providers": 124,
       "capabilities": [
         "text"
       ]
@@ -174,7 +174,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 121,
+      "providers": 126,
       "capabilities": [
         "text"
       ]
@@ -184,7 +184,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 121,
+      "providers": 126,
       "capabilities": [
         "text"
       ]
@@ -194,7 +194,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 119,
+      "providers": 124,
       "capabilities": [
         "text"
       ]
@@ -204,7 +204,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 121,
+      "providers": 126,
       "capabilities": [
         "text"
       ]
@@ -214,7 +214,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "unknown",
-      "providers": 119,
+      "providers": 124,
       "capabilities": [
         "audio_output"
       ]
@@ -224,7 +224,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "unknown",
-      "providers": 119,
+      "providers": 124,
       "capabilities": [
         "audio_output"
       ]
@@ -234,7 +234,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "unknown",
-      "providers": 119,
+      "providers": 124,
       "capabilities": [
         "audio_output"
       ]
@@ -244,7 +244,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 119,
+      "providers": 124,
       "capabilities": [
         "text"
       ]
@@ -254,7 +254,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 121,
+      "providers": 126,
       "capabilities": [
         "text"
       ]
@@ -264,7 +264,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 123,
+      "providers": 128,
       "capabilities": [
         "text"
       ]
@@ -274,7 +274,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 122,
+      "providers": 127,
       "capabilities": [
         "text"
       ]
@@ -284,7 +284,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 121,
+      "providers": 126,
       "capabilities": [
         "text"
       ]
@@ -294,7 +294,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 121,
+      "providers": 126,
       "capabilities": [
         "text",
         "image_input"
@@ -305,7 +305,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 121,
+      "providers": 126,
       "capabilities": [
         "text",
         "image_input"
@@ -316,7 +316,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 121,
+      "providers": 126,
       "capabilities": [
         "text",
         "image_input"
@@ -327,7 +327,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 121,
+      "providers": 126,
       "capabilities": [
         "text",
         "image_output",
@@ -339,7 +339,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "unknown",
-      "providers": 119,
+      "providers": 124,
       "capabilities": [
         "text"
       ]
@@ -349,7 +349,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 121,
+      "providers": 126,
       "capabilities": [
         "text",
         "image_output",
@@ -361,7 +361,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 121,
+      "providers": 126,
       "capabilities": [
         "text",
         "image_output",
@@ -373,7 +373,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 119,
+      "providers": 124,
       "capabilities": [
         "text",
         "image_input"
@@ -384,7 +384,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 119,
+      "providers": 124,
       "capabilities": [
         "text",
         "image_input"
@@ -395,7 +395,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 121,
+      "providers": 126,
       "capabilities": [
         "text",
         "image_output",
@@ -407,7 +407,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "unknown",
-      "providers": 119,
+      "providers": 124,
       "capabilities": [
         "text"
       ]
@@ -417,7 +417,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "unknown",
-      "providers": 119,
+      "providers": 124,
       "capabilities": [
         "text"
       ]
@@ -427,7 +427,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 121,
+      "providers": 126,
       "capabilities": [
         "text",
         "image_input"
@@ -438,7 +438,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 121,
+      "providers": 126,
       "capabilities": [
         "text"
       ]
@@ -448,7 +448,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 121,
+      "providers": 126,
       "capabilities": [
         "text"
       ]
@@ -458,7 +458,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 121,
+      "providers": 126,
       "capabilities": [
         "text"
       ]
@@ -468,7 +468,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 121,
+      "providers": 126,
       "capabilities": [
         "text"
       ]
@@ -478,7 +478,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 121,
+      "providers": 126,
       "capabilities": [
         "audio_input"
       ]
@@ -488,7 +488,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 121,
+      "providers": 126,
       "capabilities": [
         "audio_input"
       ]
@@ -498,7 +498,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 119,
+      "providers": 124,
       "capabilities": [
         "text"
       ]
@@ -508,7 +508,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 119,
+      "providers": 124,
       "capabilities": [
         "text",
         "image_input"
@@ -519,7 +519,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 121,
+      "providers": 126,
       "capabilities": [
         "audio_output"
       ]
@@ -529,7 +529,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "unknown",
-      "providers": 119,
+      "providers": 124,
       "capabilities": [
         "text",
         "image_input"
@@ -540,7 +540,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "unknown",
-      "providers": 119,
+      "providers": 124,
       "capabilities": [
         "text",
         "image_input"
@@ -551,7 +551,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "unknown",
-      "providers": 119,
+      "providers": 124,
       "capabilities": [
         "text",
         "image_input"
@@ -562,7 +562,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "unknown",
-      "providers": 119,
+      "providers": 124,
       "capabilities": [
         "text",
         "image_input"
@@ -573,7 +573,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 121,
+      "providers": 126,
       "capabilities": [
         "text",
         "image_input"
@@ -584,7 +584,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 121,
+      "providers": 126,
       "capabilities": [
         "text",
         "image_input"
@@ -595,7 +595,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 121,
+      "providers": 126,
       "capabilities": [
         "text",
         "image_input"
@@ -606,7 +606,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 121,
+      "providers": 126,
       "capabilities": [
         "text",
         "image_input"
@@ -617,7 +617,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 121,
+      "providers": 126,
       "capabilities": [
         "text",
         "image_input"
@@ -628,7 +628,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 121,
+      "providers": 126,
       "capabilities": [
         "text",
         "image_input"
@@ -639,7 +639,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 121,
+      "providers": 126,
       "capabilities": [
         "text",
         "image_output",
@@ -651,7 +651,7 @@
       "object": "model",
       "created": 1770701426656,
       "owned_by": "openai",
-      "providers": 119,
+      "providers": 124,
       "capabilities": [
         "text",
         "image_input"
@@ -662,7 +662,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 119,
+      "providers": 124,
       "capabilities": [
         "text",
         "image_input"
@@ -673,7 +673,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 120,
+      "providers": 125,
       "capabilities": [
         "text",
         "image_input"
@@ -684,7 +684,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 120,
+      "providers": 125,
       "capabilities": [
         "text",
         "image_input"
@@ -695,7 +695,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 120,
+      "providers": 125,
       "capabilities": [
         "text",
         "image_input"
@@ -706,7 +706,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 119,
+      "providers": 124,
       "capabilities": [
         "text",
         "image_input"
@@ -717,7 +717,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 119,
+      "providers": 124,
       "capabilities": [
         "text",
         "image_input"
@@ -728,7 +728,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 119,
+      "providers": 124,
       "capabilities": [
         "text",
         "image_output",
@@ -740,7 +740,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 119,
+      "providers": 124,
       "capabilities": [
         "text",
         "image_output",
@@ -752,7 +752,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 119,
+      "providers": 124,
       "capabilities": [
         "text",
         "image_input"
@@ -763,7 +763,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 119,
+      "providers": 124,
       "capabilities": []
     },
     {
@@ -771,7 +771,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 119,
+      "providers": 124,
       "capabilities": [
         "image_input"
       ]
@@ -781,7 +781,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 119,
+      "providers": 124,
       "capabilities": [
         "text",
         "image_output",
@@ -793,7 +793,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 119,
+      "providers": 124,
       "capabilities": [
         "text",
         "image_output",
@@ -805,7 +805,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 119,
+      "providers": 124,
       "capabilities": [
         "text",
         "image_input"
@@ -816,7 +816,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 119,
+      "providers": 124,
       "capabilities": [
         "text",
         "image_input"
@@ -827,7 +827,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 119,
+      "providers": 124,
       "capabilities": [
         "text",
         "image_input"
@@ -838,7 +838,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 119,
+      "providers": 124,
       "capabilities": [
         "text",
         "image_input"
@@ -849,7 +849,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 119,
+      "providers": 124,
       "capabilities": [
         "text",
         "image_input"
@@ -860,7 +860,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 119,
+      "providers": 124,
       "capabilities": [
         "image_input"
       ]
@@ -870,7 +870,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 119,
+      "providers": 124,
       "capabilities": [
         "text",
         "image_input"
@@ -881,7 +881,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 119,
+      "providers": 124,
       "capabilities": [
         "image_input"
       ]
@@ -891,7 +891,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 119,
+      "providers": 124,
       "capabilities": [
         "text",
         "image_input"
@@ -902,7 +902,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 120,
+      "providers": 125,
       "capabilities": [
         "text",
         "image_input"
@@ -913,7 +913,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 119,
+      "providers": 124,
       "capabilities": [
         "text",
         "image_input"
@@ -924,7 +924,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 119,
+      "providers": 124,
       "capabilities": [
         "text",
         "image_input"
@@ -935,7 +935,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 119,
+      "providers": 124,
       "capabilities": [
         "text",
         "image_input"
@@ -946,7 +946,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 119,
+      "providers": 124,
       "capabilities": [
         "audio_input"
       ]
@@ -956,7 +956,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 119,
+      "providers": 124,
       "capabilities": [
         "audio_input"
       ]
@@ -966,7 +966,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 119,
+      "providers": 124,
       "capabilities": [
         "audio_output"
       ]
@@ -976,7 +976,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 121,
+      "providers": 126,
       "capabilities": [
         "text"
       ]
@@ -986,7 +986,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "unknown",
-      "providers": 119,
+      "providers": 124,
       "capabilities": [
         "audio_output"
       ]
@@ -996,7 +996,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "unknown",
-      "providers": 121,
+      "providers": 126,
       "capabilities": [
         "audio_input"
       ]
@@ -1006,7 +1006,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "unknown",
-      "providers": 119,
+      "providers": 124,
       "capabilities": [
         "text"
       ]
@@ -1016,7 +1016,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "alibaba",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -1026,7 +1026,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "anthropic",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -1037,7 +1037,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "alibaba",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -1047,7 +1047,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openrouter",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -1058,7 +1058,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -1068,7 +1068,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -1078,7 +1078,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -1089,7 +1089,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -1099,7 +1099,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -1109,7 +1109,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -1119,7 +1119,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -1129,7 +1129,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -1139,7 +1139,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "audio_input"
@@ -1150,7 +1150,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "audio_input"
@@ -1161,7 +1161,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "z.ai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -1171,7 +1171,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -1182,7 +1182,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -1193,7 +1193,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -1203,7 +1203,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -1214,7 +1214,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -1225,7 +1225,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -1235,7 +1235,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "z.ai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -1245,7 +1245,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "google",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input",
@@ -1257,7 +1257,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "mistral.ai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -1267,7 +1267,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -1277,7 +1277,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -1287,7 +1287,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -1297,7 +1297,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -1308,7 +1308,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -1319,7 +1319,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "mistral.ai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -1329,7 +1329,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -1339,7 +1339,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "z.ai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -1350,7 +1350,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -1360,7 +1360,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -1370,7 +1370,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openrouter",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -1380,7 +1380,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -1391,7 +1391,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "amazon",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -1402,7 +1402,7 @@
       "object": "model",
       "created": 1770701426657,
       "owned_by": "mistral.ai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -1413,7 +1413,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "mistral.ai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -1424,7 +1424,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "mistral.ai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -1435,7 +1435,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "mistral.ai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -1446,7 +1446,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -1456,7 +1456,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -1466,7 +1466,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "deepseek",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -1476,7 +1476,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "deepseek",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -1486,7 +1486,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -1496,7 +1496,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "anthropic",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -1507,7 +1507,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -1517,7 +1517,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -1527,7 +1527,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -1537,7 +1537,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "google",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input",
@@ -1549,7 +1549,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "xai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -1560,7 +1560,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "google",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input",
@@ -1572,7 +1572,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -1582,7 +1582,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -1593,7 +1593,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -1604,7 +1604,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -1615,7 +1615,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -1626,7 +1626,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -1636,7 +1636,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -1646,7 +1646,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "amazon",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -1657,7 +1657,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -1668,7 +1668,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "mistral.ai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "audio_input"
@@ -1679,7 +1679,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -1689,7 +1689,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -1700,7 +1700,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -1710,7 +1710,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "alibaba",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -1721,7 +1721,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -1731,7 +1731,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -1741,7 +1741,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -1751,7 +1751,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "anthropic",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -1762,7 +1762,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "alibaba",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -1773,7 +1773,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "alibaba",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -1784,7 +1784,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -1794,7 +1794,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "meta",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -1804,7 +1804,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "baidu",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -1814,7 +1814,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "google",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input",
@@ -1826,7 +1826,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "alibaba",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -1837,7 +1837,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "alibaba",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -1848,7 +1848,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "z.ai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -1858,7 +1858,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "z.ai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -1868,7 +1868,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "anthropic",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -1879,7 +1879,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "deepseek",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -1889,7 +1889,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -1899,7 +1899,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "google",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input",
@@ -1911,7 +1911,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "alibaba",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -1922,7 +1922,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "alibaba",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -1933,7 +1933,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "alibaba",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -1943,7 +1943,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "alibaba",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -1953,7 +1953,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -1964,7 +1964,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "deepseek",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -1974,7 +1974,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "deepseek",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -1984,7 +1984,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "xai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -1995,7 +1995,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2005,7 +2005,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "alibaba",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2015,7 +2015,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "alibaba",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2025,7 +2025,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "alibaba",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2035,7 +2035,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2045,7 +2045,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "alibaba",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2055,7 +2055,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "alibaba",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2065,7 +2065,7 @@
       "object": "model",
       "created": 1770701426658,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2075,7 +2075,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2085,7 +2085,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2095,7 +2095,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2105,7 +2105,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "alibaba",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2115,7 +2115,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "xai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2125,7 +2125,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2135,7 +2135,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2145,7 +2145,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "deepseek",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2155,7 +2155,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "audio_input"
@@ -2166,7 +2166,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "mistral.ai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -2177,7 +2177,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "baidu",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2187,7 +2187,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "baidu",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -2198,7 +2198,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "z.ai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -2209,7 +2209,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "ai21",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2219,7 +2219,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -2230,7 +2230,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -2241,7 +2241,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -2252,7 +2252,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -2263,7 +2263,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2273,7 +2273,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2283,7 +2283,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2293,7 +2293,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "anthropic",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -2304,7 +2304,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "mistral.ai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2314,7 +2314,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "alibaba",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2324,7 +2324,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "alibaba",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2334,7 +2334,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "z.ai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2344,7 +2344,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "z.ai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2354,7 +2354,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "z.ai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2364,7 +2364,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "alibaba",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2374,7 +2374,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "z.ai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2384,7 +2384,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "alibaba",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2394,7 +2394,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "alibaba",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2404,7 +2404,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "bytedance",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -2415,7 +2415,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "google",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input",
@@ -2427,7 +2427,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "alibaba",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2437,7 +2437,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2447,7 +2447,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "mistral.ai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2457,7 +2457,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "mistral.ai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2467,7 +2467,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "xai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -2478,7 +2478,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2488,7 +2488,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2498,7 +2498,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "baidu",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -2509,7 +2509,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "baidu",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2519,7 +2519,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2529,7 +2529,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "mistral.ai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -2540,7 +2540,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2550,7 +2550,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "google",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input",
@@ -2562,7 +2562,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "google",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input",
@@ -2574,7 +2574,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2584,7 +2584,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "xai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2594,7 +2594,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "xai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2604,7 +2604,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "google",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input",
@@ -2616,7 +2616,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "deepseek",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2626,7 +2626,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "anthropic",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -2637,7 +2637,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "anthropic",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -2648,7 +2648,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "google",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2658,7 +2658,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "mistral.ai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -2669,7 +2669,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "google",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input",
@@ -2681,7 +2681,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2691,7 +2691,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "meta",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -2702,7 +2702,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "alibaba",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2712,7 +2712,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "alibaba",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2722,7 +2722,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "alibaba",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2732,7 +2732,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "alibaba",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2742,7 +2742,7 @@
       "object": "model",
       "created": 1770701426659,
       "owned_by": "alibaba",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2752,7 +2752,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -2763,7 +2763,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -2774,7 +2774,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -2785,7 +2785,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "alibaba",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2795,7 +2795,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -2806,7 +2806,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -2817,7 +2817,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -2828,7 +2828,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2838,7 +2838,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "meta",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2848,7 +2848,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "xai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2858,7 +2858,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "xai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2868,7 +2868,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "meta",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2878,7 +2878,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "meta",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -2889,7 +2889,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "meta",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -2900,7 +2900,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "alibaba",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -2911,7 +2911,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "deepseek",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2921,7 +2921,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "mistral.ai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -2932,7 +2932,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "google",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -2943,7 +2943,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "google",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -2954,7 +2954,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "cohere",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2964,7 +2964,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2974,7 +2974,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -2984,7 +2984,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "google",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -2995,7 +2995,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3005,7 +3005,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -3016,7 +3016,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -3027,7 +3027,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3037,7 +3037,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "alibaba",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3047,7 +3047,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "google",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input",
@@ -3059,7 +3059,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "anthropic",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -3070,7 +3070,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "anthropic",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -3081,7 +3081,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "mistral.ai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3091,7 +3091,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "meta",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3101,7 +3101,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3111,7 +3111,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "alibaba",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -3122,7 +3122,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3132,7 +3132,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3142,7 +3142,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "meta",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3152,7 +3152,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "alibaba",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -3163,7 +3163,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "alibaba",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3173,7 +3173,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "alibaba",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -3184,7 +3184,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "alibaba",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3194,7 +3194,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "alibaba",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3204,7 +3204,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3214,7 +3214,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "mistral.ai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3224,7 +3224,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "alibaba",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3234,7 +3234,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -3245,7 +3245,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "meta",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3255,7 +3255,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "deepseek",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3265,7 +3265,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -3276,7 +3276,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "microsoft",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3286,7 +3286,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3296,7 +3296,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "deepseek",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3306,7 +3306,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3316,7 +3316,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -3327,7 +3327,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "cohere",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3337,7 +3337,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "meta",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3347,7 +3347,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "amazon",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -3358,7 +3358,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "amazon",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3368,7 +3368,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "amazon",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -3379,7 +3379,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -3390,7 +3390,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "mistral.ai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3400,7 +3400,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "mistral.ai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3410,7 +3410,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "mistral.ai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -3421,7 +3421,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "alibaba",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3431,7 +3431,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3441,7 +3441,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3451,7 +3451,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "anthropic",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -3462,7 +3462,7 @@
       "object": "model",
       "created": 1770701426660,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3472,7 +3472,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "anthropic",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -3483,7 +3483,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "alibaba",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3493,7 +3493,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "meta",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3503,7 +3503,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3513,7 +3513,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3523,7 +3523,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3533,7 +3533,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "meta",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3543,7 +3543,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "meta",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3553,7 +3553,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "meta",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -3564,7 +3564,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "alibaba",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3574,7 +3574,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "meta",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3584,7 +3584,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "cohere",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3594,7 +3594,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "cohere",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3604,7 +3604,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3614,7 +3614,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "alibaba",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -3625,7 +3625,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "meta",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3635,7 +3635,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "meta",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3645,7 +3645,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3655,7 +3655,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -3666,7 +3666,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "meta",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3676,7 +3676,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "meta",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3686,7 +3686,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "meta",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3696,7 +3696,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "meta",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3706,7 +3706,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "mistral.ai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3716,7 +3716,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -3727,7 +3727,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -3738,7 +3738,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3748,7 +3748,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "meta",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3758,7 +3758,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "mistral.ai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3768,7 +3768,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "mistral.ai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3778,7 +3778,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "meta",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3788,7 +3788,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -3799,7 +3799,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -3810,7 +3810,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3820,7 +3820,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "meta",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3830,7 +3830,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "meta",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3840,7 +3840,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "mistral.ai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3850,7 +3850,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "microsoft",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3860,7 +3860,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3870,7 +3870,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "anthropic",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input"
@@ -3881,7 +3881,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "mistral.ai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3891,7 +3891,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3901,7 +3901,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3911,7 +3911,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "mistral.ai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3921,7 +3921,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "mistral.ai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3931,7 +3931,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3941,7 +3941,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3951,7 +3951,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "openrouter",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text",
         "image_input",
@@ -3964,7 +3964,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3974,7 +3974,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "mistral.ai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3984,7 +3984,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -3994,7 +3994,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -4004,7 +4004,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -4014,7 +4014,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -4024,7 +4024,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -4034,7 +4034,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -4044,7 +4044,7 @@
       "object": "model",
       "created": 1770701426661,
       "owned_by": "openai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -4177,7 +4177,7 @@
       "object": "model",
       "created": 1770701426662,
       "owned_by": "unknown",
-      "providers": 40,
+      "providers": 41,
       "capabilities": [
         "text",
         "image_input"
@@ -4188,7 +4188,7 @@
       "object": "model",
       "created": 1770701426662,
       "owned_by": "unknown",
-      "providers": 40,
+      "providers": 41,
       "capabilities": [
         "text",
         "image_input"
@@ -4259,7 +4259,7 @@
       "object": "model",
       "created": 1770762892044,
       "owned_by": "google",
-      "providers": 7,
+      "providers": 6,
       "capabilities": [
         "text",
         "image_input",
@@ -4271,7 +4271,7 @@
       "object": "model",
       "created": 1770762892044,
       "owned_by": "google",
-      "providers": 7,
+      "providers": 6,
       "capabilities": [
         "text",
         "image_input",
@@ -4283,7 +4283,7 @@
       "object": "model",
       "created": 1770762892044,
       "owned_by": "google",
-      "providers": 7,
+      "providers": 6,
       "capabilities": [
         "text",
         "image_input",
@@ -4295,7 +4295,7 @@
       "object": "model",
       "created": 1770762892044,
       "owned_by": "google",
-      "providers": 7,
+      "providers": 6,
       "capabilities": [
         "text",
         "image_input",
@@ -4307,7 +4307,7 @@
       "object": "model",
       "created": 1770762892044,
       "owned_by": "google",
-      "providers": 7,
+      "providers": 6,
       "capabilities": [
         "audio_input"
       ]
@@ -4317,7 +4317,7 @@
       "object": "model",
       "created": 1770762892044,
       "owned_by": "google",
-      "providers": 7,
+      "providers": 6,
       "capabilities": [
         "audio_input"
       ]
@@ -4327,7 +4327,7 @@
       "object": "model",
       "created": 1770762892044,
       "owned_by": "google",
-      "providers": 7,
+      "providers": 6,
       "capabilities": [
         "text",
         "image_input",
@@ -4339,7 +4339,7 @@
       "object": "model",
       "created": 1770762892044,
       "owned_by": "google",
-      "providers": 7,
+      "providers": 6,
       "capabilities": [
         "text",
         "image_input",
@@ -4351,7 +4351,7 @@
       "object": "model",
       "created": 1770762892044,
       "owned_by": "google",
-      "providers": 7,
+      "providers": 6,
       "capabilities": [
         "text",
         "audio_input"
@@ -4362,7 +4362,7 @@
       "object": "model",
       "created": 1770762892044,
       "owned_by": "google",
-      "providers": 7,
+      "providers": 6,
       "capabilities": [
         "text"
       ]
@@ -4372,7 +4372,7 @@
       "object": "model",
       "created": 1770762892044,
       "owned_by": "google",
-      "providers": 7,
+      "providers": 6,
       "capabilities": [
         "text",
         "image_input",
@@ -4384,7 +4384,7 @@
       "object": "model",
       "created": 1770762892044,
       "owned_by": "google",
-      "providers": 7,
+      "providers": 6,
       "capabilities": [
         "text",
         "image_input",
@@ -4396,7 +4396,7 @@
       "object": "model",
       "created": 1770762892044,
       "owned_by": "google",
-      "providers": 7,
+      "providers": 6,
       "capabilities": [
         "text",
         "image_input",
@@ -4408,7 +4408,7 @@
       "object": "model",
       "created": 1770762892044,
       "owned_by": "google",
-      "providers": 7,
+      "providers": 6,
       "capabilities": [
         "text",
         "image_input",
@@ -4420,7 +4420,7 @@
       "object": "model",
       "created": 1770762892044,
       "owned_by": "google",
-      "providers": 7,
+      "providers": 6,
       "capabilities": [
         "image_input"
       ]
@@ -4430,7 +4430,7 @@
       "object": "model",
       "created": 1770762892044,
       "owned_by": "google",
-      "providers": 7,
+      "providers": 6,
       "capabilities": [
         "text",
         "image_input",
@@ -4442,7 +4442,7 @@
       "object": "model",
       "created": 1770762892044,
       "owned_by": "google",
-      "providers": 7,
+      "providers": 6,
       "capabilities": [
         "text",
         "image_input",
@@ -4454,7 +4454,7 @@
       "object": "model",
       "created": 1770762892044,
       "owned_by": "google",
-      "providers": 7,
+      "providers": 6,
       "capabilities": [
         "text",
         "image_input",
@@ -4466,7 +4466,7 @@
       "object": "model",
       "created": 1770762892044,
       "owned_by": "google",
-      "providers": 7,
+      "providers": 6,
       "capabilities": [
         "image_input"
       ]
@@ -4476,7 +4476,7 @@
       "object": "model",
       "created": 1770762892044,
       "owned_by": "unknown",
-      "providers": 7,
+      "providers": 6,
       "capabilities": [
         "image_input",
         "image_output"
@@ -4487,7 +4487,7 @@
       "object": "model",
       "created": 1770762892044,
       "owned_by": "google",
-      "providers": 7,
+      "providers": 6,
       "capabilities": [
         "text",
         "image_input",
@@ -4499,7 +4499,7 @@
       "object": "model",
       "created": 1770762892044,
       "owned_by": "google",
-      "providers": 7,
+      "providers": 6,
       "capabilities": []
     },
     {
@@ -4507,7 +4507,7 @@
       "object": "model",
       "created": 1770762892044,
       "owned_by": "google",
-      "providers": 7,
+      "providers": 6,
       "capabilities": []
     },
     {
@@ -4515,7 +4515,7 @@
       "object": "model",
       "created": 1770762892044,
       "owned_by": "google",
-      "providers": 7,
+      "providers": 6,
       "capabilities": []
     },
     {
@@ -4523,7 +4523,7 @@
       "object": "model",
       "created": 1770762892049,
       "owned_by": "google",
-      "providers": 7,
+      "providers": 6,
       "capabilities": []
     },
     {
@@ -4591,7 +4591,7 @@
       "object": "model",
       "created": 1771049524336,
       "owned_by": "unknown",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -4601,7 +4601,7 @@
       "object": "model",
       "created": 1771049524336,
       "owned_by": "z.ai",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -4611,17 +4611,7 @@
       "object": "model",
       "created": 1771049524336,
       "owned_by": "unknown",
-      "providers": 2,
-      "capabilities": [
-        "text"
-      ]
-    },
-    {
-      "id": "qwen/qwen3-4b",
-      "object": "model",
-      "created": 1771049524336,
-      "owned_by": "alibaba",
-      "providers": 2,
+      "providers": 5,
       "capabilities": [
         "text"
       ]
@@ -4631,329 +4621,329 @@
       "object": "model",
       "created": 1771449683521,
       "owned_by": "google",
-      "providers": 7
+      "providers": 6
     },
     {
       "id": "gemma-3-4b-it",
       "object": "model",
       "created": 1771449683521,
       "owned_by": "google",
-      "providers": 7
+      "providers": 6
     },
     {
       "id": "gemini-2.5-flash",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "google",
-      "providers": 7
+      "providers": 6
     },
     {
       "id": "gemini-2.5-pro",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "google",
-      "providers": 7
+      "providers": 6
     },
     {
       "id": "gemini-exp-1206",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "google",
-      "providers": 7
+      "providers": 6
     },
     {
       "id": "gemini-2.5-flash-preview-09-2025",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "google",
-      "providers": 7
+      "providers": 6
     },
     {
       "id": "deep-research-pro-preview-12-2025",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "unknown",
-      "providers": 7
+      "providers": 6
     },
     {
       "id": "gemini-embedding-001",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "google",
-      "providers": 7
+      "providers": 6
     },
     {
       "id": "aqa",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "unknown",
-      "providers": 7
+      "providers": 6
     },
     {
       "id": "imagen-4.0-generate-preview-06-06",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "unknown",
-      "providers": 7
+      "providers": 6
     },
     {
       "id": "imagen-4.0-ultra-generate-preview-06-06",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "unknown",
-      "providers": 7
+      "providers": 6
     },
     {
       "id": "imagen-4.0-generate-001",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "unknown",
-      "providers": 7
+      "providers": 6
     },
     {
       "id": "imagen-4.0-ultra-generate-001",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "unknown",
-      "providers": 7
+      "providers": 6
     },
     {
       "id": "imagen-4.0-fast-generate-001",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "unknown",
-      "providers": 7
+      "providers": 6
     },
     {
       "id": "veo-2.0-generate-001",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "unknown",
-      "providers": 7
+      "providers": 6
     },
     {
       "id": "veo-3.0-generate-001",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "unknown",
-      "providers": 7
+      "providers": 6
     },
     {
       "id": "veo-3.0-fast-generate-001",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "unknown",
-      "providers": 7
+      "providers": 6
     },
     {
       "id": "veo-3.1-generate-preview",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "unknown",
-      "providers": 7
+      "providers": 6
     },
     {
       "id": "veo-3.1-fast-generate-preview",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "unknown",
-      "providers": 7
+      "providers": 6
     },
     {
       "id": "gpt-image-1",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "openai",
-      "providers": 120
+      "providers": 125
     },
     {
       "id": "gpt-realtime-mini-2025-12-15",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "openai",
-      "providers": 119
+      "providers": 124
     },
     {
       "id": "chatgpt-image-latest",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "openai",
-      "providers": 119
+      "providers": 124
     },
     {
       "id": "dall-e-3",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "unknown",
-      "providers": 119
+      "providers": 124
     },
     {
       "id": "dall-e-2",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "unknown",
-      "providers": 121
+      "providers": 126
     },
     {
       "id": "text-embedding-3-small",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "unknown",
-      "providers": 119
+      "providers": 124
     },
     {
       "id": "text-embedding-3-large",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "unknown",
-      "providers": 119
+      "providers": 124
     },
     {
       "id": "gpt-4o-realtime-preview",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "openai",
-      "providers": 121
+      "providers": 126
     },
     {
       "id": "omni-moderation-2024-09-26",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "unknown",
-      "providers": 119
+      "providers": 124
     },
     {
       "id": "gpt-4o-realtime-preview-2024-12-17",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "openai",
-      "providers": 121
+      "providers": 126
     },
     {
       "id": "gpt-4o-mini-realtime-preview-2024-12-17",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "openai",
-      "providers": 121
+      "providers": 126
     },
     {
       "id": "gpt-4o-mini-realtime-preview",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "openai",
-      "providers": 121
+      "providers": 126
     },
     {
       "id": "gpt-4o-realtime-preview-2025-06-03",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "openai",
-      "providers": 121
+      "providers": 126
     },
     {
       "id": "o4-mini-deep-research",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "unknown",
-      "providers": 90
+      "providers": 92
     },
     {
       "id": "gpt-4o-transcribe-diarize",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "openai",
-      "providers": 119
+      "providers": 124
     },
     {
       "id": "o4-mini-deep-research-2025-06-26",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "unknown",
-      "providers": 90
+      "providers": 92
     },
     {
       "id": "gpt-realtime",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "openai",
-      "providers": 119
+      "providers": 124
     },
     {
       "id": "gpt-realtime-2025-08-28",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "openai",
-      "providers": 119
+      "providers": 124
     },
     {
       "id": "gpt-image-1-mini",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "openai",
-      "providers": 119
+      "providers": 124
     },
     {
       "id": "gpt-realtime-mini",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "openai",
-      "providers": 119
+      "providers": 124
     },
     {
       "id": "gpt-realtime-mini-2025-10-06",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "openai",
-      "providers": 119
+      "providers": 124
     },
     {
       "id": "sora-2",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "unknown",
-      "providers": 119
+      "providers": 124
     },
     {
       "id": "sora-2-pro",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "unknown",
-      "providers": 119
+      "providers": 124
     },
     {
       "id": "gpt-image-1.5",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "openai",
-      "providers": 119
+      "providers": 124
     },
     {
       "id": "o3-deep-research",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "unknown",
-      "providers": 40
+      "providers": 41
     },
     {
       "id": "o3-deep-research-2025-06-26",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "unknown",
-      "providers": 40
+      "providers": 41
     },
     {
       "id": "computer-use-preview",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "unknown",
-      "providers": 39
+      "providers": 41
     },
     {
       "id": "computer-use-preview-2025-03-11",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "unknown",
-      "providers": 39
+      "providers": 41
     },
     {
       "id": "davinci:ft-personal:gr8bot-2023-05-22-07-18-22",
@@ -5163,273 +5153,273 @@
       "object": "model",
       "created": 1771457332641,
       "owned_by": "anthropic",
-      "providers": 2
+      "providers": 5
     },
     {
       "id": "qwen/qwen3.5-plus-02-15",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "alibaba",
-      "providers": 2
+      "providers": 5
     },
     {
       "id": "qwen/qwen3.5-397b-a17b",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "alibaba",
-      "providers": 2
+      "providers": 5
     },
     {
       "id": "openrouter/aurora-alpha",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "openrouter",
-      "providers": 2
+      "providers": 5
     },
     {
       "id": "nvidia/nemotron-3-nano-30b-a3b:free",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "unknown",
-      "providers": 2
+      "providers": 5
     },
     {
       "id": "openai/gpt-5.2-pro",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "openai",
-      "providers": 2
+      "providers": 5
     },
     {
       "id": "nvidia/nemotron-nano-12b-v2-vl:free",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "unknown",
-      "providers": 2
+      "providers": 5
     },
     {
       "id": "openai/gpt-5-image-mini",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "openai",
-      "providers": 2
+      "providers": 5
     },
     {
       "id": "openai/gpt-5-image",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "openai",
-      "providers": 2
+      "providers": 5
     },
     {
       "id": "openai/o3-deep-research",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "openai",
-      "providers": 2
+      "providers": 5
     },
     {
       "id": "openai/gpt-5-pro",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "openai",
-      "providers": 2
+      "providers": 5
     },
     {
       "id": "relace/relace-apply-3",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "unknown",
-      "providers": 2
+      "providers": 5
     },
     {
       "id": "opengvlab/internvl3-78b",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "unknown",
-      "providers": 2
+      "providers": 5
     },
     {
       "id": "qwen/qwen3-next-80b-a3b-instruct:free",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "alibaba",
-      "providers": 2
+      "providers": 5
     },
     {
       "id": "openai/gpt-oss-120b:free",
       "object": "model",
       "created": 1771457332641,
       "owned_by": "openai",
-      "providers": 2
+      "providers": 5
     },
     {
       "id": "openai/gpt-oss-20b:free",
       "object": "model",
       "created": 1771457332642,
       "owned_by": "openai",
-      "providers": 2
+      "providers": 5
     },
     {
       "id": "qwen/qwen3-coder:free",
       "object": "model",
       "created": 1771457332642,
       "owned_by": "alibaba",
-      "providers": 2
+      "providers": 5
     },
     {
       "id": "switchpoint/router",
       "object": "model",
       "created": 1771457332642,
       "owned_by": "unknown",
-      "providers": 2
+      "providers": 5
     },
     {
       "id": "cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
       "object": "model",
       "created": 1771457332642,
       "owned_by": "mistral.ai",
-      "providers": 2
+      "providers": 5
     },
     {
       "id": "google/gemma-3n-e2b-it:free",
       "object": "model",
       "created": 1771457332642,
       "owned_by": "google",
-      "providers": 2
+      "providers": 5
     },
     {
       "id": "tencent/hunyuan-a13b-instruct",
       "object": "model",
       "created": 1771457332642,
       "owned_by": "unknown",
-      "providers": 2
+      "providers": 5
     },
     {
       "id": "tngtech/deepseek-r1t2-chimera",
       "object": "model",
       "created": 1771457332642,
       "owned_by": "unknown",
-      "providers": 2
+      "providers": 5
     },
     {
       "id": "deepseek/deepseek-r1-0528:free",
       "object": "model",
       "created": 1771457332642,
       "owned_by": "deepseek",
-      "providers": 2
+      "providers": 5
     },
     {
       "id": "google/gemma-3n-e4b-it:free",
       "object": "model",
       "created": 1771457332642,
       "owned_by": "google",
-      "providers": 2
+      "providers": 5
     },
     {
       "id": "arcee-ai/spotlight",
       "object": "model",
       "created": 1771457332642,
       "owned_by": "unknown",
-      "providers": 2
+      "providers": 5
     },
     {
       "id": "arcee-ai/maestro-reasoning",
       "object": "model",
       "created": 1771457332642,
       "owned_by": "unknown",
-      "providers": 2
+      "providers": 5
     },
     {
       "id": "arcee-ai/virtuoso-large",
       "object": "model",
       "created": 1771457332642,
       "owned_by": "unknown",
-      "providers": 2
+      "providers": 5
     },
     {
       "id": "arcee-ai/coder-large",
       "object": "model",
       "created": 1771457332642,
       "owned_by": "unknown",
-      "providers": 2
+      "providers": 5
     },
     {
       "id": "qwen/qwen3-4b:free",
       "object": "model",
       "created": 1771457332642,
       "owned_by": "alibaba",
-      "providers": 2
+      "providers": 5
     },
     {
       "id": "openai/o1-pro",
       "object": "model",
       "created": 1771457332642,
       "owned_by": "openai",
-      "providers": 2
+      "providers": 5
     },
     {
       "id": "mistralai/mistral-small-3.1-24b-instruct:free",
       "object": "model",
       "created": 1771457332642,
       "owned_by": "mistral.ai",
-      "providers": 2
+      "providers": 5
     },
     {
       "id": "allenai/olmo-2-0325-32b-instruct",
       "object": "model",
       "created": 1771457332642,
       "owned_by": "unknown",
-      "providers": 2
+      "providers": 5
     },
     {
       "id": "google/gemma-3-4b-it:free",
       "object": "model",
       "created": 1771457332642,
       "owned_by": "google",
-      "providers": 2
+      "providers": 5
     },
     {
       "id": "google/gemma-3-12b-it:free",
       "object": "model",
       "created": 1771457332642,
       "owned_by": "google",
-      "providers": 2
+      "providers": 5
     },
     {
       "id": "google/gemma-3-27b-it:free",
       "object": "model",
       "created": 1771457332642,
       "owned_by": "google",
-      "providers": 2
+      "providers": 5
     },
     {
       "id": "meta-llama/llama-3.3-70b-instruct:free",
       "object": "model",
       "created": 1771457332642,
       "owned_by": "meta",
-      "providers": 2
+      "providers": 5
     },
     {
       "id": "meta-llama/llama-3.2-3b-instruct:free",
       "object": "model",
       "created": 1771457332642,
       "owned_by": "meta",
-      "providers": 2
+      "providers": 5
     },
     {
       "id": "nousresearch/hermes-3-llama-3.1-405b:free",
       "object": "model",
       "created": 1771457332642,
       "owned_by": "meta",
-      "providers": 2
+      "providers": 5
     },
     {
       "id": "openai/gpt-3.5-turbo-instruct",
       "object": "model",
       "created": 1771457332642,
       "owned_by": "openai",
-      "providers": 2
+      "providers": 5
     },
     {
       "id": "grok-2-image-1212",
@@ -5458,6 +5448,188 @@
       "created": 1771457332642,
       "owned_by": "unknown",
       "providers": 2
+    },
+    {
+      "id": "davinci:ft-42maru-2023-02-23-06-57-07",
+      "object": "model",
+      "created": 1771512429468,
+      "owned_by": "unknown",
+      "providers": 1
+    },
+    {
+      "id": "ada:ft-42maru-2023-02-23-06-03-45",
+      "object": "model",
+      "created": 1771512429468,
+      "owned_by": "unknown",
+      "providers": 1
+    },
+    {
+      "id": "ada:ft-42maru-2023-03-03-02-04-10",
+      "object": "model",
+      "created": 1771512429468,
+      "owned_by": "unknown",
+      "providers": 1
+    },
+    {
+      "id": "babbage:ft-42maru-2023-03-03-02-14-55",
+      "object": "model",
+      "created": 1771512429468,
+      "owned_by": "unknown",
+      "providers": 1
+    },
+    {
+      "id": "curie:ft-42maru-2023-03-03-02-18-40",
+      "object": "model",
+      "created": 1771512429468,
+      "owned_by": "unknown",
+      "providers": 1
+    },
+    {
+      "id": "ada:ft-42maru-2023-02-24-01-33-03",
+      "object": "model",
+      "created": 1771512429468,
+      "owned_by": "unknown",
+      "providers": 1
+    },
+    {
+      "id": "curie:ft-42maru-2023-02-24-09-26-18",
+      "object": "model",
+      "created": 1771512429468,
+      "owned_by": "unknown",
+      "providers": 1
+    },
+    {
+      "id": "ada:ft-42maru-2023-02-24-09-50-59",
+      "object": "model",
+      "created": 1771512429468,
+      "owned_by": "unknown",
+      "providers": 1
+    },
+    {
+      "id": "ada:ft-42maru-2023-03-03-02-47-09",
+      "object": "model",
+      "created": 1771512429468,
+      "owned_by": "unknown",
+      "providers": 1
+    },
+    {
+      "id": "babbage:ft-42maru-2023-03-03-02-54-02",
+      "object": "model",
+      "created": 1771512429468,
+      "owned_by": "unknown",
+      "providers": 1
+    },
+    {
+      "id": "curie:ft-42maru-2023-03-03-03-00-12",
+      "object": "model",
+      "created": 1771512429468,
+      "owned_by": "unknown",
+      "providers": 1
+    },
+    {
+      "id": "curie:ft-42maru-2023-02-27-07-13-18",
+      "object": "model",
+      "created": 1771512429468,
+      "owned_by": "unknown",
+      "providers": 1
+    },
+    {
+      "id": "curie:ft-42maru-2023-03-03-01-28-12",
+      "object": "model",
+      "created": 1771512429468,
+      "owned_by": "unknown",
+      "providers": 1
+    },
+    {
+      "id": "ada:ft-42maru-2023-03-03-01-28-53",
+      "object": "model",
+      "created": 1771512429468,
+      "owned_by": "unknown",
+      "providers": 1
+    },
+    {
+      "id": "curie:ft-42maru-2023-02-27-07-31-01",
+      "object": "model",
+      "created": 1771512429468,
+      "owned_by": "unknown",
+      "providers": 1
+    },
+    {
+      "id": "babbage:ft-42maru-2023-03-03-01-44-20",
+      "object": "model",
+      "created": 1771512429468,
+      "owned_by": "unknown",
+      "providers": 1
+    },
+    {
+      "id": "curie:ft-42maru-2023-03-03-01-54-49",
+      "object": "model",
+      "created": 1771512429468,
+      "owned_by": "unknown",
+      "providers": 1
+    },
+    {
+      "id": "ft:gpt-3.5-turbo-0125:personal::B07lttao:ckpt-step-185",
+      "object": "model",
+      "created": 1771512429468,
+      "owned_by": "unknown",
+      "providers": 1
+    },
+    {
+      "id": "ft:gpt-3.5-turbo-0125:personal::B07luTPH:ckpt-step-370",
+      "object": "model",
+      "created": 1771512429468,
+      "owned_by": "unknown",
+      "providers": 1
+    },
+    {
+      "id": "ft:gpt-3.5-turbo-0125:personal::B07luknT",
+      "object": "model",
+      "created": 1771512429468,
+      "owned_by": "unknown",
+      "providers": 1
+    },
+    {
+      "id": "ft:gpt-4o-2024-08-06:personal:high-up-2025:B36Hg6GX:ckpt-step-436",
+      "object": "model",
+      "created": 1771512429468,
+      "owned_by": "unknown",
+      "providers": 1
+    },
+    {
+      "id": "ft:gpt-4o-2024-08-06:personal:high-up-2025:B36Hfpta:ckpt-step-218",
+      "object": "model",
+      "created": 1771512429468,
+      "owned_by": "unknown",
+      "providers": 1
+    },
+    {
+      "id": "ft:gpt-4o-2024-08-06:personal:high-up-2025:B36Hg5t6",
+      "object": "model",
+      "created": 1771512429468,
+      "owned_by": "unknown",
+      "providers": 1
+    },
+    {
+      "id": "gemini-3.1-pro-preview",
+      "object": "model",
+      "created": 1771516136206,
+      "owned_by": "google",
+      "providers": 6
+    },
+    {
+      "id": "gemini-3.1-pro-preview-customtools",
+      "object": "model",
+      "created": 1771516136206,
+      "owned_by": "google",
+      "providers": 6
+    },
+    {
+      "id": "google/gemini-3.1-pro-preview",
+      "object": "model",
+      "created": 1771525979575,
+      "owned_by": "google",
+      "providers": 5
     }
   ]
 }
