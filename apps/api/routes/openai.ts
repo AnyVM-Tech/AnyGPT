@@ -11,7 +11,7 @@ import {
     validateApiKeyAndUsage, // Now async
 } from '../modules/userData.js';
 // Import TierData type for Request extension
-import { TierData } from '../modules/userData.js'; 
+import { TierData, type KeysFile } from '../modules/userData.js'; 
 import { logError } from '../modules/errorLogger.js';
 import redis from '../modules/db.js';
 import tiersData from '../tiers.json' with { type: 'json' };
@@ -20,7 +20,7 @@ import { enforceInMemoryRateLimit, evaluateSharedRateLimit, RequestTimestampStor
 import { runAuthMiddleware, runRateLimitMiddleware } from '../modules/middlewareFactory.js';
 import { dataManager, LoadedProviders, LoadedProviderData, type ModelsFileStructure } from '../modules/dataManager.js';
 import { logger } from '../modules/logger.js';
-import { redactAuthorizationHeader, redactToken } from '../modules/redaction.js';
+import { redactAuthorizationHeader, redactToken, hashToken } from '../modules/redaction.js';
 import { fetchWithTimeout } from '../modules/http.js';
 import {
     createInteractionToken,
@@ -91,6 +91,63 @@ async function authAndUsageMiddleware(request: Request, response: Response, next
             return { status: 500, body: { error: 'Internal Server Error', reference: 'Error during authentication processing.', timestamp: new Date().toISOString() } };
         },
     });
+}
+
+// Auth that verifies the key exists but does NOT enforce token-usage limits.
+async function authKeyOnlyMiddleware(request: Request, response: Response, next: () => void) {
+    try {
+        const authHeader = request.headers['authorization'] || request.headers['Authorization'];
+        let apiKey: string | null = null;
+        if (authHeader && typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
+            apiKey = authHeader.slice(7);
+        } else if (typeof request.headers['api-key'] === 'string') {
+            apiKey = request.headers['api-key'];
+        } else if (typeof request.headers['x-api-key'] === 'string') {
+            apiKey = request.headers['x-api-key'];
+        }
+
+        if (!apiKey) {
+            return response.status(401).json({
+                error: 'Unauthorized: Missing or invalid API key header.',
+                timestamp: new Date().toISOString(),
+            });
+        }
+
+        const keys = await dataManager.load<KeysFile>('keys');
+        const userData = keys[apiKey];
+        if (!userData) {
+            return response.status(401).json({
+                error: 'Unauthorized: Invalid API key.',
+                timestamp: new Date().toISOString(),
+            });
+        }
+
+        const tierLimits = tiersData[userData.tier as keyof typeof tiersData];
+        if (!tierLimits) {
+            return response.status(401).json({
+                error: 'Unauthorized: Invalid API key configuration.',
+                timestamp: new Date().toISOString(),
+            });
+        }
+
+        request.apiKey = apiKey;
+        request.userId = userData.userId;
+        request.userRole = userData.role;
+        request.userTokenUsage = userData.tokenUsage;
+        request.userTier = userData.tier;
+        request.tierLimits = tierLimits;
+
+        next();
+    } catch (error: any) {
+        await logError({ message: 'Error during key-only authentication', errorMessage: error?.message }, request);
+        if (!response.completed) {
+            response.status(500).json({
+                error: 'Internal Server Error',
+                reference: 'Error during authentication processing.',
+                timestamp: new Date().toISOString(),
+            });
+        }
+    }
 }
 
 // Remains synchronous
@@ -1325,8 +1382,55 @@ openaiRouter.post('/generate_key', authAndUsageMiddleware, async (request: Reque
     }
   }
 });
+
  
- 
+// Key Details Route (no token-usage enforcement)
+openaiRouter.get('/keys/me', authKeyOnlyMiddleware, rateLimitMiddleware, async (request: Request, response: Response) => {
+    try {
+        const apiKey = request.apiKey;
+        if (!apiKey) {
+            if (!response.completed) {
+                return response.status(401).json({ error: 'Unauthorized: Missing API key', timestamp: new Date().toISOString() });
+            }
+            return;
+        }
+
+        const keys = await dataManager.load<KeysFile>('keys');
+        const userData = keys[apiKey];
+        if (!userData) {
+            if (!response.completed) {
+                return response.status(401).json({ error: 'Unauthorized: Invalid API key', timestamp: new Date().toISOString() });
+            }
+            return;
+        }
+
+        const tierLimits = request.tierLimits || tiersData[userData.tier as keyof typeof tiersData];
+        const maxTokens = tierLimits?.max_tokens ?? null;
+        const tokenUsage = typeof userData.tokenUsage === 'number' ? userData.tokenUsage : 0;
+        const requestCount = typeof userData.requestCount === 'number' ? userData.requestCount : 0;
+        const remainingTokens = maxTokens !== null ? Math.max(0, maxTokens - tokenUsage) : null;
+
+        return response.json({
+            api_key_preview: redactToken(apiKey),
+            api_key_hash: hashToken(apiKey),
+            user: { id: userData.userId, role: userData.role },
+            tier: { id: userData.tier, limits: tierLimits },
+            usage: {
+                token_usage: tokenUsage,
+                request_count: requestCount,
+                remaining_tokens: remainingTokens,
+                max_tokens: maxTokens,
+            },
+            timestamp: new Date().toISOString(),
+        });
+    } catch (error: any) {
+        await logError(error, request);
+        if (!response.completed) {
+            response.status(500).json({ error: 'Internal Server Error', timestamp: new Date().toISOString() });
+        }
+    }
+});
+
 // Apply Middlewares - order matters
 // Fix: Remove '/v1' prefix since the router is already mounted at '/v1' in server.ts
 openaiRouter.use('/', authAndUsageMiddleware); 

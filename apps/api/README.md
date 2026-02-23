@@ -20,6 +20,8 @@ apps/api/
 ├── tiers.json          # Defines API usage tiers and their limits
 ├── providers.schema.json # JSON schema for providers.json
 ├── models.schema.json  # JSON schema for models.json
+├── openapi.json        # OpenAPI spec served at /openapi.json
+├── excluded-errors.json # Error patterns excluded from provider auto-disable
 |
 ├── routes/             # Contains route handlers for different API endpoints
 │   ├── admin.ts        # Admin-specific routes (e.g., adding providers, generating keys)
@@ -30,6 +32,7 @@ apps/api/
 │   ├── groq.ts         # Groq compatible API endpoints
 │   ├── openrouter.ts   # OpenRouter compatible API endpoints
 │   ├── ollama.ts       # Ollama compatible API endpoints
+│   ├── openapi.ts      # OpenAPI spec route
 │   └── ...             # Other provider-specific routes
 |
 ├── providers/          # Logic for interacting with specific AI provider APIs
@@ -43,6 +46,7 @@ apps/api/
 │   ├── dataManager.ts  # Manages dual-source data (Redis/filesystem) with automatic failover
 │   ├── modelUpdater.ts # Handles automatic updates to models.json based on provider data
 │   ├── errorLogger.ts  # Centralized error logging to file and Redis
+│   ├── errorExclusion.ts # Excludes errors from provider auto-disable
 │   ├── userData.ts     # Manages user API key generation, validation, and usage tracking
 │   ├── compute.ts      # Computes provider statistics, scores, and applies EMA
 │   ├── db.ts           # Redis database connection and operations
@@ -62,44 +66,30 @@ apps/api/
 │   ├── updateproviders.ts # Provider update scripts
 │   └── ...             # Other development utilities
 |
-└── server/             # CLI scripts (legacy, being migrated to API routes)
-    ├── addProvider.ts  # Script to add/update providers
-    └── generateApiKey.ts # Script to generate API keys
+├── server/             # CLI scripts (legacy, being migrated to API routes)
+│   ├── addProvider.ts  # Script to add/update providers
+│   └── generateApiKey.ts # Script to generate API keys
+└── ws/                 # WebSocket and realtime handlers
 ```
 
 ## Features
 
-*   **Multi-Provider Support**: Integrates with various AI model providers (OpenAI, Anthropic, Gemini, Groq, OpenRouter, Ollama, etc.).
-*   **Dual Data Storage**: Supports both Redis and filesystem-based data storage with automatic failover and preference configuration.
-*   **Dynamic Model Management**: Automatically updates `models.json` with provider counts based on active providers in `providers.json`.
-*   **OpenWebUI Compatibility**: `models.json` format is designed for compatibility with OpenWebUI.
-*   **Environment-Driven Configuration**: Enable/disable specific provider routers via environment variables.
-*   **Tier-Based Rate Limiting**: Implements RPS, RPM, RPD limits based on user tiers defined in `tiers.json`.
-*   **API Key Management**: Generation and validation of user API keys with tier-based permissions.
-*   **Provider Statistics & Scoring**: Tracks provider performance (response times, error rates, token speed) and calculates a score for intelligent routing.
-*   **Error Handling & Logging**: Comprehensive error logging to both Redis and filesystem (`logs/api-error.jsonl`) with fallback support.
-*   **Admin Endpoints**: Secure endpoints for managing providers, API keys, and metrics.
-*   **Development Testing Suite**: Comprehensive testing infrastructure with configurable mock providers.
-*   **Mock Provider Server**: Full-featured mock AI provider for testing with configurable response times, error rates, and behaviors.
-*   **WebSocket Endpoint**: Unified `/ws` endpoint for authenticated real-time chat completions (extensible for streaming & other actions).
-*   **OpenAPI Spec**: Served at `/openapi.json` for client integration.
+*   **Multi-Provider Support**: Integrates with OpenAI, Anthropic, Gemini, Groq, OpenRouter, Ollama, DeepSeek, xAI, Imagen, and more via provider configs.
+*   **OpenAI-Compatible API**: `/v1` supports chat completions, responses, embeddings, images, videos, audio (speech/transcriptions), and key introspection.
+*   **Provider-Compatible Routers**: Native-style endpoints for Anthropic (`/v3`), Gemini (`/v2`), Groq (`/v4`), Ollama (`/v5`), and OpenRouter (`/v6`).
+*   **Dual Data Storage**: Redis primary with filesystem fallback and a short in-memory cache.
+*   **Dynamic Model Management**: Updates `models.json` with provider counts and model capabilities (OpenWebUI compatible).
+*   **Tier-Based Rate Limiting**: RPS/RPM/RPD limits and provider-score gating per tier (`tiers.json`).
+*   **Provider Routing & Health**: Provider scoring, retries/fallback, auto-disable on repeated failures, and error-exclusion patterns.
+*   **Image URL Inlining Proxy**: Optional HTTP image fetch with SSRF protections, size/time limits, and per-request referer override.
+*   **WebSocket & Realtime**: `/ws` for chat and `/v1/realtime` for realtime-compatible sessions.
+*   **OpenAPI Spec**: Served at `/openapi.json` and `/api/openapi.json`.
 
 ## Prerequisites
 
 *   Node.js (version specified in `package.json` or higher)
 *   pnpm (version specified in `package.json`)
 
-## Setup
-
-1.  **Clone the repository.**
-2.  **Navigate to the `apps/api` directory:**
-    ```bash
-    cd apps/api
-    ```
-3.  **Install dependencies:**
-    ```bash
-    pnpm install
-    ```
 ## Setup
 
 1.  **Clone the repository.**
@@ -149,6 +139,7 @@ apps/api/
 
     ### Logging & Security
     *   `LOG_LEVEL`: `debug`, `info`, `warn`, `error`, or `silent` (default: `debug` in dev, `info` in production).
+    *   `LOG_SENSITIVE_PAYLOADS`: Log full URLs/body snippets for debugging (default: `false`).
     *   `API_KEY_HASH_SECRET`: Secret used to hash API keys in logs (default: `anygpt-api`).
     *   `RATE_LIMIT_HASH_SECRET`: Secret used to hash API keys for Redis rate-limiting keys (default: `anygpt-rate-limit`).
     *   `ADMIN_KEYS_LOG_MAX_ENTRIES`: Maximum number of admin key log entries returned (default: 1000).
@@ -159,6 +150,26 @@ apps/api/
     *   `ADMIN_KEYS_MAX_BODY_BYTES`: Max body size for open admin key ingest endpoint (default: 4096).
     *   `ADMIN_KEYS_ALLOWED_PROVIDERS`: Optional comma-separated allowlist for provider IDs (default: unset, allows any provider).
     *   `ADMIN_METRICS_MAX_ERROR_LINES`: Max error log lines scanned for metrics (default: 200000).
+
+    ### Provider Health & Capabilities
+    *   `DISABLE_PROVIDER_AUTO_DISABLE`: Set to `true` to disable auto-disable behavior (default: auto-disable enabled).
+    *   `DISABLE_PROVIDER_AFTER_MODELS`: Disable a provider after this many models are disabled (default: 2).
+    *   `MODEL_CAPS_REFRESH_MS`: Model capability refresh interval in ms (default: 5000).
+
+    ### Upstream Timeouts & Caches
+    *   `UPSTREAM_TIMEOUT_MS`: Upstream HTTP timeout in ms (default: 120000).
+    *   `VIDEO_REQUEST_CACHE_TTL_MS`: TTL for cached video request IDs in ms (default: 3600000).
+
+    ### Image URL Fetch Proxy
+    *   `IMAGE_FETCH_TIMEOUT_MS`: Image fetch timeout in ms (default: 15000).
+    *   `IMAGE_FETCH_MAX_BYTES`: Max image bytes to inline (default: 8MB).
+    *   `IMAGE_FETCH_MAX_REDIRECTS`: Max redirects to follow (default: 3).
+    *   `IMAGE_FETCH_ALLOW_PRIVATE`: Allow private/loopback hosts (default: `false`).
+    *   `IMAGE_FETCH_FORWARD_AUTH`: Forward Authorization header to the original host (default: `false`).
+    *   `IMAGE_FETCH_ALLOWED_PROTOCOLS`: Allowlisted protocols (default: `http,https`).
+    *   `IMAGE_FETCH_ALLOWED_HOSTS`: Optional allowlist of hosts or suffixes (comma-separated).
+    *   `IMAGE_FETCH_USER_AGENT`: User-Agent sent when fetching images.
+    *   `IMAGE_FETCH_REFERER`: Default Referer for image fetches (can be overridden per request).
 
 5.  **Initial Data Files**: The server will attempt to create `providers.json`, `models.json`, and `keys.json` if they don't exist. The data will be stored in Redis if configured, with filesystem fallback.
 
@@ -220,22 +231,53 @@ See `dev/MOCK_SERVER_CONFIG.md` for detailed documentation on configuring respon
 
 ## API Endpoints
 
-The server exposes several sets of endpoints:
+Authentication is typically via `Authorization: Bearer <YOUR_ANYGPT_API_KEY>` or `api-key`/`x-api-key` headers (provider-compatible routes map provider headers to your AnyGPT key).
 
-*   **Provider-Specific Endpoints** (e.g., `/openai/v1/chat/completions`, `/anthropic/v3/messages`):
-    *   These mimic the native APIs of providers like OpenAI, Anthropic, Gemini, and Groq.
-    *   Refer to the respective files in `routes/` for exact paths and request/response formats.
-    *   Authentication: Typically via `Authorization: Bearer <YOUR_ANYGPT_API_KEY>` or provider-specific headers like `x-api-key` mapped to your AnyGPT key.
-*   **Model Information Endpoints** (e.g., `/api/models`):
-    *   `GET /api/models`: Lists available models from `models.json`.
-    *   `POST /api/admin/models/refresh-provider-counts`: Manually triggers a refresh of provider counts in `models.json` (requires admin privileges).
-*   **Admin Endpoints** (prefixed with `/api/admin`, require admin privileges):
-    *   `POST /api/admin/providers`: Adds or updates a provider configuration in `providers.json` and fetches its models.
-    *   `POST /api/admin/users/generate-key`: Generates a new API key for a user.
+### OpenAI-Compatible (`/v1`)
+Common endpoints:
+*   `POST /v1/chat/completions`
+*   `POST /v1/responses`
+*   `POST /v1/embeddings`
+*   `POST /v1/images/generations`
+*   `POST /v1/images/edits`
+*   `POST /v1/videos/generations`
+*   `GET /v1/videos/{requestId}`
+*   `POST /v1/audio/speech`
+*   `POST /v1/audio/transcriptions`
+*   `GET /v1/audio/voices`
+*   `GET /v1/audio/models`
+*   `GET /v1/keys/me` (key usage/metrics)
+*   `POST /v1/generate_key` (admin)
+*   `POST /v1/interactions` and `GET /v1/interactions/{interactionId}`
+
+### Provider-Compatible Routers
+*   Gemini: `/v2`
+*   Anthropic: `/v3`
+*   Groq: `/v4`
+*   Ollama: `/v5`
+*   OpenRouter: `/v6`
+
+### Models and Metadata
+*   `GET /v1/models` (aliases: `/v1/chat/completions/models`, `/v1/chat/completion/models`)
+*   `POST /admin/models/refresh-provider-counts` or `POST /api/admin/models/refresh-provider-counts` (admin)
+
+### Admin
+*   Admin endpoints live under `/api/admin` (providers, API keys, metrics). See `openapi.json` for the full list.
+
+### OpenAPI Spec
+*   `GET /openapi.json`
+*   `GET /api/openapi.json`
+
+## Image URL Fetching
+
+The OpenAI- and OpenRouter-compatible paths can inline HTTP image URLs into base64 before sending upstream. This avoids provider-side URL fetch failures and applies SSRF protections.
+
+*   Use `x-image-fetch-referer` (or `x-image-referer`) to set a per-request Referer for image fetches.
+*   Configure allowlists, size limits, and timeouts with the `IMAGE_FETCH_*` environment variables.
 
 ## WebSocket Usage
 
-The server exposes a unified WebSocket endpoint at `ws://<host>:<port>/ws` for chat-style completions and future real-time features.
+The server exposes a unified WebSocket endpoint at `ws://<host>:<port>/ws` for chat-style completions. An OpenAI Realtime-compatible endpoint is also exposed at `ws://<host>:<port>/v1/realtime`.
 
 ### Message Flow
 
@@ -312,6 +354,7 @@ Set `DATA_SOURCE_PREFERENCE=redis` or `DATA_SOURCE_PREFERENCE=filesystem` in you
 *   API keys are managed in `keys.json` (filesystem) or Redis.
 *   User tiers and their associated rate limits (RPS, RPM, RPD) and provider score preferences are defined in `tiers.json`.
 *   The `generalAuthMiddleware` in `server.ts` handles initial API key validation, and specific middlewares in provider routes (`openai.ts`, etc.) or admin routes (`admin.ts`) enforce authentication and authorization.
+*   `GET /v1/keys/me` returns usage and tier info for the current key (validates the key even if token usage is exhausted).
 *   Default admin users can be auto-created using the `DEFAULT_ADMIN_USER_ID` and `DEFAULT_ADMIN_API_KEY` environment variables.
 
 ## Logging & Monitoring
@@ -320,6 +363,7 @@ Set `DATA_SOURCE_PREFERENCE=redis` or `DATA_SOURCE_PREFERENCE=filesystem` in you
 *   **Error Logging**: Detailed errors are logged in JSON Lines format to:
     - Redis (if `ERROR_LOG_TO_REDIS=true` and Redis is available)
     - Filesystem fallback (`logs/api-error.jsonl`)
+*   **Error Exclusions**: Configure `excluded-errors.json` to avoid counting known transient errors toward auto-disable logic.
 *   **Provider Statistics**: Response times, error rates, and performance metrics are continuously tracked and stored.
 *   **Request Tracking**: All API requests are logged with timestamps, response times, and usage statistics.
 
