@@ -146,9 +146,49 @@ export class GeminiAI implements IAIProvider {
     return config;
   }
 
+  private contentToText(content: string | ContentPart[]): string {
+    if (typeof content === 'string') return content;
+    if (!Array.isArray(content)) return String(content ?? '');
+    const textParts = content
+      .map((part) => {
+        if (!part || typeof part !== 'object') return '';
+        if (part.type === 'text' || part.type === 'input_text') return part.text || '';
+        return '';
+      })
+      .filter((text) => text.length > 0);
+    return textParts.join('\n');
+  }
+
+  private buildContentsFromMessages(message: IMessage): { contents: any[]; systemText: string } {
+    const sourceMessages = Array.isArray(message.messages) && message.messages.length > 0
+      ? message.messages
+      : [{ role: message.role || 'user', content: message.content }];
+
+    const contents: any[] = [];
+    const systemTexts: string[] = [];
+
+    for (const entry of sourceMessages) {
+      const roleRaw = typeof entry.role === 'string' ? entry.role.toLowerCase() : 'user';
+      if (roleRaw === 'system') {
+        const text = this.contentToText(entry.content);
+        if (text) systemTexts.push(text);
+        continue;
+      }
+      const geminiRole = roleRaw === 'assistant' || roleRaw === 'model' ? 'model' : 'user';
+      contents.push({ role: geminiRole, parts: this.toGeminiContent(entry.content) });
+    }
+
+    if (contents.length === 0) {
+      contents.push({ role: 'user', parts: this.toGeminiContent(message.content) });
+    }
+
+    return { contents, systemText: systemTexts.join('\n\n') };
+  }
+
   private buildRequestBody(message: IMessage): Record<string, any> {
+    const { contents, systemText: systemFromMessages } = this.buildContentsFromMessages(message);
     const body: Record<string, any> = {
-      contents: [{ role: 'user', parts: this.toGeminiContent(message.content) }],
+      contents,
       generationConfig: this.buildGenerationConfig(message),
     };
 
@@ -156,7 +196,7 @@ export class GeminiAI implements IAIProvider {
       ? message.system.filter((s) => typeof s === 'string' && s.trim()).join('\n')
       : (typeof message.system === 'string' ? message.system : '');
     const instructions = typeof message.instructions === 'string' ? message.instructions.trim() : '';
-    const instructionText = [systemText, instructions].filter(Boolean).join('\n\n');
+    const instructionText = [systemFromMessages, systemText, instructions].filter(Boolean).join('\n\n');
     if (instructionText) {
       body.systemInstruction = {
         parts: [{ text: instructionText }],

@@ -78,32 +78,26 @@ router.post('/v5/api/chat', authAndUsageMiddleware, rateLimitMiddleware, async (
          if (!Array.isArray(requestBody.messages) || requestBody.messages.length === 0) {
              return response.status(400).json({ error: 'Missing or invalid \'messages\' array.' });
         }
-        // Find the last user message content
-        let lastUserContent: string | null = null;
-        for (let i = requestBody.messages.length - 1; i >= 0; i--) {
-            if (requestBody.messages[i].role === 'user') {
-                const content = requestBody.messages[i].content;
-                 // Ensure content is a non-empty string
-                 if (typeof content === 'string' && content.trim()) {
-                    lastUserContent = content;
-                    break;
-                }
-            }
-        }
-        if (!lastUserContent) {
-             return response.status(400).json({ error: 'Could not find valid user content in messages.' });
-        }
-
         const modelId = requestBody.model;
         
         // --- Map to internal format ---
-        const formattedMessages: IMessage[] = [{ content: lastUserContent, model: { id: modelId } }];
+        const formattedMessages: IMessage[] = requestBody.messages.map((msg: any) => ({
+            role: msg.role,
+            content: msg.content,
+            model: { id: modelId }
+        }));
  
         // --- Call the central message handler ---
         const result = await messageHandler.handleMessages(formattedMessages, modelId, userApiKey);
  
         const totalTokensUsed = typeof result.tokenUsage === 'number' ? result.tokenUsage : 0;
-        const promptTokens = typeof result.promptTokens === 'number' ? result.promptTokens : Math.ceil(lastUserContent.length / 4); 
+        const estimateTokens = (content: any) => {
+            if (typeof content === 'string') return Math.ceil(content.length / 4);
+            return Math.ceil(JSON.stringify(content ?? '').length / 4);
+        };
+        const promptTokens = typeof result.promptTokens === 'number'
+            ? result.promptTokens
+            : formattedMessages.reduce((sum, msg) => sum + estimateTokens(msg.content), 0); 
         const completionTokens = typeof result.completionTokens === 'number' ? result.completionTokens : Math.max(0, totalTokensUsed - promptTokens); 
 
         await updateUserTokenUsage(totalTokensUsed, userApiKey); 

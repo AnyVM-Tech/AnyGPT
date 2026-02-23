@@ -224,13 +224,18 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
           if (typeof content !== 'string') {
             return send({ type: 'error', code: 'bad_request', message: 'Last message content must be string', requestId });
           }
+          const formattedMessages = messages.map((msg) => ({
+            role: msg.role,
+            content: msg.content,
+            model: { id: model },
+          }));
 
           const started = Date.now();
           send({ type: 'chat.start', requestId });
 
           if (stream) {
             try {
-              const streamHandler = messageHandler.handleStreamingMessages([{ content, model: { id: model } } as any], model, ctx.apiKey);
+              const streamHandler = messageHandler.handleStreamingMessages(formattedMessages as any, model, ctx.apiKey);
 
               let totalTokenUsage = 0;
               let providerId: string | undefined;
@@ -276,7 +281,7 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
           }
 
           try {
-            const result: MessageResult = await messageHandler.handleMessages([{ content, model: { id: model } } as any], model, ctx.apiKey);
+            const result: MessageResult = await messageHandler.handleMessages(formattedMessages as any, model, ctx.apiKey);
             const totalTokens = typeof result.tokenUsage === 'number' ? result.tokenUsage : estimateTokens(result.response || '');
             await updateUserTokenUsage(totalTokens, ctx.apiKey);
 

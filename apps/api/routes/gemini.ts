@@ -171,34 +171,32 @@ router.post('/models/:modelId/generateContent', authAndUsageMiddleware, rateLimi
             } else { return; }
         }
 
-        const lastUserContent = [...body.contents]
-            .reverse()
-            .find((contentEntry: any) => contentEntry && contentEntry.role === 'user' && Array.isArray(contentEntry.parts));
+        const mappedMessages = body.contents
+            .map((contentEntry: any) => {
+                if (!contentEntry || !Array.isArray(contentEntry.parts)) return null;
+                const mappedParts = contentEntry.parts
+                    .map((part: any) => mapGeminiInputPart(part))
+                    .filter((part: ContentPart | null): part is ContentPart => part !== null);
+                if (mappedParts.length === 0) return null;
 
-        if (!lastUserContent || !Array.isArray(lastUserContent.parts) || lastUserContent.parts.length === 0) {
-             const errDetail = { message: "Invalid request body: Could not extract valid user parts from 'contents'.", code: 400, status: 'INVALID_ARGUMENT' };
-             await logError(errDetail, request); // Renamed and added await
-             if (!response.completed) {
-                return response.status(400).json({ error: errDetail, timestamp: new Date().toISOString() });
-             } else { return; }
-        }
+                const messageContent: string | ContentPart[] =
+                    mappedParts.length === 1 && mappedParts[0].type === 'text'
+                        ? mappedParts[0].text
+                        : mappedParts;
 
-        const mappedParts = lastUserContent.parts
-            .map((part: any) => mapGeminiInputPart(part))
-            .filter((part: ContentPart | null): part is ContentPart => part !== null);
+                const roleRaw = typeof contentEntry.role === 'string' ? contentEntry.role : 'user';
+                const normalizedRole = roleRaw === 'model' ? 'assistant' : roleRaw;
+                return { role: normalizedRole, content: messageContent };
+            })
+            .filter((msg: { role: string; content: string | ContentPart[] } | null): msg is { role: string; content: string | ContentPart[] } => msg !== null);
 
-        if (mappedParts.length === 0) {
-            const errDetail = { message: "Invalid request body: Unsupported or empty user parts in 'contents'.", code: 400, status: 'INVALID_ARGUMENT' };
+        if (mappedMessages.length === 0) {
+            const errDetail = { message: "Invalid request body: Unsupported or empty 'contents'.", code: 400, status: 'INVALID_ARGUMENT' };
             await logError(errDetail, request);
             if (!response.completed) {
                 return response.status(400).json({ error: errDetail, timestamp: new Date().toISOString() });
             } else { return; }
         }
-
-        const messageContent: string | ContentPart[] =
-            mappedParts.length === 1 && mappedParts[0].type === 'text'
-                ? mappedParts[0].text
-                : mappedParts;
 
         const generationConfig = body?.generationConfig && typeof body.generationConfig === 'object'
             ? body.generationConfig
@@ -214,18 +212,28 @@ router.post('/models/:modelId/generateContent', authAndUsageMiddleware, rateLimi
 
         const voiceName = generationConfig?.speechConfig?.voiceConfig?.prebuiltVoiceConfig?.voiceName;
 
-        const formattedMessages: IMessage[] = [{
-            content: messageContent,
+        const systemInstructionParts = Array.isArray(body?.systemInstruction?.parts) ? body.systemInstruction.parts : [];
+        const systemInstructionText = systemInstructionParts
+            .map((part: any) => (typeof part?.text === 'string' ? part.text : ''))
+            .filter((text: string) => text.length > 0)
+            .join('\n');
+
+        const formattedMessages: IMessage[] = mappedMessages.map((msg: { role: string; content: string | ContentPart[] }, idx: number) => ({
+            role: msg.role,
+            content: msg.content,
             model: { id: modelId },
-            modalities: responseModalities,
-            audio: {
-                format: responseMimeType,
-                voice: typeof voiceName === 'string' ? voiceName : undefined,
-            },
-            temperature: typeof generationConfig?.temperature === 'number' ? generationConfig.temperature : undefined,
-            top_p: typeof generationConfig?.topP === 'number' ? generationConfig.topP : undefined,
-            max_output_tokens: typeof generationConfig?.maxOutputTokens === 'number' ? generationConfig.maxOutputTokens : undefined,
-        }];
+            ...(idx === mappedMessages.length - 1 ? {
+                modalities: responseModalities,
+                audio: {
+                    format: responseMimeType,
+                    voice: typeof voiceName === 'string' ? voiceName : undefined,
+                },
+                temperature: typeof generationConfig?.temperature === 'number' ? generationConfig.temperature : undefined,
+                top_p: typeof generationConfig?.topP === 'number' ? generationConfig.topP : undefined,
+                max_output_tokens: typeof generationConfig?.maxOutputTokens === 'number' ? generationConfig.maxOutputTokens : undefined,
+                system: systemInstructionText || undefined,
+            } : {}),
+        }));
         const result = await messageHandler.handleMessages(formattedMessages, modelId, userApiKey);
  
         const totalTokensUsed = typeof result.tokenUsage === 'number' ? result.tokenUsage : 0;

@@ -182,6 +182,32 @@ export class OpenAI implements IAIProvider {
     return typeof val === 'object' ? JSON.stringify(val) : String(val);
   }
 
+  private normalizeChatContent(content: any): any {
+    if (!Array.isArray(content)) return content;
+    return content.map((part) => {
+      if (!part || typeof part !== 'object') return part;
+      const type = String((part as any).type || '').toLowerCase();
+      if (type === 'input_text') {
+        return { type: 'text', text: (part as any).text ?? '' };
+      }
+      if (type === 'input_image' && (part as any).image_url) {
+        return { type: 'image_url', image_url: (part as any).image_url };
+      }
+      return part;
+    });
+  }
+
+  private normalizeChatMessages(message: IMessage) {
+    const source = Array.isArray(message.messages) && message.messages.length > 0
+      ? message.messages
+      : [{ role: message.role || 'user', content: message.content }];
+
+    return source.map((entry) => ({
+      role: typeof entry.role === 'string' && entry.role.trim() ? entry.role : 'user',
+      content: this.normalizeChatContent(entry.content),
+    }));
+  }
+
   private attachChatOptionalParams(target: Record<string, any>, message: IMessage) {
     if (message.system) target.system = message.system;
     if (message.response_format) target.response_format = message.response_format;
@@ -363,7 +389,7 @@ export class OpenAI implements IAIProvider {
   private buildChatPayload(message: IMessage, stream: boolean) {
     const payload: Record<string, any> = {
       model: message.model.id,
-      messages: [{ role: 'user', content: message.content }],
+      messages: this.normalizeChatMessages(message),
       ...(stream ? { stream: true } : {}),
     };
     this.attachChatOptionalParams(payload, message);
@@ -383,7 +409,10 @@ export class OpenAI implements IAIProvider {
   }
 
   private buildResponsesPayload(message: IMessage, stream: boolean) {
-    const input = this.normalizeResponsesInput(message.content);
+    const inputSource = Array.isArray(message.messages) && message.messages.length > 0
+      ? message.messages
+      : message.content;
+    const input = this.normalizeResponsesInput(inputSource);
 
     const payload: Record<string, any> = {
       model: message.model.id,

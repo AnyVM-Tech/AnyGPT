@@ -57,7 +57,21 @@ function rateLimitMiddleware(request: Request, response: Response, next: () => v
         }
     });
 }
- 
+
+function normalizeImageFetchReferer(raw?: string | string[]): string | undefined {
+    const value = Array.isArray(raw) ? raw[0] : raw;
+    if (!value || typeof value !== 'string') return undefined;
+    try {
+        const parsed = new URL(value);
+        if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+            return parsed.toString();
+        }
+    } catch {
+        return undefined;
+    }
+    return undefined;
+}
+
 // --- Routes ---
  
 // OpenRouter Chat Completions Route
@@ -84,13 +98,29 @@ router.post('/v6/chat/completions', authAndUsageMiddleware, rateLimitMiddleware,
         const baseModelId = modelIdParts[modelIdParts.length - 1]; // Take the part after the last '/'
 
         // --- Map to internal format using BASE model ID ---
-        const formattedMessages: IMessage[] = rawMessages.map(msg => ({ content: msg.content, model: { id: baseModelId } }));
+        const imageFetchReferer = normalizeImageFetchReferer(
+            (request.headers['x-image-fetch-referer'] as string | undefined) ||
+            (request.headers['x-image-referer'] as string | undefined)
+        );
+
+        const formattedMessages: IMessage[] = rawMessages.map(msg => ({
+            role: msg.role,
+            content: msg.content,
+            model: { id: baseModelId },
+            image_fetch_referer: imageFetchReferer
+        }));
  
         // --- Call the central message handler with BASE model ID ---
         const result = await messageHandler.handleMessages(formattedMessages, baseModelId, userApiKey);
  
         const totalTokensUsed = typeof result.tokenUsage === 'number' ? result.tokenUsage : 0;
-        const promptTokens = typeof result.promptTokens === 'number' ? result.promptTokens : Math.ceil(String(formattedMessages[formattedMessages.length - 1].content || '').length / 4);
+        const estimateTokens = (content: any) => {
+            if (typeof content === 'string') return Math.ceil(content.length / 4);
+            return Math.ceil(JSON.stringify(content ?? '').length / 4);
+        };
+        const promptTokens = typeof result.promptTokens === 'number'
+            ? result.promptTokens
+            : formattedMessages.reduce((sum, msg) => sum + estimateTokens(msg.content), 0);
         const completionTokens = typeof result.completionTokens === 'number' ? result.completionTokens : Math.max(0, totalTokensUsed - promptTokens);
 
         await updateUserTokenUsage(totalTokensUsed, userApiKey); 
@@ -142,6 +172,14 @@ router.post('/v6/chat/completions', authAndUsageMiddleware, rateLimitMiddleware,
         }
         if (error.message.includes('limit reached') || error.message.includes('Rate limit exceeded')) {
              return response.status(429).json({ error: { message: error.message, code: 'rate_limit_exceeded' }});
+        }
+        if (
+            error.message.toLowerCase().includes('requires more credits') ||
+            error.message.toLowerCase().includes('insufficient credits') ||
+            error.message.toLowerCase().includes('can only afford') ||
+            error.message.includes('status 402')
+        ) {
+             return response.status(402).json({ error: { message: 'Payment Required: insufficient credits for the requested max_tokens. Reduce max_tokens or add credits to the provider key.', code: 'payment_required' }});
         }
          if (error.message.includes('No currently active provider supports model') || error.message.includes('No provider (active or disabled) supports model')) {
              // Model not found

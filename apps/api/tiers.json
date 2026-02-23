@@ -8,17 +8,25 @@
     "max_provider_score": 70 
   },
   "pro": {
-    "rps": 50,
-    "rpm": 10000,
-    "rpd": 100000,
+    "rps": 80,
+    "rpm": 4000,
+    "rpd": 40000,
     "max_tokens": 10000000,
+    "min_provider_score": 50,
+    "max_provider_score": null 
+  },
+  "pro_130m": {
+    "rps": 80,
+    "rpm": 4000,
+    "rpd": 40000,
+    "max_tokens": 3900000000,
     "min_provider_score": 50,
     "max_provider_score": null 
   },
   "enterprise": {
     "rps": 10000,
-    "rpm": 100000,
-    "rpd": 1000000,
+    "rpm": 500000,
+    "rpd": 5000000,
     "max_tokens": null,
     "min_provider_score": 85,
     "max_provider_score": null 

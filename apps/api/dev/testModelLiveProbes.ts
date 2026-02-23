@@ -119,6 +119,8 @@ const ACCESS_PATTERNS = [
   "don't have access",
   'you do not have access',
   'no access to model',
+  'organization must be verified',
+  'verify organization',
   'user not found',
   'unauthorized',
   'invalid api key',
@@ -2043,16 +2045,20 @@ async function main() {
             }
 
             if (isAccessError(outcomeLower)) {
+              const accessReason = (outcomeLower.includes('organization must be verified') || outcomeLower.includes('verify organization'))
+                ? 'organization verification required'
+                : 'no access';
+              removeModelFromProvider(provider as LoadedProviderData, model.id, accessReason);
               providerTried.add(provider.id);
               const nextProvider = pickProvider(providers, model.id, providerValidity, providerTried);
               if (nextProvider) {
-                appendProbeLog({ type: 'probe_retry', modelId: model.id, providerId: provider.id, test: key, reason: 'no access: switching provider' });
+                appendProbeLog({ type: 'probe_retry', modelId: model.id, providerId: provider.id, test: key, reason: `${accessReason}: switching provider` });
                 provider = nextProvider;
                 providerExhausted = true;
                 rotateProvider = true;
                 break;
               }
-              skipReason = 'no access';
+              skipReason = accessReason === 'organization verification required' ? 'no access (organization verification required)' : 'no access';
               skipScope = 'model';
               break;
             }

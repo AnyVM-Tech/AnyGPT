@@ -9,6 +9,8 @@
     "not a chat model",
     "not supported in the v1/chat/completions",
     "does not have access to model",
+    "organization must be verified",
+    "verify organization",
     "No available capacity",
     "The server had an error while processing your request",
     "server_error",

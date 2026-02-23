@@ -188,6 +188,71 @@ export class MessageHandler {
         );
     }
 
+    private isInsufficientCreditsError(error: any): boolean {
+        const message = String(error?.message || error || '').toLowerCase();
+        if (!message) return false;
+        return (
+            message.includes('requires more credits') ||
+            message.includes('insufficient credits') ||
+            message.includes('can only afford') ||
+            message.includes('payment required') ||
+            message.includes('status 402')
+        );
+    }
+
+    private getProviderFamilyId(providerId: string): string {
+        const normalized = String(providerId || '').toLowerCase();
+        const dashIndex = normalized.indexOf('-');
+        return dashIndex > 0 ? normalized.slice(0, dashIndex) : normalized;
+    }
+
+    private providerSkipsRequiredCaps(
+        provider: LoadedProviderData,
+        modelId: string,
+        required: Set<ModelCapability>
+    ): boolean {
+        if (!required || required.size === 0) return false;
+        const modelData = provider.models?.[modelId];
+        const skips = (modelData as any)?.capability_skips as Partial<Record<ModelCapability, string>> | undefined;
+        if (!skips) return false;
+        for (const cap of required) {
+            if (skips[cap]) return true;
+        }
+        return false;
+    }
+
+    private appendCreditFallbackProviders(
+        allProviders: LoadedProviders,
+        candidateProviders: LoadedProviderData[],
+        selectedProvider: LoadedProviderData,
+        modelId: string,
+        required: Set<ModelCapability>,
+        triedProviderIds: Set<string>
+    ): number {
+        const targetUrl = selectedProvider.provider_url;
+        const targetFamily = this.getProviderFamilyId(selectedProvider.id);
+        let added = 0;
+
+        for (const provider of allProviders) {
+            if (!provider?.models?.[modelId]) continue;
+            if (triedProviderIds.has(provider.id)) continue;
+            if (candidateProviders.some((cand) => cand.id === provider.id)) continue;
+            const modelData = provider.models?.[modelId] as any;
+            const isDisabled = Boolean(provider.disabled || modelData?.disabled);
+            if (!isDisabled) continue;
+            if (this.providerSkipsRequiredCaps(provider, modelId, required)) continue;
+
+            const sameUrl = targetUrl && provider.provider_url === targetUrl;
+            const sameFamily = this.getProviderFamilyId(provider.id) === targetFamily;
+            if (!sameUrl && !sameFamily) continue;
+
+            candidateProviders.push(provider);
+            added += 1;
+        }
+
+        return added;
+    }
+
     private normalizeUsage(usage: ProviderUsage | undefined, fallbackInput: number, fallbackOutput: number) {
         let inputTokens = typeof usage?.prompt_tokens === 'number' ? usage.prompt_tokens : fallbackInput;
         let outputTokens = typeof usage?.completion_tokens === 'number' ? usage.completion_tokens : fallbackOutput;
@@ -228,6 +293,26 @@ export class MessageHandler {
         });
         this.modelCapabilitiesMap = nextMap;
         this.modelCapabilitiesLastUpdated = now;
+    }
+
+    private ensureProviderConfig(providerId: string, providerData: LoadedProviderData): ProviderConfig | null {
+        const existing = providerConfigs[providerId];
+        if (existing) return existing;
+
+        const key = providerData.apiKey ?? '';
+        const url = providerData.provider_url || '';
+        let config: ProviderConfig;
+
+        if (providerId.includes('openai')) config = { class: OpenAI, args: [key, url] };
+        else if (providerId.includes('openrouter')) config = { class: OpenRouterAI, args: [key, url] };
+        else if (providerId.includes('deepseek')) config = { class: DeepseekAI, args: [key, url] };
+        else if (providerId.includes('imagen')) config = { class: ImagenAI, args: [key] };
+        else if (providerId.includes('gemini') || providerId === 'google') config = { class: GeminiAI, args: [key] };
+        else config = { class: OpenAI, args: [key, url] };
+
+        providerConfigs[providerId] = config;
+        console.warn(`Provider config missing for ${providerId}; created on demand.`);
+        return config;
     }
 
     private detectRequiredCapabilities(messages: IMessage[], modelId: string): Set<ModelCapability> {
@@ -504,10 +589,14 @@ export class MessageHandler {
 
          // --- Attempt Loop ---
          let lastError: any = null;
-         for (const selectedProvider of candidateProviders) {
+         const triedProviderIds = new Set<string>();
+         for (let idx = 0; idx < candidateProviders.length; idx++) {
+             const selectedProvider = candidateProviders[idx];
              const providerId = selectedProvider.id;
+             if (triedProviderIds.has(providerId)) continue;
+             triedProviderIds.add(providerId);
 
-            const providerConfig = providerConfigs[providerId]; 
+            const providerConfig = this.ensureProviderConfig(providerId, selectedProvider);
              if (!providerConfig) {
                  console.error(`Internal config error for provider: ${providerId}. Skipping.`);
                  lastError = new Error(`Internal config error for provider: ${providerId}`);
@@ -558,7 +647,15 @@ export class MessageHandler {
                              ? (modelStats as any).token_generation_speed
                              : this.DEFAULT_GENERATION_SPEED);
                  const lastMessage = messages[messages.length - 1];
+                 const hasRole = messages.some((msg) => typeof msg.role === 'string' && msg.role.trim().length > 0);
+                 const includeMessages = messages.length > 1 || hasRole;
                  const messageForProvider: IMessage = { ...lastMessage, model: { id: modelId } };
+                 if (includeMessages) {
+                     messageForProvider.messages = messages.map((msg) => ({
+                         role: typeof msg.role === 'string' && msg.role.trim() ? msg.role : 'user',
+                         content: msg.content,
+                     }));
+                 }
                  result = await providerInstance.sendMessage(messageForProvider);
                  const attemptDuration = Date.now() - attemptStart;
                  if (result) { 
@@ -649,6 +746,20 @@ export class MessageHandler {
                  // Reinstate this important operational warning
                  console.warn(`Provider ${providerId} failed for model ${modelId}. Error: ${lastError.message}. Trying next provider if available...`);
              }
+
+             if (sendMessageError && this.isInsufficientCreditsError(sendMessageError)) {
+                 const added = this.appendCreditFallbackProviders(
+                     allProvidersOriginal,
+                     candidateProviders,
+                     selectedProvider,
+                     modelId,
+                     requiredCaps,
+                     triedProviderIds
+                 );
+                 if (added > 0) {
+                     console.warn(`Insufficient credits on ${providerId}; added ${added} fallback provider(s) for model ${modelId}.`);
+                 }
+             }
          } // End of loop through candidateProviders
 
          // If loop completes without success
@@ -687,9 +798,13 @@ export class MessageHandler {
         }
 
         let lastError: any = null;
-        for (const selectedProviderData of candidateProviders) {
+        const triedProviderIds = new Set<string>();
+        for (let idx = 0; idx < candidateProviders.length; idx++) {
+            const selectedProviderData = candidateProviders[idx];
             const providerId = selectedProviderData.id;
-            const providerConfig = providerConfigs[providerId];
+            if (triedProviderIds.has(providerId)) continue;
+            triedProviderIds.add(providerId);
+            const providerConfig = this.ensureProviderConfig(providerId, selectedProviderData);
 
             if (!providerConfig) {
                 console.error(`Internal config error for provider: ${providerId}. Skipping.`);
@@ -717,7 +832,15 @@ export class MessageHandler {
 
             try {
                 const lastMessage = messages[messages.length - 1];
+                const hasRole = messages.some((msg) => typeof msg.role === 'string' && msg.role.trim().length > 0);
+                const includeMessages = messages.length > 1 || hasRole;
                 const messageForProvider: IMessage = { ...lastMessage, model: { id: modelId } };
+                if (includeMessages) {
+                    messageForProvider.messages = messages.map((msg) => ({
+                        role: typeof msg.role === 'string' && msg.role.trim() ? msg.role : 'user',
+                        content: msg.content,
+                    }));
+                }
 
                 if (
                     !options?.disablePassthrough &&
@@ -835,6 +958,20 @@ export class MessageHandler {
                 this.updateStatsInBackground(providerId, modelId, null, true, error);
                 console.warn(`Stream failed for provider ${providerId}. Error: ${error.message}. Trying next provider if available...`);
                 lastError = error;
+
+                if (this.isInsufficientCreditsError(error)) {
+                    const added = this.appendCreditFallbackProviders(
+                        allProvidersOriginal,
+                        candidateProviders,
+                        selectedProviderData,
+                        modelId,
+                        requiredCaps,
+                        triedProviderIds
+                    );
+                    if (added > 0) {
+                        console.warn(`Insufficient credits on ${providerId}; added ${added} fallback provider(s) for model ${modelId}.`);
+                    }
+                }
                 continue;
             }
         }

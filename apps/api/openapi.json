@@ -431,6 +431,63 @@
         }
       }
     },
+    "/v1/videos/generations": {
+      "post": {
+        "summary": "Video generation",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyHeader": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Video generation"
+          }
+        }
+      }
+    },
+    "/v1/videos/{requestId}": {
+      "get": {
+        "summary": "Video generation status",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "requestId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Video status"
+          }
+        }
+      }
+    },
     "/v1/images/edits": {
       "post": {
         "summary": "Image edits",

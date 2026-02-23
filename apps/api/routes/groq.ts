@@ -107,12 +107,24 @@ router.post('/v4/chat/completions', authAndUsageMiddleware, rateLimitMiddleware,
         }
         modelId = model;
         
-        const formattedMessages: IMessage[] = rawMessages.map((msg: any) => ({ content: msg.content, model: { id: modelId } }));
+        const formattedMessages: IMessage[] = rawMessages.map((msg: any) => ({
+            role: msg.role,
+            content: msg.content,
+            model: { id: modelId }
+        }));
         const result = await messageHandler.handleMessages(formattedMessages, modelId, userApiKey);
  
         const totalTokensUsed = typeof result.tokenUsage === 'number' ? result.tokenUsage : 0;
-        const outputTokens = typeof result.completionTokens === 'number' ? result.completionTokens : Math.ceil(result.response.length / 4);
-        const promptTokens = typeof result.promptTokens === 'number' ? result.promptTokens : Math.max(0, totalTokensUsed - outputTokens);
+        const estimateTokens = (content: any) => {
+            if (typeof content === 'string') return Math.ceil(content.length / 4);
+            return Math.ceil(JSON.stringify(content ?? '').length / 4);
+        };
+        const promptTokens = typeof result.promptTokens === 'number'
+            ? result.promptTokens
+            : formattedMessages.reduce((sum, msg) => sum + estimateTokens(msg.content), 0);
+        const outputTokens = typeof result.completionTokens === 'number'
+            ? result.completionTokens
+            : Math.ceil(result.response.length / 4);
 
         await updateUserTokenUsage(totalTokensUsed, userApiKey); 
         

@@ -110,29 +110,30 @@ router.post('/v3/messages', authAndUsageMiddleware, rateLimitMiddleware, async (
                return response.status(400).json({ type: 'error', error: errDetail, timestamp });
              } else { return; }
         }
-        // We'll primarily use the *last* user message for our simple handler
-        const lastMessage = body.messages[body.messages.length - 1];
-         if (!lastMessage || lastMessage.role !== 'user' || typeof lastMessage.content !== 'string' || !lastMessage.content.trim()) {
-              const errDetail = { message: 'Invalid or empty content in the last user message.', type: 'invalid_request_error' };
-              await logError(errDetail, request);
-              if (!response.completed) {
-                 return response.status(400).json({ type: 'error', error: errDetail, timestamp });
-              } else { return; }
-         }
-
         const modelId = body.model;
-        const lastUserContent = lastMessage.content;
         
         // --- Map to internal format ---
-        const formattedMessages: IMessage[] = [{ content: lastUserContent, model: { id: modelId } }];
+        const formattedMessages: IMessage[] = body.messages.map((msg: any) => ({
+            role: msg.role,
+            content: msg.content,
+            model: { id: modelId },
+        }));
  
         // --- Call the central message handler ---
         // Assuming handleMessages now returns { response: string; latency: number; tokenUsage: number; providerId: string; }
         const result = await messageHandler.handleMessages(formattedMessages, modelId, userApiKey);
  
         const totalTokensUsed = typeof result.tokenUsage === 'number' ? result.tokenUsage : 0;
-        const inputTokens = typeof result.promptTokens === 'number' ? result.promptTokens : Math.ceil(lastUserContent.length / 4);
-        const outputTokens = typeof result.completionTokens === 'number' ? result.completionTokens : Math.max(0, totalTokensUsed - inputTokens);
+        const estimateTokens = (content: any) => {
+            if (typeof content === 'string') return Math.ceil(content.length / 4);
+            return Math.ceil(JSON.stringify(content ?? '').length / 4);
+        };
+        const inputTokens = typeof result.promptTokens === 'number'
+            ? result.promptTokens
+            : formattedMessages.reduce((sum, msg) => sum + estimateTokens(msg.content), 0);
+        const outputTokens = typeof result.completionTokens === 'number'
+            ? result.completionTokens
+            : Math.max(0, totalTokensUsed - inputTokens);
 
         await updateUserTokenUsage(totalTokensUsed, userApiKey); 
         

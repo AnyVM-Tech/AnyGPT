@@ -185,11 +185,14 @@ const IMAGE_MIN_TOKENS = readEnvNumber('IMAGE_MIN_TOKENS', 0);
 const AUDIO_MIN_TOKENS = readEnvNumber('AUDIO_MIN_TOKENS', 0);
 const LOG_SENSITIVE_PAYLOADS = readEnvBool('LOG_SENSITIVE_PAYLOADS', false);
 const UPSTREAM_TIMEOUT_MS = readEnvNumber('UPSTREAM_TIMEOUT_MS', 120_000);
+const VIDEO_REQUEST_CACHE_TTL_MS = readEnvNumber('VIDEO_REQUEST_CACHE_TTL_MS', 60 * 60 * 1000);
 const IMAGE_FETCH_TIMEOUT_MS = readEnvNumber('IMAGE_FETCH_TIMEOUT_MS', 15_000);
 const IMAGE_FETCH_MAX_BYTES = readEnvNumber('IMAGE_FETCH_MAX_BYTES', 8 * 1024 * 1024);
 const IMAGE_FETCH_MAX_REDIRECTS = readEnvNumber('IMAGE_FETCH_MAX_REDIRECTS', 3);
 const IMAGE_FETCH_ALLOW_PRIVATE = readEnvBool('IMAGE_FETCH_ALLOW_PRIVATE', false);
 const IMAGE_FETCH_FORWARD_AUTH = readEnvBool('IMAGE_FETCH_FORWARD_AUTH', false);
+const IMAGE_FETCH_USER_AGENT = process.env.IMAGE_FETCH_USER_AGENT || 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
+const IMAGE_FETCH_REFERER = process.env.IMAGE_FETCH_REFERER;
 const IMAGE_FETCH_ALLOWED_PROTOCOLS = (readEnvCsv('IMAGE_FETCH_ALLOWED_PROTOCOLS') ?? ['http', 'https']).map((p) => p.toLowerCase());
 const IMAGE_FETCH_ALLOWED_HOSTS = readEnvCsv('IMAGE_FETCH_ALLOWED_HOSTS');
 
@@ -214,6 +217,44 @@ function readEnvCsv(name: string): string[] | null {
     if (!raw) return null;
     const items = raw.split(',').map((item) => item.trim()).filter(Boolean);
     return items.length > 0 ? items : null;
+}
+
+function getHeaderValue(headers: Record<string, any>, name: string): string | undefined {
+    if (!headers) return undefined;
+    const direct = headers[name] ?? headers[name.toLowerCase()] ?? headers[name.toUpperCase()];
+    if (Array.isArray(direct)) return typeof direct[0] === 'string' ? direct[0] : undefined;
+    return typeof direct === 'string' ? direct : undefined;
+}
+
+function normalizeImageFetchReferer(raw?: string): string | undefined {
+    if (!raw) return undefined;
+    try {
+        const parsed = new URL(raw);
+        if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+            return parsed.toString();
+        }
+    } catch {
+        return undefined;
+    }
+    return undefined;
+}
+
+const videoRequestCache = new Map<string, { apiKey: string; baseUrl: string; expiresAt: number }>();
+
+function setVideoRequestCache(requestId: string, provider: { apiKey: string; baseUrl: string }) {
+    if (!requestId) return;
+    const expiresAt = Date.now() + VIDEO_REQUEST_CACHE_TTL_MS;
+    videoRequestCache.set(requestId, { ...provider, expiresAt });
+}
+
+function getVideoRequestCache(requestId: string): { apiKey: string; baseUrl: string } | null {
+    const entry = videoRequestCache.get(requestId);
+    if (!entry) return null;
+    if (entry.expiresAt < Date.now()) {
+        videoRequestCache.delete(requestId);
+        return null;
+    }
+    return { apiKey: entry.apiKey, baseUrl: entry.baseUrl };
 }
 
 function estimateTokensFromBase64Payload(payload: string, tokensPerKb: number, minTokens: number): number {
@@ -373,10 +414,11 @@ function ensureNanoBananaModalities(modalities: any): string[] {
     return Array.from(set);
 }
 
-function isNonChatModel(modelId: string): 'tts' | 'stt' | 'image-gen' | 'embedding' | false {
+function isNonChatModel(modelId: string): 'tts' | 'stt' | 'image-gen' | 'video-gen' | 'embedding' | false {
     const n = String(modelId || '').toLowerCase();
     if (n.startsWith('tts-') || n.includes('-tts')) return 'tts';
     if (n.startsWith('whisper') || n.includes('transcribe')) return 'stt';
+    if (n.includes('grok-imagine-video') || n.includes('imagine-video')) return 'video-gen';
     if (
         n.startsWith('dall-e') ||
         n.startsWith('gpt-image') ||
@@ -386,7 +428,9 @@ function isNonChatModel(modelId: string): 'tts' | 'stt' | 'image-gen' | 'embeddi
         n.includes('imagegen') ||
         n.startsWith('imagen') ||
         n.includes('imagen') ||
-        n.includes('nano-banana')
+        n.includes('nano-banana') ||
+        n.includes('grok-imagine') ||
+        n.includes('grok-2-image')
     ) return 'image-gen';
     if (n.includes('embedding')) return 'embedding';
     return false;
@@ -422,6 +466,23 @@ function extractInputAudioFromContent(content: any): { data: string; format: str
     return { data: audioPart.input_audio.data, format: audioPart.input_audio.format };
 }
 
+function extractImageUrlFromContent(content: any): string | null {
+    if (!Array.isArray(content)) return null;
+    for (const part of content) {
+        if (!part || typeof part !== 'object') continue;
+        const type = String(part.type || '').toLowerCase();
+        if (type === 'image_url') {
+            const url = typeof part.image_url === 'string' ? part.image_url : part.image_url?.url;
+            if (typeof url === 'string' && url.length > 0) return url;
+        }
+        if (type === 'input_image') {
+            const url = typeof (part as any).image_url === 'string' ? (part as any).image_url : (part as any).image_url?.url;
+            if (typeof url === 'string' && url.length > 0) return url;
+        }
+    }
+    return null;
+}
+
 function extractTextFromMessages(rawMessages: any[]): string {
     if (!Array.isArray(rawMessages)) return '';
     const lastUser = rawMessages.filter(m => m?.role === 'user').pop();
@@ -435,6 +496,16 @@ function extractInputAudioFromMessages(rawMessages: any[]): { data: string; form
         const msg = rawMessages[i];
         const audio = extractInputAudioFromContent(msg?.content);
         if (audio) return audio;
+    }
+    return null;
+}
+
+function extractImageUrlFromMessages(rawMessages: any[]): string | null {
+    if (!Array.isArray(rawMessages)) return null;
+    for (let i = rawMessages.length - 1; i >= 0; i -= 1) {
+        const msg = rawMessages[i];
+        const url = extractImageUrlFromContent(msg?.content);
+        if (url) return url;
     }
     return null;
 }
@@ -460,6 +531,337 @@ function extractInputAudioFromResponsesInput(input: any): { data: string; format
         }
     }
     return null;
+}
+
+function extractImageUrlFromResponsesInput(input: any): string | null {
+    if (Array.isArray(input)) {
+        for (const item of input) {
+            const content = item?.content ?? item;
+            const url = extractImageUrlFromContent(content);
+            if (url) return url;
+        }
+    }
+    return null;
+}
+
+function filterValidChatMessages(rawMessages: any): { role: string; content: any }[] {
+    if (!Array.isArray(rawMessages)) return [];
+    return rawMessages.filter((msg) => msg && typeof msg.role === 'string');
+}
+
+async function handleImageGenFallbackFromChatOrResponses(params: {
+    modelId: string;
+    prompt: string;
+    requestBody: any;
+    request: Request;
+    response: Response;
+    source: 'chat' | 'responses';
+}): Promise<void> {
+    const { modelId, prompt, requestBody, request, response, source } = params;
+
+    if (!prompt) {
+        if (!response.completed) {
+            response.status(400).json({
+                error: {
+                    message: `Bad Request: prompt is required for image generation (fallback from /v1/${source}).`,
+                    type: 'invalid_request_error',
+                    param: 'prompt',
+                    code: 'missing_prompt',
+                },
+                timestamp: new Date().toISOString(),
+            });
+        }
+        return;
+    }
+
+    const capsOk = await enforceModelCapabilities(modelId, ['image_output'], response);
+    if (!capsOk) return;
+
+    const provider = await pickImageGenProviderKey(modelId, ['image_output']);
+    if (!provider) {
+        if (!response.completed) {
+            response.status(503).json({ error: 'No available provider for image generation', timestamp: new Date().toISOString() });
+        }
+        return;
+    }
+
+    const upstreamUrl = `${provider.baseUrl}/v1/images/generations`;
+    const upstreamRes = await fetchWithTimeout(upstreamUrl, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${provider.apiKey}`,
+        },
+        body: JSON.stringify({
+            model: modelId,
+            prompt,
+            n: typeof requestBody?.n === 'number' ? requestBody.n : 1,
+            size: typeof requestBody?.size === 'string' ? requestBody.size : '1024x1024',
+            quality: typeof requestBody?.quality === 'string' ? requestBody.quality : undefined,
+            style: typeof requestBody?.style === 'string' ? requestBody.style : undefined,
+            response_format: typeof requestBody?.response_format === 'string' ? requestBody.response_format : undefined,
+        }),
+    }, UPSTREAM_TIMEOUT_MS);
+
+    if (!upstreamRes.ok) {
+        const errText = await upstreamRes.text().catch(() => '');
+        if (!response.completed) {
+            response.status(upstreamRes.status).json({
+                error: `Image generation upstream error: ${errText || upstreamRes.statusText}`,
+                timestamp: new Date().toISOString(),
+            });
+        }
+        return;
+    }
+
+    const resJson = await upstreamRes.json();
+    const first = Array.isArray(resJson?.data) ? resJson.data[0] : undefined;
+    const imageUrl = typeof first?.url === 'string' ? first.url : undefined;
+    const imageB64 = typeof first?.b64_json === 'string' ? first.b64_json : undefined;
+    const imageDataUrl = imageB64 ? `data:image/png;base64,${imageB64}` : undefined;
+    const imageRef = imageUrl || imageDataUrl;
+    const content = imageRef ? `![generated image](${imageRef})` : 'Image generation completed.';
+
+    const wantsStream = Boolean(requestBody?.stream);
+    if (source === 'chat' && wantsStream) {
+        const created = Math.floor(Date.now() / 1000);
+        const id = `chatcmpl_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+        response.setHeader('Content-Type', 'text/event-stream');
+        response.setHeader('Cache-Control', 'no-cache');
+        response.setHeader('Connection', 'keep-alive');
+        try { (response as any).flushHeaders?.(); } catch {}
+
+        const firstChunk = {
+            id,
+            object: 'chat.completion.chunk',
+            created,
+            model: modelId,
+            choices: [{
+                index: 0,
+                delta: { role: 'assistant', content },
+                finish_reason: null,
+            }],
+        };
+        const finalChunk = {
+            id,
+            object: 'chat.completion.chunk',
+            created,
+            model: modelId,
+            choices: [{
+                index: 0,
+                delta: {},
+                finish_reason: 'stop',
+            }],
+        };
+        response.write(`data: ${JSON.stringify(firstChunk)}\n\n`);
+        response.write(`data: ${JSON.stringify(finalChunk)}\n\n`);
+        response.write('data: [DONE]\n\n');
+        response.end();
+    } else if (source === 'chat') {
+        const created = Math.floor(Date.now() / 1000);
+        const promptTokens = Math.ceil(prompt.length / 4);
+        const totalTokens = promptTokens + 1;
+        response.json({
+            id: `chatcmpl_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+            object: 'chat.completion',
+            created,
+            model: modelId,
+            choices: [{
+                index: 0,
+                message: { role: 'assistant', content },
+                finish_reason: 'stop',
+            }],
+            usage: { prompt_tokens: promptTokens, completion_tokens: 1, total_tokens: totalTokens },
+        });
+    } else {
+        const created = Math.floor(Date.now() / 1000);
+        const promptTokens = Math.ceil(prompt.length / 4);
+        const totalTokens = promptTokens + 1;
+        response.json({
+            id: `resp_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+            object: 'response',
+            created,
+            model: modelId,
+            output: [{ content: [{ type: 'output_text', text: content }] }],
+            output_text: content,
+            usage: { prompt_tokens: promptTokens, completion_tokens: 1, total_tokens: totalTokens },
+        });
+    }
+
+    const tokenEstimate = Math.ceil(prompt.length / 4) + 500;
+    await updateUserTokenUsage(tokenEstimate, request.apiKey!);
+}
+
+async function handleVideoGenFallbackFromChatOrResponses(params: {
+    modelId: string;
+    prompt: string;
+    imageUrl?: string | null;
+    requestBody: any;
+    request: Request;
+    response: Response;
+    source: 'chat' | 'responses';
+}): Promise<void> {
+    const { modelId, prompt, imageUrl, requestBody, response, source } = params;
+
+    if (!prompt) {
+        if (!response.completed) {
+            response.status(400).json({
+                error: {
+                    message: `Bad Request: prompt is required for video generation (fallback from /v1/${source}).`,
+                    type: 'invalid_request_error',
+                    param: 'prompt',
+                    code: 'missing_prompt',
+                },
+                timestamp: new Date().toISOString(),
+            });
+        }
+        return;
+    }
+
+    const provider = await pickVideoGenProviderKey(modelId);
+    if (!provider) {
+        if (!response.completed) {
+            response.status(503).json({ error: 'No available provider for video generation', timestamp: new Date().toISOString() });
+        }
+        return;
+    }
+
+    const payload: Record<string, any> = {
+        model: modelId,
+        prompt,
+    };
+
+    if (typeof requestBody?.image_url === 'string') payload.image_url = requestBody.image_url;
+    if (typeof requestBody?.video_url === 'string') payload.video_url = requestBody.video_url;
+    if (imageUrl && !payload.image_url) payload.image_url = imageUrl;
+    if (typeof requestBody?.duration === 'number') payload.duration = requestBody.duration;
+    if (typeof requestBody?.aspect_ratio === 'string') payload.aspect_ratio = requestBody.aspect_ratio;
+    if (typeof requestBody?.resolution === 'string') payload.resolution = requestBody.resolution;
+    if (typeof requestBody?.seed === 'number') payload.seed = requestBody.seed;
+
+    const upstreamUrl = `${provider.baseUrl}/v1/videos/generations`;
+    const upstreamRes = await fetchWithTimeout(upstreamUrl, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${provider.apiKey}`,
+        },
+        body: JSON.stringify(payload),
+    }, UPSTREAM_TIMEOUT_MS);
+
+    if (!upstreamRes.ok) {
+        const errText = await upstreamRes.text().catch(() => '');
+        if (!response.completed) {
+            response.status(upstreamRes.status).json({
+                error: `Video generation upstream error: ${errText || upstreamRes.statusText}`,
+                timestamp: new Date().toISOString(),
+            });
+        }
+        return;
+    }
+
+    const resJson = await upstreamRes.json().catch(() => ({}));
+    const requestId = resJson?.request_id || resJson?.id;
+    if (!requestId) {
+        if (!response.completed) {
+            response.status(502).json({ error: 'Video generation upstream response missing request_id.', timestamp: new Date().toISOString() });
+        }
+        return;
+    }
+
+    setVideoRequestCache(String(requestId), provider);
+
+    const contentText = `Video generation started. Request ID: ${requestId}. Check /v1/videos/${requestId} for status.`;
+    const wantsStream = Boolean(requestBody?.stream);
+
+    if (source === 'chat') {
+        if (wantsStream) {
+            const created = Math.floor(Date.now() / 1000);
+            const id = `chatcmpl_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+            response.setHeader('Content-Type', 'text/event-stream');
+            response.setHeader('Cache-Control', 'no-cache');
+            response.setHeader('Connection', 'keep-alive');
+            try { (response as any).flushHeaders?.(); } catch {}
+
+            const firstChunk = {
+                id,
+                object: 'chat.completion.chunk',
+                created,
+                model: modelId,
+                choices: [{ index: 0, delta: { content: contentText }, finish_reason: null }]
+            };
+            response.write(`data: ${JSON.stringify(firstChunk)}\n\n`);
+
+            const finalChunk = {
+                id,
+                object: 'chat.completion.chunk',
+                created,
+                model: modelId,
+                choices: [{ index: 0, delta: {}, finish_reason: 'stop' }]
+            };
+            response.write(`data: ${JSON.stringify(finalChunk)}\n\n`);
+            response.write(`data: [DONE]\n\n`);
+            return response.end();
+        }
+
+        const openaiResponse = {
+            id: `chatcmpl-${Date.now()}-${Math.random().toString(36).substring(2)}`,
+            object: "chat.completion",
+            created: Math.floor(Date.now() / 1000),
+            model: modelId,
+            choices: [
+                {
+                    index: 0,
+                    message: {
+                        role: "assistant",
+                        content: contentText,
+                    },
+                    logprobs: null,
+                    finish_reason: "stop",
+                }
+            ],
+            usage: {
+                prompt_tokens: 0,
+                completion_tokens: 0,
+                total_tokens: 0
+            }
+        };
+
+        if (!response.completed) response.json(openaiResponse);
+        return;
+    }
+
+    // responses API fallback
+    if (wantsStream) {
+        const responseId = `resp_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+        const created = Math.floor(Date.now() / 1000);
+        response.setHeader('Content-Type', 'text/event-stream');
+        response.setHeader('Cache-Control', 'no-cache');
+        response.setHeader('Connection', 'keep-alive');
+        try { (response as any).flushHeaders?.(); } catch {}
+
+        response.write(`event: response.created\n`);
+        response.write(`data: ${JSON.stringify({ id: responseId, object: 'response', created, model: modelId, output: [], output_text: '' })}\n\n`);
+
+        response.write(`event: response.output_text.delta\n`);
+        response.write(`data: ${JSON.stringify({ id: responseId, object: 'response', created, model: modelId, output_text_delta: contentText, output: [{ content: [{ type: 'output_text', text: contentText }] }] })}\n\n`);
+
+        response.write(`event: response.completed\n`);
+        response.write(`data: ${JSON.stringify({ id: responseId, object: 'response', created, model: modelId, output_text: contentText, output: [{ content: [{ type: 'output_text', text: contentText }] }], usage: { total_tokens: 0 } })}\n\n`);
+        response.write(`data: [DONE]\n\n`);
+        return response.end();
+    }
+
+    const responseBody = {
+        id: `resp_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+        object: 'response',
+        created: Math.floor(Date.now() / 1000),
+        model: modelId,
+        output: [{ content: [{ type: 'output_text', text: contentText }] }],
+        output_text: contentText,
+        usage: { total_tokens: 0 }
+    };
+    if (!response.completed) response.json(responseBody);
 }
 
 function normalizeInputAudio(audio: { data: string; format: string }): { buffer: Buffer; mimeType: string; extension: string } | null {
@@ -638,7 +1040,11 @@ async function readResponseBodyWithLimit(
     return Buffer.concat(chunks);
 }
 
-async function fetchImageAsDataUrl(imageUrl: string, authHeader?: string): Promise<{ dataUrl: string; contentType: string; bytes: number } | null> {
+async function fetchImageAsDataUrl(
+    imageUrl: string,
+    authHeader?: string,
+    refererOverride?: string
+): Promise<{ dataUrl: string; contentType: string; bytes: number } | null> {
     const validation = await validateImageFetchUrl(imageUrl);
     if (!validation.ok || !validation.parsed) {
         console.warn(`[ImageProxy] Skipping image fetch (${validation.reason || 'blocked'}): ${summarizeUrlForLog(imageUrl)}`);
@@ -662,6 +1068,9 @@ async function fetchImageAsDataUrl(imageUrl: string, authHeader?: string): Promi
 
             const headers: Record<string, string> = {};
             const currentHost = currentValidation.parsed.hostname.toLowerCase();
+            if (IMAGE_FETCH_USER_AGENT) headers['User-Agent'] = IMAGE_FETCH_USER_AGENT;
+            const effectiveReferer = refererOverride || IMAGE_FETCH_REFERER;
+            if (effectiveReferer) headers['Referer'] = effectiveReferer;
             if (IMAGE_FETCH_FORWARD_AUTH && authHeader && currentHost === initialHost) {
                 headers['Authorization'] = authHeader;
             }
@@ -718,13 +1127,13 @@ async function fetchImageAsDataUrl(imageUrl: string, authHeader?: string): Promi
     }
 }
 
-async function inlineImageUrls(messages: any[], authHeader?: string) {
+async function inlineImageUrls(messages: any[], authHeader?: string, refererOverride?: string) {
     if (!messages || !Array.isArray(messages)) return;
     for (const msg of messages) {
         if (Array.isArray(msg.content)) {
             for (const part of msg.content) {
                 if (part && part.type === 'image_url' && typeof part.image_url?.url === 'string' && part.image_url.url.startsWith('http')) {
-                    const result = await fetchImageAsDataUrl(part.image_url.url, authHeader);
+                    const result = await fetchImageAsDataUrl(part.image_url.url, authHeader, refererOverride);
                     if (result) {
                         part.image_url.url = result.dataUrl;
                         console.log(`[ImageProxy] Successfully inlined image. Type: ${result.contentType}, Size: ${result.bytes}`);
@@ -927,6 +1336,7 @@ openaiRouter.use('/responses', rateLimitMiddleware);
 openaiRouter.use('/interactions', rateLimitMiddleware);
 openaiRouter.use('/audio', rateLimitMiddleware);
 openaiRouter.use('/images', rateLimitMiddleware);
+openaiRouter.use('/videos', rateLimitMiddleware);
 openaiRouter.use('/embeddings', rateLimitMiddleware);
 
  
@@ -1083,11 +1493,39 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
         if (!requestBody) throw parseError;
     }
 
+    const modelHint = typeof requestBody?.model === 'string' ? requestBody.model : '';
+    if (
+        (!Array.isArray(requestBody?.messages) || requestBody.messages.length === 0) &&
+        typeof requestBody?.prompt === 'string' &&
+        isNonChatModel(modelHint) === 'image-gen'
+    ) {
+        requestBody.messages = [{ role: 'user', content: requestBody.prompt }];
+    }
+
     const result = extractMessageFromRequestBody(requestBody);
-    const { messages: rawMessages, model: modelId } = result;
+    let { messages: rawMessages, model: modelId } = result;
+    rawMessages = filterValidChatMessages(rawMessages);
+    if (rawMessages.length === 0) {
+        if (!response.completed) {
+            return response.status(400).json({
+                error: {
+                    message: 'Bad Request: messages must include at least one message with a role.',
+                    type: 'invalid_request_error',
+                    param: 'messages',
+                    code: 'invalid_messages',
+                },
+                timestamp: new Date().toISOString(),
+            });
+        }
+        return;
+    }
+
+    const imageFetchReferer = normalizeImageFetchReferer(
+        getHeaderValue(request.headers, 'x-image-fetch-referer') || getHeaderValue(request.headers, 'x-image-referer')
+    );
 
     // Inline HTTP image URLs to base64 to avoid OpenAI fetching errors on private/local URLs
-    await inlineImageUrls(rawMessages, request.headers['authorization']);
+    await inlineImageUrls(rawMessages, request.headers['authorization'], imageFetchReferer);
 
     // Sanitize image URLs in messages (strip whitespace and normalize base64 to standard format)
     if (rawMessages && Array.isArray(rawMessages)) {
@@ -1174,27 +1612,58 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
         return response.json(responseBody);
     }
 
-    // --- Block non-chat models with helpful error ---
+    // --- Block non-chat models with helpful error (or auto-fallback for image generation) ---
     const nonChatType = isNonChatModel(modelId);
     if (nonChatType) {
+        if (nonChatType === 'image-gen' && !isNanoBananaModel(modelId)) {
+            const prompt = typeof requestBody?.prompt === 'string'
+                ? requestBody.prompt
+                : extractTextFromMessages(rawMessages);
+            await handleImageGenFallbackFromChatOrResponses({
+                modelId,
+                prompt,
+                requestBody,
+                request,
+                response,
+                source: 'chat',
+            });
+            return;
+        }
+        if (nonChatType === 'video-gen') {
+            const prompt = typeof requestBody?.prompt === 'string'
+                ? requestBody.prompt
+                : extractTextFromMessages(rawMessages);
+            const imageUrl = extractImageUrlFromMessages(rawMessages);
+            await handleVideoGenFallbackFromChatOrResponses({
+                modelId,
+                prompt,
+                imageUrl,
+                requestBody,
+                request,
+                response,
+                source: 'chat',
+            });
+            return;
+        }
         if (!(nonChatType === 'image-gen' && isNanoBananaModel(modelId))) {
-        const endpointMap: Record<string, string> = {
-            tts: '/v1/audio/speech',
-            stt: '/v1/audio/transcriptions',
-            'image-gen': '/v1/images/generations',
-            embedding: '/v1/embeddings',
-        };
-        const correctEndpoint = endpointMap[nonChatType] || 'the dedicated endpoint';
-        if (!response.completed) return response.status(400).json({
-            error: {
-                message: `'${modelId}' is not a chat model and cannot be used with /v1/chat/completions. Use ${correctEndpoint} instead.`,
-                type: 'invalid_request_error',
-                param: 'model',
-                code: 'model_not_supported',
-            },
-            timestamp: new Date().toISOString(),
-        });
-        return;
+            const endpointMap: Record<string, string> = {
+                tts: '/v1/audio/speech',
+                stt: '/v1/audio/transcriptions',
+                'image-gen': '/v1/images/generations',
+                'video-gen': '/v1/videos/generations',
+                embedding: '/v1/embeddings',
+            };
+            const correctEndpoint = endpointMap[nonChatType] || 'the dedicated endpoint';
+            if (!response.completed) return response.status(400).json({
+                error: {
+                    message: `'${modelId}' is not a chat model and cannot be used with /v1/chat/completions. Use ${correctEndpoint} instead.`,
+                    type: 'invalid_request_error',
+                    param: 'model',
+                    code: 'model_not_supported',
+                },
+                timestamp: new Date().toISOString(),
+            });
+            return;
         }
     }
 
@@ -1226,6 +1695,7 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
         content: msg.content,
         model: { id: modelId },
         ...sharedMessageOptions,
+        image_fetch_referer: imageFetchReferer,
     }));
  
     if (effectiveStream) {
@@ -1403,27 +1873,45 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
  
   } catch (error: any) { 
     await logError(error, request);
-    console.error('Chat completions error:', error.message, error.stack);
+    const errorText = String(error?.message || '');
+    console.error('Chat completions error:', errorText, error.stack);
     const timestamp = new Date().toISOString();
     let statusCode = 500;
     let clientMessage = 'Internal Server Error';
     let clientReference = 'An unexpected error occurred while processing your chat request.';
 
-    if (error.message.startsWith('Invalid request') || error.message.startsWith('Failed to parse')) {
+    if (errorText.startsWith('Invalid request') || errorText.startsWith('Failed to parse')) {
         statusCode = 400;
-        clientMessage = `Bad Request: ${error.message}`;
+        clientMessage = `Bad Request: ${errorText}`;
     } else if (error instanceof SyntaxError) {
         statusCode = 400;
         clientMessage = 'Invalid JSON';
-    } else if (error.message.includes('Unauthorized') || error.message.includes('limit reached')) {
-        statusCode = error.message.includes('limit reached') ? 429 : 401;
-        clientMessage = error.message;
-    } else if (error.message.includes('No suitable providers')) {
+    } else if (errorText.includes('Unauthorized') || errorText.includes('limit reached')) {
+        statusCode = errorText.includes('limit reached') ? 429 : 401;
+        clientMessage = errorText;
+    } else if (
+        errorText.toLowerCase().includes('requires more credits') ||
+        errorText.toLowerCase().includes('insufficient credits') ||
+        errorText.toLowerCase().includes('can only afford') ||
+        errorText.includes('status 402')
+    ) {
+        statusCode = 402;
+        clientMessage = 'Payment Required: insufficient credits for the requested max_tokens. Reduce max_tokens or add credits to the provider key.';
+    } else if (errorText.toLowerCase().includes('model not found') || errorText.toLowerCase().includes('model_not_found')) {
+        statusCode = 404;
+        clientMessage = 'Not Found: model does not exist or you do not have access to it.';
+    } else if (errorText.toLowerCase().includes('image exceeds') || errorText.toLowerCase().includes('image exceeds 5 mb')) {
+        statusCode = 400;
+        clientMessage = 'Bad Request: image exceeds the provider size limit. Please resize or compress the image before sending.';
+    } else if (errorText.includes('fetching image from URL') || errorText.includes('image_url')) {
+        statusCode = 400;
+        clientMessage = 'Bad Request: image_url could not be fetched by the provider. Use a public, non-expiring URL or pass the image as base64 data.';
+    } else if (errorText.includes('No suitable providers')) {
         statusCode = 503;
-        clientMessage = error.message;
-    } else if (error.message.includes('Provider') && error.message.includes('failed')) {
+        clientMessage = errorText;
+    } else if (errorText.includes('Provider') && errorText.includes('failed')) {
         statusCode = 502;
-        clientMessage = error.message;
+        clientMessage = errorText;
     }
     
     if (!response.completed) {
@@ -1496,32 +1984,69 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
         }
 
         const { message, modelId, stream } = extractResponsesRequestBody(requestBody);
+        const imageFetchReferer = normalizeImageFetchReferer(
+            getHeaderValue(request.headers, 'x-image-fetch-referer') || getHeaderValue(request.headers, 'x-image-referer')
+        );
+        if (imageFetchReferer) {
+            message.image_fetch_referer = imageFetchReferer;
+        }
         if (isNanoBananaModel(modelId)) {
             message.modalities = ensureNanoBananaModalities(message.modalities);
         }
 
         const nonChatType = isNonChatModel(modelId);
         if (nonChatType) {
-            if (!(nonChatType === 'image-gen' && isNanoBananaModel(modelId))) {
-            const endpointMap: Record<string, string> = {
-                tts: '/v1/audio/speech',
-                stt: '/v1/audio/transcriptions',
-                'image-gen': '/v1/images/generations',
-                embedding: '/v1/embeddings',
-            };
-            const correctEndpoint = endpointMap[nonChatType] || 'the dedicated endpoint';
-            if (!response.completed) {
-                return response.status(400).json({
-                    error: {
-                        message: `'${modelId}' is not a responses model and cannot be used with /v1/responses. Use ${correctEndpoint} instead.`,
-                        type: 'invalid_request_error',
-                        param: 'model',
-                        code: 'model_not_supported',
-                    },
-                    timestamp: new Date().toISOString(),
+            if (nonChatType === 'image-gen' && !isNanoBananaModel(modelId)) {
+                const prompt = typeof requestBody?.prompt === 'string'
+                    ? requestBody.prompt
+                    : extractTextFromResponsesInput(requestBody?.input);
+                await handleImageGenFallbackFromChatOrResponses({
+                    modelId,
+                    prompt,
+                    requestBody,
+                    request,
+                    response,
+                    source: 'responses',
                 });
+                return;
             }
-            return;
+            if (nonChatType === 'video-gen') {
+                const prompt = typeof requestBody?.prompt === 'string'
+                    ? requestBody.prompt
+                    : extractTextFromResponsesInput(requestBody?.input);
+                const imageUrl = extractImageUrlFromResponsesInput(requestBody?.input);
+                await handleVideoGenFallbackFromChatOrResponses({
+                    modelId,
+                    prompt,
+                    imageUrl,
+                    requestBody,
+                    request,
+                    response,
+                    source: 'responses',
+                });
+                return;
+            }
+            if (!(nonChatType === 'image-gen' && isNanoBananaModel(modelId))) {
+                const endpointMap: Record<string, string> = {
+                    tts: '/v1/audio/speech',
+                    stt: '/v1/audio/transcriptions',
+                    'image-gen': '/v1/images/generations',
+                    'video-gen': '/v1/videos/generations',
+                    embedding: '/v1/embeddings',
+                };
+                const correctEndpoint = endpointMap[nonChatType] || 'the dedicated endpoint';
+                if (!response.completed) {
+                    return response.status(400).json({
+                        error: {
+                            message: `'${modelId}' is not a responses model and cannot be used with /v1/responses. Use ${correctEndpoint} instead.`,
+                            type: 'invalid_request_error',
+                            param: 'model',
+                            code: 'model_not_supported',
+                        },
+                        timestamp: new Date().toISOString(),
+                    });
+                }
+                return;
             }
         }
         const effectiveStream = stream && !isImageModelId(modelId);
@@ -1695,24 +2220,39 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
         return response.json(responseBody);
     } catch (error: any) {
         await logError(error, request);
-        console.error('Responses API error:', error.message, error.stack);
+        const errorText = String(error?.message || '');
+        console.error('Responses API error:', errorText, error.stack);
         const timestamp = new Date().toISOString();
         let statusCode = 500;
         let clientMessage = 'Internal Server Error';
         let clientReference = 'An unexpected error occurred while processing your responses request.';
 
-        if (error.message.startsWith('Invalid request') || error.message.startsWith('Failed to parse') || error.message.includes('input is required')) {
+        if (errorText.startsWith('Invalid request') || errorText.startsWith('Failed to parse') || errorText.includes('input is required')) {
             statusCode = 400;
-            clientMessage = `Bad Request: ${error.message}`;
+            clientMessage = `Bad Request: ${errorText}`;
         } else if (error instanceof SyntaxError) {
             statusCode = 400;
             clientMessage = 'Invalid JSON';
-        } else if (error.message.includes('Unauthorized') || error.message.includes('limit reached')) {
-            statusCode = error.message.includes('limit reached') ? 429 : 401;
-            clientMessage = error.message;
-        } else if (error.message.includes('No suitable providers') || error.message.includes('supports model') || error.message.includes('No provider')) {
+        } else if (errorText.includes('Unauthorized') || errorText.includes('limit reached')) {
+            statusCode = errorText.includes('limit reached') ? 429 : 401;
+            clientMessage = errorText;
+        } else if (
+            errorText.toLowerCase().includes('requires more credits') ||
+            errorText.toLowerCase().includes('insufficient credits') ||
+            errorText.toLowerCase().includes('can only afford') ||
+            errorText.includes('status 402')
+        ) {
+            statusCode = 402;
+            clientMessage = 'Payment Required: insufficient credits for the requested max_tokens. Reduce max_tokens or add credits to the provider key.';
+        } else if (errorText.toLowerCase().includes('image exceeds') || errorText.toLowerCase().includes('image exceeds 5 mb')) {
+            statusCode = 400;
+            clientMessage = 'Bad Request: image exceeds the provider size limit. Please resize or compress the image before sending.';
+        } else if (errorText.includes('fetching image from URL') || errorText.includes('image_url')) {
+            statusCode = 400;
+            clientMessage = 'Bad Request: image_url could not be fetched by the provider. Use a public, non-expiring URL or pass the image as base64 data.';
+        } else if (errorText.includes('No suitable providers') || errorText.includes('supports model') || errorText.includes('No provider')) {
             statusCode = 404;
-            clientMessage = error.message;
+            clientMessage = errorText;
         }
 
         if (!response.completed) {
@@ -1844,7 +2384,19 @@ openaiRouter.post('/deployments/:deploymentId/chat/completions', authAndUsageMid
     try {
         // Extract messages using the same logic as the standard route
         const requestBody = await request.json();
-        const { messages: rawMessages } = extractMessageFromRequestBody(requestBody); 
+        let { messages: rawMessages } = extractMessageFromRequestBody(requestBody); 
+        rawMessages = filterValidChatMessages(rawMessages);
+        if (rawMessages.length === 0) {
+            return response.status(400).json({
+                error: {
+                    message: 'Bad Request: messages must include at least one message with a role.',
+                    type: 'invalid_request_error',
+                    param: 'messages',
+                    code: 'invalid_messages',
+                },
+                timestamp: new Date().toISOString(),
+            });
+        }
 
         // Use deploymentId as model identifier for the handler
         const formattedMessages: IMessage[] = rawMessages.map(msg => ({ role: msg.role, content: msg.content, model: { id: deploymentId } }));
@@ -2020,6 +2572,58 @@ async function pickOpenAIProviderKey(
     }
     const pick = candidates[Math.floor(Math.random() * candidates.length)];
     return { apiKey: pick.apiKey!, baseUrl: extractOrigin(pick.provider_url || 'https://api.openai.com') };
+}
+
+async function pickImageGenProviderKey(
+    modelId: string,
+    requiredCaps: ModelCapability[] = []
+): Promise<{ apiKey: string; baseUrl: string } | null> {
+    const providers = await dataManager.load<LoadedProviders>('providers');
+    const requiresCaps = Array.isArray(requiredCaps) && requiredCaps.length > 0;
+    const matches = providers.filter((p: LoadedProviderData) =>
+        !p.disabled &&
+        (p.id.includes('openai') || p.id.includes('xai')) &&
+        p.apiKey &&
+        p.models &&
+        modelId in p.models
+    );
+    const candidates = requiresCaps
+        ? matches.filter((p: LoadedProviderData) => {
+            const modelData = p.models?.[modelId];
+            const skips = (modelData as any)?.capability_skips as Partial<Record<ModelCapability, string>> | undefined;
+            if (!skips) return true;
+            return !requiredCaps.some((cap) => Boolean(skips[cap]));
+        })
+        : matches;
+
+    const pickFrom = candidates.length > 0 ? candidates : matches;
+    if (pickFrom.length === 0) return null;
+    const pick = pickFrom[Math.floor(Math.random() * pickFrom.length)];
+    const defaultBase = pick.id.includes('xai') ? 'https://api.x.ai' : 'https://api.openai.com';
+    return { apiKey: pick.apiKey!, baseUrl: extractOrigin(pick.provider_url || defaultBase) };
+}
+
+async function pickVideoGenProviderKey(
+    modelId: string
+): Promise<{ apiKey: string; baseUrl: string } | null> {
+    const providers = await dataManager.load<LoadedProviders>('providers');
+    const matches = providers.filter((p: LoadedProviderData) =>
+        !p.disabled &&
+        p.id.includes('xai') &&
+        p.apiKey &&
+        p.models &&
+        modelId in p.models
+    );
+    if (matches.length === 0) return null;
+    const pick = matches[Math.floor(Math.random() * matches.length)];
+    return { apiKey: pick.apiKey!, baseUrl: extractOrigin(pick.provider_url || 'https://api.x.ai') };
+}
+
+async function pickAnyXaiProviderKey(): Promise<{ apiKey: string; baseUrl: string } | null> {
+    const providers = await dataManager.load<LoadedProviders>('providers');
+    const pick = providers.find((p: LoadedProviderData) => !p.disabled && p.id.includes('xai') && p.apiKey);
+    if (!pick) return null;
+    return { apiKey: pick.apiKey!, baseUrl: extractOrigin(pick.provider_url || 'https://api.x.ai') };
 }
 // --- Audio format content-type map ---
 const AUDIO_CONTENT_TYPES: Record<string, string> = {
@@ -2345,7 +2949,7 @@ openaiRouter.post('/images/generations', async (request: Request, response: Resp
         const capsOk = await enforceModelCapabilities(model, ['image_output'], response);
         if (!capsOk) return;
 
-        const provider = await pickOpenAIProviderKey(model, ['image_output']);
+        const provider = await pickImageGenProviderKey(model, ['image_output']);
         if (!provider) {
             if (!response.completed) return response.status(503).json({ error: 'No available provider for image generation', timestamp: new Date().toISOString() });
             return;
@@ -2383,6 +2987,119 @@ openaiRouter.post('/images/generations', async (request: Request, response: Resp
     } catch (error: any) {
         await logError(error, request);
         console.error('Image generation route error:', error.message);
+        if (!response.completed) response.status(500).json({ error: 'Internal Server Error', timestamp: new Date().toISOString() });
+    }
+});
+
+// --- Video Generation: /v1/videos/generations ---
+openaiRouter.post('/videos/generations', async (request: Request, response: Response) => {
+    try {
+        const body = await request.json();
+        const model = typeof body?.model === 'string' ? body.model : '';
+        const prompt = typeof body?.prompt === 'string'
+            ? body.prompt
+            : (typeof body?.input === 'string' ? body.input : '');
+        if (!model) {
+            if (!response.completed) return response.status(400).json({ error: 'Bad Request: model is required', timestamp: new Date().toISOString() });
+            return;
+        }
+        const nonChatType = isNonChatModel(model);
+        if (nonChatType !== 'video-gen') {
+            if (!response.completed) {
+                return response.status(400).json({
+                    error: `Bad Request: '${model}' is not a video generation model. Use /v1/chat/completions or /v1/responses for text models.`,
+                    timestamp: new Date().toISOString()
+                });
+            }
+            return;
+        }
+        if (!prompt) {
+            if (!response.completed) return response.status(400).json({ error: 'Bad Request: prompt is required', timestamp: new Date().toISOString() });
+            return;
+        }
+
+        const provider = await pickVideoGenProviderKey(model);
+        if (!provider) {
+            if (!response.completed) return response.status(503).json({ error: 'No available provider for video generation', timestamp: new Date().toISOString() });
+            return;
+        }
+
+        const upstreamUrl = `${provider.baseUrl}/v1/videos/generations`;
+        const payload: Record<string, any> = {
+            model,
+            prompt,
+        };
+        if (typeof body?.image_url === 'string') payload.image_url = body.image_url;
+        if (typeof body?.video_url === 'string') payload.video_url = body.video_url;
+        if (typeof body?.duration === 'number') payload.duration = body.duration;
+        if (typeof body?.aspect_ratio === 'string') payload.aspect_ratio = body.aspect_ratio;
+        if (typeof body?.resolution === 'string') payload.resolution = body.resolution;
+        if (typeof body?.seed === 'number') payload.seed = body.seed;
+
+        const upstreamRes = await fetchWithTimeout(upstreamUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${provider.apiKey}`,
+            },
+            body: JSON.stringify(payload),
+        }, UPSTREAM_TIMEOUT_MS);
+
+        if (!upstreamRes.ok) {
+            const errText = await upstreamRes.text().catch(() => '');
+            if (!response.completed) return response.status(upstreamRes.status).json({ error: `Video generation upstream error: ${errText || upstreamRes.statusText}`, timestamp: new Date().toISOString() });
+            return;
+        }
+
+        const resJson = await upstreamRes.json();
+        const requestId = resJson?.request_id || resJson?.id;
+        if (requestId) setVideoRequestCache(String(requestId), provider);
+        response.json(resJson);
+
+        const tokenEstimate = Math.ceil(prompt.length / 4) + 500;
+        await updateUserTokenUsage(tokenEstimate, request.apiKey!);
+    } catch (error: any) {
+        await logError(error, request);
+        console.error('Video generation route error:', error.message);
+        if (!response.completed) response.status(500).json({ error: 'Internal Server Error', timestamp: new Date().toISOString() });
+    }
+});
+
+// --- Video Status: /v1/videos/{requestId} ---
+openaiRouter.get('/videos/:requestId', async (request: Request, response: Response) => {
+    try {
+        const requestId = typeof request.params?.requestId === 'string' ? request.params.requestId : '';
+        if (!requestId) {
+            if (!response.completed) return response.status(400).json({ error: 'Bad Request: requestId is required', timestamp: new Date().toISOString() });
+            return;
+        }
+
+        const cached = getVideoRequestCache(requestId);
+        const provider = cached ?? await pickAnyXaiProviderKey();
+        if (!provider) {
+            if (!response.completed) return response.status(503).json({ error: 'No available provider for video status', timestamp: new Date().toISOString() });
+            return;
+        }
+
+        const upstreamUrl = `${provider.baseUrl}/v1/videos/${requestId}`;
+        const upstreamRes = await fetchWithTimeout(upstreamUrl, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${provider.apiKey}`,
+            },
+        }, UPSTREAM_TIMEOUT_MS);
+
+        if (!upstreamRes.ok) {
+            const errText = await upstreamRes.text().catch(() => '');
+            if (!response.completed) return response.status(upstreamRes.status).json({ error: `Video status upstream error: ${errText || upstreamRes.statusText}`, timestamp: new Date().toISOString() });
+            return;
+        }
+
+        const resJson = await upstreamRes.json();
+        response.json(resJson);
+    } catch (error: any) {
+        await logError(error, request);
+        console.error('Video status route error:', error.message);
         if (!response.completed) response.status(500).json({ error: 'Internal Server Error', timestamp: new Date().toISOString() });
     }
 });

@@ -21,11 +21,21 @@ export class DeepseekAI implements IAIProvider {
     } as Record<string, string>;
   }
 
+  private buildMessages(message: IMessage) {
+    const sourceMessages = Array.isArray(message.messages) && message.messages.length > 0
+      ? message.messages
+      : [{ role: message.role || 'user', content: message.content }];
+    return sourceMessages.map((entry) => ({
+      role: typeof entry.role === 'string' && entry.role.trim() ? entry.role : 'user',
+      content: entry.content,
+    }));
+  }
+
   async sendMessage(message: IMessage): Promise<ProviderResponse> {
     const start = Date.now();
     const payload = {
       model: message.model.id,
-      messages: [{ role: 'user', content: message.content }],
+      messages: this.buildMessages(message),
     };
 
     try {
@@ -64,7 +74,7 @@ export class DeepseekAI implements IAIProvider {
   async createPassthroughStream(message: IMessage): Promise<ProviderStreamPassthrough | null> {
     const payload = {
       model: message.model.id,
-      messages: [{ role: 'user', content: message.content }],
+      messages: this.buildMessages(message),
       stream: true,
     };
     const res = await axios.post(this.endpointUrl, payload, { headers: this.buildHeaders(), responseType: 'stream' });
@@ -78,7 +88,7 @@ export class DeepseekAI implements IAIProvider {
     const start = Date.now();
     const payload = {
       model: message.model.id,
-      messages: [{ role: 'user', content: message.content }],
+      messages: this.buildMessages(message),
       stream: true,
     };
 

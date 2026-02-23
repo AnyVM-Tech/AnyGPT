@@ -1,4 +1,6 @@
 import axios from 'axios';
+import dns from 'node:dns/promises';
+import net from 'node:net';
 import { IAIProvider, IMessage, ProviderResponse, ProviderStreamChunk, ProviderStreamPassthrough } from './interfaces.js';
 
 interface OpenRouterOptions {
@@ -113,6 +115,245 @@ export class OpenRouterAI implements IAIProvider {
     return null;
   }
 
+  private readEnvNumber(name: string, fallback: number): number {
+    const raw = process.env[name];
+    if (raw === undefined) return fallback;
+    const value = Number(raw);
+    return Number.isFinite(value) && value >= 0 ? value : fallback;
+  }
+
+  private readEnvBool(name: string, fallback: boolean): boolean {
+    const raw = process.env[name];
+    if (raw === undefined) return fallback;
+    const normalized = raw.trim().toLowerCase();
+    if (['1', 'true', 'yes', 'y', 'on'].includes(normalized)) return true;
+    if (['0', 'false', 'no', 'n', 'off'].includes(normalized)) return false;
+    return fallback;
+  }
+
+  private readEnvCsv(name: string): string[] | null {
+    const raw = process.env[name];
+    if (!raw) return null;
+    const items = raw.split(',').map((item) => item.trim()).filter(Boolean);
+    return items.length > 0 ? items : null;
+  }
+
+  private isLocalHostname(host: string): boolean {
+    const normalized = host.toLowerCase();
+    return normalized === 'localhost' || normalized.endsWith('.localhost') || normalized.endsWith('.local');
+  }
+
+  private isPrivateIpv4(ip: string): boolean {
+    const parts = ip.split('.').map((n) => Number(n));
+    if (parts.length !== 4 || parts.some((n) => Number.isNaN(n))) return false;
+    const [a, b, c, d] = parts;
+    if (a === 10) return true;
+    if (a === 127) return true;
+    if (a === 169 && b === 254) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 0) return true;
+    if (a === 100 && b >= 64 && b <= 127) return true;
+    if (a === 192 && b === 0 && c === 0) return true;
+    if (a === 192 && b === 0 && c === 2) return true;
+    if (a === 198 && (b === 18 || b === 19)) return true;
+    if (a === 198 && b === 51 && c === 100) return true;
+    if (a === 203 && b === 0 && c === 113) return true;
+    if (a >= 224) return true;
+    return false;
+  }
+
+  private isPrivateIpv6(ip: string): boolean {
+    const normalized = ip.toLowerCase();
+    if (normalized === '::' || normalized === '::1') return true;
+    if (normalized.startsWith('fe80:') || normalized.startsWith('fe9') || normalized.startsWith('fea') || normalized.startsWith('feb')) return true;
+    if (normalized.startsWith('fc') || normalized.startsWith('fd')) return true;
+    if (normalized.startsWith('ff')) return true;
+    if (normalized.startsWith('2001:db8')) return true;
+    if (normalized.startsWith('::ffff:')) {
+      const ipv4 = normalized.slice('::ffff:'.length);
+      if (ipv4) return this.isPrivateIpv4(ipv4);
+    }
+    return false;
+  }
+
+  private isPrivateIp(ip: string): boolean {
+    if (net.isIPv4(ip)) return this.isPrivateIpv4(ip);
+    if (net.isIPv6(ip)) return this.isPrivateIpv6(ip);
+    return false;
+  }
+
+  private hostMatchesAllowlist(host: string, allowedHosts: string[] | null): boolean {
+    if (!allowedHosts || allowedHosts.length === 0) return true;
+    const needle = host.toLowerCase();
+    return allowedHosts.some((entry) => {
+      const allowed = entry.toLowerCase();
+      if (!allowed) return false;
+      if (allowed.startsWith('.')) {
+        const suffix = allowed.slice(1);
+        return needle === suffix || needle.endsWith(`.${suffix}`);
+      }
+      return needle === allowed;
+    });
+  }
+
+  private async resolveHostAddresses(host: string): Promise<string[]> {
+    try {
+      const res = await dns.lookup(host, { all: true });
+      return res.map((entry) => entry.address);
+    } catch {
+      return [];
+    }
+  }
+
+  private async validateImageFetchUrl(
+    rawUrl: string,
+    allowedProtocols: string[],
+    allowedHosts: string[] | null,
+    allowPrivate: boolean
+  ): Promise<{ ok: boolean; parsed?: URL }> {
+    let parsed: URL;
+    try {
+      parsed = new URL(rawUrl);
+    } catch {
+      return { ok: false };
+    }
+
+    const protocol = parsed.protocol.replace(':', '').toLowerCase();
+    if (!allowedProtocols.includes(protocol)) return { ok: false };
+
+    const hostname = parsed.hostname;
+    if (!hostname) return { ok: false };
+    if (!this.hostMatchesAllowlist(hostname, allowedHosts)) return { ok: false };
+
+    if (!allowPrivate) {
+      if (this.isLocalHostname(hostname)) return { ok: false };
+      const directIpType = net.isIP(hostname);
+      if (directIpType) {
+        if (this.isPrivateIp(hostname)) return { ok: false };
+      } else {
+        const addresses = await this.resolveHostAddresses(hostname);
+        if (addresses.length === 0) return { ok: false };
+        if (addresses.some((addr) => this.isPrivateIp(addr))) return { ok: false };
+      }
+    }
+
+    return { ok: true, parsed };
+  }
+
+  private async readResponseBodyWithLimit(response: globalThis.Response, maxBytes: number, controller?: AbortController): Promise<Buffer> {
+    const contentLength = response.headers.get('content-length');
+    if (maxBytes > 0 && contentLength) {
+      const declared = Number(contentLength);
+      if (Number.isFinite(declared) && declared > maxBytes) {
+        controller?.abort(new Error('Image exceeds max size.'));
+        throw new Error('Image exceeds max size.');
+      }
+    }
+
+    if (!response.body) return Buffer.alloc(0);
+    const reader = response.body.getReader();
+    const chunks: Buffer[] = [];
+    let total = 0;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value || value.length === 0) continue;
+      const chunk = Buffer.from(value);
+      total += chunk.length;
+      if (maxBytes > 0 && total > maxBytes) {
+        try { await reader.cancel(); } catch {}
+        controller?.abort(new Error('Image exceeds max size.'));
+        throw new Error('Image exceeds max size.');
+      }
+      chunks.push(chunk);
+    }
+
+    return Buffer.concat(chunks);
+  }
+
+  private detectMimeTypeFromBuffer(buffer: Buffer): string | null {
+    if (buffer.length < 2) return null;
+    if (buffer[0] === 0xff && buffer[1] === 0xd8) return 'image/jpeg';
+    if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) return 'image/png';
+    if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x38) return 'image/gif';
+    if (buffer.length > 12 && buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46) return 'image/webp';
+    return null;
+  }
+
+  private async fetchImageAsDataUrl(imageUrl: string, refererOverride?: string): Promise<string | null> {
+    const allowedProtocols = (this.readEnvCsv('IMAGE_FETCH_ALLOWED_PROTOCOLS') ?? ['http', 'https']).map((p) => p.toLowerCase());
+    const allowedHosts = this.readEnvCsv('IMAGE_FETCH_ALLOWED_HOSTS');
+    const allowPrivate = this.readEnvBool('IMAGE_FETCH_ALLOW_PRIVATE', false);
+    const maxRedirects = this.readEnvNumber('IMAGE_FETCH_MAX_REDIRECTS', 3);
+    const timeoutMs = this.readEnvNumber('IMAGE_FETCH_TIMEOUT_MS', 15_000);
+    const maxBytes = this.readEnvNumber('IMAGE_FETCH_MAX_BYTES', 8 * 1024 * 1024);
+    const userAgent = process.env.IMAGE_FETCH_USER_AGENT || 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
+    const referer = refererOverride || process.env.IMAGE_FETCH_REFERER;
+
+    const validation = await this.validateImageFetchUrl(imageUrl, allowedProtocols, allowedHosts, allowPrivate);
+    if (!validation.ok || !validation.parsed) return null;
+
+    const controller = new AbortController();
+    const timeoutId = timeoutMs > 0 ? setTimeout(() => controller.abort(new Error('Image fetch timed out.')), timeoutMs) : null;
+    let currentUrl = validation.parsed.toString();
+
+    try {
+      for (let hop = 0; hop <= maxRedirects; hop++) {
+        const currentValidation = hop === 0 ? validation : await this.validateImageFetchUrl(currentUrl, allowedProtocols, allowedHosts, allowPrivate);
+        if (!currentValidation.ok || !currentValidation.parsed) return null;
+
+        const headers: Record<string, string> = {};
+        if (userAgent) headers['User-Agent'] = userAgent;
+        if (referer) headers['Referer'] = referer;
+        const res = await fetch(currentUrl, { method: 'GET', redirect: 'manual', signal: controller.signal, headers });
+        if (res.status >= 300 && res.status < 400) {
+          const location = res.headers.get('location');
+          if (!location) return null;
+          currentUrl = new URL(location, currentUrl).toString();
+          continue;
+        }
+        if (!res.ok) return null;
+
+        const buffer = await this.readResponseBodyWithLimit(res, maxBytes, controller);
+        const contentType = res.headers.get('content-type') || this.detectMimeTypeFromBuffer(buffer) || 'image/jpeg';
+        const base64 = buffer.toString('base64');
+        return `data:${contentType};base64,${base64}`;
+      }
+      return null;
+    } catch {
+      return null;
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
+  }
+
+  private getSourceMessages(message: IMessage): Array<{ role: string; content: any }> {
+    return Array.isArray(message.messages) && message.messages.length > 0
+      ? message.messages
+      : [{ role: message.role || 'user', content: message.content }];
+  }
+
+  private async inlineImageUrls(sourceMessages: Array<{ role: string; content: any }>, referer?: string): Promise<void> {
+    for (const msg of sourceMessages) {
+      if (!Array.isArray(msg.content)) continue;
+      for (const part of msg.content) {
+        if (!part || typeof part !== 'object') continue;
+        if (part.type !== 'image_url') continue;
+        const urlValue = typeof part.image_url === 'string' ? part.image_url : part.image_url?.url;
+        if (typeof urlValue !== 'string' || !urlValue.startsWith('http')) continue;
+        const dataUrl = await this.fetchImageAsDataUrl(urlValue, referer);
+        if (!dataUrl) continue;
+        if (typeof part.image_url === 'string') {
+          part.image_url = { url: dataUrl };
+        } else {
+          part.image_url = { ...(part.image_url || {}), url: dataUrl };
+        }
+      }
+    }
+  }
+
   private normalizeContent(val: any): string {
     if (typeof val === 'string') return val;
     if (Array.isArray(val)) {
@@ -173,27 +414,32 @@ export class OpenRouterAI implements IAIProvider {
     return message;
   }
 
-  private buildRequestData(message: IMessage, stream: boolean = false) {
-    const normalizedContent = (() => {
-      if (!Array.isArray(message.content)) return message.content;
-      const textParts: string[] = [];
-      for (const part of message.content) {
-        if (part?.type === 'text' && typeof part.text === 'string') {
-          textParts.push(part.text);
-          continue;
-        }
-        if (part?.type === 'input_text' && typeof part.text === 'string') {
-          textParts.push(part.text);
-          continue;
-        }
-        return message.content;
+  private normalizeMessageContent(content: any): any {
+    if (!Array.isArray(content)) return content;
+    const textParts: string[] = [];
+    for (const part of content) {
+      if (part?.type === 'text' && typeof part.text === 'string') {
+        textParts.push(part.text);
+        continue;
       }
-      return textParts.length > 0 ? textParts.join('\n') : message.content;
-    })();
+      if (part?.type === 'input_text' && typeof part.text === 'string') {
+        textParts.push(part.text);
+        continue;
+      }
+      return content;
+    }
+    return textParts.length > 0 ? textParts.join('\n') : content;
+  }
+
+  private buildRequestData(message: IMessage, stream: boolean = false, sourceMessages?: Array<{ role: string; content: any }>) {
+    const messages = sourceMessages ?? this.getSourceMessages(message);
 
     const data: any = {
       model: message.model.id,
-      messages: [{ role: message.role || 'user', content: normalizedContent }],
+      messages: messages.map((entry) => ({
+        role: typeof entry.role === 'string' && entry.role.trim() ? entry.role : 'user',
+        content: this.normalizeMessageContent(entry.content),
+      })),
       stream,
     };
     if (message.modalities) data.modalities = message.modalities;
@@ -203,7 +449,9 @@ export class OpenRouterAI implements IAIProvider {
 
   async sendMessage(message: IMessage): Promise<ProviderResponse> {
     const start = Date.now();
-    const data = this.buildRequestData(message);
+    const sourceMessages = this.getSourceMessages(message);
+    await this.inlineImageUrls(sourceMessages, message.image_fetch_referer);
+    const data = this.buildRequestData(message, false, sourceMessages);
 
     try {
       const res = await axios.post(this.endpointUrl, data, { headers: this.buildHeaders() });
@@ -230,7 +478,9 @@ export class OpenRouterAI implements IAIProvider {
   }
 
   async createPassthroughStream(message: IMessage): Promise<ProviderStreamPassthrough | null> {
-    const data = this.buildRequestData(message, true);
+    const sourceMessages = this.getSourceMessages(message);
+    await this.inlineImageUrls(sourceMessages, message.image_fetch_referer);
+    const data = this.buildRequestData(message, true, sourceMessages);
     const res = await axios.post(this.endpointUrl, data, { headers: this.buildHeaders(), responseType: 'stream' });
     return {
       upstream: res.data,
@@ -240,7 +490,9 @@ export class OpenRouterAI implements IAIProvider {
 
   async *sendMessageStream(message: IMessage): AsyncGenerator<ProviderStreamChunk, void, unknown> {
     const start = Date.now();
-    const data = this.buildRequestData(message, true);
+    const sourceMessages = this.getSourceMessages(message);
+    await this.inlineImageUrls(sourceMessages, message.image_fetch_referer);
+    const data = this.buildRequestData(message, true, sourceMessages);
 
     try {
       const res = await axios.post(this.endpointUrl, data, { headers: this.buildHeaders(), responseType: 'stream' });

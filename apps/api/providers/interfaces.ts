@@ -84,6 +84,11 @@ export interface ProviderResponse {
   usage?: ProviderUsage;
 }
 
+export interface ChatMessage {
+  role: string;
+  content: string | ContentPart[];
+}
+
 export type ContentPart =
   | { type: 'text'; text: string }
   | { type: 'input_text'; text: string }
@@ -96,6 +101,7 @@ export interface IMessage {
   model: {
     id: string;
   };
+  messages?: ChatMessage[];
   useResponsesApi?: boolean;
   system?: string | string[];
   response_format?: any;
@@ -110,6 +116,7 @@ export interface IMessage {
   audio?: any;
   reasoning?: any;
   instructions?: string;
+  image_fetch_referer?: string;
 }
 
 // --- Potentially for user management/API key tracking --- //
