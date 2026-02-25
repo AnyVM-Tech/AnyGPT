@@ -1,12 +1,67 @@
 import crypto from 'crypto';
 // Remove direct fs import if no longer needed
-// import fs from 'fs'; 
+// import fs from 'fs';
 // Import the singleton DataManager instance
-import { dataManager } from './dataManager.js'; 
+import { dataManager, ModelsFileStructure } from './dataManager.js';
 // Import tiers data directly (static configuration)
-import tiersData from '../tiers.json' with { type: 'json' }; 
+import tiersData from '../tiers.json' with { type: 'json' };
 import { logger } from './logger.js';
 import { hashToken } from './redaction.js';
+
+// --- Per-model pricing cache for estimatedCost ---
+interface ModelPricing { input: number; output: number; }
+let _pricingCache: Map<string, ModelPricing> = new Map();
+let _avgBlendedRate: number = 0;
+let _pricingLastUpdated = 0;
+const PRICING_REFRESH_MS = 5 * 60 * 1000; // refresh every 5 minutes
+
+async function refreshPricingCache(): Promise<void> {
+  const now = Date.now();
+  if (_pricingCache.size > 0 && (now - _pricingLastUpdated) < PRICING_REFRESH_MS) return;
+  try {
+    const modelsFile = await dataManager.load<ModelsFileStructure>('models');
+    const data = modelsFile?.data || [];
+    const next = new Map<string, ModelPricing>();
+    const blendedRates: number[] = [];
+    for (const m of data) {
+      const p = (m as any).pricing;
+      if (!p) continue;
+      const inp = typeof p.input === 'number' ? p.input : 0;
+      const out = typeof p.output === 'number' ? p.output : 0;
+      if (inp > 0 || out > 0) {
+        next.set(m.id, { input: inp, output: out });
+        blendedRates.push((inp + out) / 2);
+      }
+    }
+    if (next.size > 0) {
+      _pricingCache = next;
+      _avgBlendedRate = blendedRates.reduce((a, b) => a + b, 0) / blendedRates.length;
+      _pricingLastUpdated = now;
+    }
+  } catch {
+    // Keep previous cache if models aren't available
+  }
+}
+
+function calculateRequestCost(
+  totalTokens: number,
+  modelId?: string,
+  promptTokens?: number,
+  completionTokens?: number
+): number {
+  if (modelId && _pricingCache.has(modelId)) {
+    const pricing = _pricingCache.get(modelId)!;
+    const pTokens = typeof promptTokens === 'number' ? promptTokens : totalTokens;
+    const cTokens = typeof completionTokens === 'number' ? completionTokens : 0;
+    // pricing.input and pricing.output are $/M tokens
+    return (pTokens * pricing.input + cTokens * pricing.output) / 1_000_000;
+  }
+  // Fallback: blended average rate
+  if (_avgBlendedRate > 0) {
+    return (totalTokens * _avgBlendedRate) / 1_000_000;
+  }
+  return 0;
+}
 
 // --- Type Definitions --- 
 // Export interfaces for use in other modules
@@ -23,10 +78,11 @@ const tiers: TiersFile = tiersData;
 
 export interface UserData {
   userId: string;
-  tokenUsage: number; 
+  tokenUsage: number;
   requestCount: number;
   role: 'admin' | 'user';
   tier: keyof TiersFile; // Use keyof TiersFile for better type safety
+  estimatedCost?: number;
 }
 // Define KeysFile structure locally or import if shared
 export interface KeysFile { [apiKey: string]: UserData; }
@@ -186,11 +242,31 @@ export function extractMessageFromRequestBody(requestBody: any): { messages: { r
 }
 
 // Becomes async due to dataManager load/save
-export async function updateUserTokenUsage(numberOfTokens: number, apiKey: string, options: { incrementRequest?: boolean } = {}): Promise<void> {
+export async function updateUserTokenUsage(
+  numberOfTokens: number,
+  apiKey: string,
+  options: {
+    incrementRequest?: boolean;
+    modelId?: string;
+    promptTokens?: number;
+    completionTokens?: number;
+  } = {}
+): Promise<void> {
   if (typeof numberOfTokens !== 'number' || isNaN(numberOfTokens) || numberOfTokens < 0) {
       logger.warn(`Invalid token count (${numberOfTokens}) for key ${hashToken(apiKey).slice(0, 12)}.`); return;
   }
   const incrementRequest = options.incrementRequest !== false;
+
+  // Ensure pricing cache is warm
+  await refreshPricingCache();
+
+  const requestCost = calculateRequestCost(
+    numberOfTokens,
+    options.modelId,
+    options.promptTokens,
+    options.completionTokens
+  );
+
   let keyFound = false;
 
   await dataManager.updateWithLock<KeysFile>('keys', (currentKeys) => {
@@ -202,6 +278,10 @@ export async function updateUserTokenUsage(numberOfTokens: number, apiKey: strin
     keyFound = true;
     userData.tokenUsage = (userData.tokenUsage || 0) + numberOfTokens;
     userData.requestCount = (userData.requestCount || 0) + (incrementRequest ? 1 : 0);
+    if (requestCost > 0) {
+      // Use 6 decimal places to avoid rounding away sub-cent per-request costs
+      userData.estimatedCost = Math.round(((userData.estimatedCost || 0) + requestCost) * 1_000_000) / 1_000_000;
+    }
     currentKeys[apiKey] = userData;
     return currentKeys;
   });

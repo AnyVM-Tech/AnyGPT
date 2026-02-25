@@ -73,6 +73,8 @@ function ensureWorker(): Worker | null {
   }
 }
 
+const WORKER_JOB_TIMEOUT_MS = Math.max(1000, Number(process.env.WORKER_JOB_TIMEOUT_MS || 5000));
+
 export async function computeProviderMetricsInWorker(
   providerData: ProviderStateStructure,
   alpha: number,
@@ -91,10 +93,27 @@ export async function computeProviderMetricsInWorker(
   const payload: MetricsJob = { id, type: 'provider-metrics', providerData, alpha, latencyWeight, errorWeight };
 
   return new Promise((resolve, reject) => {
-    jobs.set(id, { resolve, reject });
+    // Add a timeout to prevent hanging if the worker stalls
+    const timer = setTimeout(() => {
+      jobs.delete(id);
+      console.warn(`[WorkerPool] Job ${id} timed out after ${WORKER_JOB_TIMEOUT_MS}ms, falling back inline.`);
+      try {
+        computeProviderStatsWithEMA(providerData, alpha);
+        computeProviderScore(providerData, latencyWeight, errorWeight);
+        resolve(providerData);
+      } catch (fallbackErr) {
+        reject(fallbackErr);
+      }
+    }, WORKER_JOB_TIMEOUT_MS);
+
+    jobs.set(id, {
+      resolve: (val) => { clearTimeout(timer); resolve(val); },
+      reject: (err) => { clearTimeout(timer); reject(err); },
+    });
     try {
       w.postMessage(payload);
     } catch (err) {
+      clearTimeout(timer);
       jobs.delete(id);
       console.warn('[WorkerPool] postMessage failed, falling back inline.', err);
       try {

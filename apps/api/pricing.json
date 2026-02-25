@@ -1,0 +1,952 @@
+{
+  "updated_at": "2026-02-25T06:30:46.246Z",
+  "models": {
+    "gpt-4o-mini": {
+      "input": 0.15,
+      "output": 0.6,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-4o": {
+      "input": 2.5,
+      "output": 10,
+      "image_input": 0.001913,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-3.5-turbo": {
+      "input": 0.5,
+      "output": 1.5,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "deepseek-chat": {
+      "input": 0.27,
+      "output": 1.1,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "deepseek-reasoner": {
+      "input": 0.55,
+      "output": 2.19,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-4-0613": {
+      "input": 30,
+      "output": 60,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-4": {
+      "input": 30,
+      "output": 60,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-5.2-codex": {
+      "input": 3,
+      "output": 12,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-audio-mini-2025-12-15": {
+      "input": 0.15,
+      "output": 0.6,
+      "audio_input": 10,
+      "audio_output": 20,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-4-1106-preview": {
+      "input": 10,
+      "output": 30,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-3.5-turbo-1106": {
+      "input": 1,
+      "output": 2,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-4-0125-preview": {
+      "input": 10,
+      "output": 30,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-4-turbo-preview": {
+      "input": 10,
+      "output": 30,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-3.5-turbo-0125": {
+      "input": 0.5,
+      "output": 1.5,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-4-turbo": {
+      "input": 10,
+      "output": 30,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-4-turbo-2024-04-09": {
+      "input": 10,
+      "output": 30,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-4o-2024-05-13": {
+      "input": 5,
+      "output": 15,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-4o-mini-2024-07-18": {
+      "input": 0.15,
+      "output": 0.6,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-4o-2024-08-06": {
+      "input": 2.5,
+      "output": 10,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-4o-audio-preview": {
+      "input": 2.5,
+      "output": 10,
+      "audio_input": 40,
+      "audio_output": 80,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-4o-audio-preview-2024-12-17": {
+      "input": 2.5,
+      "output": 10,
+      "audio_input": 40,
+      "audio_output": 80,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-4o-mini-audio-preview-2024-12-17": {
+      "input": 0.15,
+      "output": 0.6,
+      "audio_input": 10,
+      "audio_output": 20,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "o1-2024-12-17": {
+      "input": 15,
+      "output": 60,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "o1": {
+      "input": 15,
+      "output": 60,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-4o-mini-audio-preview": {
+      "input": 0.15,
+      "output": 0.6,
+      "audio_input": 10,
+      "audio_output": 20,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "o3-mini": {
+      "input": 1.1,
+      "output": 4.4,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "o3-mini-2025-01-31": {
+      "input": 1.1,
+      "output": 4.4,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-4o-2024-11-20": {
+      "input": 2.5,
+      "output": 10,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-4o-search-preview-2025-03-11": {
+      "input": 2.5,
+      "output": 10,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-4o-search-preview": {
+      "input": 2.5,
+      "output": 10,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-4o-mini-search-preview-2025-03-11": {
+      "input": 0.15,
+      "output": 0.6,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-4o-mini-search-preview": {
+      "input": 0.15,
+      "output": 0.6,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "o1-pro-2025-03-19": {
+      "input": 150,
+      "output": 600,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "o1-pro": {
+      "input": 150,
+      "output": 600,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "o3-2025-04-16": {
+      "input": 10,
+      "output": 40,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "o4-mini-2025-04-16": {
+      "input": 1.1,
+      "output": 4.4,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "o3": {
+      "input": 10,
+      "output": 40,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "o4-mini": {
+      "input": 1.1,
+      "output": 4.4,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-4.1-2025-04-14": {
+      "input": 2,
+      "output": 8,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-4.1": {
+      "input": 2,
+      "output": 8,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-4.1-mini-2025-04-14": {
+      "input": 0.4,
+      "output": 1.6,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-4.1-mini": {
+      "input": 0.4,
+      "output": 1.6,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-4.1-nano-2025-04-14": {
+      "input": 0.1,
+      "output": 0.4,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-4.1-nano": {
+      "input": 0.1,
+      "output": 0.4,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-4o-audio-preview-2025-06-03": {
+      "input": 2.5,
+      "output": 10,
+      "audio_input": 40,
+      "audio_output": 80,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-5-chat-latest": {
+      "input": 5,
+      "output": 20,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-5-2025-08-07": {
+      "input": 5,
+      "output": 20,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-5": {
+      "input": 5,
+      "output": 20,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-5-mini-2025-08-07": {
+      "input": 0.6,
+      "output": 2.4,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-5-mini": {
+      "input": 0.6,
+      "output": 2.4,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-5-nano-2025-08-07": {
+      "input": 0.15,
+      "output": 0.6,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-5-nano": {
+      "input": 0.15,
+      "output": 0.6,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-audio-2025-08-28": {
+      "input": 2.5,
+      "output": 10,
+      "audio_input": 40,
+      "audio_output": 80,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-audio": {
+      "input": 2.5,
+      "output": 10,
+      "audio_input": 40,
+      "audio_output": 80,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-5-codex": {
+      "input": 5,
+      "output": 20,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-5-pro-2025-10-06": {
+      "input": 10,
+      "output": 40,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-5-pro": {
+      "input": 10,
+      "output": 40,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-audio-mini": {
+      "input": 0.15,
+      "output": 0.6,
+      "audio_input": 10,
+      "audio_output": 20,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-audio-mini-2025-10-06": {
+      "input": 0.15,
+      "output": 0.6,
+      "audio_input": 10,
+      "audio_output": 20,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-5-search-api": {
+      "input": 5,
+      "output": 20,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-5-search-api-2025-10-14": {
+      "input": 5,
+      "output": 20,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-5.1-chat-latest": {
+      "input": 4,
+      "output": 16,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-5.1-2025-11-13": {
+      "input": 4,
+      "output": 16,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-5.1": {
+      "input": 4,
+      "output": 16,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-5.1-codex": {
+      "input": 4,
+      "output": 16,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-5.1-codex-mini": {
+      "input": 0.5,
+      "output": 2,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-5.1-codex-max": {
+      "input": 8,
+      "output": 32,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-5.2-2025-12-11": {
+      "input": 3,
+      "output": 12,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-5.2": {
+      "input": 3,
+      "output": 12,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-5.2-pro-2025-12-11": {
+      "input": 8,
+      "output": 32,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-5.2-pro": {
+      "input": 8,
+      "output": 32,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-5.2-chat-latest": {
+      "input": 3,
+      "output": 12,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-3.5-turbo-16k": {
+      "input": 3,
+      "output": 4,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "text-embedding-ada-002": {
+      "input": 0.1,
+      "output": 0,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "grok-2-vision-1212": {
+      "input": 2,
+      "output": 10,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "grok-3": {
+      "input": 3,
+      "output": 15,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "grok-3-mini": {
+      "input": 0.3,
+      "output": 0.5,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "grok-4-0709": {
+      "input": 6,
+      "output": 18,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "grok-4-1-fast-non-reasoning": {
+      "input": 3,
+      "output": 15,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "grok-4-1-fast-reasoning": {
+      "input": 3,
+      "output": 15,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "grok-4-fast-non-reasoning": {
+      "input": 3,
+      "output": 15,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "grok-4-fast-reasoning": {
+      "input": 3,
+      "output": 15,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "grok-code-fast-1": {
+      "input": 0.5,
+      "output": 2,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "o3-pro": {
+      "input": 20,
+      "output": 80,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "o3-pro-2025-06-10": {
+      "input": 20,
+      "output": 80,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-4-0314": {
+      "input": 30,
+      "output": 60,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gemini-2.0-flash": {
+      "input": 0.1,
+      "output": 0.4,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gemini-2.0-flash-001": {
+      "input": 0.1,
+      "output": 0.4,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gemini-2.0-flash-lite-001": {
+      "input": 0.075,
+      "output": 0.3,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gemini-2.0-flash-lite": {
+      "input": 0.075,
+      "output": 0.3,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gemini-2.5-flash-preview-tts": {
+      "input": 0.15,
+      "output": 0.6,
+      "audio_output": 12,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gemini-2.5-pro-preview-tts": {
+      "input": 1.25,
+      "output": 10,
+      "audio_output": 20,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gemma-3-27b-it": {
+      "input": 0,
+      "output": 0,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gemma-3n-e2b-it": {
+      "input": 0,
+      "output": 0,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gemini-flash-latest": {
+      "input": 0.15,
+      "output": 0.6,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gemini-flash-lite-latest": {
+      "input": 0.075,
+      "output": 0.3,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gemini-pro-latest": {
+      "input": 1.25,
+      "output": 10,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gemini-2.5-flash-lite": {
+      "input": 0.075,
+      "output": 0.3,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gemini-2.5-flash-image": {
+      "input": 0.15,
+      "output": 0.6,
+      "per_image": 0.04,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gemini-2.5-flash-lite-preview-09-2025": {
+      "input": 0.075,
+      "output": 0.3,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gemini-3-pro-preview": {
+      "input": 1,
+      "output": 8,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gemini-3-flash-preview": {
+      "input": 0.1,
+      "output": 0.4,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gemini-3-pro-image-preview": {
+      "input": 1,
+      "output": 8,
+      "per_image": 0.04,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "nano-banana-pro-preview": {
+      "input": 0.15,
+      "output": 0.6,
+      "per_image": 0.04,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gemini-robotics-er-1.5-preview": {
+      "input": 1.25,
+      "output": 5,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gemini-2.5-computer-use-preview-10-2025": {
+      "input": 1.25,
+      "output": 10,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gemini-2.5-flash-native-audio-latest": {
+      "input": 0.15,
+      "output": 0.6,
+      "audio_input": 1,
+      "audio_output": 12,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gemini-2.5-flash-native-audio-preview-09-2025": {
+      "input": 0.15,
+      "output": 0.6,
+      "audio_input": 1,
+      "audio_output": 12,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gemini-2.5-flash-native-audio-preview-12-2025": {
+      "input": 0.15,
+      "output": 0.6,
+      "audio_input": 1,
+      "audio_output": 12,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gemma-3-1b-it": {
+      "input": 0,
+      "output": 0,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gemma-3-4b-it": {
+      "input": 0,
+      "output": 0,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gemini-2.5-flash": {
+      "input": 0.15,
+      "output": 0.6,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gemini-2.5-pro": {
+      "input": 1.25,
+      "output": 10,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "deep-research-pro-preview-12-2025": {
+      "input": 2.5,
+      "output": 10,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gemini-embedding-001": {
+      "input": 0,
+      "output": 0,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "aqa": {
+      "input": 0,
+      "output": 0,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "imagen-4.0-generate-001": {
+      "input": 0,
+      "output": 0,
+      "per_image": 0.04,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "imagen-4.0-ultra-generate-001": {
+      "input": 0,
+      "output": 0,
+      "per_image": 0.08,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "imagen-4.0-fast-generate-001": {
+      "input": 0,
+      "output": 0,
+      "per_image": 0.02,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "veo-2.0-generate-001": {
+      "input": 0,
+      "output": 0,
+      "per_request": 0.35,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "veo-3.0-generate-001": {
+      "input": 0,
+      "output": 0,
+      "per_request": 0.5,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "veo-3.0-fast-generate-001": {
+      "input": 0,
+      "output": 0,
+      "per_request": 0.25,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "veo-3.1-generate-preview": {
+      "input": 0,
+      "output": 0,
+      "per_request": 0.5,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "veo-3.1-fast-generate-preview": {
+      "input": 0,
+      "output": 0,
+      "per_request": 0.25,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-realtime-mini-2025-12-15": {
+      "input": 0.6,
+      "output": 2.4,
+      "audio_input": 10,
+      "audio_output": 20,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "text-embedding-3-small": {
+      "input": 0.02,
+      "output": 0,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "text-embedding-3-large": {
+      "input": 0.13,
+      "output": 0,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-4o-realtime-preview": {
+      "input": 5,
+      "output": 20,
+      "audio_input": 40,
+      "audio_output": 80,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "omni-moderation-2024-09-26": {
+      "input": 0,
+      "output": 0,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-4o-realtime-preview-2024-12-17": {
+      "input": 5,
+      "output": 20,
+      "audio_input": 40,
+      "audio_output": 80,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-4o-mini-realtime-preview-2024-12-17": {
+      "input": 0.6,
+      "output": 2.4,
+      "audio_input": 10,
+      "audio_output": 20,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-4o-mini-realtime-preview": {
+      "input": 0.6,
+      "output": 2.4,
+      "audio_input": 10,
+      "audio_output": 20,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-4o-realtime-preview-2025-06-03": {
+      "input": 5,
+      "output": 20,
+      "audio_input": 40,
+      "audio_output": 80,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-4o-transcribe-diarize": {
+      "input": 2.5,
+      "output": 10,
+      "audio_input": 6,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-realtime": {
+      "input": 5,
+      "output": 20,
+      "audio_input": 40,
+      "audio_output": 80,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-realtime-2025-08-28": {
+      "input": 5,
+      "output": 20,
+      "audio_input": 40,
+      "audio_output": 80,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-realtime-mini": {
+      "input": 0.6,
+      "output": 2.4,
+      "audio_input": 10,
+      "audio_output": 20,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-realtime-mini-2025-10-06": {
+      "input": 0.6,
+      "output": 2.4,
+      "audio_input": 10,
+      "audio_output": 20,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "computer-use-preview": {
+      "input": 3,
+      "output": 12,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "computer-use-preview-2025-03-11": {
+      "input": 3,
+      "output": 12,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gemini-3.1-pro-preview": {
+      "input": 1,
+      "output": 8,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gemini-3.1-pro-preview-customtools": {
+      "input": 1,
+      "output": 8,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-audio-1.5": {
+      "input": 2,
+      "output": 8,
+      "audio_input": 30,
+      "audio_output": 60,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-realtime-1.5": {
+      "input": 4,
+      "output": 16,
+      "audio_input": 30,
+      "audio_output": 60,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gpt-5.3-codex": {
+      "input": 2.5,
+      "output": 10,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gemma-3-12b-it": {
+      "input": 0,
+      "output": 0,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    },
+    "gemma-3n-e4b-it": {
+      "input": 0,
+      "output": 0,
+      "source": "official",
+      "updated_at": "2026-02-25T06:30:46.246Z"
+    }
+  }
+}

@@ -294,6 +294,9 @@ export class ImagenAI implements IAIProvider {
       attemptedErrors.push(`${res.status} @ generateImages ${generateImagesModelId}${text ? ` -> ${text.slice(0, 200)}` : ''}`);
     }
 
+    if (attemptedErrors.length === 0) {
+      attemptedErrors.push('no eligible image models found (empty catalog or unsupported methods)');
+    }
     throw new Error(`Imagen API failed after all strategies: ${attemptedErrors.join(' | ')}`);
   }
 

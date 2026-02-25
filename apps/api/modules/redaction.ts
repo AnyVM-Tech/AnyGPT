@@ -2,6 +2,13 @@ import crypto from 'crypto';
 
 const DEFAULT_HASH_SECRET = process.env.API_KEY_HASH_SECRET || 'anygpt-api';
 
+if (!process.env.API_KEY_HASH_SECRET) {
+  console.warn(
+    '[Security] API_KEY_HASH_SECRET is not set. Using default static secret for key hashing. ' +
+    'Set API_KEY_HASH_SECRET in your .env to a random value for production use.'
+  );
+}
+
 export function redactToken(value?: string | null, visiblePrefix = 4, visibleSuffix = 4): string | null {
   if (!value) return null;
   const token = String(value);

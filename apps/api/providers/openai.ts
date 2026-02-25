@@ -132,7 +132,10 @@ export class OpenAI implements IAIProvider {
     if (normalized.includes('gpt-5.2')) return true;
     if (normalized.includes('gpt-4.1')) return true;
     if (normalized.includes('o3') || normalized.includes('omni')) return true;
-    return normalized.includes('pro');
+    // Match specific "pro" model families (e.g. "o1-pro", "o3-pro") without
+    // accidentally matching unrelated models that happen to contain "pro".
+    if (/(?:^|[-_])pro(?:$|[-_])/.test(normalized)) return true;
+    return false;
   }
 
   private resolveChatEndpoint(): string {
@@ -340,6 +343,29 @@ export class OpenAI implements IAIProvider {
     return headers;
   }
 
+  /**
+   * Creates a stateful SSE line consumer. Feed it raw chunks and it returns
+   * parsed `data:` payloads (excluding the `data:` prefix).
+   */
+  private createSseConsumer(): (rawChunk: any) => string[] {
+    let buffer = '';
+    return (rawChunk: any): string[] => {
+      const text = Buffer.isBuffer(rawChunk) ? rawChunk.toString('utf8') : String(rawChunk);
+      buffer += text;
+      const dataLines: string[] = [];
+      while (true) {
+        const newlineIndex = buffer.indexOf('\n');
+        if (newlineIndex === -1) break;
+        let line = buffer.slice(0, newlineIndex);
+        buffer = buffer.slice(newlineIndex + 1);
+        if (line.endsWith('\r')) line = line.slice(0, -1);
+        if (!line.startsWith('data:')) continue;
+        dataLines.push(line.slice(5).trimStart());
+      }
+      return dataLines;
+    };
+  }
+
   private async readStreamBody(stream: any, maxBytes: number = 65536): Promise<string> {
     if (!stream || typeof stream[Symbol.asyncIterator] !== 'function') return '';
     let size = 0;
@@ -392,6 +418,12 @@ export class OpenAI implements IAIProvider {
       messages: this.normalizeChatMessages(message),
       ...(stream ? { stream: true } : {}),
     };
+    if (stream) {
+      const existing = message.stream_options && typeof message.stream_options === 'object'
+        ? message.stream_options
+        : {};
+      payload.stream_options = { ...existing, include_usage: true };
+    }
     this.attachChatOptionalParams(payload, message);
 
     if (this.isAudioModel(message.model.id) && payload.audio && typeof payload.audio === 'object') {
@@ -419,6 +451,9 @@ export class OpenAI implements IAIProvider {
       input,
       ...(stream ? { stream: true } : {}),
     };
+    if (stream && message.stream_options && typeof message.stream_options === 'object') {
+      payload.stream_options = { ...message.stream_options };
+    }
 
     return this.attachResponsesOptionalParams(payload, message);
   }
@@ -741,27 +776,7 @@ export class OpenAI implements IAIProvider {
     try {
       const response = await this.postSseRequest(url, data, headers);
       let fullResponse = '';
-      let sseBuffer = '';
-
-      const consumeSseChunk = (rawChunk: any): string[] => {
-        const text = Buffer.isBuffer(rawChunk) ? rawChunk.toString('utf8') : String(rawChunk);
-        sseBuffer += text;
-        const dataLines: string[] = [];
-
-        while (true) {
-          const newlineIndex = sseBuffer.indexOf('\n');
-          if (newlineIndex === -1) break;
-
-          let line = sseBuffer.slice(0, newlineIndex);
-          sseBuffer = sseBuffer.slice(newlineIndex + 1);
-
-          if (line.endsWith('\r')) line = line.slice(0, -1);
-          if (!line.startsWith('data:')) continue;
-          dataLines.push(line.slice(5).trimStart());
-        }
-
-        return dataLines;
-      };
+      const consumeSseChunk = this.createSseConsumer();
 
       for await (const value of response.data) {
         const dataMessages = consumeSseChunk(value);
@@ -808,27 +823,7 @@ export class OpenAI implements IAIProvider {
           const chatPayload = this.buildChatPayload(message, true);
           const chatResp = await this.postSseRequest(chatUrl, chatPayload, headers);
           let fullResponse = '';
-          let chatSseBuffer = '';
-
-          const consumeChatSseChunk = (rawChunk: any): string[] => {
-            const text = Buffer.isBuffer(rawChunk) ? rawChunk.toString('utf8') : String(rawChunk);
-            chatSseBuffer += text;
-            const dataLines: string[] = [];
-
-            while (true) {
-              const newlineIndex = chatSseBuffer.indexOf('\n');
-              if (newlineIndex === -1) break;
-
-              let line = chatSseBuffer.slice(0, newlineIndex);
-              chatSseBuffer = chatSseBuffer.slice(newlineIndex + 1);
-
-              if (line.endsWith('\r')) line = line.slice(0, -1);
-              if (!line.startsWith('data:')) continue;
-              dataLines.push(line.slice(5).trimStart());
-            }
-
-            return dataLines;
-          };
+          const consumeChatSseChunk = this.createSseConsumer();
 
           for await (const value of chatResp.data) {
             const dataMessages = consumeChatSseChunk(value);
@@ -860,27 +855,7 @@ export class OpenAI implements IAIProvider {
           const responsesPayload = this.buildResponsesPayload(message, true);
           const responsesResp = await this.postSseRequest(responsesUrl, responsesPayload, headers);
           let fullResponse = '';
-          let responsesSseBuffer = '';
-
-          const consumeResponsesSseChunk = (rawChunk: any): string[] => {
-            const text = Buffer.isBuffer(rawChunk) ? rawChunk.toString('utf8') : String(rawChunk);
-            responsesSseBuffer += text;
-            const dataLines: string[] = [];
-
-            while (true) {
-              const newlineIndex = responsesSseBuffer.indexOf('\n');
-              if (newlineIndex === -1) break;
-
-              let line = responsesSseBuffer.slice(0, newlineIndex);
-              responsesSseBuffer = responsesSseBuffer.slice(newlineIndex + 1);
-
-              if (line.endsWith('\r')) line = line.slice(0, -1);
-              if (!line.startsWith('data:')) continue;
-              dataLines.push(line.slice(5).trimStart());
-            }
-
-            return dataLines;
-          };
+          const consumeResponsesSseChunk = this.createSseConsumer();
 
           for await (const value of responsesResp.data) {
             const dataMessages = consumeResponsesSseChunk(value);

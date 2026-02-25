@@ -50,9 +50,14 @@ interface ErrorLogEntry {
 function sanitizeDetails(details: Record<string, any>): Record<string, any> {
     const sanitized: Record<string, any> = {};
     for (const [key, value] of Object.entries(details)) {
+        if (value === undefined) continue; // Drop undefined values entirely
         const lowered = key.toLowerCase();
         if (['apikey', 'api_key', 'authorization', 'x-api-key', 'token', 'secret'].includes(lowered)) {
             sanitized[key] = typeof value === 'string' ? redactToken(value) : '[redacted]';
+        } else if (value === null) {
+            sanitized[key] = null; // Keep explicit nulls
+        } else if (Array.isArray(value) && value.length === 0) {
+            sanitized[key] = '(empty)'; // Make empty arrays visible
         } else {
             sanitized[key] = value;
         }
@@ -71,10 +76,9 @@ export async function logError(error: any, request?: Request): Promise<void> {
     };
 
     if (request) {
-        logEntry.requestMethod = request.method;
-        logEntry.requestUrl = request.url;
-        logEntry.originIp = request.ip || request.headers?.['x-forwarded-for'] || request.headers?.['x-real-ip'];
-        // Assuming apiKey is attached to the request object as defined in your openai.ts middleware
+        logEntry.requestMethod = request.method || undefined;
+        logEntry.requestUrl = request.url || request.path || undefined;
+        logEntry.originIp = request.ip || request.headers?.['x-forwarded-for'] || request.headers?.['x-real-ip'] || undefined;
         if (request.apiKey && typeof request.apiKey === 'string') {
             logEntry.apiKey = redactToken(request.apiKey) ?? undefined;
             logEntry.apiKeyHash = hashToken(request.apiKey).slice(0, 12);
@@ -82,38 +86,50 @@ export async function logError(error: any, request?: Request): Promise<void> {
     }
 
     if (error instanceof Error) {
-        logEntry.errorMessage = error.message;
+        logEntry.errorMessage = error.message || '(empty error message)';
         if (error.stack) {
             logEntry.errorStack = error.stack;
         }
-        // Capture other enumerable properties from the error object, if any
+        // Capture all enumerable properties (modelId, attemptedProviders, etc.)
         const details: Record<string, any> = {};
         for (const key in error) {
             if (Object.prototype.hasOwnProperty.call(error, key) && key !== 'message' && key !== 'stack') {
                 details[key] = (error as any)[key];
             }
         }
+        // Also capture well-known non-enumerable properties
+        const meta = error as any;
+        if (meta.code !== undefined && !details.code) details.code = meta.code;
+        if (meta.statusCode !== undefined && !details.statusCode) details.statusCode = meta.statusCode;
+        if (meta.status !== undefined && !details.status) details.status = meta.status;
+        if (meta.modelId !== undefined && !details.modelId) details.modelId = meta.modelId;
+
         if (Object.keys(details).length > 0) {
             logEntry.errorDetails = sanitizeDetails(details);
         }
-    } else if (typeof error === 'object' && error !== null && error.message) {
-        logEntry.errorMessage = error.message;
+    } else if (typeof error === 'object' && error !== null) {
+        logEntry.errorMessage = error.message || error.errorMessage || error.error || '(no message property)';
         if (error.stack) {
             logEntry.errorStack = error.stack;
         }
         const otherProps = { ...error };
         delete otherProps.message;
         delete otherProps.stack;
+        // Keep all other properties as details for context
         if (Object.keys(otherProps).length > 0) {
             logEntry.errorDetails = sanitizeDetails(otherProps);
         }
+    } else if (typeof error === 'string') {
+        logEntry.errorMessage = error || '(empty string error)';
     } else {
-        logEntry.errorMessage = 'Error object was not an instance of Error and had no message property.';
+        logEntry.errorMessage = `Unexpected error type: ${typeof error}`;
         try {
-            logEntry.errorDetails = JSON.parse(JSON.stringify(error, Object.getOwnPropertyNames(error)));
+            logEntry.errorDetails = error != null
+                ? JSON.parse(JSON.stringify(error, Object.getOwnPropertyNames(error)))
+                : { rawValue: String(error) };
         } catch (stringifyError) {
-            console.error('[ErrorLogger] Failed to serialize non-Error object:', stringifyError);
-            logEntry.errorDetails = 'Could not serialize error object';
+            console.error('[ErrorLogger] Failed to serialize error:', stringifyError);
+            logEntry.errorDetails = { rawValue: String(error) };
         }
     }
 

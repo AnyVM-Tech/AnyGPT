@@ -66,7 +66,7 @@ export function computeEMA(
 
 export function computeProviderStatsWithEMA(
   providerData: Provider,
-  _alpha: number
+  _alpha?: number
 ): void {
   let totalResponseTime = 0;
   let totalProviderLatency = 0;

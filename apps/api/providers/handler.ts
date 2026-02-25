@@ -35,12 +35,47 @@ import {
     TierData, // Assuming this is exported from userData
 } from '../modules/userData.js';
 import { isExcludedError } from '../modules/errorExclusion.js';
+import redis from '../modules/db.js';
+import { hashToken } from '../modules/redaction.js';
+import {
+    readEnvNumber,
+    type TokenBreakdown,
+    estimateTokensFromText,
+    estimateTokensFromMessagesBreakdown,
+} from '../modules/tokenEstimation.js';
+import {
+    isRateLimitOrQuotaError as isRateLimitOrQuotaErrorShared,
+    isInvalidProviderCredentialError as isInvalidProviderCredentialErrorShared,
+    isModelAccessError as isModelAccessErrorShared,
+    isInsufficientCreditsError as isInsufficientCreditsErrorShared,
+    extractRetryAfterMs,
+} from '../modules/errorClassification.js';
 
 
 dotenv.config();
 const ajv = new Ajv();
 
 const AUTO_DISABLE_PROVIDERS = process.env.DISABLE_PROVIDER_AUTO_DISABLE !== 'true';
+const PROVIDER_AUTO_RECOVER_MS = (() => {
+    const raw = process.env.PROVIDER_AUTO_RECOVER_MS;
+    const parsed = raw !== undefined ? Number(raw) : NaN;
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 10 * 60 * 1000; // default 10 minutes
+})();
+const PROVIDER_AUTO_RECOVER_MAX_MS = (() => {
+    const raw = process.env.PROVIDER_AUTO_RECOVER_MAX_MS;
+    const parsed = raw !== undefined ? Number(raw) : NaN;
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 60 * 60 * 1000; // default 1 hour
+})();
+const REQUEST_DEADLINE_MS = (() => {
+    const raw = process.env.REQUEST_DEADLINE_MS;
+    const parsed = raw !== undefined ? Number(raw) : NaN;
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 60_000; // default 60 seconds total per request
+})();
+const FALLBACK_ATTEMPT_TIMEOUT_MS = (() => {
+    const raw = process.env.FALLBACK_ATTEMPT_TIMEOUT_MS;
+    const parsed = raw !== undefined ? Number(raw) : NaN;
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 15_000; // default 15 seconds for disabled fallback attempts
+})();
 const TTFT_INPUT_TOKENS_WEIGHT = (() => {
     const raw = process.env.TTFT_INPUT_TOKENS_WEIGHT;
     const parsed = raw !== undefined ? Number(raw) : NaN;
@@ -61,6 +96,67 @@ const NON_STREAM_MIN_TTFT_MS = (() => {
     const parsed = raw !== undefined ? Number(raw) : NaN;
     return Number.isFinite(parsed) && parsed >= 0 ? parsed : 25;
 })();
+const PROVIDER_COOLDOWN_MS = Math.max(0, Number(process.env.PROVIDER_COOLDOWN_MS ?? 60_000));
+const PROVIDER_COOLDOWN_REDIS_PREFIX = 'provider:cooldown:';
+const providerCooldowns = new Map<string, number>();
+const COOLDOWN_EVICTION_INTERVAL_MS = 5 * 60 * 1000; // Sweep expired entries every 5 minutes
+
+// Periodic eviction to prevent unbounded Map growth
+const _cooldownEvictionTimer = setInterval(() => {
+    const now = Date.now();
+    let evicted = 0;
+    for (const [key, expiresAt] of providerCooldowns) {
+        if (expiresAt <= now) {
+            providerCooldowns.delete(key);
+            evicted++;
+        }
+    }
+    if (evicted > 0) {
+        console.log(`[CooldownEviction] Swept ${evicted} expired cooldown entries. Remaining: ${providerCooldowns.size}`);
+    }
+}, COOLDOWN_EVICTION_INTERVAL_MS);
+if (typeof (_cooldownEvictionTimer as any).unref === 'function') (_cooldownEvictionTimer as any).unref();
+
+function getCooldownKey(apiKey: string): string {
+    return `${PROVIDER_COOLDOWN_REDIS_PREFIX}${hashToken(apiKey)}`;
+}
+
+async function isApiKeyCoolingDown(apiKey: string): Promise<boolean> {
+    if (!apiKey || PROVIDER_COOLDOWN_MS <= 0) return false;
+    const now = Date.now();
+    const cachedUntil = providerCooldowns.get(apiKey);
+    if (cachedUntil && cachedUntil > now) return true;
+    if (cachedUntil && cachedUntil <= now) providerCooldowns.delete(apiKey);
+
+    if (!redis || redis.status !== 'ready') return false;
+    try {
+        const ttlMs = await redis.pttl(getCooldownKey(apiKey));
+        if (ttlMs > 0) {
+            providerCooldowns.set(apiKey, now + ttlMs);
+            return true;
+        }
+    } catch {
+        return false;
+    }
+    return false;
+}
+
+// extractRetryAfterMs is now imported from '../modules/errorClassification.js'
+
+async function setApiKeyCooldown(apiKey: string, overrideMs?: number): Promise<void> {
+    const cooldownMs = Number.isFinite(overrideMs as number) && (overrideMs as number) > 0
+        ? Math.max(1, Math.ceil(overrideMs as number))
+        : PROVIDER_COOLDOWN_MS;
+    if (!apiKey || cooldownMs <= 0) return;
+    const until = Date.now() + cooldownMs;
+    providerCooldowns.set(apiKey, until);
+    if (!redis || redis.status !== 'ready') return;
+    try {
+        await redis.set(getCooldownKey(apiKey), '1', 'PX', String(cooldownMs));
+    } catch {
+        return;
+    }
+}
 const STREAM_MIN_GENERATION_WINDOW_MS = (() => {
     const raw = process.env.STREAM_MIN_GENERATION_WINDOW_MS;
     const parsed = raw !== undefined ? Number(raw) : NaN;
@@ -123,8 +219,8 @@ export async function initializeHandlerData() {
         if (p.id.includes('openai')) providerConfigs[p.id] = { class: OpenAI, args: [key, url] };
         else if (p.id.includes('openrouter')) providerConfigs[p.id] = { class: OpenRouterAI, args: [key, url] };
         else if (p.id.includes('deepseek')) providerConfigs[p.id] = { class: DeepseekAI, args: [key, url] };
-        else if (p.id.includes('imagen')) providerConfigs[p.id] = { class: ImagenAI, args: [key] };
-        else if (p.id.includes('gemini') || p.id === 'google') providerConfigs[p.id] = { class: GeminiAI, args: [key] }; 
+        else if (p.id.includes('imagen')) providerConfigs[p.id] = { class: GeminiAI, args: [key] };
+        else if (p.id.includes('gemini') || p.id === 'google') providerConfigs[p.id] = { class: GeminiAI, args: [key] };
         else providerConfigs[p.id] = { class: OpenAI, args: [key, url] }; 
     });
     console.log("Core handler components initialized.");
@@ -157,47 +253,57 @@ export class MessageHandler {
         return String(modelId || '').toLowerCase().replace(/^google\//, '');
     }
 
+    private isGeminiFamilyProvider(providerId: string): boolean {
+        return providerId.includes('gemini') || providerId === 'google' || providerId.includes('imagen');
+    }
+
+    private getGeminiInputTokenLimit(modelId: string): number {
+        const reportedLimit = GeminiAI.getModelTokenLimits(modelId)?.inputTokenLimit;
+        if (typeof reportedLimit === 'number' && Number.isFinite(reportedLimit) && reportedLimit > 0) {
+            return reportedLimit;
+        }
+        return GEMINI_INPUT_TOKEN_LIMIT;
+    }
+
+    private buildInputTokenLimitError(inputTokenEstimate: number, breakdown: TokenBreakdown, tokenLimit: number): Error {
+        const hasImageInput = breakdown.imageTokens > 0;
+        const hasAudioInput = breakdown.audioTokens > 0;
+        const baseMessage = `Input token count exceeds the maximum number of tokens allowed ${tokenLimit}. Estimated input tokens: ${inputTokenEstimate}.`;
+        const hint = hasImageInput
+            ? ' Image input appears too large; reduce image size or use a smaller image.'
+            : (hasAudioInput ? ' Audio input appears too large; reduce audio size or duration.' : '');
+        const err = new Error(`${baseMessage}${hint}`);
+        (err as any).code = 'INPUT_TOKENS_EXCEEDED';
+        (err as any).inputTokenEstimate = inputTokenEstimate;
+        (err as any).inputTokenLimit = tokenLimit;
+        (err as any).imageTokenEstimate = breakdown.imageTokens;
+        (err as any).audioTokenEstimate = breakdown.audioTokens;
+        (err as any).hasImageInput = hasImageInput;
+        (err as any).hasAudioInput = hasAudioInput;
+        return err;
+    }
+
     private shouldUseImagenProvider(providerId: string, modelId: string): boolean {
         const normalizedModelId = this.normalizeModelId(modelId);
-        const isGoogleFamilyProvider = providerId.includes('gemini') || providerId === 'google' || providerId.includes('imagen');
+        const isGoogleFamilyProvider = this.isGeminiFamilyProvider(providerId);
         const isImagenFamilyModel = normalizedModelId.startsWith('imagen-') || normalizedModelId.startsWith('nano-banana');
         return isGoogleFamilyProvider && isImagenFamilyModel;
     }
 
     private isInvalidProviderCredentialError(error: any): boolean {
-        const message = String(error?.message || error || '').toLowerCase();
-        if (!message) return false;
-
-        return (
-            message.includes('api_key_invalid') ||
-            message.includes('api key not found') ||
-            message.includes('invalid api key') ||
-            message.includes('invalid authentication') ||
-            message.includes('incorrect api key') ||
-            message.includes('unauthorized')
-        );
+        return isInvalidProviderCredentialErrorShared(error);
     }
 
     private isModelAccessError(error: any): boolean {
-        const message = String(error?.message || error || '').toLowerCase();
-        return (
-            message.includes('does not have access to model') ||
-            message.includes('model_not_found') ||
-            message.includes('no gemini model available') ||
-            message.includes('not found for api version')
-        );
+        return isModelAccessErrorShared(error);
     }
 
     private isInsufficientCreditsError(error: any): boolean {
-        const message = String(error?.message || error || '').toLowerCase();
-        if (!message) return false;
-        return (
-            message.includes('requires more credits') ||
-            message.includes('insufficient credits') ||
-            message.includes('can only afford') ||
-            message.includes('payment required') ||
-            message.includes('status 402')
-        );
+        return isInsufficientCreditsErrorShared(error);
+    }
+
+    private isRateLimitOrQuotaError(error: any): boolean {
+        return isRateLimitOrQuotaErrorShared(error);
     }
 
     private getProviderFamilyId(providerId: string): string {
@@ -250,6 +356,38 @@ export class MessageHandler {
             added += 1;
         }
 
+        return added;
+    }
+
+    /**
+     * After all active candidate providers have failed, append any disabled
+     * providers that support the requested model so they can be tried as a
+     * last resort before returning an error to the user.
+     */
+    private appendDisabledFallbackProviders(
+        allProviders: LoadedProviders,
+        candidateProviders: LoadedProviderData[],
+        modelId: string,
+        required: Set<ModelCapability>,
+        triedProviderIds: Set<string>
+    ): number {
+        let added = 0;
+        for (const provider of allProviders) {
+            if (!provider?.models?.[modelId]) continue;
+            if (triedProviderIds.has(provider.id)) continue;
+            if (candidateProviders.some((cand) => cand.id === provider.id)) continue;
+            if (this.providerSkipsRequiredCaps(provider, modelId, required)) continue;
+
+            // Include disabled providers/models — force-enable for this attempt
+            const clone = { ...provider, disabled: false };
+            const modelData = clone.models?.[modelId] as any;
+            if (modelData) {
+                clone.models = { ...clone.models, [modelId]: { ...modelData, disabled: false } };
+            }
+
+            candidateProviders.push(clone);
+            added += 1;
+        }
         return added;
     }
 
@@ -306,7 +444,7 @@ export class MessageHandler {
         if (providerId.includes('openai')) config = { class: OpenAI, args: [key, url] };
         else if (providerId.includes('openrouter')) config = { class: OpenRouterAI, args: [key, url] };
         else if (providerId.includes('deepseek')) config = { class: DeepseekAI, args: [key, url] };
-        else if (providerId.includes('imagen')) config = { class: ImagenAI, args: [key] };
+        else if (providerId.includes('imagen')) config = { class: GeminiAI, args: [key] };
         else if (providerId.includes('gemini') || providerId === 'google') config = { class: GeminiAI, args: [key] };
         else config = { class: OpenAI, args: [key, url] };
 
@@ -371,6 +509,24 @@ export class MessageHandler {
             applyTimeWindow(activeProviders as ProviderStateStructure[], this.TIME_WINDOW_HOURS);
         } catch (e) {
             console.error("Error applying time window:", e);
+        }
+
+        // Auto-recover disabled models whose recovery window has elapsed (exponential backoff)
+        const now = Date.now();
+        for (const p of activeProviders) {
+            const modelData = p.models?.[modelId] as Model | undefined;
+            if (modelData?.disabled && modelData.disabled_at) {
+                const disableCount = modelData.disable_count || 1;
+                const backoffMs = Math.min(
+                    PROVIDER_AUTO_RECOVER_MS * Math.pow(2, disableCount - 1),
+                    PROVIDER_AUTO_RECOVER_MAX_MS
+                );
+                if (now - modelData.disabled_at >= backoffMs) {
+                    console.log(`Auto-recovering model ${modelId} in provider ${p.id} after ${Math.round(backoffMs / 1000)}s backoff (disable_count=${disableCount}).`);
+                    modelData.disabled = false;
+                    // Keep disabled_at and disable_count intact — they get cleared on success or incremented on next failure
+                }
+            }
         }
 
         let compatibleProviders = activeProviders.filter((p: LoadedProviderData) => {
@@ -528,11 +684,15 @@ export class MessageHandler {
                 }
                 providerData.disabled = true;
                 modelData.consecutive_errors = this.CONSECUTIVE_ERROR_THRESHOLD;
+                modelData.disabled_at = Date.now();
+                modelData.disable_count = (modelData.disable_count || 0) + 1;
             } else {
                 modelData.consecutive_errors = (modelData.consecutive_errors || 0) + 1;
                 if (modelData.consecutive_errors >= this.CONSECUTIVE_ERROR_THRESHOLD) {
                     if (!modelData.disabled) {
                         console.warn(`Disabling model ${modelId} in provider ${providerId} after ${modelData.consecutive_errors} consecutive errors.`);
+                        modelData.disabled_at = Date.now();
+                        modelData.disable_count = (modelData.disable_count || 0) + 1;
                     }
                     modelData.disabled = true;
 
@@ -546,15 +706,21 @@ export class MessageHandler {
                 }
             }
         } else {
-            // Reset consecutive errors on success for this model
+            // Reset consecutive errors on success for this specific model
             modelData.consecutive_errors = 0;
             if (modelData.disabled) {
+                console.log(`Re-enabling model ${modelId} in provider ${providerId} after successful request.`);
                 modelData.disabled = false;
+                modelData.disabled_at = undefined;
+                modelData.disable_count = 0;
             }
-            // Re-enable provider on any model success if it was disabled
+            // Only re-enable provider if ALL models are now healthy (no disabled models remain)
             if (providerData.disabled) {
-                 console.log(`Re-enabling provider ${providerId} after successful request for model ${modelId}.`);
-                 providerData.disabled = false;
+                const remainingDisabled = Object.values(providerData.models || {}).filter((m: any) => m?.disabled).length;
+                if (remainingDisabled === 0) {
+                    console.log(`Re-enabling provider ${providerId} — all models are healthy after success on ${modelId}.`);
+                    providerData.disabled = false;
+                }
             }
         }
 
@@ -564,9 +730,26 @@ export class MessageHandler {
         return providers; 
     }
 
+    // Temporary model reroute map — requests for key are redirected to value
+    // To add a reroute: MODEL_REROUTES['source-model'] = 'target-model';
+    private static readonly MODEL_REROUTES: Record<string, string> = {
+        'gemini-2.0-flash': 'gemini-2.5-flash-lite-preview-09-2025',
+        'gemini-2.0-flash-001': 'gemini-2.5-flash-lite-preview-09-2025',
+    };
+
+    private applyModelReroute(modelId: string): string {
+        const target = MessageHandler.MODEL_REROUTES[modelId];
+        if (target) {
+            console.log(`[ModelReroute] Redirecting ${modelId} → ${target}`);
+            return target;
+        }
+        return modelId;
+    }
+
     async handleMessages(messages: IMessage[], modelId: string, apiKey: string): Promise<any> {
          if (!messages?.length || !modelId || !apiKey) throw new Error("Invalid arguments");
          if (!messageHandler) throw new Error("Service temporarily unavailable.");
+         modelId = this.applyModelReroute(modelId);
 
             await this.refreshModelCapabilities();
             this.validateModelCapabilities(modelId, messages);
@@ -579,29 +762,67 @@ export class MessageHandler {
          }
          const userData: UserData = validationResult.userData; 
          const tierLimits: TierData = validationResult.tierLimits; 
-         const userTierName = userData.tier; 
-         const allProvidersOriginal = await dataManager.load<LoadedProviders>('providers');
-         let candidateProviders = this.prepareCandidateProviders(allProvidersOriginal, modelId, tierLimits, userTierName);
-         candidateProviders = this.filterProvidersByCapabilitySkips(candidateProviders, modelId, requiredCaps);
-         if (candidateProviders.length === 0) {
-             throw new Error(`No providers available for model ${modelId} after capability filtering.`);
-         }
+        const userTierName = userData.tier; 
+        const allProvidersOriginal = await dataManager.load<LoadedProviders>('providers');
+        let candidateProviders = this.prepareCandidateProviders(allProvidersOriginal, modelId, tierLimits, userTierName);
+        candidateProviders = this.filterProvidersByCapabilitySkips(candidateProviders, modelId, requiredCaps);
+        if (candidateProviders.length === 0) {
+            throw new Error(`No providers available for model ${modelId} after capability filtering.`);
+        }
+
+        const inputTokenBreakdown = estimateTokensFromMessagesBreakdown(messages);
+        const inputTokenEstimate = inputTokenBreakdown.total;
+        const geminiInputTokenLimit = this.getGeminiInputTokenLimit(modelId);
+        if (
+            inputTokenEstimate > geminiInputTokenLimit &&
+            candidateProviders.every((p) => this.isGeminiFamilyProvider(p.id))
+        ) {
+            throw this.buildInputTokenLimitError(inputTokenEstimate, inputTokenBreakdown, geminiInputTokenLimit);
+        }
 
          // --- Attempt Loop ---
          let lastError: any = null;
          const triedProviderIds = new Set<string>();
+         const blockedApiKeys = new Set<string>();
+         let skippedByCooldown = 0;
+         let skippedByBlockedKey = 0;
+         let disabledFallbackAdded = false;
+         const requestStartTime = Date.now();
+         const totalCandidates = candidateProviders.length;
          for (let idx = 0; idx < candidateProviders.length; idx++) {
+             // Check request-level deadline before each attempt
+             const elapsed = Date.now() - requestStartTime;
+             if (elapsed >= REQUEST_DEADLINE_MS) {
+                 console.warn(`Request deadline (${REQUEST_DEADLINE_MS}ms) exceeded after ${elapsed}ms and ${triedProviderIds.size} provider(s) for model ${modelId}. Aborting.`);
+                 if (!lastError) lastError = new Error(`Request deadline exceeded (${REQUEST_DEADLINE_MS}ms)`);
+                 break;
+             }
+
              const selectedProvider = candidateProviders[idx];
              const providerId = selectedProvider.id;
-             if (triedProviderIds.has(providerId)) continue;
-             triedProviderIds.add(providerId);
+             const providerApiKey = selectedProvider.apiKey ?? '';
+             if (providerApiKey && await isApiKeyCoolingDown(providerApiKey)) {
+                 skippedByCooldown++;
+                 continue;
+             }
+             if (providerApiKey && blockedApiKeys.has(providerApiKey)) {
+                 skippedByBlockedKey++;
+                 continue;
+             }
+            if (triedProviderIds.has(providerId)) continue;
+            triedProviderIds.add(providerId);
+
+            if (this.isGeminiFamilyProvider(providerId) && inputTokenEstimate > geminiInputTokenLimit) {
+                lastError = this.buildInputTokenLimitError(inputTokenEstimate, inputTokenBreakdown, geminiInputTokenLimit);
+                continue;
+            }
 
             const providerConfig = this.ensureProviderConfig(providerId, selectedProvider);
-             if (!providerConfig) {
-                 console.error(`Internal config error for provider: ${providerId}. Skipping.`);
-                 lastError = new Error(`Internal config error for provider: ${providerId}`);
-                 continue; // Try next provider
-             }
+            if (!providerConfig) {
+                console.error(`Internal config error for provider: ${providerId}. Skipping.`);
+                lastError = new Error(`Internal config error for provider: ${providerId}`);
+                continue; // Try next provider
+            }
 
             // Inject modelId for Gemini so the SDK calls the correct model instead of a fixed default
             const args = providerConfig.args ? [...providerConfig.args] : [];
@@ -659,9 +880,7 @@ export class MessageHandler {
                  result = await providerInstance.sendMessage(messageForProvider);
                  const attemptDuration = Date.now() - attemptStart;
                  if (result) { 
-                    const estimatedInputTokens = messages.reduce((sum, msg) => {
-                        return sum + estimateTokensFromContent(msg.content);
-                    }, 0);
+                    const estimatedInputTokens = inputTokenEstimate;
                     const estimatedOutputTokens = estimateTokensFromText(result.response || '');
                     const { inputTokens, outputTokens } = this.normalizeUsage(result.usage, estimatedInputTokens, estimatedOutputTokens);
                     const tokensGenerated = inputTokens + outputTokens;
@@ -713,6 +932,15 @@ export class MessageHandler {
                 sendMessageError = error; 
              }
 
+             if (sendMessageError && this.isRateLimitOrQuotaError(sendMessageError)) {
+                 if (providerApiKey) {
+                     blockedApiKeys.add(providerApiKey);
+                     const retryAfterMs = extractRetryAfterMs(String(sendMessageError?.message || sendMessageError || ''));
+                     await setApiKeyCooldown(providerApiKey, retryAfterMs ?? undefined);
+                 }
+                 console.warn(`Rate limit/quota hit for ${providerId}; skipping this key for the remainder of the request.`);
+             }
+
              // --- Update Stats & Save (Always, regardless of attempt outcome) ---
             try {
                 await dataManager.updateWithLock<LoadedProviders>('providers', async (currentProvidersData) => {
@@ -760,12 +988,43 @@ export class MessageHandler {
                      console.warn(`Insufficient credits on ${providerId}; added ${added} fallback provider(s) for model ${modelId}.`);
                  }
              }
+
+             // When all current candidates are exhausted, try disabled providers as last resort
+             if (!disabledFallbackAdded && idx === candidateProviders.length - 1) {
+                 const added = this.appendDisabledFallbackProviders(
+                     allProvidersOriginal, candidateProviders, modelId, requiredCaps, triedProviderIds
+                 );
+                 if (added > 0) {
+                     disabledFallbackAdded = true;
+                     console.warn(`All active providers failed for model ${modelId}. Trying ${added} disabled provider(s) as last resort.`);
+                 }
+             }
          } // End of loop through candidateProviders
 
-         // If loop completes without success
-         console.error(`All attempts failed for model ${modelId}. Last error: ${lastError?.message || 'Unknown error'}`);
-         const detail = lastError?.message || 'All available providers failed or were unsuitable.';
-         throw new Error(`Failed to process request: ${detail}`); // Surface the last provider error for debugging
+         // If loop completes without success — build a descriptive error
+         const attempted = triedProviderIds.size;
+         const allSkipped = attempted === 0 && (skippedByCooldown > 0 || skippedByBlockedKey > 0);
+         let detail: string;
+         if (allSkipped) {
+             const parts: string[] = [];
+             if (skippedByCooldown > 0) parts.push(`${skippedByCooldown} rate-limited/cooling down`);
+             if (skippedByBlockedKey > 0) parts.push(`${skippedByBlockedKey} blocked by key`);
+             detail = `All ${totalCandidates} provider(s) for model ${modelId} are temporarily unavailable (${parts.join(', ')}). Try again shortly.`;
+         } else if (attempted > 0 && lastError) {
+             detail = `${attempted} provider(s) attempted for model ${modelId}, all failed. Last error: ${lastError.message}`;
+         } else {
+             detail = lastError?.message || `No providers could serve model ${modelId}.`;
+         }
+         console.error(`All attempts failed for model ${modelId}. Attempted: ${attempted}, Cooldown: ${skippedByCooldown}, Blocked: ${skippedByBlockedKey}. Detail: ${detail}`);
+         const finalError = new Error(`Failed to process request: ${detail}`);
+         (finalError as any).modelId = modelId;
+         (finalError as any).attemptedProviders = Array.from(triedProviderIds);
+         (finalError as any).lastProviderError = lastError?.message || null;
+         (finalError as any).candidateProviders = totalCandidates;
+         (finalError as any).skippedByCooldown = skippedByCooldown;
+         (finalError as any).skippedByBlockedKey = skippedByBlockedKey;
+         (finalError as any).allSkippedByRateLimit = allSkipped;
+         throw finalError;
     }
 
     async *handleStreamingMessages(
@@ -776,6 +1035,7 @@ export class MessageHandler {
     ): AsyncGenerator<any, void, unknown> {
         if (!messages?.length || !modelId || !apiKey) throw new Error("Invalid arguments for streaming");
         if (!messageHandler) throw new Error("Service temporarily unavailable.");
+        modelId = this.applyModelReroute(modelId);
 
         await this.refreshModelCapabilities();
         this.validateModelCapabilities(modelId, messages);
@@ -797,13 +1057,51 @@ export class MessageHandler {
             throw new Error(`No providers available for model ${modelId} after capability filtering.`);
         }
 
+        const inputTokenBreakdown = estimateTokensFromMessagesBreakdown(messages);
+        const inputTokenEstimate = inputTokenBreakdown.total;
+        const geminiInputTokenLimit = this.getGeminiInputTokenLimit(modelId);
+        if (
+            inputTokenEstimate > geminiInputTokenLimit &&
+            candidateProviders.every((p) => this.isGeminiFamilyProvider(p.id))
+        ) {
+            throw this.buildInputTokenLimitError(inputTokenEstimate, inputTokenBreakdown, geminiInputTokenLimit);
+        }
+
         let lastError: any = null;
         const triedProviderIds = new Set<string>();
+        const blockedApiKeys = new Set<string>();
+        let skippedByCooldown = 0;
+        let skippedByBlockedKey = 0;
+        let disabledFallbackAdded = false;
+        const requestStartTime = Date.now();
+        const totalCandidates = candidateProviders.length;
         for (let idx = 0; idx < candidateProviders.length; idx++) {
+            // Check request-level deadline before each attempt
+            const elapsed = Date.now() - requestStartTime;
+            if (elapsed >= REQUEST_DEADLINE_MS) {
+                console.warn(`Streaming request deadline (${REQUEST_DEADLINE_MS}ms) exceeded after ${elapsed}ms and ${triedProviderIds.size} provider(s) for model ${modelId}. Aborting.`);
+                if (!lastError) lastError = new Error(`Request deadline exceeded (${REQUEST_DEADLINE_MS}ms)`);
+                break;
+            }
+
             const selectedProviderData = candidateProviders[idx];
             const providerId = selectedProviderData.id;
+            const providerApiKey = selectedProviderData.apiKey ?? '';
+            if (providerApiKey && await isApiKeyCoolingDown(providerApiKey)) {
+                skippedByCooldown++;
+                continue;
+            }
+            if (providerApiKey && blockedApiKeys.has(providerApiKey)) {
+                skippedByBlockedKey++;
+                continue;
+            }
             if (triedProviderIds.has(providerId)) continue;
             triedProviderIds.add(providerId);
+
+            if (this.isGeminiFamilyProvider(providerId) && inputTokenEstimate > geminiInputTokenLimit) {
+                lastError = this.buildInputTokenLimitError(inputTokenEstimate, inputTokenBreakdown, geminiInputTokenLimit);
+                continue;
+            }
             const providerConfig = this.ensureProviderConfig(providerId, selectedProviderData);
 
             if (!providerConfig) {
@@ -850,16 +1148,12 @@ export class MessageHandler {
                     try {
                         const passthrough = await providerInstance.createPassthroughStream(messageForProvider);
                         if (passthrough?.upstream) {
-                            const promptTokens = messages.reduce((sum, msg) => {
-                                return sum + estimateTokensFromContent(msg.content);
-                            }, 0);
-
                             console.log(`[StreamPassthrough] Activated for provider ${providerId} (${passthrough.mode}).`);
                             yield {
                                 type: 'passthrough',
                                 providerId,
                                 passthrough,
-                                promptTokens,
+                                promptTokens: inputTokenEstimate,
                                 startedAt: Date.now(),
                             };
                             return;
@@ -888,9 +1182,7 @@ export class MessageHandler {
                     }
 
                     const totalResponseTime = Date.now() - streamStart;
-                    const inputTokens = messages.reduce((sum, msg) => {
-                        return sum + estimateTokensFromContent(msg.content);
-                    }, 0);
+                    const inputTokens = inputTokenEstimate;
                     const outputTokens = estimateTokensFromText(fullResponse);
 
                     let providerLatency: number | null = null;
@@ -959,6 +1251,15 @@ export class MessageHandler {
                 console.warn(`Stream failed for provider ${providerId}. Error: ${error.message}. Trying next provider if available...`);
                 lastError = error;
 
+                if (this.isRateLimitOrQuotaError(error)) {
+                    if (providerApiKey) {
+                        blockedApiKeys.add(providerApiKey);
+                        const retryAfterMs = extractRetryAfterMs(String(error?.message || error || ''));
+                        await setApiKeyCooldown(providerApiKey, retryAfterMs ?? undefined);
+                    }
+                    console.warn(`Rate limit/quota hit for ${providerId}; skipping this key for the remainder of the request.`);
+                }
+
                 if (this.isInsufficientCreditsError(error)) {
                     const added = this.appendCreditFallbackProviders(
                         allProvidersOriginal,
@@ -972,13 +1273,45 @@ export class MessageHandler {
                         console.warn(`Insufficient credits on ${providerId}; added ${added} fallback provider(s) for model ${modelId}.`);
                     }
                 }
+
+                // When all current candidates are exhausted, try disabled providers as last resort
+                if (!disabledFallbackAdded && idx === candidateProviders.length - 1) {
+                    const added = this.appendDisabledFallbackProviders(
+                        allProvidersOriginal, candidateProviders, modelId, requiredCaps, triedProviderIds
+                    );
+                    if (added > 0) {
+                        disabledFallbackAdded = true;
+                        console.warn(`All active streaming providers failed for model ${modelId}. Trying ${added} disabled provider(s) as last resort.`);
+                    }
+                }
                 continue;
             }
         }
 
-        console.error(`All streaming attempts failed for model ${modelId}. Last error: ${lastError?.message || 'Unknown error'}`);
-        const detail = lastError?.message || 'All available providers failed or were unsuitable.';
-        throw new Error(`Failed to process streaming request: ${detail}`);
+        // Build a descriptive error
+        const attempted = triedProviderIds.size;
+        const allSkipped = attempted === 0 && (skippedByCooldown > 0 || skippedByBlockedKey > 0);
+        let detail: string;
+        if (allSkipped) {
+            const parts: string[] = [];
+            if (skippedByCooldown > 0) parts.push(`${skippedByCooldown} rate-limited/cooling down`);
+            if (skippedByBlockedKey > 0) parts.push(`${skippedByBlockedKey} blocked by key`);
+            detail = `All ${totalCandidates} provider(s) for model ${modelId} are temporarily unavailable (${parts.join(', ')}). Try again shortly.`;
+        } else if (attempted > 0 && lastError) {
+            detail = `${attempted} provider(s) attempted for model ${modelId}, all failed. Last error: ${lastError.message}`;
+        } else {
+            detail = lastError?.message || `No providers could serve model ${modelId}.`;
+        }
+        console.error(`All streaming attempts failed for model ${modelId}. Attempted: ${attempted}, Cooldown: ${skippedByCooldown}, Blocked: ${skippedByBlockedKey}. Detail: ${detail}`);
+        const finalError = new Error(`Failed to process streaming request: ${detail}`);
+        (finalError as any).modelId = modelId;
+        (finalError as any).attemptedProviders = Array.from(triedProviderIds);
+        (finalError as any).lastProviderError = lastError?.message || null;
+        (finalError as any).candidateProviders = totalCandidates;
+        (finalError as any).skippedByCooldown = skippedByCooldown;
+        (finalError as any).skippedByBlockedKey = skippedByBlockedKey;
+        (finalError as any).allSkippedByRateLimit = allSkipped;
+        throw finalError;
     }
 
     private async updateStatsInBackground(
@@ -1005,113 +1338,8 @@ export class MessageHandler {
     }
 }
 
-const BASE64_DATA_URL_GLOBAL = /data:([^;\s]+);base64,([A-Za-z0-9+/=_-]+)/gi;
-
-const IMAGE_INPUT_TOKENS_PER_KB = readEnvNumber('IMAGE_INPUT_TOKENS_PER_KB', 4);
-const IMAGE_OUTPUT_TOKENS_PER_KB = readEnvNumber('IMAGE_OUTPUT_TOKENS_PER_KB', 8);
-const AUDIO_INPUT_TOKENS_PER_KB = readEnvNumber('AUDIO_INPUT_TOKENS_PER_KB', 2);
-const AUDIO_OUTPUT_TOKENS_PER_KB = readEnvNumber('AUDIO_OUTPUT_TOKENS_PER_KB', 4);
-const IMAGE_URL_FALLBACK_TOKENS = readEnvNumber('IMAGE_URL_FALLBACK_TOKENS', 512);
-const AUDIO_DATA_FALLBACK_TOKENS = readEnvNumber('AUDIO_DATA_FALLBACK_TOKENS', 256);
-const IMAGE_MIN_TOKENS = readEnvNumber('IMAGE_MIN_TOKENS', 0);
-const AUDIO_MIN_TOKENS = readEnvNumber('AUDIO_MIN_TOKENS', 0);
-
-function readEnvNumber(name: string, fallback: number): number {
-    const raw = process.env[name];
-    if (raw === undefined) return fallback;
-    const value = Number(raw);
-    return Number.isFinite(value) && value >= 0 ? value : fallback;
-}
-
-function estimateTokensFromBase64Payload(payload: string, tokensPerKb: number, minTokens: number): number {
-    if (!payload) return minTokens;
-    const cleaned = payload.replace(/\s+/g, '');
-    if (!cleaned) return minTokens;
-    const bytes = Math.max(0, Math.floor((cleaned.length * 3) / 4));
-    const tokens = Math.ceil((bytes / 1024) * tokensPerKb);
-    return Math.max(tokens, minTokens);
-}
-
-function estimateTokensFromDataUrl(dataUrl: string, direction: 'input' | 'output'): number {
-    const match = dataUrl.match(/^data:([^;\s]+);base64,([A-Za-z0-9+/=_-]+)$/i);
-    if (!match) return 0;
-    const mimeType = (match[1] || '').toLowerCase();
-    const payload = match[2] || '';
-
-    if (mimeType.startsWith('image/')) {
-        const perKb = direction === 'input' ? IMAGE_INPUT_TOKENS_PER_KB : IMAGE_OUTPUT_TOKENS_PER_KB;
-        return estimateTokensFromBase64Payload(payload, perKb, IMAGE_MIN_TOKENS);
-    }
-    if (mimeType.startsWith('audio/')) {
-        const perKb = direction === 'input' ? AUDIO_INPUT_TOKENS_PER_KB : AUDIO_OUTPUT_TOKENS_PER_KB;
-        return estimateTokensFromBase64Payload(payload, perKb, AUDIO_MIN_TOKENS);
-    }
-    return 0;
-}
-
-function estimateTokensFromText(text: string, direction: 'input' | 'output' = 'output'): number {
-    const value = String(text || '');
-    if (!value) return 0;
-
-    let mediaTokens = 0;
-    if (value.includes('data:')) {
-        const regex = new RegExp(BASE64_DATA_URL_GLOBAL);
-        for (const match of value.matchAll(regex)) {
-            const mimeType = (match[1] || '').toLowerCase();
-            const payload = match[2] || '';
-            if (mimeType.startsWith('image/')) {
-                const perKb = direction === 'input' ? IMAGE_INPUT_TOKENS_PER_KB : IMAGE_OUTPUT_TOKENS_PER_KB;
-                mediaTokens += estimateTokensFromBase64Payload(payload, perKb, IMAGE_MIN_TOKENS);
-            } else if (mimeType.startsWith('audio/')) {
-                const perKb = direction === 'input' ? AUDIO_INPUT_TOKENS_PER_KB : AUDIO_OUTPUT_TOKENS_PER_KB;
-                mediaTokens += estimateTokensFromBase64Payload(payload, perKb, AUDIO_MIN_TOKENS);
-            }
-        }
-    }
-
-    const stripped = value.replace(BASE64_DATA_URL_GLOBAL, '[binary-data]');
-    if (!stripped) return mediaTokens;
-    return mediaTokens + Math.ceil(stripped.length / 4);
-}
-
-function estimateTokensFromContent(content: IMessage['content']): number {
-    if (typeof content === 'string') {
-        return estimateTokensFromText(content, 'input');
-    }
-    if (!Array.isArray(content)) {
-        return estimateTokensFromText(JSON.stringify(content), 'input');
-    }
-
-    let total = 0;
-    for (const part of content) {
-        if (!part || typeof part !== 'object') continue;
-        const type = String((part as any).type || '').toLowerCase();
-        if (type === 'text' || type === 'input_text') {
-            total += estimateTokensFromText((part as any).text || '', 'input');
-            continue;
-        }
-        if (type === 'image_url') {
-            const url = (part as any)?.image_url?.url;
-            if (typeof url === 'string' && url.startsWith('data:')) {
-                total += estimateTokensFromDataUrl(url, 'input');
-            } else if (typeof url === 'string' && url.length > 0) {
-                total += IMAGE_URL_FALLBACK_TOKENS;
-            }
-            continue;
-        }
-        if (type === 'input_audio') {
-            const data = (part as any)?.input_audio?.data;
-            if (typeof data === 'string' && data.length > 0) {
-                total += estimateTokensFromBase64Payload(data, AUDIO_INPUT_TOKENS_PER_KB, AUDIO_MIN_TOKENS);
-            } else {
-                total += AUDIO_DATA_FALLBACK_TOKENS;
-            }
-            continue;
-        }
-        total += estimateTokensFromText(JSON.stringify(part), 'input');
-    }
-
-    return total;
-}
+// Token estimation constants/functions now imported from '../modules/tokenEstimation.js'
+// Error classification functions now imported from '../modules/errorClassification.js'
+const GEMINI_INPUT_TOKEN_LIMIT = readEnvNumber('GEMINI_INPUT_TOKEN_LIMIT', 1_048_576);
 
 export { messageHandler };

@@ -4,6 +4,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { spawn } from 'child_process';
 import redis from './db.js';
+import { dataManager, LoadedProviders, LoadedProviderData } from './dataManager.js';
+import { checkKey, type KeyStatus } from './keyChecker.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -41,6 +43,8 @@ const LOCK_TTL_MS = Math.max(10_000, Number(process.env.ADMIN_KEY_SYNC_LOCK_TTL_
 const STARTUP_PROBE_COOLDOWN_MS = Math.max(0, Number(process.env.ADMIN_KEY_SYNC_STARTUP_PROBE_COOLDOWN_MS ?? 60 * 60 * 1000));
 const PROBE_MAX_MODELS = process.env.ADMIN_KEY_SYNC_PROBE_MAX_MODELS;
 const PROBE_ALL_CAPS = process.env.ADMIN_KEY_SYNC_PROBE_ALL_CAPS;
+const CHECK_DISABLED_KEYS = process.env.ADMIN_KEY_SYNC_CHECK_DISABLED !== '0';
+const DISABLED_KEY_CHECK_CONCURRENCY = Math.max(1, Number(process.env.ADMIN_KEY_SYNC_DISABLED_CONCURRENCY ?? 4));
 
 let running = false;
 let pending = false;
@@ -186,6 +190,86 @@ function runScript(label: string, script: string, env?: Record<string, string>):
   });
 }
 
+function getProviderFamily(providerId: string): string {
+  const lower = String(providerId || '').toLowerCase();
+  if (lower.includes('openai')) return 'openai';
+  if (lower.includes('gemini') || lower === 'google') return 'gemini';
+  if (lower.includes('anthropic')) return 'anthropic';
+  if (lower.includes('openrouter')) return 'openrouter';
+  if (lower.includes('deepseek')) return 'deepseek';
+  if (lower.includes('xai') || lower.includes('x-ai')) return 'xai';
+  return '';
+}
+
+/**
+ * Lightweight health check for disabled provider keys.
+ * Uses keyChecker to validate the key works and has quota, then re-enables
+ * providers whose keys are now healthy. Does NOT test full model capabilities.
+ */
+async function checkDisabledProviderKeys(): Promise<void> {
+  try {
+    const providers = await dataManager.load<LoadedProviders>('providers');
+    const disabled = providers.filter((p: LoadedProviderData) => p.disabled && p.apiKey);
+    if (disabled.length === 0) return;
+
+    console.log(`[AdminKeySync] Checking ${disabled.length} disabled provider key(s)...`);
+    let reEnabled = 0;
+    let stillDisabled = 0;
+
+    // Process in batches to limit concurrency
+    for (let i = 0; i < disabled.length; i += DISABLED_KEY_CHECK_CONCURRENCY) {
+      const batch = disabled.slice(i, i + DISABLED_KEY_CHECK_CONCURRENCY);
+      const results = await Promise.allSettled(
+        batch.map(async (provider: LoadedProviderData) => {
+          const family = getProviderFamily(provider.id);
+          if (!family) return { provider, status: null as KeyStatus | null };
+          const status = await checkKey(family, provider.apiKey!);
+          return { provider, status };
+        })
+      );
+
+      for (const result of results) {
+        if (result.status !== 'fulfilled' || !result.value.status) continue;
+        const { provider, status } = result.value;
+        if (!status) continue;
+
+        if (status.isValid && status.hasQuota !== false) {
+          // Key is valid and has quota — re-enable the provider
+          const idx = providers.findIndex((p: LoadedProviderData) => p.id === provider.id);
+          if (idx !== -1) {
+            providers[idx].disabled = false;
+            // Also re-enable all models that were disabled due to consecutive errors
+            for (const modelId of Object.keys(providers[idx].models || {})) {
+              const model = providers[idx].models[modelId] as any;
+              if (model?.disabled) {
+                model.disabled = false;
+                model.consecutive_errors = 0;
+                model.disable_count = 0;
+                model.disabled_at = undefined;
+              }
+            }
+            reEnabled++;
+            console.log(`[AdminKeySync] Re-enabled provider ${provider.id} — key is valid with quota.`);
+          }
+        } else {
+          stillDisabled++;
+          const reason = !status.isValid ? 'invalid key' : 'no quota';
+          console.log(`[AdminKeySync] Provider ${provider.id} stays disabled (${reason}).`);
+        }
+      }
+    }
+
+    if (reEnabled > 0) {
+      await dataManager.save<LoadedProviders>('providers', providers);
+      console.log(`[AdminKeySync] Disabled key check complete. Re-enabled: ${reEnabled}, still disabled: ${stillDisabled}.`);
+    } else {
+      console.log(`[AdminKeySync] Disabled key check complete. No providers re-enabled (${stillDisabled} still disabled).`);
+    }
+  } catch (err) {
+    console.warn('[AdminKeySync] Disabled key check failed:', err);
+  }
+}
+
 async function runSync(reason: string, force = false): Promise<void> {
   if (!SYNC_ENABLED) return;
   if (running) {
@@ -235,6 +319,11 @@ async function runSync(reason: string, force = false): Promise<void> {
       await runScript('testModelLiveProbes', 'dev/testModelLiveProbes.ts', probeEnv);
     }
 
+    // Lightweight key health check for disabled providers
+    if (CHECK_DISABLED_KEYS) {
+      await checkDisabledProviderKeys();
+    }
+
     lastRunAt = Date.now();
   } catch (err) {
     console.warn(`[AdminKeySync] Sync run failed (${reason}):`, err);
@@ -260,6 +349,17 @@ function schedule(reason: string, force = false, delayOverride?: number): void {
 
 export function notifyAdminKeyReceived(): void {
   schedule('admin-key', true);
+}
+
+/**
+ * Called when new models without capabilities are discovered during model sync.
+ * Triggers a probe run so the new models get their capabilities tested.
+ */
+export function notifyNewModelsDiscovered(modelIds: string[]): void {
+  if (!SYNC_ENABLED || !RUN_PROBES) return;
+  if (modelIds.length === 0) return;
+  console.log(`[AdminKeySync] New models without capabilities detected: ${modelIds.join(', ')}. Scheduling probe run.`);
+  schedule('new-models', true);
 }
 
 export function startAdminKeySyncScheduler(): void {

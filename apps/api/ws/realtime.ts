@@ -207,7 +207,7 @@ export function attachRealtimeWebSocket(app: { ws: (path: string, handler: (ws: 
                 return;
             }
 
-            if (upstreamWs && upstreamWs.readyState === WebSocket.OPEN) {
+            if (upstreamWs && upstreamWs.readyState === 1 /* OPEN */) {
                 upstreamWs.send(msg);
             } else {
                 // Buffer or drop?
@@ -222,7 +222,7 @@ export function attachRealtimeWebSocket(app: { ws: (path: string, handler: (ws: 
 
         clientWs.on('close', () => {
             if (upstreamWs) {
-                if (upstreamWs.readyState === WebSocket.OPEN || upstreamWs.readyState === WebSocket.CONNECTING) {
+                if (upstreamWs.readyState === 1 /* OPEN */ || upstreamWs.readyState === 0 /* CONNECTING */) {
                     upstreamWs.close();
                 }
             }

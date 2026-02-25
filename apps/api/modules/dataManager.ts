@@ -6,7 +6,7 @@ import { Redis } from 'ioredis';
 // --- Define or Import Data Structure Interfaces ---
 
 // Represents the runtime data held for a specific model WITHIN a provider entry
-interface ProviderModelData { 
+interface ProviderModelData {
     id: string;
     token_generation_speed: number;
     response_times: any[]; // Array of ResponseEntry objects
@@ -17,6 +17,8 @@ interface ProviderModelData {
     avg_token_speed: number | null;
     capability_skips?: Record<string, string>;
     disabled?: boolean;
+    disabled_at?: number; // Epoch ms when the model was disabled (for time-based auto-recovery)
+    disable_count?: number; // How many times this model has been disabled (for exponential backoff)
 }
 
 // FIX: Add export
@@ -38,12 +40,13 @@ export type LoadedProviders = LoadedProviderData[];
 
 // FIX: Add export (if UserData/KeysFile are defined here and needed elsewhere)
 // Or ensure they are exported from userData.ts if defined there
-export interface UserData { 
-    userId: string; 
+export interface UserData {
+    userId: string;
     tokenUsage: number;
     requestCount: number;
     role: 'admin' | 'user';
     tier: string;
+    estimatedCost?: number;
 }
 export interface KeysFile { 
     [apiKey: string]: UserData; 
@@ -245,13 +248,19 @@ class DataManager {
         const roleA = a?.role === 'admin' ? 'admin' : (a?.role === 'user' ? 'user' : undefined);
         const roleB = b?.role === 'admin' ? 'admin' : (b?.role === 'user' ? 'user' : undefined);
 
-        return {
+        const merged: UserData = {
             userId: (typeof b?.userId === 'string' && b.userId) ? b.userId : ((typeof a?.userId === 'string' && a.userId) ? a.userId : 'unknown_user'),
             tokenUsage: Math.max(0, Number.isFinite(Number(a?.tokenUsage)) ? Number(a?.tokenUsage) : 0, Number.isFinite(Number(b?.tokenUsage)) ? Number(b?.tokenUsage) : 0),
             requestCount: Math.max(0, Number.isFinite(Number(a?.requestCount)) ? Number(a?.requestCount) : 0, Number.isFinite(Number(b?.requestCount)) ? Number(b?.requestCount) : 0),
             role: roleA === 'admin' || roleB === 'admin' ? 'admin' : (roleB || roleA || 'user'),
             tier: (typeof b?.tier === 'string' && b.tier) ? b.tier : ((typeof a?.tier === 'string' && a.tier) ? a.tier : 'free'),
         };
+        const costB = typeof b?.estimatedCost === 'number' ? b.estimatedCost : undefined;
+        const costA = typeof a?.estimatedCost === 'number' ? a.estimatedCost : undefined;
+        if (costB !== undefined || costA !== undefined) {
+            merged.estimatedCost = costB ?? costA;
+        }
+        return merged;
     }
 
     private mergeKeysData(redisKeys: KeysFile, fsKeys: KeysFile): KeysFile {
@@ -277,6 +286,12 @@ class DataManager {
                     .map(([key, value]) => [key, String(value)])
               )
             : undefined;
+        const disabled_at = typeof (raw as any)?.disabled_at === 'number' && (raw as any).disabled_at > 0
+            ? (raw as any).disabled_at
+            : undefined;
+        const disable_count = typeof (raw as any)?.disable_count === 'number' && (raw as any).disable_count >= 0
+            ? Math.floor((raw as any).disable_count)
+            : undefined;
         return {
             id: typeof raw?.id === 'string' && raw.id ? raw.id : modelId,
             token_generation_speed: typeof raw?.token_generation_speed === 'number' && !Number.isNaN(raw.token_generation_speed) ? raw.token_generation_speed : 50,
@@ -288,6 +303,8 @@ class DataManager {
             avg_token_speed: typeof raw?.avg_token_speed === 'number' ? raw.avg_token_speed : null,
             capability_skips: capabilitySkips && Object.keys(capabilitySkips).length ? capabilitySkips : undefined,
             disabled: Boolean((raw as any)?.disabled),
+            ...(disabled_at !== undefined ? { disabled_at } : {}),
+            ...(disable_count !== undefined ? { disable_count } : {}),
         };
     }
 
@@ -321,6 +338,13 @@ class DataManager {
             ...(normalizedFs.capability_skips || {}),
             ...(normalizedRedis.capability_skips || {}),
         };
+        // For disabled_at / disable_count: prefer the more recent disable timestamp; take the higher count
+        const mergedDisabledAt = (normalizedRedis.disabled_at && normalizedFs.disabled_at)
+            ? Math.max(normalizedRedis.disabled_at, normalizedFs.disabled_at)
+            : (normalizedRedis.disabled_at ?? normalizedFs.disabled_at);
+        const mergedDisableCount = (normalizedRedis.disable_count !== undefined && normalizedFs.disable_count !== undefined)
+            ? Math.max(normalizedRedis.disable_count, normalizedFs.disable_count)
+            : (normalizedRedis.disable_count ?? normalizedFs.disable_count);
         return {
             id: normalizedRedis.id || normalizedFs.id || modelId,
             token_generation_speed: Math.max(1, normalizedRedis.token_generation_speed || normalizedFs.token_generation_speed || 50),
@@ -332,6 +356,8 @@ class DataManager {
             avg_token_speed: normalizedRedis.avg_token_speed ?? normalizedFs.avg_token_speed,
             capability_skips: Object.keys(mergedSkips).length ? mergedSkips : undefined,
             disabled: Boolean(normalizedFs.disabled || normalizedRedis.disabled),
+            ...(mergedDisabledAt !== undefined ? { disabled_at: mergedDisabledAt } : {}),
+            ...(mergedDisableCount !== undefined ? { disable_count: mergedDisableCount } : {}),
         };
     }
 

@@ -2,16 +2,16 @@ import HyperExpress, { Request, Response } from '../lib/uws-compat.js';
 import dotenv from 'dotenv';
 import dns from 'node:dns/promises';
 import net from 'node:net';
-import { messageHandler } from '../providers/handler.js'; 
-import { IMessage, type ModelCapability } from '../providers/interfaces.js'; 
-import { 
+import { messageHandler } from '../providers/handler.js';
+import { IMessage, type ModelCapability } from '../providers/interfaces.js';
+import {
     generateUserApiKey, // Now async
-    extractMessageFromRequestBody, 
+    extractMessageFromRequestBody,
     updateUserTokenUsage, // Now async
     validateApiKeyAndUsage, // Now async
 } from '../modules/userData.js';
 // Import TierData type for Request extension
-import { TierData, type KeysFile } from '../modules/userData.js'; 
+import { TierData, type KeysFile } from '../modules/userData.js';
 import { logError } from '../modules/errorLogger.js';
 import redis from '../modules/db.js';
 import tiersData from '../tiers.json' with { type: 'json' };
@@ -32,6 +32,28 @@ import {
     InteractionRequest,
     InteractionTokenClient,
 } from '../modules/interactions.js';
+import {
+    readEnvNumber,
+    readEnvBool,
+    readEnvCsv,
+    BASE64_DATA_URL_GLOBAL,
+    IMAGE_INPUT_TOKENS_PER_KB,
+    IMAGE_OUTPUT_TOKENS_PER_KB,
+    AUDIO_INPUT_TOKENS_PER_KB,
+    AUDIO_OUTPUT_TOKENS_PER_KB,
+    IMAGE_URL_FALLBACK_TOKENS,
+    AUDIO_DATA_FALLBACK_TOKENS,
+    IMAGE_MIN_TOKENS,
+    AUDIO_MIN_TOKENS,
+    estimateTokensFromBase64Payload,
+    estimateTokensFromDataUrl,
+    estimateTokensFromText,
+    estimateTokensFromContent,
+} from '../modules/tokenEstimation.js';
+import {
+    isRateLimitOrQuotaError as isRateLimitError,
+    extractRetryAfterSeconds,
+} from '../modules/errorClassification.js';
  
 dotenv.config();
  
@@ -41,6 +63,8 @@ const openaiRouter = new HyperExpress.Router();
 const requestTimestamps: RequestTimestampStore = {};
 const RATE_LIMIT_KEY_PREFIX = 'api:ratelimit:';
 const INTERACTIONS_TOKEN_TTL_SECONDS = 15 * 60;
+
+// isRateLimitError and extractRetryAfterSeconds now imported from '../modules/errorClassification.js'
 
 async function incrementSharedCounters(apiKey: string) {
     try {
@@ -225,21 +249,16 @@ function extractResponsesRequestBody(requestBody: any): { message: IMessage; mod
         tools: requestBody.tools,
         tool_choice: requestBody.tool_choice,
         reasoning: requestBody.reasoning,
-        instructions: requestBody.instructions
+        instructions: requestBody.instructions,
+        stream_options: (requestBody.stream_options && typeof requestBody.stream_options === 'object')
+            ? requestBody.stream_options
+            : undefined
     };
 
     return { message, modelId, stream: Boolean(requestBody.stream) };
 }
 
-const BASE64_DATA_URL_GLOBAL = /data:([^;\s]+);base64,([A-Za-z0-9+/=_-]+)/gi;
-const IMAGE_INPUT_TOKENS_PER_KB = readEnvNumber('IMAGE_INPUT_TOKENS_PER_KB', 4);
-const IMAGE_OUTPUT_TOKENS_PER_KB = readEnvNumber('IMAGE_OUTPUT_TOKENS_PER_KB', 8);
-const AUDIO_INPUT_TOKENS_PER_KB = readEnvNumber('AUDIO_INPUT_TOKENS_PER_KB', 2);
-const AUDIO_OUTPUT_TOKENS_PER_KB = readEnvNumber('AUDIO_OUTPUT_TOKENS_PER_KB', 4);
-const IMAGE_URL_FALLBACK_TOKENS = readEnvNumber('IMAGE_URL_FALLBACK_TOKENS', 512);
-const AUDIO_DATA_FALLBACK_TOKENS = readEnvNumber('AUDIO_DATA_FALLBACK_TOKENS', 256);
-const IMAGE_MIN_TOKENS = readEnvNumber('IMAGE_MIN_TOKENS', 0);
-const AUDIO_MIN_TOKENS = readEnvNumber('AUDIO_MIN_TOKENS', 0);
+// Token estimation constants now imported from '../modules/tokenEstimation.js'
 const LOG_SENSITIVE_PAYLOADS = readEnvBool('LOG_SENSITIVE_PAYLOADS', false);
 const UPSTREAM_TIMEOUT_MS = readEnvNumber('UPSTREAM_TIMEOUT_MS', 120_000);
 const VIDEO_REQUEST_CACHE_TTL_MS = readEnvNumber('VIDEO_REQUEST_CACHE_TTL_MS', 60 * 60 * 1000);
@@ -253,28 +272,7 @@ const IMAGE_FETCH_REFERER = process.env.IMAGE_FETCH_REFERER;
 const IMAGE_FETCH_ALLOWED_PROTOCOLS = (readEnvCsv('IMAGE_FETCH_ALLOWED_PROTOCOLS') ?? ['http', 'https']).map((p) => p.toLowerCase());
 const IMAGE_FETCH_ALLOWED_HOSTS = readEnvCsv('IMAGE_FETCH_ALLOWED_HOSTS');
 
-function readEnvNumber(name: string, fallback: number): number {
-    const raw = process.env[name];
-    if (raw === undefined) return fallback;
-    const value = Number(raw);
-    return Number.isFinite(value) && value >= 0 ? value : fallback;
-}
-
-function readEnvBool(name: string, fallback: boolean): boolean {
-    const raw = process.env[name];
-    if (raw === undefined) return fallback;
-    const normalized = raw.trim().toLowerCase();
-    if (['1', 'true', 'yes', 'y', 'on'].includes(normalized)) return true;
-    if (['0', 'false', 'no', 'n', 'off'].includes(normalized)) return false;
-    return fallback;
-}
-
-function readEnvCsv(name: string): string[] | null {
-    const raw = process.env[name];
-    if (!raw) return null;
-    const items = raw.split(',').map((item) => item.trim()).filter(Boolean);
-    return items.length > 0 ? items : null;
-}
+// readEnvNumber, readEnvBool, readEnvCsv now imported from '../modules/tokenEstimation.js'
 
 function getHeaderValue(headers: Record<string, any>, name: string): string | undefined {
     if (!headers) return undefined;
@@ -297,6 +295,23 @@ function normalizeImageFetchReferer(raw?: string): string | undefined {
 }
 
 const videoRequestCache = new Map<string, { apiKey: string; baseUrl: string; expiresAt: number }>();
+const VIDEO_CACHE_EVICTION_INTERVAL_MS = 5 * 60 * 1000;
+
+// Periodic eviction to prevent unbounded Map growth
+const _videoCacheEvictionTimer = setInterval(() => {
+    const now = Date.now();
+    let evicted = 0;
+    for (const [key, entry] of videoRequestCache) {
+        if (entry.expiresAt < now) {
+            videoRequestCache.delete(key);
+            evicted++;
+        }
+    }
+    if (evicted > 0) {
+        console.log(`[VideoCacheEviction] Swept ${evicted} expired entries. Remaining: ${videoRequestCache.size}`);
+    }
+}, VIDEO_CACHE_EVICTION_INTERVAL_MS);
+if (typeof (_videoCacheEvictionTimer as any).unref === 'function') (_videoCacheEvictionTimer as any).unref();
 
 function setVideoRequestCache(requestId: string, provider: { apiKey: string; baseUrl: string }) {
     if (!requestId) return;
@@ -314,96 +329,8 @@ function getVideoRequestCache(requestId: string): { apiKey: string; baseUrl: str
     return { apiKey: entry.apiKey, baseUrl: entry.baseUrl };
 }
 
-function estimateTokensFromBase64Payload(payload: string, tokensPerKb: number, minTokens: number): number {
-    if (!payload) return minTokens;
-    const cleaned = payload.replace(/\s+/g, '');
-    if (!cleaned) return minTokens;
-    const bytes = Math.max(0, Math.floor((cleaned.length * 3) / 4));
-    const tokens = Math.ceil((bytes / 1024) * tokensPerKb);
-    return Math.max(tokens, minTokens);
-}
-
-function estimateTokensFromDataUrl(dataUrl: string, direction: 'input' | 'output'): number {
-    const match = dataUrl.match(/^data:([^;\s]+);base64,([A-Za-z0-9+/=_-]+)$/i);
-    if (!match) return 0;
-    const mimeType = (match[1] || '').toLowerCase();
-    const payload = match[2] || '';
-
-    if (mimeType.startsWith('image/')) {
-        const perKb = direction === 'input' ? IMAGE_INPUT_TOKENS_PER_KB : IMAGE_OUTPUT_TOKENS_PER_KB;
-        return estimateTokensFromBase64Payload(payload, perKb, IMAGE_MIN_TOKENS);
-    }
-    if (mimeType.startsWith('audio/')) {
-        const perKb = direction === 'input' ? AUDIO_INPUT_TOKENS_PER_KB : AUDIO_OUTPUT_TOKENS_PER_KB;
-        return estimateTokensFromBase64Payload(payload, perKb, AUDIO_MIN_TOKENS);
-    }
-    return 0;
-}
-
-function estimateTokensFromText(text: string, direction: 'input' | 'output' = 'output'): number {
-    const value = String(text || '');
-    if (!value) return 0;
-
-    let mediaTokens = 0;
-    if (value.includes('data:')) {
-        const regex = new RegExp(BASE64_DATA_URL_GLOBAL);
-        for (const match of value.matchAll(regex)) {
-            const mimeType = (match[1] || '').toLowerCase();
-            const payload = match[2] || '';
-            if (mimeType.startsWith('image/')) {
-                const perKb = direction === 'input' ? IMAGE_INPUT_TOKENS_PER_KB : IMAGE_OUTPUT_TOKENS_PER_KB;
-                mediaTokens += estimateTokensFromBase64Payload(payload, perKb, IMAGE_MIN_TOKENS);
-            } else if (mimeType.startsWith('audio/')) {
-                const perKb = direction === 'input' ? AUDIO_INPUT_TOKENS_PER_KB : AUDIO_OUTPUT_TOKENS_PER_KB;
-                mediaTokens += estimateTokensFromBase64Payload(payload, perKb, AUDIO_MIN_TOKENS);
-            }
-        }
-    }
-
-    const stripped = value.replace(BASE64_DATA_URL_GLOBAL, '[binary-data]');
-    if (!stripped) return mediaTokens;
-    return mediaTokens + Math.ceil(stripped.length / 4);
-}
-
-function estimateTokensFromContent(content: IMessage['content']): number {
-    if (typeof content === 'string') {
-        return estimateTokensFromText(content, 'input');
-    }
-    if (!Array.isArray(content)) {
-        return estimateTokensFromText(JSON.stringify(content), 'input');
-    }
-
-    let total = 0;
-    for (const part of content) {
-        if (!part || typeof part !== 'object') continue;
-        const type = String((part as any).type || '').toLowerCase();
-        if (type === 'text' || type === 'input_text') {
-            total += estimateTokensFromText((part as any).text || '', 'input');
-            continue;
-        }
-        if (type === 'image_url') {
-            const url = (part as any)?.image_url?.url;
-            if (typeof url === 'string' && url.startsWith('data:')) {
-                total += estimateTokensFromDataUrl(url, 'input');
-            } else if (typeof url === 'string' && url.length > 0) {
-                total += IMAGE_URL_FALLBACK_TOKENS;
-            }
-            continue;
-        }
-        if (type === 'input_audio') {
-            const data = (part as any)?.input_audio?.data;
-            if (typeof data === 'string' && data.length > 0) {
-                total += estimateTokensFromBase64Payload(data, AUDIO_INPUT_TOKENS_PER_KB, AUDIO_MIN_TOKENS);
-            } else {
-                total += AUDIO_DATA_FALLBACK_TOKENS;
-            }
-            continue;
-        }
-        total += estimateTokensFromText(JSON.stringify(part), 'input');
-    }
-
-    return total;
-}
+// estimateTokensFromBase64Payload, estimateTokensFromDataUrl, estimateTokensFromText,
+// estimateTokensFromContent now imported from '../modules/tokenEstimation.js'
 
 function extractUsageTokens(usage: any): { promptTokens?: number; completionTokens?: number; totalTokens?: number } {
     if (!usage || typeof usage !== 'object') return {};
@@ -1186,17 +1113,32 @@ async function fetchImageAsDataUrl(
 
 async function inlineImageUrls(messages: any[], authHeader?: string, refererOverride?: string) {
     if (!messages || !Array.isArray(messages)) return;
+
+    // Collect all image parts that need fetching, then fetch in parallel
+    const fetchJobs: Array<{ part: any; url: string }> = [];
     for (const msg of messages) {
         if (Array.isArray(msg.content)) {
             for (const part of msg.content) {
                 if (part && part.type === 'image_url' && typeof part.image_url?.url === 'string' && part.image_url.url.startsWith('http')) {
-                    const result = await fetchImageAsDataUrl(part.image_url.url, authHeader, refererOverride);
-                    if (result) {
-                        part.image_url.url = result.dataUrl;
-                        console.log(`[ImageProxy] Successfully inlined image. Type: ${result.contentType}, Size: ${result.bytes}`);
-                    }
+                    fetchJobs.push({ part, url: part.image_url.url });
                 }
             }
+        }
+    }
+    if (fetchJobs.length === 0) return;
+
+    const results = await Promise.allSettled(
+        fetchJobs.map(async (job) => {
+            const result = await fetchImageAsDataUrl(job.url, authHeader, refererOverride);
+            return { part: job.part, result };
+        })
+    );
+
+    for (const outcome of results) {
+        if (outcome.status === 'fulfilled' && outcome.value.result) {
+            const { part, result } = outcome.value;
+            part.image_url.url = result.dataUrl;
+            console.log(`[ImageProxy] Successfully inlined image. Type: ${result.contentType}, Size: ${result.bytes}`);
         }
     }
 }
@@ -1772,6 +1714,7 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
     }
 
     const effectiveStream = stream && !isImageModelId(modelId);
+    const includeUsageInStream = Boolean(requestBody?.stream_options?.include_usage);
     
     // Per-request token check logic (remains commented out or implement as needed)
 
@@ -1789,6 +1732,9 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
         tool_choice: requestBody.tool_choice,
         reasoning: requestBody.reasoning,
         instructions: requestBody.instructions,
+        stream_options: (requestBody.stream_options && typeof requestBody.stream_options === 'object')
+            ? requestBody.stream_options
+            : undefined,
     };
     if (isNanoBananaModel(modelId)) {
         sharedMessageOptions.modalities = ensureNanoBananaModalities(sharedMessageOptions.modalities);
@@ -1816,6 +1762,8 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
         let fallbackToNormalized = false;
         let promptTokensFromUsage: number | undefined;
         let completionTokensFromUsage: number | undefined;
+        let promptTokensFinal: number | undefined;
+        let completionTokensFinal: number | undefined;
         let streamOutputText = '';
 
         for await (const result of streamHandler) {
@@ -1879,7 +1827,9 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
                 response.write(`data: ${JSON.stringify(openaiStreamChunk)}\n\n`);
             } else if (result.type === 'final') {
                 // Capture final metrics from the stream
-                if (result.tokenUsage) totalTokenUsage = result.tokenUsage;
+                if (typeof result.tokenUsage === 'number') totalTokenUsage = result.tokenUsage;
+                if (typeof result.promptTokens === 'number') promptTokensFinal = result.promptTokens;
+                if (typeof result.completionTokens === 'number') completionTokensFinal = result.completionTokens;
             }
         }
 
@@ -1914,12 +1864,26 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
                 totalTokenUsage = promptEstimate + completionEstimate;
             }
 
-            await updateUserTokenUsage(totalTokenUsage, userApiKey);
+            await updateUserTokenUsage(totalTokenUsage, userApiKey, { modelId });
             if (!response.completed) return response.end();
             return;
         }
         
-        await updateUserTokenUsage(totalTokenUsage, userApiKey);
+        const finalPromptTokens = typeof promptTokensFinal === 'number'
+            ? promptTokensFinal
+            : (typeof promptTokensFromUsage === 'number'
+                ? promptTokensFromUsage
+                : formattedMessages.reduce((sum, msg) => sum + estimateTokensFromContent(msg.content), 0));
+        const finalCompletionTokens = typeof completionTokensFinal === 'number'
+            ? completionTokensFinal
+            : (typeof completionTokensFromUsage === 'number'
+                ? completionTokensFromUsage
+                : estimateTokensFromText(streamOutputText));
+        if (totalTokenUsage <= 0) {
+            totalTokenUsage = finalPromptTokens + finalCompletionTokens;
+        }
+
+        await updateUserTokenUsage(totalTokenUsage, userApiKey, { modelId, promptTokens: finalPromptTokens, completionTokens: finalCompletionTokens });
         
         const finalChunk = {
             id: requestId,
@@ -1932,6 +1896,13 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
                 finish_reason: 'stop'
             }]
         };
+        if (includeUsageInStream) {
+            (finalChunk as any).usage = {
+                prompt_tokens: finalPromptTokens,
+                completion_tokens: finalCompletionTokens,
+                total_tokens: totalTokenUsage
+            };
+        }
         response.write(`data: ${JSON.stringify(finalChunk)}\n\n`);
         response.write(`data: [DONE]\n\n`);
         return response.end();
@@ -1944,7 +1915,7 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
         const totalTokensUsed = typeof result.tokenUsage === 'number' ? result.tokenUsage : 0;
         const promptTokensUsed = typeof result.promptTokens === 'number' ? result.promptTokens : undefined;
         const completionTokensUsed = typeof result.completionTokens === 'number' ? result.completionTokens : undefined;
-        await updateUserTokenUsage(totalTokensUsed, userApiKey); 
+        await updateUserTokenUsage(totalTokensUsed, userApiKey, { modelId, promptTokens: promptTokensUsed, completionTokens: completionTokensUsed });
     
         // --- Format response strictly like OpenAI --- 
         const openaiResponse = {
@@ -1983,13 +1954,24 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
     let statusCode = 500;
     let clientMessage = 'Internal Server Error';
     let clientReference = 'An unexpected error occurred while processing your chat request.';
+    const errorMeta = error as any;
 
-    if (errorText.startsWith('Invalid request') || errorText.startsWith('Failed to parse')) {
+    // All providers rate-limited — return 429 with Retry-After
+    if (errorMeta?.allSkippedByRateLimit) {
+        statusCode = 429;
+        clientMessage = errorText;
+    } else if (errorMeta?.code === 'INPUT_TOKENS_EXCEEDED' && errorMeta?.hasImageInput) {
+        statusCode = 400;
+        clientMessage = 'Bad Request: image input too large for the model limit. Reduce image size or use a smaller image URL.';
+    } else if (errorText.startsWith('Invalid request') || errorText.startsWith('Failed to parse')) {
         statusCode = 400;
         clientMessage = `Bad Request: ${errorText}`;
     } else if (error instanceof SyntaxError) {
         statusCode = 400;
         clientMessage = 'Invalid JSON';
+    } else if (isRateLimitError(errorText)) {
+        statusCode = 429;
+        clientMessage = errorText;
     } else if (errorText.includes('Unauthorized') || errorText.includes('limit reached')) {
         statusCode = errorText.includes('limit reached') ? 429 : 401;
         clientMessage = errorText;
@@ -2007,7 +1989,17 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
     } else if (errorText.toLowerCase().includes('image exceeds') || errorText.toLowerCase().includes('image exceeds 5 mb')) {
         statusCode = 400;
         clientMessage = 'Bad Request: image exceeds the provider size limit. Please resize or compress the image before sending.';
-    } else if (errorText.includes('fetching image from URL') || errorText.includes('image_url')) {
+    } else if (
+        errorText.toLowerCase().includes('input token count exceeds') ||
+        errorText.toLowerCase().includes('maximum number of tokens allowed')
+    ) {
+        statusCode = 400;
+        clientMessage = 'Bad Request: input token count exceeds the model limit. Reduce the prompt size or truncate history.';
+    } else if (
+        errorText.includes('fetching image from URL') ||
+        errorText.includes('image_url') ||
+        errorText.toLowerCase().includes('cannot fetch content from the provided url')
+    ) {
         statusCode = 400;
         clientMessage = 'Bad Request: image_url could not be fetched by the provider. Use a public, non-expiring URL or pass the image as base64 data.';
     } else if (errorText.includes('No suitable providers')) {
@@ -2017,8 +2009,14 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
         statusCode = 502;
         clientMessage = errorText;
     }
-    
+
     if (!response.completed) {
+       if (statusCode === 429) {
+           const retryAfterSeconds = extractRetryAfterSeconds(errorText);
+           if (retryAfterSeconds) {
+               response.setHeader('Retry-After', String(retryAfterSeconds));
+           }
+       }
        if (statusCode === 500) {
            response.status(statusCode).json({ error: clientMessage, reference: clientReference, timestamp });
        } else {
@@ -2170,6 +2168,8 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
             let fallbackToNormalized = false;
             let promptTokensFromUsage: number | undefined;
             let completionTokensFromUsage: number | undefined;
+            let promptTokensFinal: number | undefined;
+            let completionTokensFinal: number | undefined;
             let responsesCreatedSent = false;
 
             for await (const result of streamHandler) {
@@ -2252,7 +2252,9 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
                         response.write(`data: ${JSON.stringify({ ...basePayload, output: [], output_text: '' })}\n\n`);
                         responsesCreatedSent = true;
                     }
-                    if (result.tokenUsage) totalTokenUsage = result.tokenUsage;
+                    if (typeof result.tokenUsage === 'number') totalTokenUsage = result.tokenUsage;
+                    if (typeof result.promptTokens === 'number') promptTokensFinal = result.promptTokens;
+                    if (typeof result.completionTokens === 'number') completionTokensFinal = result.completionTokens;
                 }
             }
 
@@ -2275,7 +2277,9 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
                         response.write(`event: response.output_text.delta\n`);
                         response.write(`data: ${JSON.stringify(chunkPayload)}\n\n`);
                     } else if (fallbackResult.type === 'final') {
-                        if (fallbackResult.tokenUsage) totalTokenUsage = fallbackResult.tokenUsage;
+                        if (typeof fallbackResult.tokenUsage === 'number') totalTokenUsage = fallbackResult.tokenUsage;
+                        if (typeof fallbackResult.promptTokens === 'number') promptTokensFinal = fallbackResult.promptTokens;
+                        if (typeof fallbackResult.completionTokens === 'number') completionTokensFinal = fallbackResult.completionTokens;
                     }
                 }
             }
@@ -2287,18 +2291,36 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
                     totalTokenUsage = promptEstimate + completionEstimate;
                 }
 
-                await updateUserTokenUsage(totalTokenUsage, userApiKey);
+                await updateUserTokenUsage(totalTokenUsage, userApiKey, { modelId });
                 if (!response.completed) return response.end();
                 return;
             }
 
-            await updateUserTokenUsage(totalTokenUsage, userApiKey);
+            const finalInputTokens = typeof promptTokensFinal === 'number'
+                ? promptTokensFinal
+                : (typeof promptTokensFromUsage === 'number'
+                    ? promptTokensFromUsage
+                    : estimateTokensFromContent(message.content));
+            const finalOutputTokens = typeof completionTokensFinal === 'number'
+                ? completionTokensFinal
+                : (typeof completionTokensFromUsage === 'number'
+                    ? completionTokensFromUsage
+                    : estimateTokensFromText(fullText));
+            if (totalTokenUsage <= 0) {
+                totalTokenUsage = finalInputTokens + finalOutputTokens;
+            }
+
+            await updateUserTokenUsage(totalTokenUsage, userApiKey, { modelId, promptTokens: finalInputTokens, completionTokens: finalOutputTokens });
 
             const finalPayload = {
                 ...basePayload,
                 output: [{ content: [{ type: 'output_text', text: fullText }] }],
                 output_text: fullText,
-                usage: { total_tokens: totalTokenUsage }
+                usage: {
+                    input_tokens: finalInputTokens,
+                    output_tokens: finalOutputTokens,
+                    total_tokens: totalTokenUsage
+                }
             };
 
             response.write(`event: response.completed\n`);
@@ -2312,13 +2334,13 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
         const totalTokensUsed = typeof result.tokenUsage === 'number' ? result.tokenUsage : 0;
         const promptTokensUsed = typeof result.promptTokens === 'number' ? result.promptTokens : undefined;
         const completionTokensUsed = typeof result.completionTokens === 'number' ? result.completionTokens : undefined;
-        await updateUserTokenUsage(totalTokensUsed, userApiKey);
+        await updateUserTokenUsage(totalTokensUsed, userApiKey, { modelId, promptTokens: promptTokensUsed, completionTokens: completionTokensUsed });
 
         const responseBody = {
             ...basePayload,
             output: [{ content: [{ type: 'output_text', text: assistantContent }] }],
             output_text: assistantContent,
-            usage: { prompt_tokens: promptTokensUsed, completion_tokens: completionTokensUsed, total_tokens: totalTokensUsed }
+            usage: { input_tokens: promptTokensUsed, output_tokens: completionTokensUsed, total_tokens: totalTokensUsed }
         };
 
         return response.json(responseBody);
@@ -2330,13 +2352,24 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
         let statusCode = 500;
         let clientMessage = 'Internal Server Error';
         let clientReference = 'An unexpected error occurred while processing your responses request.';
+        const errorMeta = error as any;
 
-        if (errorText.startsWith('Invalid request') || errorText.startsWith('Failed to parse') || errorText.includes('input is required')) {
+        // All providers rate-limited — return 429 with Retry-After
+        if (errorMeta?.allSkippedByRateLimit) {
+            statusCode = 429;
+            clientMessage = errorText;
+        } else if (errorMeta?.code === 'INPUT_TOKENS_EXCEEDED' && errorMeta?.hasImageInput) {
+            statusCode = 400;
+            clientMessage = 'Bad Request: image input too large for the model limit. Reduce image size or use a smaller image URL.';
+        } else if (errorText.startsWith('Invalid request') || errorText.startsWith('Failed to parse') || errorText.includes('input is required')) {
             statusCode = 400;
             clientMessage = `Bad Request: ${errorText}`;
         } else if (error instanceof SyntaxError) {
             statusCode = 400;
             clientMessage = 'Invalid JSON';
+        } else if (isRateLimitError(errorText)) {
+            statusCode = 429;
+            clientMessage = errorText;
         } else if (errorText.includes('Unauthorized') || errorText.includes('limit reached')) {
             statusCode = errorText.includes('limit reached') ? 429 : 401;
             clientMessage = errorText;
@@ -2351,7 +2384,17 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
         } else if (errorText.toLowerCase().includes('image exceeds') || errorText.toLowerCase().includes('image exceeds 5 mb')) {
             statusCode = 400;
             clientMessage = 'Bad Request: image exceeds the provider size limit. Please resize or compress the image before sending.';
-        } else if (errorText.includes('fetching image from URL') || errorText.includes('image_url')) {
+        } else if (
+            errorText.toLowerCase().includes('input token count exceeds') ||
+            errorText.toLowerCase().includes('maximum number of tokens allowed')
+        ) {
+            statusCode = 400;
+            clientMessage = 'Bad Request: input token count exceeds the model limit. Reduce the prompt size or truncate history.';
+        } else if (
+            errorText.includes('fetching image from URL') ||
+            errorText.includes('image_url') ||
+            errorText.toLowerCase().includes('cannot fetch content from the provided url')
+        ) {
             statusCode = 400;
             clientMessage = 'Bad Request: image_url could not be fetched by the provider. Use a public, non-expiring URL or pass the image as base64 data.';
         } else if (errorText.includes('No suitable providers') || errorText.includes('supports model') || errorText.includes('No provider')) {
@@ -2360,6 +2403,12 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
         }
 
         if (!response.completed) {
+            if (statusCode === 429) {
+                const retryAfterSeconds = extractRetryAfterSeconds(errorText);
+                if (retryAfterSeconds) {
+                    response.setHeader('Retry-After', String(retryAfterSeconds));
+                }
+            }
             if (statusCode === 500) {
                 response.status(statusCode).json({ error: clientMessage, reference: clientReference, timestamp });
             } else {

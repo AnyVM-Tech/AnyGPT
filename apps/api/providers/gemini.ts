@@ -18,6 +18,8 @@ const MODEL_CATALOG_TTL_MS = 5 * 60 * 1000;
 type GeminiModelCatalogItem = {
   id: string;
   supportedMethods: Set<string>;
+  inputTokenLimit?: number;
+  outputTokenLimit?: number;
 };
 
 type GeminiModelCatalogCacheEntry = {
@@ -27,12 +29,105 @@ type GeminiModelCatalogCacheEntry = {
 
 export class GeminiAI implements IAIProvider {
   private static modelCatalogCache: Map<string, GeminiModelCatalogCacheEntry> = new Map();
+  private static modelTokenLimits: Map<string, { inputTokenLimit?: number; outputTokenLimit?: number }> = new Map();
 
   private apiKey: string;
+
+  /**
+   * Strip API keys from error/response text to prevent leaking secrets into logs.
+   */
+  private redactApiKey(text: string): string {
+    if (!this.apiKey || !text) return text;
+    return text.split(this.apiKey).join('[REDACTED]');
+  }
   // Removed state properties: busy, lastLatency, providerData, alpha, providerId
 
+  private static normalizeModelIdStatic(modelId: string): string {
+    let normalized = String(modelId || '');
+    if (normalized.startsWith('google/')) normalized = normalized.slice('google/'.length);
+    if (normalized.startsWith('models/')) normalized = normalized.slice('models/'.length);
+    return normalized;
+  }
+
   private normalizeModelId(modelId: string): string {
-    return modelId.startsWith('google/') ? modelId.slice('google/'.length) : modelId;
+    return GeminiAI.normalizeModelIdStatic(modelId);
+  }
+
+  private static recordModelTokenLimits(modelId: string, inputTokenLimit?: number, outputTokenLimit?: number) {
+    const normalized = GeminiAI.normalizeModelIdStatic(modelId);
+    const next: { inputTokenLimit?: number; outputTokenLimit?: number } = {
+      ...(GeminiAI.modelTokenLimits.get(normalized) ?? {}),
+    };
+    if (Number.isFinite(inputTokenLimit) && (inputTokenLimit as number) > 0) {
+      next.inputTokenLimit = inputTokenLimit;
+    }
+    if (Number.isFinite(outputTokenLimit) && (outputTokenLimit as number) > 0) {
+      next.outputTokenLimit = outputTokenLimit;
+    }
+    if (Object.keys(next).length > 0) {
+      GeminiAI.modelTokenLimits.set(normalized, next);
+    }
+  }
+
+  static getModelTokenLimits(modelId: string): { inputTokenLimit?: number; outputTokenLimit?: number } | undefined {
+    const normalized = GeminiAI.normalizeModelIdStatic(modelId);
+    return GeminiAI.modelTokenLimits.get(normalized);
+  }
+
+  private static extractTokenLimitFromMessage(message: string): { kind: 'input' | 'output'; limit: number } | null {
+    const raw = String(message || '');
+    const inputMatch = raw.match(/input token count exceeds the maximum number of tokens allowed\s+(\d+)/i);
+    if (inputMatch) {
+      const limit = Number(inputMatch[1]);
+      if (Number.isFinite(limit)) return { kind: 'input', limit };
+    }
+    const outputMatch = raw.match(/output token count exceeds the maximum number of tokens allowed\s+(\d+)/i);
+    if (outputMatch) {
+      const limit = Number(outputMatch[1]);
+      if (Number.isFinite(limit)) return { kind: 'output', limit };
+    }
+    const maxOutputMatch = raw.match(/max\s*output\s*tokens[^\d]*(\d+)/i);
+    if (maxOutputMatch) {
+      const limit = Number(maxOutputMatch[1]);
+      if (Number.isFinite(limit)) return { kind: 'output', limit };
+    }
+    const genericMatch = raw.match(/maximum number of tokens allowed\s+(\d+)/i);
+    if (genericMatch) {
+      const limit = Number(genericMatch[1]);
+      if (!Number.isFinite(limit)) return null;
+      const lowered = raw.toLowerCase();
+      if (lowered.includes('input')) return { kind: 'input', limit };
+      if (lowered.includes('output')) return { kind: 'output', limit };
+    }
+    return null;
+  }
+
+  private static extractGeminiErrorMessage(errorMessage: string): string {
+    const raw = String(errorMessage || '');
+    const jsonStart = raw.indexOf('{');
+    const jsonEnd = raw.lastIndexOf('}');
+    if (jsonStart >= 0 && jsonEnd > jsonStart) {
+      const jsonSlice = raw.slice(jsonStart, jsonEnd + 1);
+      try {
+        const parsed = JSON.parse(jsonSlice);
+        const apiMessage = parsed?.error?.message;
+        if (typeof apiMessage === 'string' && apiMessage.trim()) return apiMessage;
+      } catch {
+        // Ignore JSON parsing errors and fall back to raw message
+      }
+    }
+    return raw;
+  }
+
+  static updateModelTokenLimitsFromError(modelId: string, errorMessage: string) {
+    const apiMessage = GeminiAI.extractGeminiErrorMessage(errorMessage);
+    const parsed = GeminiAI.extractTokenLimitFromMessage(apiMessage);
+    if (!parsed) return;
+    if (parsed.kind === 'input') {
+      GeminiAI.recordModelTokenLimits(modelId, parsed.limit, undefined);
+      return;
+    }
+    GeminiAI.recordModelTokenLimits(modelId, undefined, parsed.limit);
   }
 
   private toModelsName(modelId: string): string {
@@ -51,8 +146,8 @@ export class GeminiAI implements IAIProvider {
     const response = await fetchWithTimeout(endpoint);
     if (!response.ok) {
       const responseText = await response.text().catch(() => '');
-      console.error(`Gemini ListModels raw error response: ${responseText}`);
-      throw new Error(`Gemini ListModels failed: [${response.status} ${response.statusText}] ${responseText}`);
+      console.error(`Gemini ListModels raw error response: ${this.redactApiKey(responseText)}`);
+      throw new Error(`Gemini ListModels failed: [${response.status} ${response.statusText}] ${this.redactApiKey(responseText)}`);
     }
 
     const payload = await response.json();
@@ -61,6 +156,8 @@ export class GeminiAI implements IAIProvider {
       .map((model: any) => {
         const name = typeof model?.name === 'string' ? model.name : '';
         const id = name.startsWith('models/') ? name.slice('models/'.length) : name;
+        const inputTokenLimit = typeof model?.inputTokenLimit === 'number' ? model.inputTokenLimit : undefined;
+        const outputTokenLimit = typeof model?.outputTokenLimit === 'number' ? model.outputTokenLimit : undefined;
         const supportedGenerationMethods = Array.isArray(model?.supportedGenerationMethods)
           ? model.supportedGenerationMethods
           : [];
@@ -69,7 +166,10 @@ export class GeminiAI implements IAIProvider {
             .filter((method: any) => typeof method === 'string' && method.length > 0)
             .map((method: string) => method.toLowerCase())
         );
-        return { id, supportedMethods };
+        if (Number.isFinite(inputTokenLimit) || Number.isFinite(outputTokenLimit)) {
+          GeminiAI.recordModelTokenLimits(id, inputTokenLimit, outputTokenLimit);
+        }
+        return { id, supportedMethods, inputTokenLimit, outputTokenLimit };
       })
       .filter((entry: GeminiModelCatalogItem) => entry.id.length > 0);
 
@@ -109,13 +209,25 @@ export class GeminiAI implements IAIProvider {
   }
 
   private buildGenerationConfig(message: IMessage): Record<string, any> {
+    const modelLimits = GeminiAI.getModelTokenLimits(message.model?.id ?? '');
+    const outputTokenLimit = typeof modelLimits?.outputTokenLimit === 'number' ? modelLimits.outputTokenLimit : undefined;
+    const defaultMaxOutput = typeof outputTokenLimit === 'number' && outputTokenLimit > 0
+      ? outputTokenLimit
+      : 8192;
+    let maxOutputTokens =
+      typeof message.max_output_tokens === 'number'
+        ? message.max_output_tokens
+        : (typeof message.max_tokens === 'number' ? message.max_tokens : defaultMaxOutput);
+    if (typeof outputTokenLimit === 'number' && outputTokenLimit > 0 && maxOutputTokens > outputTokenLimit) {
+      console.warn(
+        `Gemini maxOutputTokens clamped from ${maxOutputTokens} to ${outputTokenLimit} for model ${message.model?.id ?? 'unknown'}.`
+      );
+      maxOutputTokens = outputTokenLimit;
+    }
     const config: Record<string, any> = {
       temperature: typeof message.temperature === 'number' ? message.temperature : 1,
       topP: typeof message.top_p === 'number' ? message.top_p : 0.95,
-      maxOutputTokens:
-        typeof message.max_output_tokens === 'number'
-          ? message.max_output_tokens
-          : (typeof message.max_tokens === 'number' ? message.max_tokens : 8192),
+      maxOutputTokens,
     };
 
     const requestedModalities = Array.isArray(message.modalities)
@@ -218,7 +330,7 @@ export class GeminiAI implements IAIProvider {
 
   private async throwGeminiHttpError(response: Response, context: string): Promise<never> {
     const responseText = await response.text().catch(() => '');
-    const details = responseText ? ` ${responseText}` : '';
+    const details = responseText ? ` ${this.redactApiKey(responseText)}` : '';
     throw new Error(`Gemini API ${context} failed: [${response.status} ${response.statusText}]${details}`);
   }
 
@@ -292,8 +404,8 @@ export class GeminiAI implements IAIProvider {
     const startTime = Date.now();
 
     try {
-      const body = this.buildRequestBody(message);
       const resolved = await this.resolveModelIdForMethod(message.model.id, 'generateContent');
+      const body = this.buildRequestBody(message);
       const response = await this.requestGemini(resolved.modelId, 'generateContent', body);
       if (!response.ok) {
         await this.throwGeminiHttpError(response, 'generateContent');
@@ -336,6 +448,7 @@ export class GeminiAI implements IAIProvider {
 
       // Extract a more specific error message if possible
       const errorMessage = error.message || 'Unknown Gemini API error';
+      GeminiAI.updateModelTokenLimitsFromError(message.model?.id ?? '', errorMessage);
       // Rethrow the error to be handled by the MessageHandler
       throw new Error(`Gemini API call failed: ${errorMessage}`);
     }
@@ -349,8 +462,8 @@ export class GeminiAI implements IAIProvider {
     const startTime = Date.now();
 
     try {
-      const body = this.buildRequestBody(message);
       const resolved = await this.resolveModelIdForMethod(message.model.id, 'streamGenerateContent', true);
+      const body = this.buildRequestBody(message);
 
       if (!resolved.usesStreamMethod) {
         const nonStreamResponse = await this.requestGemini(resolved.modelId, 'generateContent', body);
@@ -417,6 +530,7 @@ export class GeminiAI implements IAIProvider {
       const latency = Date.now() - startTime;
       console.error(`Error during sendMessageStream with Gemini model ${message.model.id} (Latency: ${latency}ms):`, error);
       const errorMessage = error.message || 'Unknown Gemini API error';
+      GeminiAI.updateModelTokenLimitsFromError(message.model?.id ?? '', errorMessage);
       throw new Error(`Gemini API stream call failed: ${errorMessage}`);
     }
   }

@@ -239,10 +239,12 @@ export async function checkGemini(apiKey: string): Promise<KeyStatus> {
          const modelsRes = await axios.get(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`, { validateStatus: () => true, timeout: 10000 });
          if (modelsRes.status === 200 && modelsRes.data?.models) {
              status.isValid = true;
+             // Key can list models → it has quota for at least generateContent
+             status.hasQuota = true;
              status.models = modelsRes.data.models.map((m: any) => m.name.replace('models/', ''));
              
-             // Check billing via imagen call (from python script)
-             const billRes = await axios.post(`https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key=${apiKey}`, 
+             // Check billing via imagen call (determines paid-tier features)
+             const billRes = await axios.post(`https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key=${apiKey}`,
                 { instances: [{ prompt: "" }] },
                 { validateStatus: () => true, timeout: 10000 }
              );
@@ -254,16 +256,21 @@ export async function checkGemini(apiKey: string): Promise<KeyStatus> {
                  } else {
                      status.billingEnabled = false;
                      status.tier = 'Free Tier';
-                     status.hasQuota = false;
+                     // Free tier still has quota for text models — don't set hasQuota=false
                  }
              } else if (billRes.status === 429) {
+                 // Rate limited on billing check but key itself works
                  status.billingEnabled = false;
-                 status.hasQuota = false;
              } else if (billRes.status === 200) {
                  status.billingEnabled = true;
              }
              if (isQuotaExhausted(billErr)) {
-                 status.hasQuota = false;
+                 // Only mark hasQuota false if the error is truly about exhausted quota
+                 // (not just "not accessible to free users")
+                 const msg = (billErr.message || '').toLowerCase();
+                 if (!msg.includes('only accessible to billed users')) {
+                     status.hasQuota = false;
+                 }
              }
          } else if (modelsRes.status === 429) {
              status.isValid = true;

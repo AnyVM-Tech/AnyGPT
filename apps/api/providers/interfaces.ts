@@ -25,6 +25,8 @@ export interface Model {
   avg_token_speed: number | null; // Calculated average token speed (tokens/sec, e.g., EMA)
   capability_skips?: Partial<Record<ModelCapability, string>>; // Optional per-model capability skips
   disabled?: boolean; // Optional per-model disable flag
+  disabled_at?: number; // Epoch ms when the model was disabled (for time-based auto-recovery)
+  disable_count?: number; // How many times this model has been disabled (for exponential backoff)
 }
 
 export interface ResponseEntry {
@@ -116,6 +118,7 @@ export interface IMessage {
   audio?: any;
   reasoning?: any;
   instructions?: string;
+  stream_options?: Record<string, any>;
   image_fetch_referer?: string;
 }
 

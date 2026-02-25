@@ -402,6 +402,8 @@ function isModalitiesUnsupportedError(outcomeLower: string): boolean {
 
 function shouldSkipLegacyCompletionsModel(modelId: string): boolean {
   const id = modelId.toLowerCase();
+  // Embedding models are handled separately — exclude them here
+  if (isEmbeddingModel(id)) return false;
   return (
     id.startsWith('davinci') ||
     id.startsWith('text-davinci') ||
@@ -411,12 +413,128 @@ function shouldSkipLegacyCompletionsModel(modelId: string): boolean {
     id.startsWith('text-babbage') ||
     id.startsWith('ada') ||
     id.startsWith('text-ada') ||
-    id.startsWith('text-embedding') ||
     id.includes('gpt-3.5-turbo-instruct') ||
-    id.startsWith('ft:') ||
-    id.includes(':ft-') ||
-    id.includes(':ft:')
+    isFineTunedModel(id)
   );
+}
+
+/**
+ * Detect realtime models (WebSocket-based, can't be probed via HTTP).
+ * These models support text + audio I/O via the Realtime API.
+ */
+function isRealtimeModel(modelId: string): boolean {
+  const id = typeof modelId === 'string' ? modelId.toLowerCase() : '';
+  return id.includes('realtime');
+}
+
+/**
+ * Returns known capabilities for models that can't be probed via standard HTTP,
+ * based on their model ID patterns. Returns null if not a known model type.
+ */
+function getKnownCapabilities(modelId: string): { caps: ModelCapability[]; reason: string } | null {
+  const id = typeof modelId === 'string' ? modelId.toLowerCase() : '';
+  if (!id) return null;
+
+  // Image generation models (Imagen, DALL-E, GPT-Image, Grok Imagine)
+  if (id.startsWith('imagen-') || id.startsWith('dall-e') || id.startsWith('gpt-image') || id === 'chatgpt-image-latest') {
+    return { caps: ['text', 'image_output'], reason: 'image generation model' };
+  }
+  if (id.includes('grok-imagine-image') || id.includes('grok-2-image')) {
+    return { caps: ['text', 'image_output'], reason: 'xAI image generation model' };
+  }
+
+  // Video generation models (Sora, Veo, Grok Imagine Video)
+  if (id.startsWith('sora') || id.startsWith('veo-')) {
+    return { caps: ['text', 'image_output'], reason: 'video generation model' };
+  }
+  if (id.includes('grok-imagine-video')) {
+    return { caps: ['text', 'image_output'], reason: 'xAI video generation model' };
+  }
+
+  // Deep research / tool-use models
+  if (id.includes('deep-research')) {
+    return { caps: ['text'], reason: 'deep research model' };
+  }
+
+  // Native audio models (Gemini)
+  if (id.includes('native-audio')) {
+    return { caps: ['text', 'audio_input', 'audio_output'], reason: 'native audio model' };
+  }
+
+  // Computer use models
+  if (id.includes('computer-use')) {
+    return { caps: ['text', 'image_input'], reason: 'computer use model' };
+  }
+
+  // Embedding models
+  if (id.includes('embedding')) {
+    return { caps: ['text'], reason: 'embedding model' };
+  }
+
+  // AQA (Google Attributed Question Answering)
+  if (id === 'aqa') {
+    return { caps: ['text'], reason: 'AQA model' };
+  }
+
+  // xAI image/video models
+  if (id.includes('grok') && (id.includes('image') || id.includes('imagine') || id.includes('video'))) {
+    if (id.includes('video')) return { caps: ['text', 'image_output'], reason: 'xAI video model' };
+    return { caps: ['text', 'image_output'], reason: 'xAI image model' };
+  }
+
+  // Sora video models
+  if (id.startsWith('sora')) {
+    return { caps: ['text', 'image_output'], reason: 'Sora video model' };
+  }
+
+  // TTS models
+  if (id.startsWith('tts-') || id.includes('-tts')) {
+    return { caps: ['text', 'audio_output'], reason: 'TTS model' };
+  }
+
+  // Whisper/STT models
+  if (id.startsWith('whisper') || id.includes('transcribe')) {
+    return { caps: ['audio_input', 'text'], reason: 'STT model' };
+  }
+
+  // Moderation models
+  if (id.includes('moderation')) {
+    return { caps: ['text'], reason: 'moderation model' };
+  }
+
+  // Responses-only / tool-requiring models
+  if (id.includes('deep-research')) {
+    return { caps: ['text'], reason: 'deep research model' };
+  }
+
+  return null;
+}
+
+/**
+ * Detect embedding-only models that need the /v1/embeddings endpoint.
+ */
+function isEmbeddingModel(modelId: string): boolean {
+  const id = typeof modelId === 'string' ? modelId.toLowerCase() : '';
+  return id.startsWith('text-embedding') || id.includes('embedding');
+}
+
+/**
+ * Detect fine-tuned models (ft: prefix or :ft- infix).
+ * These are typically tied to specific OpenAI accounts/orgs and
+ * will 404 for keys that don't own them.
+ */
+function isFineTunedModel(modelId: string): boolean {
+  const id = typeof modelId === 'string' ? modelId.toLowerCase() : '';
+  return id.startsWith('ft:') || id.includes(':ft-') || id.includes(':ft:');
+}
+
+/**
+ * Detect private fine-tuned models that are tied to a specific org/account.
+ * All fine-tuned models are org-specific — they will 404 for keys that
+ * don't own them. The probe can't test them since it uses shared keys.
+ */
+function isPrivateFineTune(modelId: string): boolean {
+  return isFineTunedModel(modelId);
 }
 
 function isXaiMediaModel(modelId: string): boolean {
@@ -1614,6 +1732,38 @@ async function main() {
   const capabilitySkipStore = probeTested.capability_skips ?? (probeTested.capability_skips = {});
   let providersChanged = false;
 
+  // Pre-pass: assign known capabilities to ALL models that don't have them
+  // This runs before any probing/skipping so even models blocked by rate limits get capabilities
+  let knownCapsAssigned = 0;
+  for (const model of models) {
+    if (model.capabilities && Array.isArray(model.capabilities) && model.capabilities.length > 0) continue;
+    const knownCaps = getKnownCapabilities(model.id);
+    if (knownCaps) {
+      (model as any).capabilities = knownCaps.caps;
+      providersChanged = true;
+      knownCapsAssigned++;
+      const pt = probeTested.data[model.id] || {};
+      for (const cap of knownCaps.caps) {
+        if (!pt[cap]) pt[cap] = `ok (known: ${knownCaps.reason})`;
+      }
+      if (!pt._status) pt._status = `ok (${knownCaps.reason})`;
+      probeTested.data[model.id] = pt;
+    }
+    // Fine-tunes get text capability
+    if (isFineTunedModel(model.id)) {
+      (model as any).capabilities = ['text'];
+      providersChanged = true;
+      knownCapsAssigned++;
+      const pt = probeTested.data[model.id] || {};
+      if (!pt.text) pt.text = 'ok (fine-tune — assumed text)';
+      if (!pt._status) pt._status = 'ok (fine-tune)';
+      probeTested.data[model.id] = pt;
+    }
+  }
+  if (knownCapsAssigned > 0) {
+    console.log(`Pre-pass: assigned known capabilities to ${knownCapsAssigned} models.`);
+  }
+
   allProviders.forEach((provider, idx) => {
     if (!providerOrderIndex.has(provider.id)) providerOrderIndex.set(provider.id, idx);
   });
@@ -1738,6 +1888,99 @@ async function main() {
         }
       }
 
+      // Realtime models use WebSocket API — assign known capabilities directly
+      if (isRealtimeModel(model.id)) {
+        const realtimeCaps: ModelCapability[] = ['text', 'audio_input', 'audio_output'];
+        if (!model.capabilities || !model.capabilities.length) {
+          (model as any).capabilities = realtimeCaps;
+          providersChanged = true;
+        }
+        const pt = probeTested.data[model.id] || {};
+        pt.text = 'ok (realtime)';
+        pt.audio_input = 'ok (realtime)';
+        pt.audio_output = 'ok (realtime)';
+        pt._status = 'ok (realtime model — WebSocket only)';
+        probeTested.data[model.id] = pt;
+        appendProbeLog({ type: 'probe_skip', modelId: model.id, reason: 'realtime model (WebSocket only, capabilities assigned directly)' });
+        continue;
+      }
+
+      // Assign known capabilities for models that can't be probed via standard HTTP
+      const knownCaps = getKnownCapabilities(model.id);
+      if (knownCaps && (!model.capabilities || !model.capabilities.length)) {
+        (model as any).capabilities = knownCaps.caps;
+        providersChanged = true;
+        const pt = probeTested.data[model.id] || {};
+        for (const cap of knownCaps.caps) {
+          pt[cap] = `ok (known: ${knownCaps.reason})`;
+        }
+        pt._status = `ok (${knownCaps.reason})`;
+        probeTested.data[model.id] = pt;
+        appendProbeLog({ type: 'probe_skip', modelId: model.id, reason: `known capabilities assigned: ${knownCaps.reason}` });
+        continue;
+      }
+
+      // Skip private fine-tuned models (tied to specific org/account, will always 404 for other keys)
+      // Assign ['text'] since all fine-tunes are text models
+      if (isPrivateFineTune(model.id)) {
+        if (!model.capabilities || !model.capabilities.length) {
+          (model as any).capabilities = ['text'];
+          providersChanged = true;
+        }
+        appendProbeLog({ type: 'probe_skip', modelId: model.id, reason: 'private fine-tuned model (org-specific)' });
+        const pt = probeTested.data[model.id] || {};
+        pt.text = 'ok (private fine-tune — assumed text)';
+        pt._status = 'ok (private fine-tune)';
+        probeTested.data[model.id] = pt;
+        continue;
+      }
+
+      // Handle embedding models: test via embeddings endpoint, not chat
+      if (isEmbeddingModel(model.id)) {
+        while (provider && !provider.id.includes('openai')) {
+          providerTried.add(provider.id);
+          provider = pickProvider(providers, model.id, providerValidity, providerTried);
+        }
+        if (!provider) {
+          appendProbeLog({ type: 'probe_skip', modelId: model.id, reason: 'embedding model (no openai provider)' });
+          continue;
+        }
+        // Test via embeddings endpoint
+        try {
+          const embeddingsUrl = (() => {
+            const url = provider.provider_url || '';
+            if (url.includes('/v1/')) return url.slice(0, url.indexOf('/v1/') + 4) + 'embeddings';
+            if (url.endsWith('/v1')) return url + '/embeddings';
+            return 'https://api.openai.com/v1/embeddings';
+          })();
+          const embRes = await axios.post(embeddingsUrl, {
+            model: model.id,
+            input: 'test',
+          }, {
+            headers: { Authorization: `Bearer ${provider.apiKey}` },
+            validateStatus: () => true,
+            timeout: REQUEST_TIMEOUT_MS,
+          });
+          const pt = probeTested.data[model.id] || {};
+          if (embRes.status === 200) {
+            pt.text = 'ok';
+            pt._status = 'ok (embedding)';
+            if (!model.capabilities || !model.capabilities.length) {
+              (model as any).capabilities = ['text'];
+              providersChanged = true;
+            }
+          } else {
+            pt.text = `fail: embeddings ${embRes.status}`;
+            pt._status = `fail: embeddings ${embRes.status}`;
+            appendProbeLog({ type: 'probe_fail', modelId: model.id, providerId: provider.id, test: 'text', outcome: `fail: embeddings ${embRes.status}` });
+          }
+          probeTested.data[model.id] = pt;
+        } catch (err: any) {
+          appendProbeLog({ type: 'probe_fail', modelId: model.id, providerId: provider.id, test: 'text', outcome: `fail: ${err?.message || 'unknown'}` });
+        }
+        continue;
+      }
+
       const declaredCaps = Array.isArray(model.capabilities) && model.capabilities.length
         ? (model.capabilities as ModelCapability[])
         : ([] as ModelCapability[]);
@@ -1787,11 +2030,16 @@ async function main() {
           if (regionUnavailable) return true;
           if (testFailHints && testFailHints.has(test.name)) return true;
           if (declaredCapsSet.has(cap)) return false;
+          // Skip capability tests that already have a definitive stored result
+          if (SKIP_TESTED_OK && testedOutcome) return false;
           return true;
         }
+        // Non-capability tests (e.g. streaming): re-test only transient failures
         if (retryable) return true;
         if (quotaSkipped) return true;
         if (regionUnavailable) return true;
+        // Skip non-capability tests that already have a definitive stored result
+        if (SKIP_TESTED_OK && testedOutcome) return false;
         return true;
       });
       if (isRelaceModel(model.id)) {
