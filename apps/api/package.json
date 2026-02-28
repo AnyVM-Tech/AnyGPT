@@ -33,7 +33,7 @@
 		"dotenv": "^16.4.5",
 		"eventsource": "^2.0.2",
 		"ioredis": "^5.5.0",
-		"openai": "^4.47.1",
+		"openai": "^6.22.0",
 		"selenium-webdriver": "^4.26.0",
 		"uWebSockets.js": "github:uNetworking/uWebSockets.js#v20.51.0",
 		"uuid": "^11.1.0",
