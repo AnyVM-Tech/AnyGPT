@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import rateLimit from 'express-rate-limit';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -33,10 +34,15 @@ try {
 
 const app = express();
 
+const spaLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // limit each IP to 100 SPA requests per windowMs
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 // SPA fallback — serve index.html for any unmatched route
-app.get('*', (_req, res) => {
+app.get('*', spaLimiter, (_req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
