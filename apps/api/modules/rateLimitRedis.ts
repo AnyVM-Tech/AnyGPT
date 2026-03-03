@@ -48,15 +48,18 @@ redis.call('EXPIRE', key, ttl)
 return {s_count, m_count, d_count}
 `;
 
-const RATE_LIMIT_HASH_SECRET = process.env.RATE_LIMIT_HASH_SECRET || process.env.API_KEY_HASH_SECRET || 'anygpt-rate-limit';
+const RATE_LIMIT_HASH_SECRET: string = process.env.RATE_LIMIT_HASH_SECRET
+  || process.env.API_KEY_HASH_SECRET
+  || crypto.randomBytes(32).toString('hex');
 let warnedDefaultSecret = false;
 
 function hashApiKey(apiKey: string): string {
   if (!process.env.RATE_LIMIT_HASH_SECRET && !process.env.API_KEY_HASH_SECRET && !warnedDefaultSecret) {
     warnedDefaultSecret = true;
-    logger.warn('[RateLimit] RATE_LIMIT_HASH_SECRET is not set; using default hash secret.');
+    logger.warn('[RateLimit] RATE_LIMIT_HASH_SECRET is not set; using a randomly generated per-process hash secret.');
   }
-  return crypto.createHmac('sha256', RATE_LIMIT_HASH_SECRET).update(apiKey).digest('hex');
+  const context = 'rate-limit:api-key:';
+  return crypto.createHmac('sha256', RATE_LIMIT_HASH_SECRET).update(context + apiKey).digest('hex');
 }
 
 export async function incrementSharedRateLimitCounters(
