@@ -1,5 +1,6 @@
 import uWS, { TemplatedApp, HttpRequest, HttpResponse, us_listen_socket } from 'uWebSockets.js';
 import { STATUS_CODES } from 'http';
+import { randomUUID } from 'crypto';
 
 type NextFunction = () => void;
 type Handler = (request: Request, response: Response, next: NextFunction) => any;
@@ -98,6 +99,7 @@ class Request {
     public headers: Record<string, string>;
     public ip?: string;
     public completed = false;
+    public requestId: string;
 
     private bodyCache?: Promise<Buffer>;
     private maxBodyLength: number;
@@ -115,6 +117,7 @@ class Request {
         this.headers = ctx.headers;
         this.maxBodyLength = maxBodyLength;
         this.ip = resolveClientIp(req, this.headers);
+        this.requestId = this.headers['x-request-id'] || `req_${randomUUID()}`;
         // Start capturing the request body immediately so data arriving before handlers call .json()/.text() is buffered.
         this.initBodyCapture();
     }
@@ -163,6 +166,38 @@ class Response {
     private headersSent = false;
     private headers: Record<string, string> = {};
     private res: HttpResponse;
+    private errorId?: string;
+
+    private attachErrorIdToBody(body: string): string {
+        if (!this.errorId) return body;
+        try {
+            const parsed = JSON.parse(body);
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                const record = parsed as Record<string, any>;
+                if (!('error_id' in record)) record.error_id = this.errorId;
+                if (typeof record.error === 'string') {
+                    if (!record.error.includes(this.errorId)) {
+                        record.error = `${record.error} (error_id: ${this.errorId})`;
+                    }
+                } else if (record.error && typeof record.error === 'object' && !Array.isArray(record.error)) {
+                    const errorObj = record.error as Record<string, any>;
+                    if (!('id' in errorObj)) errorObj.id = this.errorId;
+                    if (typeof errorObj.message === 'string' && !errorObj.message.includes(this.errorId)) {
+                        errorObj.message = `${errorObj.message} (error_id: ${this.errorId})`;
+                    }
+                }
+                if (typeof record.message === 'string' && !record.message.includes(this.errorId)) {
+                    record.message = `${record.message} (error_id: ${this.errorId})`;
+                }
+                return JSON.stringify(record);
+            }
+        } catch {
+            // Non-JSON response
+        }
+        if (body.includes(this.errorId)) return body;
+        const suffix = `error_id: ${this.errorId}`;
+        return body.endsWith('\n') ? `${body}${suffix}` : `${body}\n${suffix}`;
+    }
 
     private withCork(fn: () => void): void {
         if (this.completed) return;
@@ -191,6 +226,11 @@ class Response {
         return this;
     }
 
+    setErrorId(errorId: string): this {
+        this.errorId = errorId;
+        return this;
+    }
+
     private writeHeadersIfNeeded() {
         if (this.headersSent) return;
         const statusText = STATUS_CODES[this.statusCode] || '';
@@ -204,6 +244,28 @@ class Response {
     json(payload: any): void {
         if (this.completed) return;
         this.setHeader('Content-Type', 'application/json');
+        const shouldAttachErrorId = Boolean(this.errorId)
+            && payload && typeof payload === 'object' && !Array.isArray(payload)
+            && (this.statusCode >= 400 || 'error' in payload || (payload as Record<string, any>).type === 'error');
+        if (shouldAttachErrorId && this.errorId) {
+            const payloadRecord = payload as Record<string, any>;
+            if (!('error_id' in payloadRecord)) {
+                payloadRecord.error_id = this.errorId;
+            }
+            if (typeof payloadRecord.error === 'string') {
+                if (!payloadRecord.error.includes(this.errorId)) {
+                    payloadRecord.error = `${payloadRecord.error} (error_id: ${this.errorId})`;
+                }
+            } else if (payloadRecord.error && typeof payloadRecord.error === 'object' && !Array.isArray(payloadRecord.error)) {
+                const errorObj = payloadRecord.error as Record<string, any>;
+                if (!('id' in errorObj)) errorObj.id = this.errorId;
+                if (typeof errorObj.message === 'string' && !errorObj.message.includes(this.errorId)) {
+                    errorObj.message = `${errorObj.message} (error_id: ${this.errorId})`;
+                }
+            } else if (typeof payloadRecord.message === 'string' && !payloadRecord.message.includes(this.errorId)) {
+                payloadRecord.message = `${payloadRecord.message} (error_id: ${this.errorId})`;
+            }
+        }
         const body = JSON.stringify(payload);
         this.withCork(() => {
             this.writeHeadersIfNeeded();
@@ -223,10 +285,19 @@ class Response {
 
     end(chunk?: string | Buffer): void {
         if (this.completed) return;
+        let output = chunk;
+        const shouldAttachErrorId = Boolean(this.errorId) && this.statusCode >= 400 && chunk !== undefined;
+        if (shouldAttachErrorId && this.errorId) {
+            if (Buffer.isBuffer(chunk)) {
+                output = Buffer.from(this.attachErrorIdToBody(chunk.toString('utf8')));
+            } else if (typeof chunk === 'string') {
+                output = this.attachErrorIdToBody(chunk);
+            }
+        }
         this.withCork(() => {
             this.writeHeadersIfNeeded();
-            if (chunk !== undefined) {
-                this.res.end(chunk as any);
+            if (output !== undefined) {
+                this.res.end(output as any);
             } else {
                 this.res.end();
             }
@@ -317,8 +388,11 @@ class Router {
                 const ctx = buildContext(res, req, fullPath, paramNames);
                 const request = new Request(res, req, ctx, maxBodyLength);
                 const response = new Response(res);
+                response.setHeader('x-request-id', request.requestId);
+                response.setErrorId(request.requestId);
 
                 const handleError = (error: unknown) => {
+                    response.setErrorId(request.requestId);
                     if (errorHandler) {
                         try {
                             const maybe = errorHandler(request, response, error);
@@ -379,6 +453,8 @@ class Router {
                 const ctx = buildContext(res, req, fallbackPath, extractParamNames(fallbackPath));
                 const request = new Request(res, req, ctx, maxBodyLength);
                 const response = new Response(res);
+                response.setHeader('x-request-id', request.requestId);
+                response.setErrorId(request.requestId);
                 notFoundHandler(request, response);
                 if (!response.completed) response.status(404).end();
             });

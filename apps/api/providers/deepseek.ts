@@ -31,11 +31,53 @@ export class DeepseekAI implements IAIProvider {
     }));
   }
 
+  private normalizeChatTools(tools: any): any[] | undefined {
+    if (!Array.isArray(tools)) return undefined;
+    return tools.map((tool) => {
+      if (!tool || typeof tool !== 'object') return tool;
+      const func = (tool as any).function;
+      if (func && typeof func === 'object') {
+        return tool;
+      }
+      const name = (tool as any).name;
+      const description = (tool as any).description;
+      const parameters = (tool as any).parameters;
+      if (!name) return tool;
+      const normalized: Record<string, any> = {
+        type: (tool as any).type ?? 'function',
+        function: {
+          name,
+        },
+      };
+      if (description) normalized.function.description = description;
+      if (parameters) normalized.function.parameters = parameters;
+      if (typeof (tool as any).strict !== 'undefined') {
+        normalized.function.strict = (tool as any).strict;
+      }
+      return normalized;
+    });
+  }
+
+  private normalizeChatToolChoice(toolChoice: any): any {
+    if (!toolChoice || typeof toolChoice !== 'object') return toolChoice;
+    if (Array.isArray(toolChoice)) return toolChoice;
+    const func = (toolChoice as any).function;
+    if (func && typeof func === 'object') return toolChoice;
+    const name = (toolChoice as any).name;
+    if (name) {
+      return { type: (toolChoice as any).type ?? 'function', function: { name } };
+    }
+    return toolChoice;
+  }
+
   async sendMessage(message: IMessage): Promise<ProviderResponse> {
     const start = Date.now();
     const payload = {
       model: message.model.id,
       messages: this.buildMessages(message),
+      tools: this.normalizeChatTools(message.tools) ?? message.tools,
+      tool_choice: this.normalizeChatToolChoice(message.tool_choice),
+      reasoning: message.reasoning,
     };
 
     try {
@@ -62,7 +104,11 @@ export class DeepseekAI implements IAIProvider {
           prompt_tokens: typeof res.data?.usage?.prompt_tokens === 'number' ? res.data.usage.prompt_tokens : undefined,
           completion_tokens: typeof res.data?.usage?.completion_tokens === 'number' ? res.data.usage.completion_tokens : undefined,
           total_tokens: typeof res.data?.usage?.total_tokens === 'number' ? res.data.usage.total_tokens : undefined,
-        }
+        },
+        tool_calls: Array.isArray(res.data?.choices?.[0]?.message?.tool_calls)
+          ? res.data.choices[0].message.tool_calls
+          : undefined,
+        finish_reason: res.data?.choices?.[0]?.finish_reason,
       };
     } catch (error: any) {
       const latency = Date.now() - start;
@@ -76,6 +122,9 @@ export class DeepseekAI implements IAIProvider {
       model: message.model.id,
       messages: this.buildMessages(message),
       stream: true,
+      tools: this.normalizeChatTools(message.tools) ?? message.tools,
+      tool_choice: this.normalizeChatToolChoice(message.tool_choice),
+      reasoning: message.reasoning,
     };
     const res = await axios.post(this.endpointUrl, payload, { headers: this.buildHeaders(), responseType: 'stream' });
     return {
@@ -90,6 +139,9 @@ export class DeepseekAI implements IAIProvider {
       model: message.model.id,
       messages: this.buildMessages(message),
       stream: true,
+      tools: this.normalizeChatTools(message.tools) ?? message.tools,
+      tool_choice: this.normalizeChatToolChoice(message.tool_choice),
+      reasoning: message.reasoning,
     };
 
     try {
@@ -106,10 +158,18 @@ export class DeepseekAI implements IAIProvider {
           }
           try {
             const parsed = JSON.parse(payloadLine);
-            const chunk = parsed.choices?.[0]?.delta?.content || '';
+            const delta = parsed.choices?.[0]?.delta;
+            const chunk = delta?.content || '';
             full += chunk;
             const latency = Date.now() - start;
-            yield { chunk, latency, response: full, anystream: res.data };
+            yield {
+              chunk,
+              latency,
+              response: full,
+              anystream: res.data,
+              tool_calls: Array.isArray(delta?.tool_calls) ? delta.tool_calls : undefined,
+              finish_reason: parsed?.choices?.[0]?.finish_reason,
+            };
           } catch {
             // skip malformed chunk
           }

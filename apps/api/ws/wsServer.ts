@@ -39,9 +39,13 @@ interface AuthMessage extends BaseMessage { type: 'auth'; apiKey: string; }
 interface ChatCompletionsMessage extends BaseMessage {
   type: 'chat.completions';
   model: string;
-  messages: Array<{ role: string; content: string }>;
+  messages: Array<{ role: string; content: any }>;
   requestId?: string;
   stream?: boolean;
+  tools?: any[];
+  tool_choice?: any;
+  reasoning?: any;
+  reasoning_effort?: any;
 }
 
 type IncomingMessage = PingMessage | AuthMessage | ChatCompletionsMessage;
@@ -56,14 +60,14 @@ interface OpenAIStreamChunk {
   object: string;
   created: number;
   model: string;
-  choices: Array<{ index: number; delta: { content?: string }; finish_reason: string | null }>;
+  choices: Array<{ index: number; delta: { content?: string; tool_calls?: any[] }; finish_reason: string | null }>;
 }
 interface OpenAIResponse {
   id: string;
   object: string;
   created: number;
   model: string;
-  choices: Array<{ index: number; message: { role: string; content: string }; finish_reason: string }>;
+  choices: Array<{ index: number; message: { role: string; content: string; tool_calls?: any[] }; finish_reason: string }>;
   usage: { total_tokens: number };
 }
 interface ChatCompleteResponse extends BaseResponse {
@@ -134,6 +138,8 @@ interface MessageResult {
   response: string;
   tokenUsage?: number;
   providerId?: string;
+  tool_calls?: any[];
+  finish_reason?: string;
 }
 
 function estimateTokens(text: string): number { return Math.ceil(text.length / 4); }
@@ -221,13 +227,22 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
           }
           const userMessage = messages[messages.length - 1];
           const content = userMessage?.content;
-          if (typeof content !== 'string') {
-            return send({ type: 'error', code: 'bad_request', message: 'Last message content must be string', requestId });
+          if (typeof content !== 'string' && !Array.isArray(content)) {
+            return send({ type: 'error', code: 'bad_request', message: 'Last message content must be string or array', requestId });
           }
+          if (payload.reasoning === undefined && payload.reasoning_effort !== undefined) {
+            payload.reasoning = payload.reasoning_effort;
+          }
+          const sharedMessageOptions = {
+            tools: Array.isArray(payload.tools) ? payload.tools : undefined,
+            tool_choice: payload.tool_choice,
+            reasoning: payload.reasoning,
+          };
           const formattedMessages = messages.map((msg) => ({
             role: msg.role,
             content: msg.content,
             model: { id: model },
+            ...sharedMessageOptions,
           }));
 
           const started = Date.now();
@@ -235,10 +250,12 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
 
           if (stream) {
             try {
-              const streamHandler = messageHandler.handleStreamingMessages(formattedMessages as any, model, ctx.apiKey);
+              const streamHandler = messageHandler.handleStreamingMessages(formattedMessages as any, model, ctx.apiKey, { requestId });
 
               let totalTokenUsage = 0;
               let providerId: string | undefined;
+              let toolCalls: any[] | undefined;
+              let finishReason: string | undefined;
 
               for await (const result of streamHandler) {
                 if (result.type === 'chunk') {
@@ -247,12 +264,21 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
                     object: 'chat.completion.chunk',
                     created: Math.floor(started / 1000),
                     model,
-                    choices: [{ index: 0, delta: { content: result.chunk }, finish_reason: null }]
+                    choices: [{
+                      index: 0,
+                      delta: {
+                        content: result.chunk,
+                        ...(result.tool_calls && result.tool_calls.length > 0 ? { tool_calls: result.tool_calls } : {}),
+                      },
+                      finish_reason: result.finish_reason || null,
+                    }]
                   };
                   send(openaiStreamChunk);
                 } else if (result.type === 'final') {
                   if (typeof result.tokenUsage === 'number') totalTokenUsage = result.tokenUsage;
                   if (result.providerId) providerId = result.providerId;
+                  if (Array.isArray(result.tool_calls) && result.tool_calls.length > 0) toolCalls = result.tool_calls;
+                  if (result.finish_reason) finishReason = result.finish_reason;
                 }
               }
 
@@ -266,7 +292,15 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
                   object: 'chat.completion',
                   created: Math.floor(started / 1000),
                   model,
-                  choices: [{ index: 0, message: { role: 'assistant', content: '' }, finish_reason: 'stop' }],
+                  choices: [{
+                    index: 0,
+                    message: {
+                      role: 'assistant',
+                      content: '',
+                      ...(toolCalls && toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
+                    },
+                    finish_reason: finishReason || (toolCalls?.length ? 'tool_calls' : 'stop'),
+                  }],
                   usage: { total_tokens: totalTokenUsage }
                 },
                 latencyMs: Date.now() - started,
@@ -281,7 +315,7 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
           }
 
           try {
-            const result: MessageResult = await messageHandler.handleMessages(formattedMessages as any, model, ctx.apiKey);
+            const result: MessageResult = await messageHandler.handleMessages(formattedMessages as any, model, ctx.apiKey, requestId);
             const totalTokens = typeof result.tokenUsage === 'number' ? result.tokenUsage : estimateTokens(result.response || '');
             await updateUserTokenUsage(totalTokens, ctx.apiKey);
 
@@ -290,7 +324,15 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
               object: 'chat.completion',
               created: Math.floor(Date.now() / 1000),
               model,
-              choices: [{ index: 0, message: { role: 'assistant', content: result.response }, finish_reason: 'stop' }],
+              choices: [{
+                index: 0,
+                message: {
+                  role: 'assistant',
+                  content: result.response,
+                  ...(result.tool_calls && result.tool_calls.length > 0 ? { tool_calls: result.tool_calls } : {}),
+                },
+                finish_reason: result.finish_reason || (result.tool_calls?.length ? 'tool_calls' : 'stop'),
+              }],
               usage: { total_tokens: totalTokens }
             };
 

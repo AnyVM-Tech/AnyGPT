@@ -20,7 +20,7 @@
               "type": "array",
               "items": {
                 "type": "string",
-                "enum": ["text", "image_input", "image_output", "audio_input", "audio_output"]
+              "enum": ["text", "image_input", "image_output", "audio_input", "audio_output", "tool_calling"]
               }
             }
           }

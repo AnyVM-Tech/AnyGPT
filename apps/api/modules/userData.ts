@@ -14,6 +14,7 @@ let _pricingCache: Map<string, ModelPricing> = new Map();
 let _avgBlendedRate: number = 0;
 let _pricingLastUpdated = 0;
 const PRICING_REFRESH_MS = 5 * 60 * 1000; // refresh every 5 minutes
+const CODEX_SINGLE_TURN_ONLY = process.env.CODEX_SINGLE_TURN_ONLY === '1';
 
 async function refreshPricingCache(): Promise<void> {
   const now = Date.now();
@@ -199,6 +200,7 @@ export function extractMessageFromRequestBody(requestBody: any): { messages: { r
       if (!m || typeof m !== 'object' || typeof m.role !== 'string') {
         throw new Error('Each message must include a role.');
       }
+      const role = m.role;
       const content = m.content;
       const isStringContent = typeof content === 'string';
       const isArrayContent = Array.isArray(content);
@@ -225,7 +227,7 @@ export function extractMessageFromRequestBody(requestBody: any): { messages: { r
           }
         });
       }
-      return { role: m.role, content };
+      return { role, content };
     });
     
     let maxTokens: number | undefined = undefined;
@@ -234,7 +236,34 @@ export function extractMessageFromRequestBody(requestBody: any): { messages: { r
       if (isNaN(parsedTokens) || parsedTokens <= 0) throw new Error('Invalid max_tokens.');
       maxTokens = parsedTokens;
     }
-    return { messages: normalizedMessages, model: requestBody.model, max_tokens: maxTokens };
+    let trimmedMessages = normalizedMessages;
+    while (trimmedMessages.length > 0) {
+      const lastRole = trimmedMessages[trimmedMessages.length - 1]?.role;
+      if (lastRole === 'assistant' || lastRole === 'system' || lastRole === 'developer') {
+        trimmedMessages = trimmedMessages.slice(0, -1);
+        continue;
+      }
+      break;
+    }
+    if (trimmedMessages.length === 0) {
+      throw new Error('At least one user message is required.');
+    }
+
+    const normalizedModelId = String(requestBody.model || '').toLowerCase();
+    if (CODEX_SINGLE_TURN_ONLY && normalizedModelId.includes('codex')) {
+      const systemMessages = trimmedMessages.filter((msg: { role: string; content: any }) => msg.role === 'system' || msg.role === 'developer');
+      const lastUserMessage = [...trimmedMessages].reverse().find((msg: { role: string; content: any }) => msg.role === 'user');
+      if (!lastUserMessage) {
+        throw new Error('At least one user message is required.');
+      }
+      trimmedMessages = [...systemMessages, lastUserMessage];
+      const userContent = lastUserMessage.content;
+      if (typeof userContent === 'string' && userContent.trim().length < 2) {
+        throw new Error('User message too short for codex; provide a longer prompt.');
+      }
+    }
+
+    return { messages: trimmedMessages, model: requestBody.model, max_tokens: maxTokens };
   } catch(error) {
     console.error("Error parsing request:", error);
     throw new Error(`Request parse failed: ${error instanceof Error ? error.message : String(error)}`);

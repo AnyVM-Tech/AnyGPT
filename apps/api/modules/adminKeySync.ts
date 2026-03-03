@@ -43,6 +43,7 @@ const LOCK_TTL_MS = Math.max(10_000, Number(process.env.ADMIN_KEY_SYNC_LOCK_TTL_
 const STARTUP_PROBE_COOLDOWN_MS = Math.max(0, Number(process.env.ADMIN_KEY_SYNC_STARTUP_PROBE_COOLDOWN_MS ?? 60 * 60 * 1000));
 const PROBE_MAX_MODELS = process.env.ADMIN_KEY_SYNC_PROBE_MAX_MODELS;
 const PROBE_ALL_CAPS = process.env.ADMIN_KEY_SYNC_PROBE_ALL_CAPS;
+const PROBE_KEYCHECK_ONLY = process.env.ADMIN_KEY_SYNC_PROBE_KEYCHECK_ONLY === '1';
 const CHECK_DISABLED_KEYS = process.env.ADMIN_KEY_SYNC_CHECK_DISABLED !== '0';
 const DISABLED_KEY_CHECK_CONCURRENCY = Math.max(1, Number(process.env.ADMIN_KEY_SYNC_DISABLED_CONCURRENCY ?? 4));
 
@@ -316,6 +317,7 @@ async function runSync(reason: string, force = false): Promise<void> {
       const probeEnv: Record<string, string> = {};
       if (PROBE_MAX_MODELS) probeEnv.CAP_TEST_MAX_MODELS = PROBE_MAX_MODELS;
       if (PROBE_ALL_CAPS) probeEnv.CAP_TEST_ALL_CAPS = PROBE_ALL_CAPS;
+      if (PROBE_KEYCHECK_ONLY) probeEnv.CAP_TEST_KEYCHECK_ONLY = '1';
       await runScript('testModelLiveProbes', 'dev/testModelLiveProbes.ts', probeEnv);
     }
 

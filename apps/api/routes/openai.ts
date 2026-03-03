@@ -207,6 +207,10 @@ function extractResponsesRequestBody(requestBody: any): { message: IMessage; mod
         throw new Error('Invalid request body.');
     }
 
+    if (requestBody.reasoning === undefined && requestBody.reasoning_effort !== undefined) {
+        requestBody.reasoning = requestBody.reasoning_effort;
+    }
+
     if (!requestBody.model || typeof requestBody.model !== 'string' || !requestBody.model.trim()) {
         throw new Error('model parameter is required.');
     }
@@ -1609,6 +1613,10 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
 
     const stream = Boolean(requestBody.stream);
 
+    if (requestBody?.reasoning === undefined && requestBody?.reasoning_effort !== undefined) {
+        requestBody.reasoning = requestBody.reasoning_effort;
+    }
+
     if (requestBody?.interaction) {
         const interactionBody = requestBody.interaction;
         const input = typeof interactionBody?.input === 'string'
@@ -1623,14 +1631,15 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
         }
 
         const normalized = normalizeDeepResearchModel(modelRaw, typeof interactionBody?.agent === 'string' ? interactionBody.agent : undefined);
-        const interactionRequest: InteractionRequest = {
-            model: normalized.model,
-            input,
-            tools: Array.isArray(interactionBody.tools) ? interactionBody.tools : undefined,
-            response_format: interactionBody.response_format && typeof interactionBody.response_format === 'object' ? interactionBody.response_format : undefined,
-            generation_config: interactionBody.generation_config && typeof interactionBody.generation_config === 'object' ? interactionBody.generation_config : undefined,
-            agent: normalized.agent,
-        };
+            const interactionRequest: InteractionRequest = {
+                model: normalized.model,
+                input,
+                tools: Array.isArray(interactionBody.tools) ? interactionBody.tools : undefined,
+                response_format: interactionBody.response_format && typeof interactionBody.response_format === 'object' ? interactionBody.response_format : undefined,
+                generation_config: interactionBody.generation_config && typeof interactionBody.generation_config === 'object' ? interactionBody.generation_config : undefined,
+                agent: normalized.agent,
+                reasoning: interactionBody.reasoning ?? interactionBody.reasoning_effort ?? requestBody.reasoning,
+            };
 
         const secret = getInteractionsSigningSecret();
         const interactionId = createInteractionToken(
@@ -1740,20 +1749,20 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
         sharedMessageOptions.modalities = ensureNanoBananaModalities(sharedMessageOptions.modalities);
     }
 
-    const formattedMessages: IMessage[] = rawMessages.map(msg => ({
-        role: msg.role,
-        content: msg.content,
-        model: { id: modelId },
-        ...sharedMessageOptions,
-        image_fetch_referer: imageFetchReferer,
-    }));
+        const formattedMessages: IMessage[] = rawMessages.map(msg => ({
+            role: msg.role,
+            content: msg.content,
+            model: { id: modelId },
+            ...sharedMessageOptions,
+            image_fetch_referer: imageFetchReferer,
+        }));
  
     if (effectiveStream) {
         response.setHeader('Content-Type', 'text/event-stream');
         response.setHeader('Cache-Control', 'no-cache');
         response.setHeader('Connection', 'keep-alive');
         
-        const streamHandler = messageHandler.handleStreamingMessages(formattedMessages, modelId, userApiKey);
+        const streamHandler = messageHandler.handleStreamingMessages(formattedMessages, modelId, userApiKey, { requestId: request.requestId });
         const started = Date.now();
         const requestId = `chatcmpl-${Date.now()}`;
         
@@ -1765,6 +1774,8 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
         let promptTokensFinal: number | undefined;
         let completionTokensFinal: number | undefined;
         let streamOutputText = '';
+        let toolCallsFromStream: any[] | undefined;
+        let finishReasonFromStream: string | undefined;
 
         for await (const result of streamHandler) {
             if (result.type === 'passthrough') {
@@ -1813,6 +1824,8 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
                 }
                 break;
             } else if (result.type === 'chunk') {
+                if (Array.isArray(result.tool_calls) && result.tool_calls.length > 0) toolCallsFromStream = result.tool_calls;
+                if (result.finish_reason) finishReasonFromStream = result.finish_reason;
                 const openaiStreamChunk = {
                     id: requestId,
                     object: 'chat.completion.chunk',
@@ -1820,8 +1833,13 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
                     model: modelId,
                     choices: [{
                         index: 0,
-                        delta: { content: result.chunk },
-                        finish_reason: null
+                        delta: {
+                            content: result.chunk,
+                            ...(result.tool_calls && result.tool_calls.length > 0
+                                ? { tool_calls: result.tool_calls }
+                                : {}),
+                        },
+                        finish_reason: result.finish_reason || null
                     }]
                 };
                 response.write(`data: ${JSON.stringify(openaiStreamChunk)}\n\n`);
@@ -1830,13 +1848,17 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
                 if (typeof result.tokenUsage === 'number') totalTokenUsage = result.tokenUsage;
                 if (typeof result.promptTokens === 'number') promptTokensFinal = result.promptTokens;
                 if (typeof result.completionTokens === 'number') completionTokensFinal = result.completionTokens;
+                if (Array.isArray(result.tool_calls) && result.tool_calls.length > 0) toolCallsFromStream = result.tool_calls;
+                if (result.finish_reason) finishReasonFromStream = result.finish_reason;
             }
         }
 
         if (fallbackToNormalized) {
-            const fallbackStreamHandler = messageHandler.handleStreamingMessages(formattedMessages, modelId, userApiKey, { disablePassthrough: true });
+                const fallbackStreamHandler = messageHandler.handleStreamingMessages(formattedMessages, modelId, userApiKey, { disablePassthrough: true, requestId: request.requestId });
             for await (const fallbackResult of fallbackStreamHandler) {
                 if (fallbackResult.type === 'chunk') {
+                    if (Array.isArray(fallbackResult.tool_calls) && fallbackResult.tool_calls.length > 0) toolCallsFromStream = fallbackResult.tool_calls;
+                    if (fallbackResult.finish_reason) finishReasonFromStream = fallbackResult.finish_reason;
                     const openaiStreamChunk = {
                         id: requestId,
                         object: 'chat.completion.chunk',
@@ -1844,13 +1866,22 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
                         model: modelId,
                         choices: [{
                             index: 0,
-                            delta: { content: fallbackResult.chunk },
-                            finish_reason: null
+                            delta: {
+                                content: fallbackResult.chunk,
+                                ...(fallbackResult.tool_calls && fallbackResult.tool_calls.length > 0
+                                    ? { tool_calls: fallbackResult.tool_calls }
+                                    : {}),
+                            },
+                            finish_reason: fallbackResult.finish_reason || null
                         }]
                     };
                     response.write(`data: ${JSON.stringify(openaiStreamChunk)}\n\n`);
                 } else if (fallbackResult.type === 'final') {
                     if (fallbackResult.tokenUsage) totalTokenUsage = fallbackResult.tokenUsage;
+                    if (typeof fallbackResult.promptTokens === 'number') promptTokensFinal = fallbackResult.promptTokens;
+                    if (typeof fallbackResult.completionTokens === 'number') completionTokensFinal = fallbackResult.completionTokens;
+                    if (Array.isArray(fallbackResult.tool_calls) && fallbackResult.tool_calls.length > 0) toolCallsFromStream = fallbackResult.tool_calls;
+                    if (fallbackResult.finish_reason) finishReasonFromStream = fallbackResult.finish_reason;
                 }
             }
         }
@@ -1893,7 +1924,7 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
             choices: [{
                 index: 0,
                 delta: {},
-                finish_reason: 'stop'
+                finish_reason: finishReasonFromStream || (toolCallsFromStream?.length ? 'tool_calls' : 'stop')
             }]
         };
         if (includeUsageInStream) {
@@ -1909,7 +1940,7 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
 
     } else {
         // messageHandler call is already async
-        const result = await messageHandler.handleMessages(formattedMessages, modelId, userApiKey);
+        const result = await messageHandler.handleMessages(formattedMessages, modelId, userApiKey, request.requestId);
         const assistantContent = formatAssistantContent(result.response);
     
         const totalTokensUsed = typeof result.tokenUsage === 'number' ? result.tokenUsage : 0;
@@ -1918,23 +1949,26 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
         await updateUserTokenUsage(totalTokensUsed, userApiKey, { modelId, promptTokens: promptTokensUsed, completionTokens: completionTokensUsed });
     
         // --- Format response strictly like OpenAI --- 
-        const openaiResponse = {
-            id: `chatcmpl-${Date.now()}-${Math.random().toString(36).substring(2)}`,
-            object: "chat.completion",
-            created: Math.floor(Date.now() / 1000), // Unix timestamp
-            model: modelId,
-            // system_fingerprint: null, // OpenAI typically includes this. Set to null if not available.
-            choices: [
-                {
-                    index: 0,
-                    message: {
-                        role: "assistant",
-                        content: assistantContent,
-                    },
-                    logprobs: null, // OpenAI includes this, set to null if not applicable
-                    finish_reason: "stop", // Assuming stop as default
-                }
-            ],
+            const openaiResponse = {
+                id: `chatcmpl-${Date.now()}-${Math.random().toString(36).substring(2)}`,
+                object: "chat.completion",
+                created: Math.floor(Date.now() / 1000), // Unix timestamp
+                model: modelId,
+                // system_fingerprint: null, // OpenAI typically includes this. Set to null if not available.
+                choices: [
+                    {
+                        index: 0,
+                        message: {
+                            role: "assistant",
+                            content: assistantContent,
+                            ...(result.tool_calls && result.tool_calls.length > 0
+                                ? { tool_calls: result.tool_calls }
+                                : {}),
+                        },
+                        logprobs: null, // OpenAI includes this, set to null if not applicable
+                        finish_reason: result.finish_reason || (result.tool_calls?.length ? 'tool_calls' : "stop"),
+                    }
+                ],
             usage: {
                 prompt_tokens: promptTokensUsed,
                 completion_tokens: completionTokensUsed,
@@ -2038,7 +2072,11 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
         const userApiKey = request.apiKey!;
         const requestBody = await request.json();
 
-        if (requestBody?.interaction) {
+    if (requestBody?.reasoning === undefined && requestBody?.reasoning_effort !== undefined) {
+        requestBody.reasoning = requestBody.reasoning_effort;
+    }
+
+    if (requestBody?.interaction) {
             const interactionBody = requestBody.interaction;
             const input = typeof interactionBody?.input === 'string'
                 ? interactionBody.input
@@ -2060,6 +2098,7 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
                 response_format: responseFormat,
                 generation_config: interactionBody.generation_config && typeof interactionBody.generation_config === 'object' ? interactionBody.generation_config : undefined,
                 agent: normalized.agent,
+                reasoning: interactionBody.reasoning ?? interactionBody.reasoning_effort ?? requestBody.reasoning,
             };
 
             const secret = getInteractionsSigningSecret();
@@ -2152,6 +2191,10 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
             }
         }
         const effectiveStream = stream && !isImageModelId(modelId);
+        if (message.tools || message.tool_choice) {
+            const capsOk = await enforceModelCapabilities(modelId, ['tool_calling'], response);
+            if (!capsOk) return;
+        }
 
         const responseId = `resp_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
         const created = Math.floor(Date.now() / 1000);
@@ -2161,9 +2204,11 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
             response.setHeader('Content-Type', 'text/event-stream');
             response.setHeader('Cache-Control', 'no-cache');
             response.setHeader('Connection', 'keep-alive');
-            const streamHandler = messageHandler.handleStreamingMessages([message], modelId, userApiKey);
+            const streamHandler = messageHandler.handleStreamingMessages([message], modelId, userApiKey, { requestId: request.requestId });
             let totalTokenUsage = 0;
             let fullText = '';
+            let toolCallsFromStream: any[] | undefined;
+            let finishReasonFromStream: string | undefined;
             let passthroughHandled = false;
             let fallbackToNormalized = false;
             let promptTokensFromUsage: number | undefined;
@@ -2238,6 +2283,10 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
                         response.write(`data: ${JSON.stringify({ ...basePayload, output: [], output_text: '' })}\n\n`);
                         responsesCreatedSent = true;
                     }
+                    if (Array.isArray(result.tool_calls) && result.tool_calls.length > 0) {
+                        toolCallsFromStream = result.tool_calls;
+                    }
+                    if (result.finish_reason) finishReasonFromStream = result.finish_reason;
                     fullText += result.chunk;
                     const chunkPayload = {
                         ...basePayload,
@@ -2255,6 +2304,10 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
                     if (typeof result.tokenUsage === 'number') totalTokenUsage = result.tokenUsage;
                     if (typeof result.promptTokens === 'number') promptTokensFinal = result.promptTokens;
                     if (typeof result.completionTokens === 'number') completionTokensFinal = result.completionTokens;
+                    if (Array.isArray(result.tool_calls) && result.tool_calls.length > 0) {
+                        toolCallsFromStream = result.tool_calls;
+                    }
+                    if (result.finish_reason) finishReasonFromStream = result.finish_reason;
                 }
             }
 
@@ -2265,9 +2318,13 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
                     responsesCreatedSent = true;
                 }
 
-                const fallbackStreamHandler = messageHandler.handleStreamingMessages([message], modelId, userApiKey, { disablePassthrough: true });
+                const fallbackStreamHandler = messageHandler.handleStreamingMessages([message], modelId, userApiKey, { disablePassthrough: true, requestId: request.requestId });
                 for await (const fallbackResult of fallbackStreamHandler) {
                     if (fallbackResult.type === 'chunk') {
+                        if (Array.isArray(fallbackResult.tool_calls) && fallbackResult.tool_calls.length > 0) {
+                            toolCallsFromStream = fallbackResult.tool_calls;
+                        }
+                        if (fallbackResult.finish_reason) finishReasonFromStream = fallbackResult.finish_reason;
                         fullText += fallbackResult.chunk;
                         const chunkPayload = {
                             ...basePayload,
@@ -2280,6 +2337,10 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
                         if (typeof fallbackResult.tokenUsage === 'number') totalTokenUsage = fallbackResult.tokenUsage;
                         if (typeof fallbackResult.promptTokens === 'number') promptTokensFinal = fallbackResult.promptTokens;
                         if (typeof fallbackResult.completionTokens === 'number') completionTokensFinal = fallbackResult.completionTokens;
+                        if (Array.isArray(fallbackResult.tool_calls) && fallbackResult.tool_calls.length > 0) {
+                            toolCallsFromStream = fallbackResult.tool_calls;
+                        }
+                        if (fallbackResult.finish_reason) finishReasonFromStream = fallbackResult.finish_reason;
                     }
                 }
             }
@@ -2312,15 +2373,20 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
 
             await updateUserTokenUsage(totalTokenUsage, userApiKey, { modelId, promptTokens: finalInputTokens, completionTokens: finalOutputTokens });
 
+            const finalOutputContent: any[] = [{ type: 'output_text', text: fullText }];
+            if (Array.isArray(toolCallsFromStream) && toolCallsFromStream.length > 0) {
+                finalOutputContent.splice(0, finalOutputContent.length, { type: 'tool_calls', tool_calls: toolCallsFromStream });
+            }
             const finalPayload = {
                 ...basePayload,
-                output: [{ content: [{ type: 'output_text', text: fullText }] }],
+                output: [{ content: finalOutputContent }],
                 output_text: fullText,
                 usage: {
                     input_tokens: finalInputTokens,
                     output_tokens: finalOutputTokens,
                     total_tokens: totalTokenUsage
-                }
+                },
+                ...(finishReasonFromStream ? { status: finishReasonFromStream } : {})
             };
 
             response.write(`event: response.completed\n`);
@@ -2329,18 +2395,25 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
             return response.end();
         }
 
-        const result = await messageHandler.handleMessages([message], modelId, userApiKey);
+        const result = await messageHandler.handleMessages([message], modelId, userApiKey, request.requestId);
         const assistantContent = formatAssistantContent(result.response);
         const totalTokensUsed = typeof result.tokenUsage === 'number' ? result.tokenUsage : 0;
         const promptTokensUsed = typeof result.promptTokens === 'number' ? result.promptTokens : undefined;
         const completionTokensUsed = typeof result.completionTokens === 'number' ? result.completionTokens : undefined;
         await updateUserTokenUsage(totalTokensUsed, userApiKey, { modelId, promptTokens: promptTokensUsed, completionTokens: completionTokensUsed });
 
+        const outputContent: any[] = [{ type: 'output_text', text: assistantContent }];
+        const outputText = (result.tool_calls && result.tool_calls.length > 0) ? '' : assistantContent;
+        if (result.tool_calls && result.tool_calls.length > 0) {
+            outputContent.splice(0, outputContent.length, { type: 'tool_calls', tool_calls: result.tool_calls });
+        }
+
         const responseBody = {
             ...basePayload,
-            output: [{ content: [{ type: 'output_text', text: assistantContent }] }],
-            output_text: assistantContent,
-            usage: { input_tokens: promptTokensUsed, output_tokens: completionTokensUsed, total_tokens: totalTokensUsed }
+            output: [{ content: outputContent }],
+            output_text: outputText,
+            usage: { input_tokens: promptTokensUsed, output_tokens: completionTokensUsed, total_tokens: totalTokensUsed },
+            ...(result.finish_reason ? { status: result.finish_reason } : {})
         };
 
         return response.json(responseBody);
@@ -2438,6 +2511,9 @@ openaiRouter.post('/interactions', async (request: Request, response: Response) 
         }
 
         const normalized = normalizeDeepResearchModel(model, typeof body?.agent === 'string' ? body.agent : undefined);
+        if (body?.reasoning === undefined && body?.reasoning_effort !== undefined) {
+            body.reasoning = body.reasoning_effort;
+        }
         const interactionRequest: InteractionRequest = {
             model: normalized.model,
             input,
@@ -2445,6 +2521,7 @@ openaiRouter.post('/interactions', async (request: Request, response: Response) 
             response_format: body.response_format && typeof body.response_format === 'object' ? body.response_format : undefined,
             generation_config: body.generation_config && typeof body.generation_config === 'object' ? body.generation_config : undefined,
             agent: normalized.agent,
+            reasoning: body.reasoning,
         };
 
         const secret = getInteractionsSigningSecret();
@@ -2555,7 +2632,7 @@ openaiRouter.post('/deployments/:deploymentId/chat/completions', authAndUsageMid
         const formattedMessages: IMessage[] = rawMessages.map(msg => ({ role: msg.role, content: msg.content, model: { id: deploymentId } }));
  
         // Call the central message handler
-        const result = await messageHandler.handleMessages(formattedMessages, deploymentId, userApiKey);
+        const result = await messageHandler.handleMessages(formattedMessages, deploymentId, userApiKey, request.requestId);
  
         const totalTokensUsed = typeof result.tokenUsage === 'number' ? result.tokenUsage : 0;
         const promptTokensUsed = typeof result.promptTokens === 'number' ? result.promptTokens : undefined;

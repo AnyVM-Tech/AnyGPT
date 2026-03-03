@@ -247,9 +247,10 @@ export async function refreshProviderCountsInModelsFile(): Promise<void> {
             return;
         }
 
-        // Calculate active provider counts for each model ID
+        // Calculate active provider counts and average TPS for each model ID
         const activeProviderCounts: { [modelId: string]: number } = {};
         const availableModelIds = new Set<string>();
+        const modelTpsSamples: { [modelId: string]: number[] } = {};
 
         for (const provider of providersData) {
             if (!provider.disabled) { // Consider a provider active if 'disabled' is false or undefined
@@ -257,8 +258,32 @@ export async function refreshProviderCountsInModelsFile(): Promise<void> {
                     for (const modelId in provider.models) {
                         activeProviderCounts[modelId] = (activeProviderCounts[modelId] || 0) + 1;
                         availableModelIds.add(modelId);
+
+                        // Collect TPS data for throughput calculation
+                        const modelData = provider.models[modelId] as any;
+                        const tps = typeof modelData?.avg_token_speed === 'number' && modelData.avg_token_speed > 0
+                            ? modelData.avg_token_speed
+                            : (typeof modelData?.token_generation_speed === 'number' && modelData.token_generation_speed > 0 && modelData.token_generation_speed !== 50
+                                ? modelData.token_generation_speed
+                                : null);
+                        if (tps !== null && tps > 0.1 && tps < 5000) { // Filter outliers
+                            if (!modelTpsSamples[modelId]) modelTpsSamples[modelId] = [];
+                            modelTpsSamples[modelId].push(tps);
+                        }
                     }
                 }
+            }
+        }
+
+        // Calculate average throughput per model (median to reduce outlier impact)
+        const modelThroughput: { [modelId: string]: number } = {};
+        for (const [modelId, samples] of Object.entries(modelTpsSamples)) {
+            if (samples.length >= 1) {
+                samples.sort((a, b) => a - b);
+                const median = samples.length % 2 === 0
+                    ? (samples[samples.length / 2 - 1] + samples[samples.length / 2]) / 2
+                    : samples[Math.floor(samples.length / 2)];
+                modelThroughput[modelId] = Math.round(median);
             }
         }
 
@@ -290,6 +315,15 @@ export async function refreshProviderCountsInModelsFile(): Promise<void> {
                     (model as any).pricing = dynamicPrice;
                     changesMade = true;
                 }
+                // Update throughput from real provider TPS data
+                const realThroughput = modelThroughput[model.id];
+                if (realThroughput && realThroughput > 0) {
+                    const currentThroughput = (model as any).throughput;
+                    if (currentThroughput !== realThroughput) {
+                        (model as any).throughput = realThroughput;
+                        changesMade = true;
+                    }
+                }
                 updatedModels.push(model);
             } else {
                 // Remove models with no active providers
@@ -303,12 +337,13 @@ export async function refreshProviderCountsInModelsFile(): Promise<void> {
         const newModelsWithoutCaps: string[] = [];
         for (const modelId of availableModelIds) {
             if (!existingModelIds.has(modelId)) {
-                const newModel = {
+                const newModel: any = {
                     id: modelId,
                     object: "model" as const,
                     created: Date.now(),
                     owned_by: guessOwnedBy(modelId),
-                    providers: activeProviderCounts[modelId]
+                    providers: activeProviderCounts[modelId],
+                    throughput: modelThroughput[modelId] || 50
                 };
                 updatedModels.push(newModel);
                 newModelsWithoutCaps.push(modelId);
@@ -317,9 +352,22 @@ export async function refreshProviderCountsInModelsFile(): Promise<void> {
             }
         }
 
+        // Normalize key order for consistent JSON output
+        const KEY_ORDER = ['id', 'object', 'created', 'owned_by', 'providers', 'throughput', 'capabilities', 'pricing'];
+        const normalizedModels = updatedModels.map((m: any) => {
+            const ordered: any = {};
+            for (const k of KEY_ORDER) {
+                if (k in m) ordered[k] = m[k];
+            }
+            for (const k of Object.keys(m)) {
+                if (!(k in ordered)) ordered[k] = m[k];
+            }
+            return ordered;
+        });
+
         // Update the models file if changes were made
         if (changesMade) {
-            modelsFile.data = updatedModels;
+            modelsFile.data = normalizedModels;
             await dataManager.save<ModelsFileStructure>('models', modelsFile);
             console.log(`Successfully synchronized models.json. Total models: ${updatedModels.length}`);
         } else {

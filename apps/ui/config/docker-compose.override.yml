@@ -1,5 +1,7 @@
 services:
   api:
+    env_file:
+      - .env
     volumes:
       - type: bind
         source: ./librechat.yaml

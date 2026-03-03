@@ -234,7 +234,7 @@ router.post('/models/:modelId/generateContent', authAndUsageMiddleware, rateLimi
                 system: systemInstructionText || undefined,
             } : {}),
         }));
-        const result = await messageHandler.handleMessages(formattedMessages, modelId, userApiKey);
+        const result = await messageHandler.handleMessages(formattedMessages, modelId, userApiKey, request.requestId);
  
         const totalTokensUsed = typeof result.tokenUsage === 'number' ? result.tokenUsage : 0;
         const promptTokensUsed = typeof result.promptTokens === 'number' ? result.promptTokens : undefined;
@@ -311,6 +311,9 @@ router.post('/interactions', authAndUsageMiddleware, rateLimitMiddleware, async 
 
     try {
         const body = await request.json();
+        if (body?.reasoning === undefined && body?.reasoning_effort !== undefined) {
+            body.reasoning = body.reasoning_effort;
+        }
         if (!body || typeof body !== 'object') {
             const errDetail = { message: 'Invalid request body.', code: 400, status: 'INVALID_ARGUMENT' };
             await logError(errDetail, request);
@@ -337,6 +340,7 @@ router.post('/interactions', authAndUsageMiddleware, rateLimitMiddleware, async 
             response_format: body.response_format && typeof body.response_format === 'object' ? body.response_format : undefined,
             generation_config: body.generation_config && typeof body.generation_config === 'object' ? body.generation_config : undefined,
             agent: normalized.agent,
+            reasoning: body.reasoning,
         };
 
         const secret = getInteractionsSigningSecret();

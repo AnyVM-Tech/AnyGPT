@@ -13,7 +13,7 @@ import path from 'path';
 // Simple live probe for a representative request per capability for each model.
 // It picks the first available provider for the model (disabled providers are skipped) and
 // attempts minimal payloads: text, image input, image output, audio input, audio output,
-// streaming, realtime. Results update models.json `capabilities` and persist unsupported
+// tool calling, streaming, realtime. Results update models.json `capabilities` and persist unsupported
 // capability skips in logs/probe-tested.json (no tested_capabilities persisted).
 //
 // Run (prefer Node 20/22 per engines):
@@ -44,6 +44,7 @@ import path from 'path';
 //   CAP_TEST_SKIP_TESTED_OK: if "0", re-test models even if probe-tested has ok results (default: 1)
 //   CAP_TEST_PROVIDER_FILTER: comma-separated provider id substring(s) to probe (e.g. "openai,openrouter")
 //   CAP_TEST_PROVIDER_FAMILY: comma-separated provider family names to probe (e.g. "openai,gemini,openrouter")
+//   CAP_TEST_KEYCHECK_ONLY: if "1", only validate provider keys/quotas and update providers.json (skip model probes)
 const REQUEST_TIMEOUT_MS = Number(process.env.CAP_TEST_TIMEOUT_MS ?? 15000);
 const IMAGE_TIMEOUT_MS = Number(process.env.CAP_TEST_IMAGE_TIMEOUT_MS ?? Math.max(REQUEST_TIMEOUT_MS, 30000));
 const AUDIO_TIMEOUT_MS = Number(process.env.CAP_TEST_AUDIO_TIMEOUT_MS ?? REQUEST_TIMEOUT_MS);
@@ -75,6 +76,7 @@ const MAX_PROBE_LOG_LINES = Math.max(0, Number(process.env.CAP_TEST_PROBE_LOG_LI
 const SKIP_TESTED_OK = process.env.CAP_TEST_SKIP_TESTED_OK !== '0';
 const AUDIO_VOICE = process.env.CAP_TEST_AUDIO_VOICE ?? 'alloy';
 const AUDIO_FORMAT = process.env.CAP_TEST_AUDIO_FORMAT ?? 'wav';
+const KEYCHECK_ONLY = process.env.CAP_TEST_KEYCHECK_ONLY === '1';
 const args = process.argv.slice(2);
 const providerFilterArg = args.find((arg) => arg.startsWith('--providers=') || arg.startsWith('--provider='));
 const providerFamilyArg = args.find((arg) => arg.startsWith('--provider-family=') || arg.startsWith('--provider-families=') || arg.startsWith('--families='));
@@ -175,6 +177,29 @@ const TOOLS_REQUIRED_PATTERNS = [
   'computer-use'
 ];
 
+const TOOL_UNSUPPORTED_PATTERNS = [
+  "unsupported parameter: 'tools'",
+  'unsupported parameter: "tools"',
+  "unsupported parameter: 'tool_choice'",
+  'unsupported parameter: "tool_choice"',
+  "unknown parameter: 'tools'",
+  'unknown parameter: "tools"',
+  "unknown parameter: 'tool_choice'",
+  'unknown parameter: "tool_choice"',
+  'tool calls are not supported',
+  'tool call is not supported',
+  'tool calling is not supported',
+  'tool_calls is not supported',
+  'tool_choice is not supported',
+  'tools are not supported',
+  'tools is not supported',
+  'tools not supported',
+  'does not support tools',
+  'does not support tool',
+  'function calling is not supported',
+  'function_call is not supported',
+];
+
 const SPECIAL_PROMPT_PATTERNS = [
   'expected `<code>',
   'expected <code>',
@@ -217,7 +242,7 @@ const DATA_URL_REQUIRED_PATTERNS = [
   "without the 'data:' prefix"
 ];
 
-const ALL_CAPABILITIES: ModelCapability[] = ['text', 'image_input', 'image_output', 'audio_input', 'audio_output'];
+const ALL_CAPABILITIES: ModelCapability[] = ['text', 'image_input', 'image_output', 'audio_input', 'audio_output', 'tool_calling'];
 
 function detectEndpointHint(outcomeLower: string): EndpointHint | null {
   if (outcomeLower.includes('interactions api')) return 'interactions';
@@ -392,6 +417,11 @@ function isToolsRequiredError(outcomeLower: string): boolean {
   return TOOLS_REQUIRED_PATTERNS.some((pattern) => outcomeLower.includes(pattern));
 }
 
+function isToolUnsupportedError(outcomeLower: string): boolean {
+  if (TOOL_UNSUPPORTED_PATTERNS.some((pattern) => outcomeLower.includes(pattern))) return true;
+  return outcomeLower.includes('tools') && outcomeLower.includes('not supported');
+}
+
 function isSpecialPromptError(outcomeLower: string): boolean {
   return SPECIAL_PROMPT_PATTERNS.some((pattern) => outcomeLower.includes(pattern));
 }
@@ -453,7 +483,17 @@ function getKnownCapabilities(modelId: string): { caps: ModelCapability[]; reaso
 
   // Deep research / tool-use models
   if (id.includes('deep-research')) {
-    return { caps: ['text'], reason: 'deep research model' };
+    return { caps: ['text', 'tool_calling'], reason: 'deep research model' };
+  }
+
+  // OpenAI o3/o4 and Responses-centric tool-use models
+  if (id.startsWith('o3') || id.startsWith('o4')) {
+    return { caps: ['text', 'tool_calling'], reason: 'responses tool-use model' };
+  }
+
+  // Function-calling / tool-use models
+  if (id.includes('function') || id.includes('tool')) {
+    return { caps: ['text', 'tool_calling'], reason: 'tool-use model' };
   }
 
   // Native audio models (Gemini)
@@ -463,7 +503,7 @@ function getKnownCapabilities(modelId: string): { caps: ModelCapability[]; reaso
 
   // Computer use models
   if (id.includes('computer-use')) {
-    return { caps: ['text', 'image_input'], reason: 'computer use model' };
+    return { caps: ['text', 'image_input', 'tool_calling'], reason: 'computer use model' };
   }
 
   // Embedding models
@@ -503,9 +543,6 @@ function getKnownCapabilities(modelId: string): { caps: ModelCapability[]; reaso
   }
 
   // Responses-only / tool-requiring models
-  if (id.includes('deep-research')) {
-    return { caps: ['text'], reason: 'deep research model' };
-  }
 
   return null;
 }
@@ -1290,6 +1327,8 @@ function getProbePrompt(testName: string, isRelace: boolean): string {
     case 'streaming':
     case 'realtime':
       return 'Stream a short response.';
+    case 'tool_calling':
+      return 'Call the get_time tool with timezone "UTC".';
     default:
       return 'Reply with a short sentence.';
   }
@@ -1333,6 +1372,26 @@ function buildMessage(
 
   const message: IMessage = { content, model: { id: modelId } };
 
+  if (testName === 'tool_calling') {
+    message.tools = [
+      {
+        type: 'function',
+        function: {
+          name: 'get_time',
+          description: 'Return the current time for a timezone.',
+          parameters: {
+            type: 'object',
+            properties: {
+              timezone: { type: 'string' },
+            },
+            required: ['timezone'],
+          },
+        },
+      },
+    ];
+    message.tool_choice = { type: 'function', function: { name: 'get_time' } };
+  }
+
   const outputModalities: string[] = [];
   if (caps.has('image_output')) outputModalities.push('image');
   if (caps.has('audio_output')) outputModalities.push('audio');
@@ -1356,7 +1415,15 @@ function buildMessage(
 async function runWithTimeout<T>(fn: () => Promise<T>, label: string, timeoutMs: number = REQUEST_TIMEOUT_MS): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`timeout after ${timeoutMs}ms (${label})`)), timeoutMs);
-    fn()
+    let result: Promise<T> | T;
+    try {
+      result = fn();
+    } catch (err) {
+      clearTimeout(timer);
+      reject(err);
+      return;
+    }
+    Promise.resolve(result)
       .then((val) => {
         clearTimeout(timer);
         resolve(val);
@@ -1538,6 +1605,12 @@ async function testCapability(
         : (testName === 'audio_output' ? AUDIO_TIMEOUT_MS : REQUEST_TIMEOUT_MS);
       const message = buildTestMessage();
       const res = await runWithTimeout(() => provider.sendMessage(message), `${modelId}:${mode}:request`, timeoutOverride);
+      if (testName === 'tool_calling') {
+        const toolCalls = (res as any)?.tool_calls;
+        return Array.isArray(toolCalls) && toolCalls.length > 0
+          ? 'ok'
+          : 'fail: missing tool_calls';
+      }
       return res && typeof res.response === 'string' ? 'ok' : 'fail: empty response';
     } catch (err: any) {
       const message = String(err?.message || 'unknown error');
@@ -1689,6 +1762,9 @@ function inferTestModes(
   // Streaming probe for any model (uses same payload as text)
   tests.push({ name: 'streaming', caps: new Set<ModelCapability>(['text']), mode: 'stream' });
 
+  // Tool calling probe (non-capability, validates tool call support)
+  tests.push({ name: 'tool_calling', caps: new Set<ModelCapability>(['text']), mode: 'normal' });
+
   // Heuristic realtime: name contains 'realtime'
   if (modelId.toLowerCase().includes('realtime')) {
     tests.push({ name: 'realtime', caps: new Set<ModelCapability>(['text']), mode: 'stream' });
@@ -1724,8 +1800,12 @@ async function main() {
     .filter((model) => supportedModelIds.has(model.id));
 
   if (models.length === 0) {
-    console.warn('No models available after provider filtering. Exiting.');
-    return;
+    if (KEYCHECK_ONLY) {
+      console.warn('No models available after provider filtering. Running key checks only.');
+    } else {
+      console.warn('No models available after provider filtering. Exiting.');
+      return;
+    }
   }
 
   const probeTested = loadProbeTested();
@@ -1848,6 +1928,15 @@ async function main() {
 
   const keyCheckWorkers = Array.from({ length: KEYCHECK_CONCURRENCY }, () => keyCheckWorker());
   await Promise.all(keyCheckWorkers);
+
+  if (KEYCHECK_ONLY) {
+    if (providersChanged) {
+      await dataManager.save('providers', allProviders);
+      console.log('providers.json updated (disabled no-quota/invalid keys).');
+    }
+    console.log('Key-check-only mode complete. Skipped model capability probes.');
+    return;
+  }
 
   const modelQueue = models.filter((_, idx) => idx < MAX_MODELS);
   let processed = 0;
@@ -2014,7 +2103,7 @@ async function main() {
       let tests = inferTestModes(model.id, declaredCaps, TEST_ALL_CAPS);
       tests = tests.filter((test) => {
         const cap = test.name as ModelCapability;
-        const isCapabilityTest = ALL_CAPABILITIES.includes(cap);
+          const isCapabilityTest = ALL_CAPABILITIES.includes(cap);
         const testedOutcome = testedResults?.[test.name];
         const quotaSkipped = isQuotaSkipValue(testedOutcome);
         const retryable = isRetryableSkipValue(testedOutcome);
@@ -2022,18 +2111,18 @@ async function main() {
         if (testSkipHints?.has(test.name)) return false;
         if (SKIP_TESTED_OK && isOkResult(testedOutcome)) return false;
         if (isLegacyCompletions && test.name !== 'text') return false;
-        if (isCapabilityTest) {
-          const storedSkipReason = declaredSkipMap.get(cap);
-          if (storedSkipReason && !isRetryableSkipReason(storedSkipReason)) return false;
-          if (quotaSkipped) return true;
-          if (retryable) return true;
-          if (regionUnavailable) return true;
-          if (testFailHints && testFailHints.has(test.name)) return true;
-          if (declaredCapsSet.has(cap)) return false;
-          // Skip capability tests that already have a definitive stored result
-          if (SKIP_TESTED_OK && testedOutcome) return false;
-          return true;
-        }
+          if (isCapabilityTest) {
+            const storedSkipReason = declaredSkipMap.get(cap);
+            if (storedSkipReason && !isRetryableSkipReason(storedSkipReason)) return false;
+            if (quotaSkipped) return true;
+            if (retryable) return true;
+            if (regionUnavailable) return true;
+            if (testFailHints && testFailHints.has(test.name)) return true;
+            if (declaredCapsSet.has(cap)) return false;
+            // Skip capability tests that already have a definitive stored result
+            if (SKIP_TESTED_OK && testedOutcome) return false;
+            return true;
+          }
         // Non-capability tests (e.g. streaming): re-test only transient failures
         if (retryable) return true;
         if (quotaSkipped) return true;
@@ -2335,6 +2424,12 @@ async function main() {
               break;
             }
 
+            if (key === 'tool_calling' && isToolUnsupportedError(outcomeLower)) {
+              skipReason = 'tool calling unsupported';
+              skipScope = 'test';
+              break;
+            }
+
             const unsupported = classifyUnsupportedCapability(outcomeLower, key);
             if (unsupported) {
               skipReason = unsupported;
@@ -2485,21 +2580,24 @@ async function main() {
             rateLimitUntil.delete(provider.id);
             serverErrorBackoff.delete(provider.id);
             serverErrorUntil.delete(provider.id);
-            if (key === 'text') {
-              caps.add('text');
-            }
-            if (key === 'image_input') {
-              caps.add('image_input');
-            }
-            if (key === 'image_output') {
-              caps.add('image_output');
-            }
-            if (key === 'audio_input') {
-              caps.add('audio_input');
-            }
-            if (key === 'audio_output') {
-              caps.add('audio_output');
-            }
+          if (key === 'text') {
+            caps.add('text');
+          }
+          if (key === 'image_input') {
+            caps.add('image_input');
+          }
+          if (key === 'image_output') {
+            caps.add('image_output');
+          }
+          if (key === 'audio_input') {
+            caps.add('audio_input');
+          }
+          if (key === 'audio_output') {
+            caps.add('audio_output');
+          }
+          if (key === 'tool_calling') {
+            caps.add('tool_calling');
+          }
           } else {
             appendProbeLog({ type: 'probe_fail', modelId: model.id, providerId: provider.id, test: key, outcome });
           }

@@ -115,12 +115,90 @@ const defaultEmptyData: Record<DataType, any> = {
 };
 let lastModelsMirrorSignature: string | null = null;
 
+async function backupInvalidKeysJson(filePath: string, error: unknown): Promise<void> {
+    try {
+        if (!fs.existsSync(filePath)) return;
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const backupPath = `${filePath}.invalid-${timestamp}.bak`;
+        await fs.promises.copyFile(filePath, backupPath);
+        console.warn(`[DataManager] Backed up invalid keys.json to ${backupPath}.`);
+    } catch (backupError) {
+        console.error(`[DataManager] Failed to back up invalid keys.json (${filePath}):`, backupError);
+    }
+    console.error(`[DataManager] Invalid JSON in ${filePath}. Skipping overwrite to avoid data loss.`, error);
+}
+
+const dataTmpDir = (process.env.DATA_TMP_DIR ?? '').trim() || '.tmp';
+const resolvedDataTmpDir = path.resolve(dataTmpDir);
+let dataTmpDirEnsured = false;
+let dataTmpDirUnavailable = false;
+
+async function ensureTmpDirExists(): Promise<string | null> {
+    if (dataTmpDirUnavailable) return null;
+    if (dataTmpDirEnsured) return resolvedDataTmpDir;
+    try {
+        await fs.promises.mkdir(resolvedDataTmpDir, { recursive: true });
+        dataTmpDirEnsured = true;
+        return resolvedDataTmpDir;
+    } catch (err) {
+        if (!dataTmpDirUnavailable) {
+            console.error(`[DataManager] Failed to ensure DATA_TMP_DIR (${resolvedDataTmpDir}); falling back to in-place tmp files.`, err);
+        }
+        dataTmpDirUnavailable = true;
+        return null;
+    }
+}
+
+async function writeFileAtomic(filePath: string, contents: string): Promise<void> {
+    const tmpDir = await ensureTmpDirExists();
+    const tmpPath = tmpDir
+        ? path.join(tmpDir, `${path.basename(filePath)}.tmp-${process.pid}-${Date.now()}`)
+        : `${filePath}.tmp-${process.pid}-${Date.now()}`;
+    try {
+        await fs.promises.writeFile(tmpPath, contents, 'utf8');
+        try {
+            await fs.promises.rename(tmpPath, filePath);
+        } catch (err: any) {
+            if (err?.code === 'EXDEV') {
+                await fs.promises.copyFile(tmpPath, filePath);
+                await fs.promises.unlink(tmpPath);
+            } else {
+                throw err;
+            }
+        }
+    } catch (err) {
+        try {
+            await fs.promises.unlink(tmpPath);
+        } catch {
+            // ignore cleanup errors
+        }
+        throw err;
+    }
+}
+
 // Set to track if filesystem fallback has been logged for a dataType
 const filesystemFallbackLogged = new Set<DataType>();
+
+const keysFilesystemSyncIntervalMs = Math.max(
+    0,
+    Number(process.env.KEYS_FS_SYNC_INTERVAL_MS ?? '3000') || 3000
+);
+
+const pendingFsWrites = new Map<DataType, { timer: NodeJS.Timeout; data: string; filePath: string }>();
 
 // Prefer Redis by default when available; allow forcing filesystem via env.
 const dataSourcePreference: 'redis' | 'filesystem' = process.env.DATA_SOURCE_PREFERENCE === 'filesystem' ? 'filesystem' : 'redis';
 console.log(`[DataManager] Data source preference set to: ${dataSourcePreference}`);
+
+const redisReadTimeoutMs = Math.max(
+    100,
+    Number(process.env.REDIS_READ_TIMEOUT_MS ?? '750') || 750
+);
+
+const keysRedisReadTimeoutMs = Math.max(
+    100,
+    Number(process.env.KEYS_REDIS_READ_TIMEOUT_MS ?? redisReadTimeoutMs) || redisReadTimeoutMs
+);
 
 // --- DataManager Class ---
 class DataManager {
@@ -247,12 +325,20 @@ class DataManager {
     private mergeKeyRecords(a?: Partial<UserData>, b?: Partial<UserData>): UserData {
         const roleA = a?.role === 'admin' ? 'admin' : (a?.role === 'user' ? 'user' : undefined);
         const roleB = b?.role === 'admin' ? 'admin' : (b?.role === 'user' ? 'user' : undefined);
+        const toNumber = (value: unknown): number | undefined => {
+            const num = typeof value === 'number' ? value : Number(value);
+            return Number.isFinite(num) ? num : undefined;
+        };
+        const redisTokenUsage = toNumber(b?.tokenUsage);
+        const fsTokenUsage = toNumber(a?.tokenUsage);
+        const redisRequestCount = toNumber(b?.requestCount);
+        const fsRequestCount = toNumber(a?.requestCount);
 
         const merged: UserData = {
             userId: (typeof b?.userId === 'string' && b.userId) ? b.userId : ((typeof a?.userId === 'string' && a.userId) ? a.userId : 'unknown_user'),
-            tokenUsage: Math.max(0, Number.isFinite(Number(a?.tokenUsage)) ? Number(a?.tokenUsage) : 0, Number.isFinite(Number(b?.tokenUsage)) ? Number(b?.tokenUsage) : 0),
-            requestCount: Math.max(0, Number.isFinite(Number(a?.requestCount)) ? Number(a?.requestCount) : 0, Number.isFinite(Number(b?.requestCount)) ? Number(b?.requestCount) : 0),
-            role: roleA === 'admin' || roleB === 'admin' ? 'admin' : (roleB || roleA || 'user'),
+            tokenUsage: Math.max(0, redisTokenUsage ?? fsTokenUsage ?? 0),
+            requestCount: Math.max(0, redisRequestCount ?? fsRequestCount ?? 0),
+            role: roleB || roleA || 'user',
             tier: (typeof b?.tier === 'string' && b.tier) ? b.tier : ((typeof a?.tier === 'string' && a.tier) ? a.tier : 'free'),
         };
         const costB = typeof b?.estimatedCost === 'number' ? b.estimatedCost : undefined;
@@ -438,12 +524,15 @@ class DataManager {
         const filePath = filePaths.keys;
 
         let fsKeys: KeysFile = {};
+        let fsInvalid = false;
         try {
             const raw = await fs.promises.readFile(filePath, 'utf8');
             fsKeys = JSON.parse(raw || '{}') as KeysFile;
         } catch (err: any) {
-            if (err?.code !== 'ENOENT') {
-                console.error('[DataManager] Failed reading keys from filesystem for sync:', err);
+            const isMissing = err?.code === 'ENOENT';
+            if (!isMissing) {
+                await backupInvalidKeysJson(filePath, err);
+                fsInvalid = true;
             }
         }
 
@@ -464,10 +553,25 @@ class DataManager {
             }
         }
 
-        const merged = this.mergeKeysData(redisKeys, fsKeys);
+        const hasRedisKeys = Object.keys(redisKeys).length > 0;
+        const hasFsKeys = Object.keys(fsKeys).length > 0;
+
+        if (!hasRedisKeys && !hasFsKeys) {
+            console.warn('[DataManager] Keys sync skipped: both filesystem and Redis keys are empty.');
+            return;
+        }
+
+        if (fsInvalid && !hasRedisKeys) {
+            console.warn('[DataManager] Keys sync skipped: filesystem keys are invalid and Redis has no keys.');
+            return;
+        }
+
+        const merged = hasRedisKeys
+            ? this.normalizeKeysSchema(redisKeys).normalized
+            : this.normalizeKeysSchema(fsKeys).normalized;
 
         try {
-            await fs.promises.writeFile(filePath, JSON.stringify(merged, null, 2), 'utf8');
+            await writeFileAtomic(filePath, JSON.stringify(merged, null, 2));
         } catch (err) {
             console.error('[DataManager] Failed writing merged keys to filesystem:', err);
         }
@@ -520,7 +624,7 @@ class DataManager {
         const merged = this.mergeProvidersData(redisProviders, fsProviders);
 
         try {
-            await fs.promises.writeFile(filePath, JSON.stringify(merged, null, 2), 'utf8');
+            await writeFileAtomic(filePath, JSON.stringify(merged, null, 2));
         } catch (err) {
             console.error('[DataManager] Failed writing merged providers to filesystem:', err);
         }
@@ -592,7 +696,7 @@ class DataManager {
 
         if (source === 'redis') {
             try {
-                await fs.promises.writeFile(filePaths.models, JSON.stringify(modelsData, null, 2), 'utf8');
+                await writeFileAtomic(filePaths.models, JSON.stringify(modelsData, null, 2));
             } catch (err) {
                 console.error('[DataManager] Failed syncing models from Redis to filesystem:', err);
                 return;
@@ -683,9 +787,10 @@ class DataManager {
                 return null;
             }
             try {
+                const redisTimeoutMs = dataType === 'keys' ? keysRedisReadTimeoutMs : redisReadTimeoutMs;
                 const redisData = await withTimeout(
                     this.redisClient!.hget(redisHashKey, redisField),
-                    750,
+                    redisTimeoutMs,
                     `[DataManager] Redis HGET timed out for ${dataType}`
                 );
                 if (redisData) {
@@ -695,7 +800,7 @@ class DataManager {
 
                 const legacyData = await withTimeout(
                     this.redisClient!.get(legacyRedisKey),
-                    750,
+                    redisTimeoutMs,
                     `[DataManager] Redis legacy GET timed out for ${dataType}`
                 );
                 if (legacyData) {
@@ -728,6 +833,10 @@ class DataManager {
              } catch (err: any) {
                  if (err?.code === 'ENOENT') {
                      console.warn(`[DataManager] File not found: ${filePath}. Cannot load ${dataType} from filesystem.`);
+                     return null;
+                 }
+                 if (dataType === 'keys') {
+                     await backupInvalidKeysJson(filePath, err);
                      return null;
                  }
                  console.error(`[DataManager] Error loading/parsing file ${filePath}. Error:`, err);
@@ -877,6 +986,35 @@ class DataManager {
             return;
         }
 
+        if (dataType === 'keys' && keysFilesystemSyncIntervalMs > 0) {
+            const filePath = filePaths[dataType];
+            let fileStringifiedData: string;
+            try {
+                if (data === null || typeof data !== 'object') throw new Error(`Invalid data type for ${dataType}: ${typeof data}`);
+                fileStringifiedData = JSON.stringify(data, null, 2);
+            } catch (err) {
+                console.error(`[DataManager] Error stringifying data for ${dataType} (filesystem mirror). Aborting save. Error:`, err);
+                return;
+            }
+
+            const pending = pendingFsWrites.get(dataType);
+            if (pending?.timer) {
+                clearTimeout(pending.timer);
+            }
+            const timer = setTimeout(async () => {
+                try {
+                    await writeFileAtomic(filePath, fileStringifiedData);
+                } catch (writeErr) {
+                    console.error(`[DataManager] Failed writing ${dataType} to filesystem mirror (delayed):`, writeErr);
+                } finally {
+                    pendingFsWrites.delete(dataType);
+                }
+            }, keysFilesystemSyncIntervalMs);
+
+            pendingFsWrites.set(dataType, { timer, data: fileStringifiedData, filePath });
+            return;
+        }
+
         const filePath = filePaths[dataType];
         let fileStringifiedData: string;
         try {
@@ -888,7 +1026,7 @@ class DataManager {
         }
 
         try {
-            await fs.promises.writeFile(filePath, fileStringifiedData, 'utf8');
+            await writeFileAtomic(filePath, fileStringifiedData);
         } catch (err) {
             console.error(`[DataManager] Failed writing ${dataType} to filesystem mirror:`, err);
         }
@@ -898,6 +1036,12 @@ class DataManager {
         // Safety guard: never overwrite providers.json with an empty array
         if (dataType === 'providers' && Array.isArray(data) && data.length === 0) {
             console.error('[DataManager] Refusing to save providers.json because data array is empty. Aborting save to prevent destruction.');
+            return;
+        }
+
+        if (dataType === 'keys' && dataSourcePreference === 'redis') {
+            await this.saveToRedisOnly(dataType, data);
+            await this.saveToFilesystemOnly(dataType, data);
             return;
         }
 
@@ -949,7 +1093,11 @@ class DataManager {
 
         const fsSavePromise = (async () => {
             try {
-                await fs.promises.writeFile(filePath, fileStringifiedData, 'utf8');
+                if (dataType === 'keys' && keysFilesystemSyncIntervalMs > 0) {
+                    await this.saveToFilesystemOnly(dataType, data);
+                } else {
+                    await writeFileAtomic(filePath, fileStringifiedData);
+                }
                 fsSuccess = true;
                 console.log(`[DataManager] Data saved successfully to Filesystem for: ${dataType}`);
             } catch (err) {

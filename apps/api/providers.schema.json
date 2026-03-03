@@ -136,14 +136,18 @@
             "type": ["number", "null"],
             "description": "Calculated latency attributable to the provider (ms)."
           },
-          "observed_speed_tps": { 
-            "type": ["number", "null"],
-            "description": "Observed speed (tokens/sec) for this specific request."
-          },
-           "apiKey": { 
-            "type": ["string", "null"],
-            "description": "API key of the user making the request."
-          }
+        "observed_speed_tps": { 
+          "type": ["number", "null"],
+          "description": "Observed speed (tokens/sec) for this specific request."
+        },
+         "apiKey": { 
+          "type": ["string", "null"],
+          "description": "API key of the user making the request."
+        },
+        "request_id": {
+          "type": ["string", "null"],
+          "description": "Request ID associated with this response entry."
+        }
         }
       }
     }

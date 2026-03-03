@@ -23,6 +23,9 @@ Thumbs.db
 # Cache directories
 /.cache
 
+# Temp directories
+apps/api/.tmp/
+
 # Build directories
 /dist
 apps/api/dist
@@ -41,6 +44,7 @@ apps/api/keys.json
 apps/api/providers.json
 apps/api/models.json
 apps/api/tiers.json
+apps/api/keys.json.invalid-2026-03-01T19-09-59-257Z.bak
 # Excluded errors (if generated)
 apps/api/excluded-errors.json
 

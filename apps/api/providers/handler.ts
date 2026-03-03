@@ -48,6 +48,7 @@ import {
     isInvalidProviderCredentialError as isInvalidProviderCredentialErrorShared,
     isModelAccessError as isModelAccessErrorShared,
     isInsufficientCreditsError as isInsufficientCreditsErrorShared,
+    isToolUnsupportedError as isToolUnsupportedErrorShared,
     extractRetryAfterMs,
 } from '../modules/errorClassification.js';
 
@@ -66,10 +67,16 @@ const PROVIDER_AUTO_RECOVER_MAX_MS = (() => {
     const parsed = raw !== undefined ? Number(raw) : NaN;
     return Number.isFinite(parsed) && parsed > 0 ? parsed : 60 * 60 * 1000; // default 1 hour
 })();
+const RATE_LIMIT_WAIT_PER_MESSAGE = process.env.RATE_LIMIT_WAIT_PER_MESSAGE === '1';
+const RATE_LIMIT_WAIT_MAX_MS = (() => {
+    const raw = process.env.RATE_LIMIT_WAIT_MAX_MS;
+    const parsed = raw !== undefined ? Number(raw) : NaN;
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 2 * 60 * 1000; // default 2 minutes max wait
+})();
 const REQUEST_DEADLINE_MS = (() => {
     const raw = process.env.REQUEST_DEADLINE_MS;
     const parsed = raw !== undefined ? Number(raw) : NaN;
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : 60_000; // default 60 seconds total per request
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0; // default disabled (no request-level timeout)
 })();
 const FALLBACK_ATTEMPT_TIMEOUT_MS = (() => {
     const raw = process.env.FALLBACK_ATTEMPT_TIMEOUT_MS;
@@ -156,6 +163,27 @@ async function setApiKeyCooldown(apiKey: string, overrideMs?: number): Promise<v
     } catch {
         return;
     }
+}
+
+async function waitForCooldownOrDeadline(
+    cooldownMs: number | null,
+    requestStartTime: number,
+    deadlineMs: number
+): Promise<boolean> {
+    const hasExplicitCooldown = Number.isFinite(cooldownMs as number) && (cooldownMs as number) > 0;
+    if (!RATE_LIMIT_WAIT_PER_MESSAGE && !hasExplicitCooldown) return false;
+    const baseDelay = hasExplicitCooldown
+        ? Math.ceil(cooldownMs as number)
+        : PROVIDER_COOLDOWN_MS;
+    if (baseDelay <= 0) return false;
+    const cappedDelay = Math.min(baseDelay, RATE_LIMIT_WAIT_MAX_MS);
+    const remaining = deadlineMs > 0
+        ? deadlineMs - (Date.now() - requestStartTime)
+        : Number.POSITIVE_INFINITY;
+    const waitMs = Math.min(cappedDelay, Math.max(0, remaining));
+    if (waitMs <= 0) return false;
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
+    return true;
 }
 const STREAM_MIN_GENERATION_WINDOW_MS = (() => {
     const raw = process.env.STREAM_MIN_GENERATION_WINDOW_MS;
@@ -253,6 +281,44 @@ export class MessageHandler {
         return String(modelId || '').toLowerCase().replace(/^google\//, '');
     }
 
+    private resolveModelIdForRequest(modelId: string): string {
+        const raw = String(modelId || '').trim();
+        if (!raw) return raw;
+        if (this.modelCapabilitiesMap.size === 0) return raw;
+
+        const candidates = new Set<string>();
+        const addCandidate = (value: string) => {
+            if (value) candidates.add(value);
+        };
+
+        addCandidate(raw);
+        const lower = raw.toLowerCase();
+        addCandidate(lower);
+
+        const slashIndex = raw.lastIndexOf('/');
+        if (slashIndex > 0 && slashIndex + 1 < raw.length) {
+            addCandidate(raw.slice(slashIndex + 1));
+        }
+
+        const lowerSlashIndex = lower.lastIndexOf('/');
+        if (lowerSlashIndex > 0 && lowerSlashIndex + 1 < lower.length) {
+            addCandidate(lower.slice(lowerSlashIndex + 1));
+        }
+
+        for (const candidate of candidates) {
+            if (this.modelCapabilitiesMap.has(candidate)) {
+                if (candidate !== raw) {
+                    console.log(`[ModelNormalize] Resolved requested model '${raw}'  '${candidate}'.`);
+                }
+                return candidate;
+            }
+        }
+
+        const err = new Error(`Model not found: ${raw}. No provider (active or disabled) supports model ${raw}.`);
+        (err as any).code = 'model_not_found';
+        throw err;
+    }
+
     private isGeminiFamilyProvider(providerId: string): boolean {
         return providerId.includes('gemini') || providerId === 'google' || providerId.includes('imagen');
     }
@@ -304,6 +370,10 @@ export class MessageHandler {
 
     private isRateLimitOrQuotaError(error: any): boolean {
         return isRateLimitOrQuotaErrorShared(error);
+    }
+
+    private isToolUnsupportedError(error: any): boolean {
+        return isToolUnsupportedErrorShared(error);
     }
 
     private getProviderFamilyId(providerId: string): string {
@@ -472,6 +542,8 @@ export class MessageHandler {
             if (modalities.includes('image')) required.add('image_output');
             if (modalities.includes('audio')) required.add('audio_output');
             if (message?.audio) required.add('audio_output');
+            if (Array.isArray(message?.tools) && message.tools.length > 0) required.add('tool_calling');
+            if (message?.tool_choice) required.add('tool_calling');
         });
 
         // Heuristic: if the requested model name implies image generation, demand image_output
@@ -598,7 +670,7 @@ export class MessageHandler {
     }
 
     private validateModelCapabilities(modelId: string, messages: IMessage[]) {
-        const caps = modelCapabilitiesMap.get(modelId) || [];
+        const caps = this.modelCapabilitiesMap.get(modelId) || [];
         if (caps.length === 0) return;
         const required = this.detectRequiredCapabilities(messages, modelId);
         const missing = Array.from(required).filter((cap) => !caps.includes(cap));
@@ -676,7 +748,7 @@ export class MessageHandler {
             }
 
             // Skip error counting entirely for excluded error patterns
-            if (isExcludedError(attemptError)) {
+            if (isExcludedError(attemptError) || this.isToolUnsupportedError(attemptError)) {
                 // Don't increment errors or disable — treat as a non-event
             } else if (AUTO_DISABLE_PROVIDERS && this.isInvalidProviderCredentialError(attemptError)) {
                 if (!providerData.disabled) {
@@ -733,7 +805,6 @@ export class MessageHandler {
     // Temporary model reroute map — requests for key are redirected to value
     // To add a reroute: MODEL_REROUTES['source-model'] = 'target-model';
     private static readonly MODEL_REROUTES: Record<string, string> = {
-        'gemini-2.0-flash': 'gemini-2.5-flash-lite-preview-09-2025',
         'gemini-2.0-flash-001': 'gemini-2.5-flash-lite-preview-09-2025',
     };
 
@@ -746,14 +817,15 @@ export class MessageHandler {
         return modelId;
     }
 
-    async handleMessages(messages: IMessage[], modelId: string, apiKey: string): Promise<any> {
+    async handleMessages(messages: IMessage[], modelId: string, apiKey: string, requestId?: string): Promise<any> {
          if (!messages?.length || !modelId || !apiKey) throw new Error("Invalid arguments");
          if (!messageHandler) throw new Error("Service temporarily unavailable.");
          modelId = this.applyModelReroute(modelId);
 
-            await this.refreshModelCapabilities();
-            this.validateModelCapabilities(modelId, messages);
-            const requiredCaps = this.detectRequiredCapabilities(messages, modelId);
+         await this.refreshModelCapabilities();
+         modelId = this.resolveModelIdForRequest(modelId);
+         this.validateModelCapabilities(modelId, messages);
+         const requiredCaps = this.detectRequiredCapabilities(messages, modelId);
 
          const validationResult = await validateApiKeyAndUsage(apiKey); 
          if (!validationResult.valid || !validationResult.userData || !validationResult.tierLimits) {
@@ -791,20 +863,27 @@ export class MessageHandler {
          const totalCandidates = candidateProviders.length;
          for (let idx = 0; idx < candidateProviders.length; idx++) {
              // Check request-level deadline before each attempt
-             const elapsed = Date.now() - requestStartTime;
-             if (elapsed >= REQUEST_DEADLINE_MS) {
-                 console.warn(`Request deadline (${REQUEST_DEADLINE_MS}ms) exceeded after ${elapsed}ms and ${triedProviderIds.size} provider(s) for model ${modelId}. Aborting.`);
-                 if (!lastError) lastError = new Error(`Request deadline exceeded (${REQUEST_DEADLINE_MS}ms)`);
-                 break;
-             }
+            const elapsed = Date.now() - requestStartTime;
+            if (REQUEST_DEADLINE_MS > 0 && elapsed >= REQUEST_DEADLINE_MS) {
+                console.warn(`Request deadline (${REQUEST_DEADLINE_MS}ms) exceeded after ${elapsed}ms and ${triedProviderIds.size} provider(s) for model ${modelId}. Aborting.`);
+                if (!lastError) lastError = new Error(`Request deadline exceeded (${REQUEST_DEADLINE_MS}ms)`);
+                break;
+            }
 
              const selectedProvider = candidateProviders[idx];
              const providerId = selectedProvider.id;
-             const providerApiKey = selectedProvider.apiKey ?? '';
-             if (providerApiKey && await isApiKeyCoolingDown(providerApiKey)) {
-                 skippedByCooldown++;
-                 continue;
-             }
+            const providerApiKey = selectedProvider.apiKey ?? '';
+            if (providerApiKey && await isApiKeyCoolingDown(providerApiKey)) {
+                skippedByCooldown++;
+                if (await waitForCooldownOrDeadline(null, requestStartTime, REQUEST_DEADLINE_MS)) {
+                    idx = -1;
+                    skippedByCooldown = 0;
+                    skippedByBlockedKey = 0;
+                    triedProviderIds.clear();
+                    blockedApiKeys.clear();
+                }
+                continue;
+            }
              if (providerApiKey && blockedApiKeys.has(providerApiKey)) {
                  skippedByBlockedKey++;
                  continue;
@@ -922,7 +1001,8 @@ export class MessageHandler {
                         tokens_generated: tokensGenerated,
                         provider_latency: providerLatency,
                         observed_speed_tps: observedSpeedTps,
-                        apiKey: apiKey
+                        apiKey: apiKey,
+                        request_id: requestId
                     };
                  } else { 
                     sendMessageError = new Error(`Provider ${providerId} returned null result for model ${modelId}.`); 
@@ -932,14 +1012,23 @@ export class MessageHandler {
                 sendMessageError = error; 
              }
 
-             if (sendMessageError && this.isRateLimitOrQuotaError(sendMessageError)) {
-                 if (providerApiKey) {
-                     blockedApiKeys.add(providerApiKey);
-                     const retryAfterMs = extractRetryAfterMs(String(sendMessageError?.message || sendMessageError || ''));
-                     await setApiKeyCooldown(providerApiKey, retryAfterMs ?? undefined);
-                 }
-                 console.warn(`Rate limit/quota hit for ${providerId}; skipping this key for the remainder of the request.`);
-             }
+            if (sendMessageError && this.isRateLimitOrQuotaError(sendMessageError)) {
+                const retryAfterMs = extractRetryAfterMs(String(sendMessageError?.message || sendMessageError || ''));
+                if (providerApiKey) {
+                    blockedApiKeys.add(providerApiKey);
+                    await setApiKeyCooldown(providerApiKey, retryAfterMs ?? undefined);
+                }
+                console.warn(`Rate limit/quota hit for ${providerId}; skipping this key for the remainder of the request.`);
+                const waitCooldownMs = RATE_LIMIT_WAIT_PER_MESSAGE ? (retryAfterMs ?? null) : null;
+                const waited = await waitForCooldownOrDeadline(waitCooldownMs, requestStartTime, REQUEST_DEADLINE_MS);
+                if (waited) {
+                    idx = -1;
+                    triedProviderIds.clear();
+                    blockedApiKeys.clear();
+                    skippedByCooldown = 0;
+                    skippedByBlockedKey = 0;
+                }
+            }
 
              // --- Update Stats & Save (Always, regardless of attempt outcome) ---
             try {
@@ -967,7 +1056,9 @@ export class MessageHandler {
                     tokenUsage: responseEntry.tokens_generated,
                     promptTokens: responseEntry.input_tokens,
                     completionTokens: responseEntry.output_tokens,
-                    providerId: providerId 
+                    providerId: providerId,
+                    tool_calls: result.tool_calls,
+                    finish_reason: result.finish_reason,
                 };
              } else {
                  lastError = sendMessageError || new Error(`Provider ${providerId} for model ${modelId} finished in invalid state or stats update failed after success.`);
@@ -1031,13 +1122,14 @@ export class MessageHandler {
         messages: IMessage[],
         modelId: string,
         apiKey: string,
-        options?: { disablePassthrough?: boolean }
+        options?: { disablePassthrough?: boolean; requestId?: string }
     ): AsyncGenerator<any, void, unknown> {
         if (!messages?.length || !modelId || !apiKey) throw new Error("Invalid arguments for streaming");
         if (!messageHandler) throw new Error("Service temporarily unavailable.");
         modelId = this.applyModelReroute(modelId);
 
         await this.refreshModelCapabilities();
+        modelId = this.resolveModelIdForRequest(modelId);
         this.validateModelCapabilities(modelId, messages);
         const requiredCaps = this.detectRequiredCapabilities(messages, modelId);
 
@@ -1078,7 +1170,7 @@ export class MessageHandler {
         for (let idx = 0; idx < candidateProviders.length; idx++) {
             // Check request-level deadline before each attempt
             const elapsed = Date.now() - requestStartTime;
-            if (elapsed >= REQUEST_DEADLINE_MS) {
+            if (REQUEST_DEADLINE_MS > 0 && elapsed >= REQUEST_DEADLINE_MS) {
                 console.warn(`Streaming request deadline (${REQUEST_DEADLINE_MS}ms) exceeded after ${elapsed}ms and ${triedProviderIds.size} provider(s) for model ${modelId}. Aborting.`);
                 if (!lastError) lastError = new Error(`Request deadline exceeded (${REQUEST_DEADLINE_MS}ms)`);
                 break;
@@ -1089,6 +1181,13 @@ export class MessageHandler {
             const providerApiKey = selectedProviderData.apiKey ?? '';
             if (providerApiKey && await isApiKeyCoolingDown(providerApiKey)) {
                 skippedByCooldown++;
+                if (await waitForCooldownOrDeadline(null, requestStartTime, REQUEST_DEADLINE_MS)) {
+                    idx = -1;
+                    skippedByCooldown = 0;
+                    skippedByBlockedKey = 0;
+                    triedProviderIds.clear();
+                    blockedApiKeys.clear();
+                }
                 continue;
             }
             if (providerApiKey && blockedApiKeys.has(providerApiKey)) {
@@ -1170,14 +1269,18 @@ export class MessageHandler {
                     let totalLatency = 0;
                     let chunkCount = 0;
                     let firstChunkLatency: number | null = null;
+                    let toolCalls: any[] | undefined;
+                    let finishReason: string | undefined;
 
-                    for await (const { chunk, latency, response } of stream) {
+                    for await (const { chunk, latency, response, tool_calls, finish_reason } of stream as any) {
                         fullResponse = response;
                         totalLatency += latency || 0;
                         chunkCount++;
                         if (firstChunkLatency === null && chunk && chunk.length > 0) {
                             firstChunkLatency = latency || 0;
                         }
+                        if (Array.isArray(tool_calls) && tool_calls.length > 0) toolCalls = tool_calls;
+                        if (finish_reason) finishReason = finish_reason;
                         yield { type: 'chunk', chunk, latency };
                     }
 
@@ -1211,7 +1314,8 @@ export class MessageHandler {
                         tokens_generated: inputTokens + outputTokens,
                         provider_latency: providerLatency,
                         observed_speed_tps: observedSpeedTps,
-                        apiKey: apiKey
+                        apiKey: apiKey,
+                        request_id: options?.requestId
                     };
 
                     this.updateStatsInBackground(providerId, modelId, responseEntry, false);
@@ -1224,13 +1328,15 @@ export class MessageHandler {
                         providerId: providerId,
                         latency: totalResponseTime,
                         providerLatency: providerLatency,
-                        observedSpeedTps: observedSpeedTps
+                        observedSpeedTps: observedSpeedTps,
+                        tool_calls: toolCalls,
+                        finish_reason: finishReason
                     };
                     return;
                 }
 
                 console.log(`Provider ${providerId} is not streaming compatible. Simulating stream.`);
-                const result = await this.handleMessages(messages, modelId, apiKey);
+                const result = await this.handleMessages(messages, modelId, apiKey, options?.requestId);
                 const responseText = result.response;
                 const chunkSize = 5;
                 for (let i = 0; i < responseText.length; i += chunkSize) {
@@ -1243,7 +1349,9 @@ export class MessageHandler {
                     type: 'final',
                     tokenUsage: result.tokenUsage || 0,
                     providerId: result.providerId,
-                    latency: result.latency
+                    latency: result.latency,
+                    tool_calls: result.tool_calls,
+                    finish_reason: result.finish_reason,
                 };
                 return;
             } catch (error: any) {
@@ -1252,12 +1360,21 @@ export class MessageHandler {
                 lastError = error;
 
                 if (this.isRateLimitOrQuotaError(error)) {
+                    const retryAfterMs = extractRetryAfterMs(String(error?.message || error || ''));
                     if (providerApiKey) {
                         blockedApiKeys.add(providerApiKey);
-                        const retryAfterMs = extractRetryAfterMs(String(error?.message || error || ''));
                         await setApiKeyCooldown(providerApiKey, retryAfterMs ?? undefined);
                     }
                     console.warn(`Rate limit/quota hit for ${providerId}; skipping this key for the remainder of the request.`);
+                    const waitCooldownMs = RATE_LIMIT_WAIT_PER_MESSAGE ? (retryAfterMs ?? null) : null;
+                    const waited = await waitForCooldownOrDeadline(waitCooldownMs, requestStartTime, REQUEST_DEADLINE_MS);
+                    if (waited) {
+                        idx = -1;
+                        triedProviderIds.clear();
+                        blockedApiKeys.clear();
+                        skippedByCooldown = 0;
+                        skippedByBlockedKey = 0;
+                    }
                 }
 
                 if (this.isInsufficientCreditsError(error)) {

@@ -11,6 +11,11 @@ fi
 
 cd "$LIBRECHAT_DIR"
 
+if ! git remote | grep -q '^upstream$'; then
+  echo "Adding upstream remote for LibreChat..."
+  git remote add upstream https://github.com/danny-avila/LibreChat.git
+fi
+
 BRANCH="${1:-main}"
 
 echo "Fetching upstream..."

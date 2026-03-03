@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AnyGPT — Multi-Model AI Gateway</title>
+  <meta name="description" content="AnyGPT provides unified access to GPT-4o, Claude, Gemini, DeepSeek, and more through a single OpenAI-compatible API.">
+  <link rel="icon" type="image/svg+xml" href="/AnyVM-logo.svg">
+
+  <!-- Tailwind CSS (same as LibreChat) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            surface: {
+              primary: '#0a0f1a',
+              secondary: '#111827',
+              tertiary: '#1a2236',
+              hover: '#1f2a42',
+            },
+            brand: {
+              DEFAULT: '#47b9e7',
+              dark: '#2472b7',
+              mid: '#2a8cc8',
+              bright: '#2d9de0',
+              light: '#62bfe7',
+            },
+            border: {
+              DEFAULT: '#1e293b',
+              light: '#2a3654',
+            }
+          },
+          fontFamily: {
+            sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
+            mono: ['JetBrains Mono', 'Fira Code', 'Consolas', 'monospace'],
+          }
+        }
+      }
+    }
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/keycloak-js@25.0.6/dist/keycloak.min.js"></script>
+
+  <style>
+    html { scroll-behavior: smooth; }
+    body { -webkit-font-smoothing: antialiased; }
+    .gradient-text {
+      background: linear-gradient(135deg, #2472b7, #47b9e7, #62bfe7);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .hero-glow {
+      background:
+        radial-gradient(ellipse 60% 50% at 50% 0%, rgba(36, 114, 183, 0.15) 0%, transparent 70%),
+        radial-gradient(ellipse 40% 40% at 70% 20%, rgba(71, 185, 231, 0.08) 0%, transparent 60%);
+    }
+    .btn-gradient {
+      background: linear-gradient(135deg, #2472b7, #47b9e7);
+    }
+    .btn-gradient:hover {
+      box-shadow: 0 4px 20px rgba(71, 185, 231, 0.4);
+    }
+    .code-kw { color: #ff7b72; }
+    .code-str { color: #a5d6ff; }
+  </style>
+</head>
+<body class="bg-surface-primary text-gray-100 font-sans">
+
+  <!-- Navigation -->
+  <nav class="fixed top-0 left-0 right-0 z-50 bg-surface-primary/85 backdrop-blur-xl border-b border-border">
+    <div class="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
+      <a href="/" class="flex items-center gap-2.5 no-underline text-gray-100">
+        <img src="/AnyVM-logo.svg" alt="AnyGPT" class="w-8 h-8 rounded-md">
+        <span class="text-lg font-bold tracking-tight">AnyGPT</span>
+      </a>
+      <div class="flex items-center gap-3" id="nav-actions">
+        <!-- Populated by JS -->
+      </div>
+    </div>
+  </nav>
+
+  <!-- Hero -->
+  <section class="relative pt-40 pb-24 overflow-hidden text-center">
+    <div class="hero-glow absolute inset-0 pointer-events-none"></div>
+    <div class="relative z-10 max-w-6xl mx-auto px-6">
+      <div class="inline-block px-4 py-1.5 rounded-full bg-brand/10 border border-brand/20 text-brand text-xs font-semibold uppercase tracking-wider mb-6">
+        Powered by AnyVM
+      </div>
+      <h1 class="text-5xl md:text-6xl lg:text-7xl font-extrabold tracking-tight leading-[1.1] mb-5">
+        One API.<br>
+        <span class="gradient-text">Every Model.</span>
+      </h1>
+      <p class="max-w-xl mx-auto text-lg text-gray-400 leading-relaxed mb-9">
+        Access GPT-4o, Claude, Gemini, DeepSeek, and dozens more AI models
+        through a single, OpenAI-compatible API gateway.
+      </p>
+      <div class="flex items-center justify-center gap-4 flex-wrap" id="hero-actions">
+        <noscript>
+          <a href="/login" class="btn-gradient inline-flex items-center px-8 py-3.5 rounded-xl text-white font-semibold text-base transition-all">Get Started</a>
+        </noscript>
+      </div>
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section class="py-24" id="features">
+    <div class="max-w-6xl mx-auto px-6">
+      <h2 class="text-center text-3xl font-bold tracking-tight mb-3">Why AnyGPT?</h2>
+      <p class="text-center text-gray-400 text-lg max-w-lg mx-auto mb-12">Everything you need to run AI across your organization.</p>
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+
+        <div class="bg-surface-tertiary border border-border rounded-xl p-7 transition-all hover:bg-surface-hover hover:border-border-light hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/20">
+          <div class="text-3xl mb-3">🔀</div>
+          <h3 class="text-base font-semibold mb-2">Multi-Model Access</h3>
+          <p class="text-gray-400 text-sm leading-relaxed">Switch between OpenAI, Anthropic, Google, Meta, and more — all through a single API key and endpoint.</p>
+        </div>
+
+        <div class="bg-surface-tertiary border border-border rounded-xl p-7 transition-all hover:bg-surface-hover hover:border-border-light hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/20">
+          <div class="text-3xl mb-3">🔌</div>
+          <h3 class="text-base font-semibold mb-2">OpenAI-Compatible API</h3>
+          <p class="text-gray-400 text-sm leading-relaxed">Drop-in replacement for the OpenAI API. Use your existing SDKs, tools, and integrations without changes.</p>
+        </div>
+
+        <div class="bg-surface-tertiary border border-border rounded-xl p-7 transition-all hover:bg-surface-hover hover:border-border-light hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/20">
+          <div class="text-3xl mb-3">💬</div>
+          <h3 class="text-base font-semibold mb-2">Chat Interface</h3>
+          <p class="text-gray-400 text-sm leading-relaxed">Beautiful built-in chat UI powered by LibreChat. Conversations, presets, and multi-modal support out of the box.</p>
+        </div>
+
+        <div class="bg-surface-tertiary border border-border rounded-xl p-7 transition-all hover:bg-surface-hover hover:border-border-light hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/20">
+          <div class="text-3xl mb-3">🔐</div>
+          <h3 class="text-base font-semibold mb-2">Enterprise Auth</h3>
+          <p class="text-gray-400 text-sm leading-relaxed">Keycloak-powered SSO with OpenID Connect. Role-based access, centralized user management, and audit trails.</p>
+        </div>
+
+        <div class="bg-surface-tertiary border border-border rounded-xl p-7 transition-all hover:bg-surface-hover hover:border-border-light hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/20">
+          <div class="text-3xl mb-3">⚡</div>
+          <h3 class="text-base font-semibold mb-2">Intelligent Routing</h3>
+          <p class="text-gray-400 text-sm leading-relaxed">Automatic provider failover, load balancing, and smart routing across API keys for maximum uptime.</p>
+        </div>
+
+        <div class="bg-surface-tertiary border border-border rounded-xl p-7 transition-all hover:bg-surface-hover hover:border-border-light hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/20">
+          <div class="text-3xl mb-3">📊</div>
+          <h3 class="text-base font-semibold mb-2">Usage Tracking</h3>
+          <p class="text-gray-400 text-sm leading-relaxed">Per-user token tracking, tier-based rate limits, and real-time metrics. Know exactly how your AI budget is spent.</p>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- Models -->
+  <section class="py-20" id="models">
+    <div class="max-w-6xl mx-auto px-6">
+      <h2 class="text-center text-3xl font-bold tracking-tight mb-3">Supported Models</h2>
+      <p class="text-center text-gray-400 text-lg max-w-lg mx-auto mb-12">Access the latest models from leading AI providers, all in one place.</p>
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+
+        <div class="bg-surface-tertiary border border-border rounded-xl p-6 transition-all hover:border-brand-dark">
+          <div class="text-xs font-bold uppercase tracking-widest text-brand mb-2">OpenAI</div>
+          <div class="text-gray-400 text-sm leading-relaxed">GPT-4o · GPT-4o Mini · o1 · o3-mini</div>
+        </div>
+
+        <div class="bg-surface-tertiary border border-border rounded-xl p-6 transition-all hover:border-brand-dark">
+          <div class="text-xs font-bold uppercase tracking-widest text-brand mb-2">Anthropic</div>
+          <div class="text-gray-400 text-sm leading-relaxed">Claude 4 Sonnet · Claude 3.5 Haiku · Claude 3.5 Sonnet</div>
+        </div>
+
+        <div class="bg-surface-tertiary border border-border rounded-xl p-6 transition-all hover:border-brand-dark">
+          <div class="text-xs font-bold uppercase tracking-widest text-brand mb-2">Google</div>
+          <div class="text-gray-400 text-sm leading-relaxed">Gemini 2.5 Pro · Gemini 2.0 Flash · Gemini 2.5 Flash</div>
+        </div>
+
+        <div class="bg-surface-tertiary border border-border rounded-xl p-6 transition-all hover:border-brand-dark">
+          <div class="text-xs font-bold uppercase tracking-widest text-brand mb-2">DeepSeek</div>
+          <div class="text-gray-400 text-sm leading-relaxed">DeepSeek V3 · DeepSeek R1</div>
+        </div>
+
+        <div class="bg-surface-tertiary border border-border rounded-xl p-6 transition-all hover:border-brand-dark">
+          <div class="text-xs font-bold uppercase tracking-widest text-brand mb-2">Meta</div>
+          <div class="text-gray-400 text-sm leading-relaxed">Llama 4 Scout · Llama 4 Maverick · Llama 3.3 70B</div>
+        </div>
+
+        <div class="bg-surface-tertiary border border-border rounded-xl p-6 transition-all hover:border-brand-dark">
+          <div class="text-xs font-bold uppercase tracking-widest text-brand mb-2">More</div>
+          <div class="text-gray-400 text-sm leading-relaxed">Groq · Ollama · OpenRouter · and growing…</div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- API Code Example -->
+  <section class="py-20" id="api">
+    <div class="max-w-6xl mx-auto px-6">
+      <h2 class="text-center text-3xl font-bold tracking-tight mb-3">Simple API Integration</h2>
+      <p class="text-center text-gray-400 text-lg max-w-lg mx-auto mb-12">Use any OpenAI-compatible SDK. Just change the base URL.</p>
+      <div class="max-w-2xl mx-auto bg-[#0d1117] border border-border rounded-xl overflow-hidden">
+        <div class="flex items-center justify-between px-5 py-3 bg-white/[0.02] border-b border-border">
+          <span class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Python</span>
+          <div class="flex gap-1.5">
+            <span class="w-2.5 h-2.5 rounded-full bg-red-500"></span>
+            <span class="w-2.5 h-2.5 rounded-full bg-yellow-500"></span>
+            <span class="w-2.5 h-2.5 rounded-full bg-green-500"></span>
+          </div>
+        </div>
+        <pre class="p-5 overflow-x-auto font-mono text-sm leading-7 text-[#c9d1d9]"><code><span class="code-kw">from</span> openai <span class="code-kw">import</span> OpenAI
+
+client = OpenAI(
+    base_url=<span class="code-str">"https://gpt.anyvm.tech/v1"</span>,
+    api_key=<span class="code-str">"your-anygpt-api-key"</span>
+)
+
+response = client.chat.completions.create(
+    model=<span class="code-str">"gpt-4o"</span>,
+    messages=[{<span class="code-str">"role"</span>: <span class="code-str">"user"</span>, <span class="code-str">"content"</span>: <span class="code-str">"Hello!"</span>}]
+)</code></pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <section class="py-20 text-center bg-gradient-to-b from-transparent to-brand-dark/5">
+    <div class="max-w-6xl mx-auto px-6">
+      <h2 class="text-3xl font-bold mb-3">Ready to get started?</h2>
+      <p class="text-gray-400 text-lg mb-8">Sign up and start using the most powerful AI models in seconds.</p>
+      <div class="flex items-center justify-center gap-4 flex-wrap" id="cta-actions">
+        <!-- Populated by JS -->
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="py-8 border-t border-border">
+    <div class="max-w-6xl mx-auto px-6 flex items-center justify-between flex-wrap gap-4">
+      <div class="flex items-center gap-2.5 text-gray-500 text-sm">
+        <img src="/AnyVM-logo.svg" alt="AnyVM" class="w-6 h-6 rounded">
+        <span>AnyGPT by AnyVM</span>
+      </div>
+      <div class="flex gap-6">
+        <a href="/v1/models" target="_blank" class="text-gray-500 text-sm hover:text-brand transition-colors">API Models</a>
+        <a href="/openapi.json" target="_blank" class="text-gray-500 text-sm hover:text-brand transition-colors">API Docs</a>
+      </div>
+    </div>
+  </footer>
+
+  <script src="/script.js"></script>
+</body>
+</html>

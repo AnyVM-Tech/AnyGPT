@@ -9,5 +9,11 @@ if [[ ! -d "$ROOT/librechat" ]]; then
 fi
 
 cd "$ROOT/librechat"
-npm run backend:stop
-echo "If frontend dev server is running, stop it with Ctrl+C in that terminal."
+
+if [[ "${USE_DOCKER:-}" == "1" ]]; then
+  echo "Stopping LibreChat Docker containers..."
+  docker compose down
+else
+  npm run backend:stop
+  echo "If frontend dev server is running, stop it with Ctrl+C in that terminal."
+fi

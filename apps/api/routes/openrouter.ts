@@ -86,6 +86,9 @@ router.post('/v6/chat/completions', authAndUsageMiddleware, rateLimitMiddleware,
    try {
         // Use the standard OpenAI-style extractor
         const requestBody = await request.json();
+        if (requestBody?.reasoning === undefined && requestBody?.reasoning_effort !== undefined) {
+            requestBody.reasoning = requestBody.reasoning_effort;
+        }
         const { messages: rawMessages, model } = extractMessageFromRequestBody(requestBody);
         originalModelId = model; // Store the requested model name
 
@@ -103,15 +106,32 @@ router.post('/v6/chat/completions', authAndUsageMiddleware, rateLimitMiddleware,
             (request.headers['x-image-referer'] as string | undefined)
         );
 
+        const sharedMessageOptions: Partial<IMessage> = {
+            system: requestBody.system,
+            response_format: requestBody.response_format,
+            max_tokens: typeof requestBody.max_tokens === 'number' ? requestBody.max_tokens : undefined,
+            max_output_tokens: typeof requestBody.max_output_tokens === 'number' ? requestBody.max_output_tokens : undefined,
+            temperature: typeof requestBody.temperature === 'number' ? requestBody.temperature : undefined,
+            top_p: typeof requestBody.top_p === 'number' ? requestBody.top_p : undefined,
+            metadata: requestBody.metadata,
+            modalities: Array.isArray(requestBody.modalities) ? requestBody.modalities : undefined,
+            audio: requestBody.audio,
+            tools: Array.isArray(requestBody.tools) ? requestBody.tools : undefined,
+            tool_choice: requestBody.tool_choice,
+            reasoning: requestBody.reasoning,
+            instructions: requestBody.instructions,
+        };
+
         const formattedMessages: IMessage[] = rawMessages.map(msg => ({
             role: msg.role,
             content: msg.content,
             model: { id: baseModelId },
+            ...sharedMessageOptions,
             image_fetch_referer: imageFetchReferer
         }));
  
         // --- Call the central message handler with BASE model ID ---
-        const result = await messageHandler.handleMessages(formattedMessages, baseModelId, userApiKey);
+    const result = await messageHandler.handleMessages(formattedMessages, baseModelId, userApiKey, request.requestId);
  
         const totalTokensUsed = typeof result.tokenUsage === 'number' ? result.tokenUsage : 0;
         const estimateTokens = (content: any) => {
@@ -136,9 +156,12 @@ router.post('/v6/chat/completions', authAndUsageMiddleware, rateLimitMiddleware,
                     index: 0,
                     message: {
                         role: "assistant",
-                        content: result.response
+                        content: result.response,
+                        ...(result.tool_calls && result.tool_calls.length > 0
+                            ? { tool_calls: result.tool_calls }
+                            : {})
                     },
-                    finish_reason: "stop",
+                    finish_reason: result.finish_reason || (result.tool_calls?.length ? 'tool_calls' : "stop"),
                     // OpenRouter includes routing info here
                     // We can add placeholders or approximate if needed
                      usage: { 

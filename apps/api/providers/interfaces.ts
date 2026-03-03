@@ -1,5 +1,5 @@
 // Interface for the structure of data in models.json
-export type ModelCapability = 'text' | 'image_input' | 'image_output' | 'audio_input' | 'audio_output';
+export type ModelCapability = 'text' | 'image_input' | 'image_output' | 'audio_input' | 'audio_output' | 'tool_calling';
 
 export interface ModelDefinition {
   id: string;
@@ -38,6 +38,7 @@ export interface ResponseEntry {
   provider_latency: number | null; // Calculated latency attributable to the provider (ms)
   observed_speed_tps?: number | null; // Observed speed (tokens/sec) for this specific request
   apiKey?: string | null; // User's API key making the request
+  request_id?: string; // Request ID associated with this response entry
 }
 
 export interface Provider {
@@ -72,6 +73,8 @@ export interface ProviderStreamChunk {
   response: string;
   anystream: any;
   passthrough?: ProviderStreamPassthrough;
+  tool_calls?: any[];
+  finish_reason?: string;
 }
 
 export interface ProviderUsage {
@@ -84,6 +87,8 @@ export interface ProviderResponse {
   response: string;
   latency: number;
   usage?: ProviderUsage;
+  tool_calls?: any[];
+  finish_reason?: string;
 }
 
 export interface ChatMessage {

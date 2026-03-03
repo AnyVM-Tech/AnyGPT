@@ -98,3 +98,37 @@ export function isModelAccessError(error: any): boolean {
         message.includes('permission denied') && message.includes('model')
     );
 }
+
+// --- Tool Unsupported ---
+
+export function isToolUnsupportedError(error: any): boolean {
+    const message = String(error?.message || error || '').toLowerCase();
+    if (!message) return false;
+
+    const patterns = [
+        "unsupported parameter: 'tools'",
+        'unsupported parameter: "tools"',
+        "unsupported parameter: 'tool_choice'",
+        'unsupported parameter: "tool_choice"',
+        "unknown parameter: 'tools'",
+        'unknown parameter: "tools"',
+        "unknown parameter: 'tool_choice'",
+        'unknown parameter: "tool_choice"',
+        'tool calls are not supported',
+        'tool call is not supported',
+        'tool calling is not supported',
+        'tool_calls is not supported',
+        'tool_choice is not supported',
+        'tools are not supported',
+        'tools is not supported',
+        'tools not supported',
+        'does not support tools',
+        'does not support tool',
+        'function calling is not supported',
+        'function_call is not supported',
+    ];
+
+    if (patterns.some((pattern) => message.includes(pattern))) return true;
+    if (message.includes('tools') && message.includes('not supported')) return true;
+    return false;
+}

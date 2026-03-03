@@ -37,6 +37,7 @@ if (!fs.existsSync(logDirectory)) {
 
 interface ErrorLogEntry {
     timestamp: string;
+    errorId?: string;
     apiKey?: string;
     apiKeyHash?: string;
     originIp?: string;
@@ -70,8 +71,10 @@ export async function logError(error: any, request?: Request): Promise<void> {
     const timestamp = new Date().toISOString();
     logger.debug(`[ErrorLogger] logError called at ${timestamp}`);
 
+    const errorId = request?.requestId;
     const logEntry: ErrorLogEntry = {
         timestamp,
+        errorId,
         errorMessage: 'Unknown error',
     };
 

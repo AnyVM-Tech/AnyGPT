@@ -5,6 +5,7 @@
     "dev": "bash scripts/dev.sh",
     "start": "bash scripts/start.sh",
     "stop": "bash scripts/stop.sh",
-    "sync-config": "bash scripts/sync-config.sh"
+    "sync-config": "bash scripts/sync-config.sh",
+    "sync-librechat": "bash scripts/sync-librechat.sh"
   }
 }

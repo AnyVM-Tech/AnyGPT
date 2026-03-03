@@ -121,7 +121,7 @@ router.post('/v3/messages', authAndUsageMiddleware, rateLimitMiddleware, async (
  
         // --- Call the central message handler ---
         // Assuming handleMessages now returns { response: string; latency: number; tokenUsage: number; providerId: string; }
-        const result = await messageHandler.handleMessages(formattedMessages, modelId, userApiKey);
+        const result = await messageHandler.handleMessages(formattedMessages, modelId, userApiKey, request.requestId);
  
         const totalTokensUsed = typeof result.tokenUsage === 'number' ? result.tokenUsage : 0;
         const estimateTokens = (content: any) => {

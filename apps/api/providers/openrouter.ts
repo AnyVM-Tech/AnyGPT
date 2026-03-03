@@ -138,6 +138,11 @@ export class OpenRouterAI implements IAIProvider {
     return items.length > 0 ? items : null;
   }
 
+  private getRequestTimeoutMs(): number {
+    const upstreamTimeout = this.readEnvNumber('UPSTREAM_TIMEOUT_MS', 120_000);
+    return this.readEnvNumber('OPENROUTER_TIMEOUT_MS', upstreamTimeout);
+  }
+
   private isLocalHostname(host: string): boolean {
     const normalized = host.toLowerCase();
     return normalized === 'localhost' || normalized.endsWith('.localhost') || normalized.endsWith('.local');
@@ -436,15 +441,65 @@ export class OpenRouterAI implements IAIProvider {
 
     const data: any = {
       model: message.model.id,
-      messages: messages.map((entry) => ({
-        role: typeof entry.role === 'string' && entry.role.trim() ? entry.role : 'user',
-        content: this.normalizeMessageContent(entry.content),
-      })),
+      messages: messages.map((entry) => {
+        const rawRole = typeof entry.role === 'string' ? entry.role.trim() : '';
+        const role = rawRole === 'tool' ? 'assistant' : (rawRole || 'user');
+        return {
+          role,
+          content: this.normalizeMessageContent(entry.content),
+        };
+      }),
       stream,
     };
     if (message.modalities) data.modalities = message.modalities;
     if (message.audio) data.audio = message.audio;
+    if (typeof message.tools !== 'undefined') {
+      data.tools = this.normalizeChatTools(message.tools) ?? message.tools;
+    }
+    if (typeof message.tool_choice !== 'undefined') {
+      data.tool_choice = this.normalizeChatToolChoice(message.tool_choice);
+    }
+    if (message.reasoning) data.reasoning = message.reasoning;
     return data;
+  }
+
+  private normalizeChatTools(tools: any): any[] | undefined {
+    if (!Array.isArray(tools)) return undefined;
+    return tools.map((tool) => {
+      if (!tool || typeof tool !== 'object') return tool;
+      const func = (tool as any).function;
+      if (func && typeof func === 'object') {
+        return tool;
+      }
+      const name = (tool as any).name;
+      const description = (tool as any).description;
+      const parameters = (tool as any).parameters;
+      if (!name) return tool;
+      const normalized: Record<string, any> = {
+        type: (tool as any).type ?? 'function',
+        function: {
+          name,
+        },
+      };
+      if (description) normalized.function.description = description;
+      if (parameters) normalized.function.parameters = parameters;
+      if (typeof (tool as any).strict !== 'undefined') {
+        normalized.function.strict = (tool as any).strict;
+      }
+      return normalized;
+    });
+  }
+
+  private normalizeChatToolChoice(toolChoice: any): any {
+    if (!toolChoice || typeof toolChoice !== 'object') return toolChoice;
+    if (Array.isArray(toolChoice)) return toolChoice;
+    const func = (toolChoice as any).function;
+    if (func && typeof func === 'object') return toolChoice;
+    const name = (toolChoice as any).name;
+    if (name) {
+      return { type: (toolChoice as any).type ?? 'function', function: { name } };
+    }
+    return toolChoice;
   }
 
   async sendMessage(message: IMessage): Promise<ProviderResponse> {
@@ -454,7 +509,8 @@ export class OpenRouterAI implements IAIProvider {
     const data = this.buildRequestData(message, false, sourceMessages);
 
     try {
-      const res = await axios.post(this.endpointUrl, data, { headers: this.buildHeaders() });
+      const timeoutMs = this.getRequestTimeoutMs();
+      const res = await axios.post(this.endpointUrl, data, { headers: this.buildHeaders(), timeout: timeoutMs });
       const latency = Date.now() - start;
       const messagePayload = res.data?.choices?.[0]?.message;
       const media = this.extractMediaFromMessage(messagePayload);
@@ -468,7 +524,9 @@ export class OpenRouterAI implements IAIProvider {
           prompt_tokens: typeof res.data?.usage?.prompt_tokens === 'number' ? res.data.usage.prompt_tokens : undefined,
           completion_tokens: typeof res.data?.usage?.completion_tokens === 'number' ? res.data.usage.completion_tokens : undefined,
           total_tokens: typeof res.data?.usage?.total_tokens === 'number' ? res.data.usage.total_tokens : undefined,
-        }
+        },
+        tool_calls: Array.isArray(messagePayload?.tool_calls) ? messagePayload.tool_calls : undefined,
+        finish_reason: res.data?.choices?.[0]?.finish_reason,
       };
     } catch (error: any) {
       const latency = Date.now() - start;
@@ -481,7 +539,8 @@ export class OpenRouterAI implements IAIProvider {
     const sourceMessages = this.getSourceMessages(message);
     await this.inlineImageUrls(sourceMessages, message.image_fetch_referer);
     const data = this.buildRequestData(message, true, sourceMessages);
-    const res = await axios.post(this.endpointUrl, data, { headers: this.buildHeaders(), responseType: 'stream' });
+    const timeoutMs = this.getRequestTimeoutMs();
+    const res = await axios.post(this.endpointUrl, data, { headers: this.buildHeaders(), responseType: 'stream', timeout: timeoutMs });
     return {
       upstream: res.data,
       mode: 'openai-chat-sse',
@@ -495,7 +554,8 @@ export class OpenRouterAI implements IAIProvider {
     const data = this.buildRequestData(message, true, sourceMessages);
 
     try {
-      const res = await axios.post(this.endpointUrl, data, { headers: this.buildHeaders(), responseType: 'stream' });
+      const timeoutMs = this.getRequestTimeoutMs();
+      const res = await axios.post(this.endpointUrl, data, { headers: this.buildHeaders(), responseType: 'stream', timeout: timeoutMs });
       let full = '';
       for await (const value of res.data) {
         const lines = value.toString('utf8').split('\n').filter((line: string) => line.trim().startsWith('data: '));
@@ -515,7 +575,14 @@ export class OpenRouterAI implements IAIProvider {
               || this.normalizeContent(delta?.content ?? delta?.text ?? delta?.transcript ?? delta?.audio?.transcript);
             full += chunk;
             const latency = Date.now() - start;
-            yield { chunk, latency, response: full, anystream: res.data };
+            yield {
+              chunk,
+              latency,
+              response: full,
+              anystream: res.data,
+              tool_calls: Array.isArray(delta?.tool_calls) ? delta.tool_calls : undefined,
+              finish_reason: parsed?.choices?.[0]?.finish_reason,
+            };
           } catch (e) {
             // Skip malformed chunk
           }

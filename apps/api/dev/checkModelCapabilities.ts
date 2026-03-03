@@ -5,7 +5,7 @@ import { fileURLToPath } from 'url';
 // Lightweight capability audit for models.json. Heuristic-based; does not call providers.
 // Run with: pnpm tsx ./dev/checkModelCapabilities.ts
 
-type ModelCapability = 'text' | 'image_input' | 'image_output' | 'audio_input' | 'audio_output';
+type ModelCapability = 'text' | 'image_input' | 'image_output' | 'audio_input' | 'audio_output' | 'tool_calling';
 interface ModelDefinition {
   id: string;
   capabilities?: ModelCapability[];
@@ -19,6 +19,7 @@ const patterns = {
   imageOutput: [/image/, /imagen/, /dall-e/, /veo/, /sora/, /imagine/],
   audioInput: [/whisper/, /asr/, /transcribe/, /audio\-input/],
   audioOutput: [/tts/, /audio/],
+  toolCalling: [/function/, /tool[_-]?call/, /tool-use/, /deep-research/, /computer-use/, /^o3/, /^o4/],
 };
 
 function loadModels(): ModelDefinition[] {
@@ -35,6 +36,7 @@ function inferRequiredCaps(id: string): Set<ModelCapability> {
   if (patterns.imageOutput.some((p) => p.test(lower))) required.add('image_output');
   if (patterns.audioInput.some((p) => p.test(lower))) required.add('audio_input');
   if (patterns.audioOutput.some((p) => p.test(lower))) required.add('audio_output');
+  if (patterns.toolCalling.some((p) => p.test(lower))) required.add('tool_calling');
 
   return required;
 }

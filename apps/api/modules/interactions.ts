@@ -9,6 +9,7 @@ export type InteractionRequest = {
     response_format?: any;
     generation_config?: any;
     agent?: string;
+    reasoning?: any;
 };
 
 export type InteractionTokenClient = 'gemini' | 'openai-chat' | 'openai-responses';

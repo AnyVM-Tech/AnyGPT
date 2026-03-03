@@ -55,12 +55,33 @@ const defaultKeys: Record<string, any> = {}; // Using Record<string, any>
 const modelsJsonPath = path.resolve('models.json'); // Adjusted path
 const keysJsonPath = path.resolve('keys.json'); // Adjusted path
 
+function isKeysJsonPath(filePath: string): boolean {
+  return path.basename(filePath) === 'keys.json';
+}
+
+async function backupInvalidKeysJson(filePath: string, error: unknown): Promise<void> {
+  try {
+    if (!fs.existsSync(filePath)) return;
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const backupPath = `${filePath}.invalid-${timestamp}.bak`;
+    await fs.promises.copyFile(filePath, backupPath);
+    console.warn(`[Startup] Backed up invalid keys.json to ${backupPath}.`);
+  } catch (backupError) {
+    console.error(`[Startup] Failed to back up invalid keys.json (${filePath}):`, backupError);
+  }
+  console.error(`[Startup] Invalid JSON in ${filePath}. Skipping overwrite to avoid data loss.`, error);
+}
+
 async function initializeJsonFile<T>(filePath: string, defaultContent: T): Promise<void> {
   try {
     const data = await fs.promises.readFile(filePath, 'utf8');
     JSON.parse(data);
   } catch (error: any) {
     const isMissing = error?.code === 'ENOENT';
+    if (!isMissing && isKeysJsonPath(filePath)) {
+      await backupInvalidKeysJson(filePath, error);
+      return;
+    }
     if (!isMissing) {
       console.error(`Invalid JSON format in ${filePath}. Re-initializing... Error: ${error?.message || String(error)}`);
     }

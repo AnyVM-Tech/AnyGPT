@@ -88,7 +88,7 @@ router.post('/v5/api/chat', authAndUsageMiddleware, rateLimitMiddleware, async (
         }));
  
         // --- Call the central message handler ---
-        const result = await messageHandler.handleMessages(formattedMessages, modelId, userApiKey);
+        const result = await messageHandler.handleMessages(formattedMessages, modelId, userApiKey, request.requestId);
  
         const totalTokensUsed = typeof result.tokenUsage === 'number' ? result.tokenUsage : 0;
         const estimateTokens = (content: any) => {

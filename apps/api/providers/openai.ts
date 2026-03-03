@@ -48,6 +48,129 @@ export class OpenAI implements IAIProvider {
       return error?.message || 'Unknown API error';
     }
 
+  private normalizeUnsupportedParamName(raw: string): string | null {
+    if (!raw || typeof raw !== 'string') return null;
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+    const unquoted = trimmed.replace(/^['"`]+|['"`]+$/g, '');
+    const base = unquoted.split(/[.\[]/)[0]?.trim();
+    if (!base) return null;
+    return base.toLowerCase();
+  }
+
+  private getUnsupportedParamSet(modelId: string): Set<string> {
+    const key = this.normalizeModelId(modelId);
+    let set = this.unsupportedParamsByModel.get(key);
+    if (!set) {
+      set = new Set<string>();
+      this.unsupportedParamsByModel.set(key, set);
+    }
+    return set;
+  }
+
+  private recordUnsupportedParams(modelId: string, params: string[]): string[] {
+    const set = this.getUnsupportedParamSet(modelId);
+    const added: string[] = [];
+    for (const param of params) {
+      const normalized = this.normalizeUnsupportedParamName(param);
+      if (!normalized) continue;
+      if (!set.has(normalized)) {
+        set.add(normalized);
+        added.push(normalized);
+      }
+    }
+    return added;
+  }
+
+  private stripUnsupportedParamsFromPayload(
+    payload: Record<string, any>,
+    modelId: string,
+    extraParams?: string[],
+  ): { cleaned: Record<string, any>; removed: string[] } {
+    const unsupported = new Set<string>(this.getUnsupportedParamSet(modelId));
+    if (Array.isArray(extraParams)) {
+      for (const param of extraParams) {
+        const normalized = this.normalizeUnsupportedParamName(param);
+        if (normalized) unsupported.add(normalized);
+      }
+    }
+
+    if (unsupported.size === 0) {
+      return { cleaned: payload, removed: [] };
+    }
+
+    const cleaned = { ...payload };
+    const removed = new Set<string>();
+    const protectedKeys = new Set(['model', 'messages', 'input', 'stream']);
+    const removeKey = (key: string) => {
+      if (Object.prototype.hasOwnProperty.call(cleaned, key)) {
+        delete cleaned[key];
+        removed.add(key);
+      }
+    };
+
+    for (const key of Object.keys(cleaned)) {
+      const normalizedKey = key.toLowerCase();
+      if (protectedKeys.has(normalizedKey)) continue;
+      if (unsupported.has(normalizedKey)) {
+        removeKey(key);
+      }
+    }
+
+    if (unsupported.has('max_tokens')) removeKey('max_output_tokens');
+    if (unsupported.has('max_output_tokens')) removeKey('max_tokens');
+
+    if (unsupported.has('tools') || unsupported.has('tool_choice')) {
+      removeKey('tools');
+      removeKey('tool_choice');
+    }
+
+    if (unsupported.has('audio') || unsupported.has('modalities')) {
+      removeKey('audio');
+      removeKey('modalities');
+    }
+
+    return { cleaned, removed: Array.from(removed) };
+  }
+
+  private extractUnsupportedParams(error: any): string[] {
+    const results = new Set<string>();
+    const paramField = error?.response?.data?.error?.param || error?.response?.data?.param;
+    if (typeof paramField === 'string') {
+      const normalized = this.normalizeUnsupportedParamName(paramField);
+      if (normalized) results.add(normalized);
+    }
+
+    const message = this.extractApiErrorMessage(error);
+    const patterns = [
+      /Unsupported parameter:?\s*['"]([^'"]+)['"]/i,
+      /Unrecognized request argument supplied:?\s*['"]?([^'"\s]+)['"]?/i,
+      /Unknown parameter:?\s*['"]?([^'"\s]+)['"]?/i,
+      /Invalid request.*?['"]([^'"]+)['"] is not supported/i,
+    ];
+
+    for (const pattern of patterns) {
+      const match = message.match(pattern);
+      if (match) {
+        const normalized = this.normalizeUnsupportedParamName(match[1]);
+        if (normalized) results.add(normalized);
+      }
+    }
+
+    if (results.size === 0) {
+      const listMatch = message.match(/Unsupported parameters?:\s*([^\.\[]+)/i);
+      if (listMatch) {
+        const entries = listMatch[1].split(',');
+        for (const entry of entries) {
+          const normalized = this.normalizeUnsupportedParamName(entry);
+          if (normalized) results.add(normalized);
+        }
+      }
+    }
+
+    return Array.from(results);
+  }
+
     private extractUsage(data: any, useResponsesApi: boolean): ProviderUsage | undefined {
       if (useResponsesApi) {
         const usage = data?.usage || data?.response?.usage;
@@ -71,6 +194,7 @@ export class OpenAI implements IAIProvider {
   private apiKey: string;
   private endpointUrl: string;
   private hasCustomEndpoint: boolean;
+  private unsupportedParamsByModel = new Map<string, Set<string>>();
   // Removed state properties: busy, lastLatency, providerData, alpha
 
   /**
@@ -117,6 +241,18 @@ export class OpenAI implements IAIProvider {
       || normalized.startsWith('o4')
       || normalized.includes('deep-research')
       || normalized.includes('computer-use')
+    );
+  }
+
+  private supportsReasoningParam(modelId: string): boolean {
+    const normalized = this.normalizeModelId(modelId);
+    return (
+      normalized.startsWith('o1')
+      || normalized.startsWith('o3')
+      || normalized.startsWith('o4')
+      || normalized.includes('omni')
+      || normalized.includes('deep-research')
+      || normalized.includes('gpt-5')
     );
   }
 
@@ -205,10 +341,36 @@ export class OpenAI implements IAIProvider {
       ? message.messages
       : [{ role: message.role || 'user', content: message.content }];
 
-    return source.map((entry) => ({
-      role: typeof entry.role === 'string' && entry.role.trim() ? entry.role : 'user',
-      content: this.normalizeChatContent(entry.content),
-    }));
+    return source.map((entry) => {
+      const rawRole = typeof entry.role === 'string' ? entry.role.trim() : '';
+      const role = rawRole === 'tool' ? 'assistant' : (rawRole || 'user');
+      return {
+        role,
+        content: this.normalizeChatContent(entry.content),
+      };
+    });
+  }
+
+  private buildChatStreamOptions(message: IMessage): Record<string, any> | undefined {
+    const existing = message.stream_options && typeof message.stream_options === 'object'
+      ? { ...message.stream_options }
+      : {};
+
+    if (this.hasCustomEndpoint && Object.prototype.hasOwnProperty.call(existing, 'include_usage')) {
+      delete (existing as any).include_usage;
+    }
+
+    return Object.keys(existing).length > 0 ? existing : undefined;
+  }
+
+  private buildResponsesStreamOptions(message: IMessage): Record<string, any> | undefined {
+    const existing = message.stream_options && typeof message.stream_options === 'object'
+      ? { ...message.stream_options }
+      : {};
+    if (Object.prototype.hasOwnProperty.call(existing, 'include_usage')) {
+      delete (existing as any).include_usage;
+    }
+    return Object.keys(existing).length > 0 ? existing : undefined;
   }
 
   private attachChatOptionalParams(target: Record<string, any>, message: IMessage) {
@@ -218,8 +380,15 @@ export class OpenAI implements IAIProvider {
     if (typeof message.temperature === 'number') target.temperature = message.temperature;
     if (typeof message.top_p === 'number') target.top_p = message.top_p;
     if (message.metadata) target.metadata = message.metadata;
-    if (message.tools) target.tools = message.tools;
-    if (message.tool_choice) target.tool_choice = message.tool_choice;
+    if (typeof message.tools !== 'undefined') {
+      target.tools = this.normalizeChatTools(message.tools) ?? message.tools;
+    }
+    if (typeof message.tool_choice !== 'undefined') {
+      target.tool_choice = this.normalizeChatToolChoice(message.tool_choice);
+    }
+    if (typeof message.reasoning !== 'undefined' && this.supportsReasoningParam(message.model.id)) {
+      target.reasoning = message.reasoning;
+    }
 
     const hasAudioInput = this.hasAudioInputContent(message.content);
     const hasAudioModality = Array.isArray(message.modalities) && message.modalities.some((modality) => String(modality).toLowerCase() === 'audio');
@@ -232,6 +401,82 @@ export class OpenAI implements IAIProvider {
     }
 
     return target;
+  }
+
+  private normalizeChatTools(tools: any): any[] | undefined {
+    if (!Array.isArray(tools)) return undefined;
+    return tools.map((tool) => {
+      if (!tool || typeof tool !== 'object') return tool;
+      const func = (tool as any).function;
+      if (func && typeof func === 'object') {
+        return tool;
+      }
+      const name = (tool as any).name;
+      const description = (tool as any).description;
+      const parameters = (tool as any).parameters;
+      if (!name) return tool;
+      const normalized: Record<string, any> = {
+        type: (tool as any).type ?? 'function',
+        function: {
+          name,
+        },
+      };
+      if (description) normalized.function.description = description;
+      if (parameters) normalized.function.parameters = parameters;
+      if (typeof (tool as any).strict !== 'undefined') {
+        normalized.function.strict = (tool as any).strict;
+      }
+      return normalized;
+    });
+  }
+
+  private normalizeChatToolChoice(toolChoice: any): any {
+    if (!toolChoice || typeof toolChoice !== 'object') return toolChoice;
+    if (Array.isArray(toolChoice)) return toolChoice;
+    const func = (toolChoice as any).function;
+    if (func && typeof func === 'object') return toolChoice;
+    const name = (toolChoice as any).name;
+    if (name) {
+      return { type: (toolChoice as any).type ?? 'function', function: { name } };
+    }
+    return toolChoice;
+  }
+
+  private normalizeResponsesTools(tools: any): any[] | undefined {
+    if (!Array.isArray(tools)) return undefined;
+    return tools.map((tool) => {
+      if (!tool || typeof tool !== 'object') return tool;
+      const func = (tool as any).function;
+      if (func && typeof func === 'object') {
+        const name = func.name ?? (tool as any).name;
+        const description = func.description ?? (tool as any).description;
+        const parameters = func.parameters ?? (tool as any).parameters;
+        const normalized: Record<string, any> = {
+          type: (tool as any).type ?? 'function',
+        };
+        if (name) normalized.name = name;
+        if (description) normalized.description = description;
+        if (parameters) normalized.parameters = parameters;
+        if (typeof (tool as any).strict !== 'undefined') normalized.strict = (tool as any).strict;
+        if (typeof (func as any).strict !== 'undefined' && typeof normalized.strict === 'undefined') {
+          normalized.strict = (func as any).strict;
+        }
+        return normalized;
+      }
+      return tool;
+    });
+  }
+
+  private normalizeResponsesToolChoice(toolChoice: any): any {
+    if (!toolChoice || typeof toolChoice !== 'object') return toolChoice;
+    if (Array.isArray(toolChoice)) return toolChoice;
+    const func = (toolChoice as any).function;
+    if (func && typeof func === 'object') {
+      const name = func.name ?? (toolChoice as any).name;
+      if (name) return { type: (toolChoice as any).type ?? 'function', name };
+      return { type: (toolChoice as any).type ?? 'function' };
+    }
+    return toolChoice;
   }
 
   private hasAudioInputContent(content: IMessage['content']): boolean {
@@ -254,9 +499,19 @@ export class OpenAI implements IAIProvider {
     if (typeof message.temperature === 'number') target.temperature = message.temperature;
     if (typeof message.top_p === 'number') target.top_p = message.top_p;
     if (message.metadata) target.metadata = message.metadata;
-    if (message.tools) target.tools = message.tools;
-    if (message.tool_choice) target.tool_choice = message.tool_choice;
-    if (message.reasoning) target.reasoning = message.reasoning;
+    if (typeof message.tools !== 'undefined') {
+      target.tools = this.normalizeResponsesTools(message.tools) ?? message.tools;
+    }
+    if (typeof message.tool_choice !== 'undefined') {
+      target.tool_choice = this.normalizeResponsesToolChoice(message.tool_choice);
+    }
+    if (typeof message.reasoning !== 'undefined' && this.supportsReasoningParam(message.model.id)) {
+      if (typeof message.reasoning === 'string' && message.reasoning.trim()) {
+        target.reasoning = { effort: message.reasoning.trim() };
+      } else {
+        target.reasoning = message.reasoning;
+      }
+    }
     if (message.instructions) target.instructions = message.instructions;
     if (message.modalities) target.modalities = message.modalities;
     if (message.audio) target.audio = message.audio;
@@ -271,13 +526,34 @@ export class OpenAI implements IAIProvider {
     const normalized: any[] = [];
 
     for (const part of parts) {
+      if (typeof part === 'string') {
+        normalized.push({ type: 'input_text', text: part });
+        continue;
+      }
+      if (typeof part === 'number' || typeof part === 'boolean') {
+        normalized.push({ type: 'input_text', text: String(part) });
+        continue;
+      }
       if (!part || typeof part !== 'object') {
         continue;
       }
 
       const type = String(part.type || '').toLowerCase();
+      if (!type && typeof (part as any).text === 'string') {
+        normalized.push({ type: 'input_text', text: (part as any).text });
+        continue;
+      }
       if ((type === 'text' || type === 'input_text') && typeof part.text === 'string') {
         normalized.push({ type: 'input_text', text: part.text });
+        continue;
+      }
+      if (type === 'output_text') {
+        const text = typeof (part as any).text === 'string'
+          ? (part as any).text
+          : (typeof (part as any).output_text === 'string' ? (part as any).output_text : undefined);
+        if (typeof text === 'string') {
+          normalized.push({ type: 'output_text', text });
+        }
         continue;
       }
 
@@ -419,10 +695,8 @@ export class OpenAI implements IAIProvider {
       ...(stream ? { stream: true } : {}),
     };
     if (stream) {
-      const existing = message.stream_options && typeof message.stream_options === 'object'
-        ? message.stream_options
-        : {};
-      payload.stream_options = { ...existing, include_usage: true };
+      const streamOptions = this.buildChatStreamOptions(message);
+      if (streamOptions) payload.stream_options = streamOptions;
     }
     this.attachChatOptionalParams(payload, message);
 
@@ -445,14 +719,57 @@ export class OpenAI implements IAIProvider {
       ? message.messages
       : message.content;
     const input = this.normalizeResponsesInput(inputSource);
+    let normalizedInput = input.map((entry: any) => {
+      if (!entry || typeof entry !== 'object') return entry;
+      if (!('role' in entry)) return entry;
+      const role = entry.role === 'tool' ? 'assistant' : entry.role;
+      const cleaned: Record<string, any> = { role, content: entry.content };
+      if (typeof entry.name === 'string' && entry.name.trim()) {
+        cleaned.name = entry.name.trim();
+      }
+      return cleaned;
+    });
+    const normalizedModelId = this.normalizeModelId(message.model.id);
+    const isCodexModel = normalizedModelId.includes('codex');
+    const codexSingleTurnEnv = process.env.CODEX_SINGLE_TURN_ONLY === '1';
+    if (isCodexModel && codexSingleTurnEnv) {
+      const systemEntries = normalizedInput.filter(
+        (entry: any) => entry && typeof entry === 'object' && (entry.role === 'system' || entry.role === 'developer')
+      );
+      const lastUserEntry = [...normalizedInput]
+        .reverse()
+        .find((entry: any) => entry && typeof entry === 'object' && entry.role === 'user');
+      if (lastUserEntry) {
+        normalizedInput = [...systemEntries, lastUserEntry];
+      }
+    }
+
+    normalizedInput = normalizedInput.map((entry: any) => {
+      if (!entry || typeof entry !== 'object') return entry;
+      if (entry.role !== 'assistant' || !Array.isArray(entry.content)) return entry;
+      const content = entry.content.map((part: any) => {
+        if (!part || typeof part !== 'object') return part;
+        const type = String(part.type || '').toLowerCase();
+        if ((type === 'input_text' || type === 'text') && typeof part.text === 'string') {
+          return { type: 'output_text', text: part.text };
+        }
+        if (type === 'output_text' && typeof part.text === 'string') return part;
+        if (type === 'output_text' && typeof (part as any).output_text === 'string') {
+          return { type: 'output_text', text: (part as any).output_text };
+        }
+        return part;
+      });
+      return { ...entry, content };
+    });
 
     const payload: Record<string, any> = {
       model: message.model.id,
-      input,
+      input: normalizedInput,
       ...(stream ? { stream: true } : {}),
     };
-    if (stream && message.stream_options && typeof message.stream_options === 'object') {
-      payload.stream_options = { ...message.stream_options };
+    if (stream) {
+      const streamOptions = this.buildResponsesStreamOptions(message);
+      if (streamOptions) payload.stream_options = streamOptions;
     }
 
     return this.attachResponsesOptionalParams(payload, message);
@@ -558,6 +875,105 @@ export class OpenAI implements IAIProvider {
     return null;
   }
 
+  private extractChatToolCalls(data: any): any[] | undefined {
+    const toolCalls = data?.choices?.[0]?.message?.tool_calls;
+    return Array.isArray(toolCalls) && toolCalls.length > 0 ? toolCalls : undefined;
+  }
+
+  private buildResponsesToolCall(raw: any): any | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const name = raw?.name
+      ?? raw?.function?.name
+      ?? raw?.tool?.name
+      ?? raw?.tool_name
+      ?? raw?.tool?.function?.name;
+    if (!name || typeof name !== 'string') return null;
+
+    const rawArgs = raw?.arguments
+      ?? raw?.function?.arguments
+      ?? raw?.tool?.arguments
+      ?? raw?.tool_call?.arguments
+      ?? raw?.args
+      ?? raw?.parameters;
+    let argumentsPayload = '{}';
+    if (typeof rawArgs === 'string') {
+      argumentsPayload = rawArgs;
+    } else if (typeof rawArgs !== 'undefined') {
+      try {
+        argumentsPayload = JSON.stringify(rawArgs);
+      } catch {
+        argumentsPayload = String(rawArgs);
+      }
+    }
+
+    const id = raw?.call_id ?? raw?.id ?? raw?.tool_call_id ?? raw?.tool_call?.id;
+    return {
+      id: typeof id === 'string' && id.length > 0 ? id : `call_${Math.random().toString(36).slice(2, 10)}`,
+      type: 'function',
+      function: {
+        name,
+        arguments: argumentsPayload,
+      },
+    };
+  }
+
+  private extractResponsesToolCalls(data: any): any[] | undefined {
+    if (Array.isArray(data?.tool_calls) && data.tool_calls.length > 0) return data.tool_calls;
+    if (Array.isArray(data?.response?.tool_calls) && data.response.tool_calls.length > 0) return data.response.tool_calls;
+
+    const outputList = Array.isArray(data?.output) ? data.output : (data?.output ? [data.output] : []);
+    const responseOutputList = Array.isArray(data?.response?.output)
+      ? data.response.output
+      : (data?.response?.output ? [data.response.output] : []);
+    const candidates = [...outputList, ...responseOutputList];
+    if (data?.item) candidates.push(data.item);
+    if (data?.output_item) candidates.push(data.output_item);
+    if (data?.response?.output_item) candidates.push(data.response.output_item);
+
+    const collected: any[] = [];
+    const pushToolCall = (rawCall: any) => {
+      const call = this.buildResponsesToolCall(rawCall);
+      if (call) collected.push(call);
+    };
+
+    for (const entry of candidates) {
+      if (!entry || typeof entry !== 'object') continue;
+      if (Array.isArray(entry?.tool_calls) && entry.tool_calls.length > 0) return entry.tool_calls;
+      if (entry?.type === 'tool_calls' && Array.isArray(entry.tool_calls) && entry.tool_calls.length > 0) {
+        return entry.tool_calls;
+      }
+      if (entry?.type === 'tool_call' || entry?.type === 'function_call') {
+        pushToolCall(entry);
+        continue;
+      }
+
+      const content = Array.isArray(entry?.content) ? entry.content : [];
+      for (const part of content) {
+        if (!part || typeof part !== 'object') continue;
+        if (Array.isArray(part?.tool_calls) && part.tool_calls.length > 0) return part.tool_calls;
+        if (part?.type === 'tool_calls' && Array.isArray(part.tool_calls) && part.tool_calls.length > 0) {
+          return part.tool_calls;
+        }
+        if (part?.type === 'tool_call' || part?.type === 'function_call') {
+          pushToolCall(part);
+        }
+      }
+    }
+
+    return collected.length > 0 ? collected : undefined;
+  }
+
+  private extractToolCalls(data: any, useResponsesApi: boolean): any[] | undefined {
+    return useResponsesApi ? this.extractResponsesToolCalls(data) : this.extractChatToolCalls(data);
+  }
+
+  private extractFinishReason(data: any, useResponsesApi: boolean): string | undefined {
+    if (useResponsesApi) {
+      return data?.status || data?.response?.status;
+    }
+    return data?.choices?.[0]?.finish_reason;
+  }
+
   private extractResponseText(data: any, useResponsesApi: boolean): string | null {
     if (useResponsesApi) {
       const media = this.extractMediaFromResponsesOutput(data?.output)
@@ -578,6 +994,8 @@ export class OpenAI implements IAIProvider {
           }
         }
       }
+      const toolCalls = this.extractResponsesToolCalls(data);
+      if (Array.isArray(toolCalls) && toolCalls.length > 0) return '';
       return null;
     }
 
@@ -606,6 +1024,9 @@ export class OpenAI implements IAIProvider {
     // Audio-only outputs may omit text fields; avoid failing the whole provider attempt.
     if (message?.audio || Array.isArray(raw)) return '[Audio output generated]';
 
+    const toolCalls = message?.tool_calls;
+    if (Array.isArray(toolCalls) && toolCalls.length > 0) return '';
+
     return null;
   }
 
@@ -617,6 +1038,9 @@ export class OpenAI implements IAIProvider {
 
     const audio = this.extractAudioFromPart(parsed?.audio ?? parsed?.output_audio ?? parsed);
     if (audio) return audio;
+
+    const toolCalls = this.extractResponsesToolCalls(parsed);
+    if (Array.isArray(toolCalls) && toolCalls.length > 0) return '';
 
     return parsed?.delta
       || parsed?.output_text_delta
@@ -667,14 +1091,16 @@ export class OpenAI implements IAIProvider {
     const data = useResponsesApi
       ? this.buildResponsesPayload(message, false)
       : this.buildChatPayload(message, false);
+    const stripped = this.stripUnsupportedParamsFromPayload(data, message.model.id);
+    const requestData = stripped.cleaned;
 
     try {
-      const response = await axios.post(url, data, { headers });
+      const response = await axios.post(url, requestData, { headers });
       const endTime = Date.now();
       const latency = endTime - startTime;
 
       const responseText = this.extractResponseText(response.data, useResponsesApi);
-      if (!responseText) {
+      if (responseText === null || responseText === undefined) {
         console.error('Unexpected response structure from API:', response.data);
         throw new Error('Unexpected response structure from the API');
       }
@@ -682,14 +1108,41 @@ export class OpenAI implements IAIProvider {
       return {
         response: responseText,
         latency: latency,
-        usage: this.extractUsage(response.data, useResponsesApi)
+        usage: this.extractUsage(response.data, useResponsesApi),
+        tool_calls: this.extractToolCalls(response.data, useResponsesApi),
+        finish_reason: this.extractFinishReason(response.data, useResponsesApi),
       };
     } catch (error: any) {
       const missingInput = useResponsesApi && this.isMissingInputError(error);
       const missingMessages = !useResponsesApi && this.isMissingMessagesError(error);
 
       if (useResponsesApi && (error?.response?.status === 400 || missingInput)) {
-        console.error('[OpenAI][Responses] 400 payload summary:', this.summarizeResponsesPayload(data));
+        console.error('[OpenAI][Responses] 400 payload summary:', this.summarizeResponsesPayload(requestData));
+      }
+
+      const unsupportedParams = this.extractUnsupportedParams(error);
+      if (unsupportedParams.length > 0) {
+        this.recordUnsupportedParams(message.model.id, unsupportedParams);
+        const retried = this.stripUnsupportedParamsFromPayload(requestData, message.model.id, unsupportedParams);
+        if (retried.removed.length > 0) {
+          try {
+            const retryStart = Date.now();
+            const retryResp = await axios.post(url, retried.cleaned, { headers });
+            const retryLatency = Date.now() - retryStart;
+            const retryText = this.extractResponseText(retryResp.data, useResponsesApi);
+            if (retryText !== null && retryText !== undefined) {
+              return {
+                response: retryText,
+                latency: retryLatency,
+                usage: this.extractUsage(retryResp.data, useResponsesApi),
+                tool_calls: this.extractToolCalls(retryResp.data, useResponsesApi),
+                finish_reason: this.extractFinishReason(retryResp.data, useResponsesApi),
+              };
+            }
+          } catch (retryError: any) {
+            console.error('Retry after stripping unsupported params failed:', retryError);
+          }
+        }
       }
       // If responses API rejects, try chat once as a fallback (skip if endpoint explicitly targets responses)
       const responsesOnly = this.isResponsesOnlyModel(message.model.id);
@@ -697,12 +1150,19 @@ export class OpenAI implements IAIProvider {
         try {
           const chatUrl = this.resolveChatEndpoint();
           const chatPayload = this.buildChatPayload(message, false);
+          const chatStripped = this.stripUnsupportedParamsFromPayload(chatPayload, message.model.id);
           const chatStart = Date.now();
-          const chatResp = await axios.post(chatUrl, chatPayload, { headers });
+          const chatResp = await axios.post(chatUrl, chatStripped.cleaned, { headers });
           const chatLatency = Date.now() - chatStart;
           const chatText = this.extractResponseText(chatResp.data, false);
-          if (chatText) {
-            return { response: chatText, latency: chatLatency, usage: this.extractUsage(chatResp.data, false) };
+          if (chatText !== null && chatText !== undefined) {
+            return {
+              response: chatText,
+              latency: chatLatency,
+              usage: this.extractUsage(chatResp.data, false),
+              tool_calls: this.extractToolCalls(chatResp.data, false),
+              finish_reason: this.extractFinishReason(chatResp.data, false),
+            };
           }
         } catch (fallbackError: any) {
           console.error('Chat fallback after responses API 400 failed:', fallbackError);
@@ -712,12 +1172,19 @@ export class OpenAI implements IAIProvider {
         try {
           const responsesUrl = this.resolveResponsesEndpoint();
           const responsesPayload = this.buildResponsesPayload(message, false);
+          const responsesStripped = this.stripUnsupportedParamsFromPayload(responsesPayload, message.model.id);
           const responsesStart = Date.now();
-          const responsesResp = await axios.post(responsesUrl, responsesPayload, { headers });
+          const responsesResp = await axios.post(responsesUrl, responsesStripped.cleaned, { headers });
           const responsesLatency = Date.now() - responsesStart;
           const responsesText = this.extractResponseText(responsesResp.data, true);
-          if (responsesText) {
-            return { response: responsesText, latency: responsesLatency, usage: this.extractUsage(responsesResp.data, true) };
+          if (responsesText !== null && responsesText !== undefined) {
+            return {
+              response: responsesText,
+              latency: responsesLatency,
+              usage: this.extractUsage(responsesResp.data, true),
+              tool_calls: this.extractToolCalls(responsesResp.data, true),
+              finish_reason: this.extractFinishReason(responsesResp.data, true),
+            };
           }
         } catch (fallbackError: any) {
           console.error('Responses fallback after chat missing messages failed:', fallbackError);
@@ -753,8 +1220,10 @@ export class OpenAI implements IAIProvider {
     const data = useResponsesApi
       ? this.buildResponsesPayload(message, true)
       : this.buildChatPayload(message, true);
+    const stripped = this.stripUnsupportedParamsFromPayload(data, message.model.id);
+    const requestData = stripped.cleaned;
 
-    const response = await this.postSseRequest(url, data, headers);
+    const response = await this.postSseRequest(url, requestData, headers);
     return {
       upstream: response.data,
       mode: useResponsesApi ? 'openai-responses-sse' : 'openai-chat-sse',
@@ -772,9 +1241,11 @@ export class OpenAI implements IAIProvider {
     const data = useResponsesApi
       ? this.buildResponsesPayload(message, true)
       : this.buildChatPayload(message, true);
+    const stripped = this.stripUnsupportedParamsFromPayload(data, message.model.id);
+    const requestData = stripped.cleaned;
 
     try {
-      const response = await this.postSseRequest(url, data, headers);
+      const response = await this.postSseRequest(url, requestData, headers);
       let fullResponse = '';
       const consumeSseChunk = this.createSseConsumer();
 
@@ -789,11 +1260,13 @@ export class OpenAI implements IAIProvider {
           try {
             const parsed = JSON.parse(dataMessage);
             let chunk = '';
+            const toolCalls = this.extractToolCalls(parsed, useResponsesApi);
+            const finishReason = this.extractFinishReason(parsed, useResponsesApi);
             if (useResponsesApi) {
               // Handle Responses API SSE events
               if (parsed?.type === 'response.completed') {
                 const latency = Date.now() - startTime;
-                yield { chunk: '', latency, response: fullResponse, anystream: response.data };
+                yield { chunk: '', latency, response: fullResponse, anystream: response.data, tool_calls: toolCalls, finish_reason: finishReason };
                 return;
               }
               chunk = this.extractResponsesStreamChunk(parsed);
@@ -802,7 +1275,7 @@ export class OpenAI implements IAIProvider {
             }
             fullResponse += chunk;
             const latency = Date.now() - startTime;
-            yield { chunk, latency, response: fullResponse, anystream: response.data };
+            yield { chunk, latency, response: fullResponse, anystream: response.data, tool_calls: toolCalls, finish_reason: finishReason };
           } catch (error) {
             console.error('Error parsing stream chunk:', error);
           }
@@ -813,7 +1286,55 @@ export class OpenAI implements IAIProvider {
       const missingMessages = !useResponsesApi && this.isMissingMessagesError(error);
 
       if (useResponsesApi && (error?.response?.status === 400 || missingInput)) {
-        console.error('[OpenAI][Responses][Stream] 400 payload summary:', this.summarizeResponsesPayload(data));
+        console.error('[OpenAI][Responses][Stream] 400 payload summary:', this.summarizeResponsesPayload(requestData));
+      }
+
+      const unsupportedParams = this.extractUnsupportedParams(error);
+      if (unsupportedParams.length > 0) {
+        this.recordUnsupportedParams(message.model.id, unsupportedParams);
+        const retried = this.stripUnsupportedParamsFromPayload(requestData, message.model.id, unsupportedParams);
+        if (retried.removed.length > 0) {
+          try {
+            const retryResp = await this.postSseRequest(url, retried.cleaned, headers);
+            let fullResponse = '';
+            const consumeRetryChunk = this.createSseConsumer();
+
+            for await (const value of retryResp.data) {
+              const dataMessages = consumeRetryChunk(value);
+              for (const dataMessage of dataMessages) {
+                if (dataMessage === '[DONE]') {
+                  const latency = Date.now() - startTime;
+                  yield { chunk: '', latency, response: fullResponse, anystream: retryResp.data };
+                  return;
+                }
+                try {
+                  const parsed = JSON.parse(dataMessage);
+                  let chunk = '';
+                  const toolCalls = this.extractToolCalls(parsed, useResponsesApi);
+                  const finishReason = this.extractFinishReason(parsed, useResponsesApi);
+                  if (useResponsesApi) {
+                    if (parsed?.type === 'response.completed') {
+                      const latency = Date.now() - startTime;
+                      yield { chunk: '', latency, response: fullResponse, anystream: retryResp.data, tool_calls: toolCalls, finish_reason: finishReason };
+                      return;
+                    }
+                    chunk = this.extractResponsesStreamChunk(parsed);
+                  } else {
+                    chunk = this.extractChatStreamChunk(parsed);
+                  }
+                  fullResponse += chunk;
+                  const latency = Date.now() - startTime;
+                  yield { chunk, latency, response: fullResponse, anystream: retryResp.data, tool_calls: toolCalls, finish_reason: finishReason };
+                } catch (retryParseError) {
+                  console.error('Error parsing retry stream chunk:', retryParseError);
+                }
+              }
+            }
+            return;
+          } catch (retryError: any) {
+            console.error('Retry stream after stripping unsupported params failed:', retryError);
+          }
+        }
       }
       // If responses API stream 400s, retry once on chat stream
       const responsesOnly = this.isResponsesOnlyModel(message.model.id);
@@ -821,7 +1342,8 @@ export class OpenAI implements IAIProvider {
         try {
           const chatUrl = this.resolveChatEndpoint();
           const chatPayload = this.buildChatPayload(message, true);
-          const chatResp = await this.postSseRequest(chatUrl, chatPayload, headers);
+          const chatStripped = this.stripUnsupportedParamsFromPayload(chatPayload, message.model.id);
+          const chatResp = await this.postSseRequest(chatUrl, chatStripped.cleaned, headers);
           let fullResponse = '';
           const consumeChatSseChunk = this.createSseConsumer();
 
@@ -836,9 +1358,11 @@ export class OpenAI implements IAIProvider {
               try {
                 const parsed = JSON.parse(dataMessage);
                 const chunk = this.extractChatStreamChunk(parsed);
+                const toolCalls = this.extractToolCalls(parsed, false);
+                const finishReason = this.extractFinishReason(parsed, false);
                 fullResponse += chunk;
                 const latency = Date.now() - startTime;
-                yield { chunk, latency, response: fullResponse, anystream: chatResp.data };
+                yield { chunk, latency, response: fullResponse, anystream: chatResp.data, tool_calls: toolCalls, finish_reason: finishReason };
               } catch (parseErr) {
                 console.error('Error parsing chat fallback stream chunk:', parseErr);
               }
@@ -853,7 +1377,8 @@ export class OpenAI implements IAIProvider {
         try {
           const responsesUrl = this.resolveResponsesEndpoint();
           const responsesPayload = this.buildResponsesPayload(message, true);
-          const responsesResp = await this.postSseRequest(responsesUrl, responsesPayload, headers);
+          const responsesStripped = this.stripUnsupportedParamsFromPayload(responsesPayload, message.model.id);
+          const responsesResp = await this.postSseRequest(responsesUrl, responsesStripped.cleaned, headers);
           let fullResponse = '';
           const consumeResponsesSseChunk = this.createSseConsumer();
 

@@ -1,0 +1,12 @@
+{
+  "name": "anygpt-homepage",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node serve.js",
+    "dev": "node serve.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0"
+  }
+}
