@@ -2,6 +2,7 @@ import HyperExpress, { Request, Response } from '../lib/uws-compat.js';
 import dotenv from 'dotenv';
 import dns from 'node:dns/promises';
 import net from 'node:net';
+import crypto from 'node:crypto';
 import { messageHandler } from '../providers/handler.js';
 import { IMessage, type ModelCapability } from '../providers/interfaces.js';
 import {
@@ -2828,7 +2829,7 @@ async function pickImageGenProviderKey(
 
     const pickFrom = candidates.length > 0 ? candidates : matches;
     if (pickFrom.length === 0) return null;
-    const pick = pickFrom[Math.floor(Math.random() * pickFrom.length)];
+    const pick = pickFrom[crypto.randomInt(pickFrom.length)];
     const defaultBase = pick.id.includes('xai') ? 'https://api.x.ai' : 'https://api.openai.com';
     return { apiKey: pick.apiKey!, baseUrl: extractOrigin(pick.provider_url || defaultBase) };
 }
@@ -2845,7 +2846,7 @@ async function pickVideoGenProviderKey(
         modelId in p.models
     );
     if (matches.length === 0) return null;
-    const pick = matches[Math.floor(Math.random() * matches.length)];
+    const pick = matches[crypto.randomInt(matches.length)];
     return { apiKey: pick.apiKey!, baseUrl: extractOrigin(pick.provider_url || 'https://api.x.ai') };
 }
 
