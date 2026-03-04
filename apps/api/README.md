@@ -201,6 +201,13 @@ apps/api/
     ```
     The experimental build outputs JavaScript files to `dist/experimental/`.
 
+*   **Systemd Services:**
+    ```bash
+    sudo systemctl status anygpt-api
+    sudo systemctl status anygpt-experimental
+    ```
+    The experimental service uses a separate build output and default port (3001).
+
 ## Testing
 
 The project includes a comprehensive testing suite with both unit tests and integration tests using a configurable mock provider.
