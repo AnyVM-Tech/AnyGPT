@@ -35,6 +35,14 @@ interface WsClientContext {
   tierLimits?: TierLimits;
   rate: { second: RateWindow; minute: RateWindow; day: RateWindow };
   authenticated: boolean;
+  /**
+   * Per-connection cache of the most recent shared rate-limit snapshot from Redis.
+   * This reduces redundant Redis round-trips for bursts of messages using the same API key.
+   */
+  sharedRateCache?: {
+    value: { rps: number; rpm: number; rpd: number } | null;
+    fetchedAt: number;
+  };
 }
 
 interface TierLimits { rps: number; rpm: number; rpd: number; }
@@ -191,11 +199,39 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
   app.ws('/ws', (ws: WSWrapper, req: RequestContext) => {
     const ctx: WsClientContext = {
       rate: { second: { timestamps: [] }, minute: { timestamps: [] }, day: { timestamps: [] } },
-      authenticated: false
+      authenticated: false,
+      sharedRateCache: { value: null, fetchedAt: 0 }
     };
 
     const send = (data: OutgoingResponse): void => {
-      try { ws.send(JSON.stringify(data)); } catch { /* ignore */ }
+      try {
+        ws.send(JSON.stringify(data));
+      } catch (err) {
+        logError({
+          message: 'WebSocket send failed',
+          error: err,
+          // Best-effort context; may help debugging without changing behavior.
+          wsRoute: '/ws',
+          messageType: (data as any)?.type
+        });
+      }
+    };
+
+    // Small per-connection TTL (in ms) for caching shared rate-limit state from Redis.
+    const SHARED_RATE_CACHE_TTL_MS = 150;
+
+    const getSharedRateLimitForCtx = async (): Promise<{ rps: number; rpm: number; rpd: number } | null> => {
+      if (!ctx.apiKey || !ctx.tierLimits) {
+        return null;
+      }
+      const now = Date.now();
+      const cache = ctx.sharedRateCache;
+      if (cache && now - cache.fetchedAt <= SHARED_RATE_CACHE_TTL_MS) {
+        return cache.value;
+      }
+      const shared = await checkSharedRateLimit(ctx.apiKey, ctx.tierLimits);
+      ctx.sharedRateCache = { value: shared, fetchedAt: now };
+      return shared;
     };
 
     const rateCheck = async (): Promise<boolean> => {
@@ -222,7 +258,7 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
         return false;
       }
 
-      const shared = await checkSharedRateLimit(ctx.apiKey, ctx.tierLimits);
+      const shared = await getSharedRateLimitForCtx();
       if (shared) {
         if (shared.rps > ctx.tierLimits.rps) return false;
         if (shared.rpm > ctx.tierLimits.rpm) return false;
@@ -288,6 +324,23 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
           if (typeof content !== 'string' && !Array.isArray(content)) {
             return send({ type: 'error', code: 'bad_request', message: 'Last message content must be string or array', requestId });
           }
+          if (Array.isArray(content)) {
+            const allItemsValid = content.every((item) => {
+              if (!item || typeof item !== 'object') return false;
+              const anyItem = item as { type?: unknown; text?: unknown };
+              if (typeof anyItem.type !== 'string') return false;
+              if (anyItem.type === 'text' && typeof anyItem.text !== 'string') return false;
+              return true;
+            });
+            if (!allItemsValid) {
+              return send({
+                type: 'error',
+                code: 'bad_request',
+                message: 'Last message content array contains invalid items',
+                requestId,
+              });
+            }
+          }
           // Prefer the more explicit `reasoning_effort` field when present; fall back to
           // the legacy/general `reasoning` field for backward compatibility.
           const normalizedReasoning =
@@ -318,8 +371,26 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
               let toolCalls: any[] | undefined;
               let finishReason: string | undefined;
 
+              const accumulateToolCalls = (calls: any[]) => {
+                if (!toolCalls) {
+                  toolCalls = [...calls];
+                } else {
+                  toolCalls.push(...calls);
+                }
+              };
+
               for await (const result of streamHandler) {
                 if (result.type === 'chunk') {
+                  // Accumulate any tool calls observed in streaming chunks so complex
+                  // tool_call sequences are preserved for the final summary.
+                  if (Array.isArray(result.tool_calls) && result.tool_calls.length > 0) {
+                    accumulateToolCalls(result.tool_calls);
+                  }
+                  // Track latest finish_reason observed during streaming.
+                  if (result.finish_reason) {
+                    finishReason = result.finish_reason;
+                  }
+
                   const openaiStreamChunk: OpenAIStreamChunk = {
                     id: `chatcmpl-${requestId || Date.now()}`,
                     object: 'chat.completion.chunk',
@@ -338,7 +409,9 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
                 } else if (result.type === 'final') {
                   if (typeof result.tokenUsage === 'number') totalTokenUsage = result.tokenUsage;
                   if (result.providerId) providerId = result.providerId;
-                  if (Array.isArray(result.tool_calls)) toolCalls = result.tool_calls;
+                  if (Array.isArray(result.tool_calls) && result.tool_calls.length > 0) {
+                    accumulateToolCalls(result.tool_calls);
+                  }
                   if (result.finish_reason) finishReason = result.finish_reason;
                 }
               }
@@ -346,8 +419,16 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
               try {
                 await updateUserTokenUsage(totalTokenUsage, ctx.apiKey);
               } catch (updateErr) {
-                // Log usage update failures but do not block the response to the client
-                await logError({ message: 'Failed to update user token usage in WebSocket handler', totalTokenUsage, requestId, error: updateErr });
+                // Log usage update failures but do not block the response to the client.
+                // Avoid logging the full API key; only include a masked suffix for correlation.
+                const redactedApiKey = ctx.apiKey ? `***${ctx.apiKey.slice(-4)}` : undefined;
+                await logError({
+                  message: 'Failed to update user token usage in WebSocket handler',
+                  apiKey: redactedApiKey,
+                  totalTokenUsage,
+                  requestId,
+                  error: updateErr
+                });
               }
 
               const finalPayload: ChatCompleteResponse = {
