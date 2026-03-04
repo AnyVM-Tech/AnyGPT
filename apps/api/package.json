@@ -40,7 +40,7 @@
 		"dotenv": "^16.6.1",
 		"eventsource": "^2.0.2",
 		"ioredis": "^5.10.0",
-		"openai": "^4.104.0",
+		"openai": "^6.25.0",
 		"selenium-webdriver": "^4.41.0",
 		"uWebSockets.js": "github:uNetworking/uWebSockets.js#v20.51.0",
 		"uuid": "^11.1.0",
