@@ -89,24 +89,28 @@ type OutgoingResponse =
 
 const wsClients = new Set<WSWrapper>();
 const WS_RATE_PREFIX = 'ws:ratelimit:';
+const UNAUTH_RPS = 1;
+const UNAUTH_RPM = 5;
+const UNAUTH_RPD = 50;
 
 function createRedisDuplicate(role: 'subscriber' | 'publisher') {
   if (!redis) return null;
   try {
     const client = redis.duplicate();
 
-    client.on('error', (err: Error) => {
+    client.on('error', (err: any) => {
       // Log but do not crash the process if a duplicated client encounters errors.
-      logError({ message: `[WS PubSub] Redis ${role} client error`, error: err });
+      logError({ message: `[WS PubSub] Redis ${role} client error`, errorMessage: err?.message, errorStack: err?.stack });
     });
 
     client.on('ready', () => {
-      console.info?.(`[WS PubSub] Redis ${role} client is ready`);
+      console.info(`[WS PubSub] Redis ${role} client is ready`);
     });
 
     return client;
   } catch (err) {
-    logError(err as any);
+    const error = err as Error;
+    logError({ message: `[WS PubSub] Failed to duplicate Redis client for ${role}`, errorMessage: error.message, errorStack: error.stack });
     return null;
   }
 }
@@ -136,7 +140,7 @@ if (redisSubscriber) {
   });
 
   const subscribeToChannel = () => {
-    redisSubscriber.subscribe('anygpt:ws:broadcast').catch(err => {
+    redisSubscriber.subscribe('anygpt:ws:broadcast').catch((err: unknown) => {
       console.warn('[WS PubSub] Failed to subscribe to channel:', err);
     });
   };
@@ -199,10 +203,6 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
 
       // If the client is not yet authenticated, apply a strict default rate limit
       if (!ctx.apiKey || !ctx.tierLimits) {
-        const UNAUTH_RPS = 1;
-        const UNAUTH_RPM = 5;
-        const UNAUTH_RPD = 50;
-
         if (ctx.rate.second.timestamps.length >= UNAUTH_RPS) return false;
         if (ctx.rate.minute.timestamps.length >= UNAUTH_RPM) return false;
         if (ctx.rate.day.timestamps.length >= UNAUTH_RPD) return false;
@@ -340,13 +340,7 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
                 await updateUserTokenUsage(totalTokenUsage, ctx.apiKey);
               } catch (updateErr) {
                 // Log usage update failures but do not block the response to the client
-                logError({
-                  message: 'Failed to update user token usage in WebSocket handler',
-                  error: updateErr,
-                  apiKey: ctx.apiKey,
-                  totalTokenUsage,
-                  requestId,
-                });
+                logError({ message: 'Failed to update user token usage in WebSocket handler', apiKey: ctx.apiKey, totalTokenUsage, requestId, error: updateErr });
               }
 
               const finalPayload: ChatCompleteResponse = {

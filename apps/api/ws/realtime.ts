@@ -155,7 +155,7 @@ export function attachRealtimeWebSocket(app: { ws: (path: string, handler: (ws: 
                 upstreamWs.on('open', () => {
                     // Flush buffer
                     for (const msg of messageBuffer) {
-                        upstreamWs?.send(msg);
+                        upstreamWs!.send(msg);
                     }
                     messageBuffer = [];
                 });
@@ -183,8 +183,7 @@ export function attachRealtimeWebSocket(app: { ws: (path: string, handler: (ws: 
                                 const total = (usage.input_tokens || 0) + (usage.output_tokens || 0);
                                 if (total > 0 && userApiKey) {
                                     updateUserTokenUsage(total, userApiKey).catch(err => {
-                                        logError({
-                                            message: 'Realtime usage update failed',
+                                        logError('Realtime usage update failed', {
                                             error: err,
                                             userApiKey,
                                             totalTokens: total,
@@ -204,7 +203,7 @@ export function attachRealtimeWebSocket(app: { ws: (path: string, handler: (ws: 
                 });
 
                 upstreamWs.on('error', (err: any) => {
-                    logError({ message: 'Realtime Upstream Error', error: err });
+                    logError('Realtime Upstream Error', err);
                     clientWs.send(JSON.stringify({ type: 'error', error: { type: 'server_error', message: 'Upstream connection error.' } }));
                     clientWs.close();
                 });
