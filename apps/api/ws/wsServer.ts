@@ -89,9 +89,34 @@ type OutgoingResponse =
 
 const wsClients = new Set<WSWrapper>();
 const WS_RATE_PREFIX = 'ws:ratelimit:';
+const UNAUTH_RPS = 1;
+const UNAUTH_RPM = 5;
+const UNAUTH_RPD = 50;
 
-const redisSubscriber = redis ? redis.duplicate() : null;
-const redisPublisher = redis ? redis.duplicate() : null;
+function createRedisDuplicate(role: 'subscriber' | 'publisher') {
+  if (!redis) return null;
+  try {
+    const client = redis.duplicate();
+
+    client.on('error', (err: any) => {
+      // Log but do not crash the process if a duplicated client encounters errors.
+      logError({ message: `[WS PubSub] Redis ${role} client error`, errorMessage: err?.message, errorStack: err?.stack });
+    });
+
+    client.on('ready', () => {
+      console.info(`[WS PubSub] Redis ${role} client is ready`);
+    });
+
+    return client;
+  } catch (err) {
+    const error = err as Error;
+    logError({ message: `[WS PubSub] Failed to duplicate Redis client for ${role}`, errorMessage: error.message, errorStack: error.stack });
+    return null;
+  }
+}
+
+const redisSubscriber = createRedisDuplicate('subscriber');
+const redisPublisher = createRedisDuplicate('publisher');
 
 async function publishWsBroadcast(payload: any) {
   if (!redisPublisher || redisPublisher.status !== 'ready') return;
@@ -103,7 +128,7 @@ async function publishWsBroadcast(payload: any) {
 }
 
 if (redisSubscriber) {
-  redisSubscriber.on('message', (_channel, message) => {
+  redisSubscriber.on('message', (_channel: string, message: string) => {
     try {
       const parsed = JSON.parse(message);
       wsClients.forEach(ws => {
@@ -113,9 +138,20 @@ if (redisSubscriber) {
       console.warn('[WS PubSub] Failed to process incoming broadcast:', err);
     }
   });
-  redisSubscriber.subscribe('anygpt:ws:broadcast').catch(err => {
-    console.warn('[WS PubSub] Failed to subscribe to channel:', err);
-  });
+
+  const subscribeToChannel = () => {
+    redisSubscriber.subscribe('anygpt:ws:broadcast').catch((err: unknown) => {
+      console.warn('[WS PubSub] Failed to subscribe to channel:', err);
+    });
+  };
+
+  if (redisSubscriber.status === 'ready') {
+    // Already connected; subscribe immediately.
+    subscribeToChannel();
+  } else {
+    // Defer subscription until the duplicated client is ready.
+    redisSubscriber.once('ready', subscribeToChannel);
+  }
 }
 
 async function checkSharedRateLimit(apiKey: string, limits: TierLimits) {
@@ -158,7 +194,25 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
     };
 
     const rateCheck = async (): Promise<boolean> => {
-      if (!ctx.apiKey || !ctx.tierLimits) return true; // until auth completes
+      const now = Date.now();
+
+      // Always prune local windows before applying any limits
+      prune(ctx.rate.second, now - 1000);
+      prune(ctx.rate.minute, now - 60_000);
+      prune(ctx.rate.day, now - 86_400_000);
+
+      // If the client is not yet authenticated, apply a strict default rate limit
+      if (!ctx.apiKey || !ctx.tierLimits) {
+        if (ctx.rate.second.timestamps.length >= UNAUTH_RPS) return false;
+        if (ctx.rate.minute.timestamps.length >= UNAUTH_RPM) return false;
+        if (ctx.rate.day.timestamps.length >= UNAUTH_RPD) return false;
+
+        ctx.rate.second.timestamps.push(now);
+        ctx.rate.minute.timestamps.push(now);
+        ctx.rate.day.timestamps.push(now);
+        return true;
+      }
+
       if (ctx.tierLimits.rps <= 0 || ctx.tierLimits.rpm <= 0 || ctx.tierLimits.rpd <= 0) {
         return false;
       }
@@ -170,11 +224,6 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
         if (shared.rpd > ctx.tierLimits.rpd) return false;
         return true;
       }
-
-      const now = Date.now();
-      prune(ctx.rate.second, now - 1000);
-      prune(ctx.rate.minute, now - 60_000);
-      prune(ctx.rate.day, now - 86_400_000);
 
       const { rps, rpm, rpd } = ctx.tierLimits;
       if (ctx.rate.second.timestamps.length >= rps) return false;
@@ -234,13 +283,14 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
           if (typeof content !== 'string' && !Array.isArray(content)) {
             return send({ type: 'error', code: 'bad_request', message: 'Last message content must be string or array', requestId });
           }
-          if (payload.reasoning === undefined && payload.reasoning_effort !== undefined) {
-            payload.reasoning = payload.reasoning_effort;
-          }
+          const normalizedReasoning =
+            payload.reasoning === undefined && payload.reasoning_effort !== undefined
+              ? payload.reasoning_effort
+              : payload.reasoning;
           const sharedMessageOptions = {
             tools: Array.isArray(payload.tools) ? payload.tools : undefined,
             tool_choice: payload.tool_choice,
-            reasoning: payload.reasoning,
+            reasoning: normalizedReasoning,
           };
           const formattedMessages = messages.map((msg) => ({
             role: msg.role,
@@ -286,7 +336,12 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
                 }
               }
 
-              await updateUserTokenUsage(totalTokenUsage, ctx.apiKey);
+              try {
+                await updateUserTokenUsage(totalTokenUsage, ctx.apiKey);
+              } catch (updateErr) {
+                // Log usage update failures but do not block the response to the client
+                logError({ message: 'Failed to update user token usage in WebSocket handler', apiKey: ctx.apiKey, totalTokenUsage, requestId, error: updateErr });
+              }
 
               const finalPayload: ChatCompleteResponse = {
                 type: 'chat.complete',
