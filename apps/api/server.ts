@@ -184,7 +184,7 @@ async function generalAuthMiddleware(request: Request, response: Response, next:
                 request.userTier = validationResult.userData.tier;
                 request.tierLimits = validationResult.tierLimits;
             } else {
-                console.warn(`GeneralAuth: Invalid or unrecognized API key provided. URI: ${request.path}, Key Prefix: ${apiKey.substring(0, Math.min(5, apiKey.length))}...`);
+                console.warn(`GeneralAuth: Invalid or unrecognized API key provided. URI: ${request.path}`);
             }
         } catch (error: any) {
             await logError({ message: 'Error during general API key validation', errorMessage: error.message, errorStack: error.stack, apiKeyProvided: !!apiKey }, request);
