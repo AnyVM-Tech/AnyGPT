@@ -11,6 +11,8 @@ interface RealtimeConfig {
     model: string;
 }
 
+type RealtimeMessage = string | Buffer | ArrayBuffer | Uint8Array;
+
 function isOpenAIHost(urlStr?: string | null): boolean {
     if (!urlStr) return false;
     try {
@@ -83,11 +85,11 @@ async function pickRealtimeProvider(modelId: string): Promise<RealtimeConfig | n
 
 export function attachRealtimeWebSocket(app: { ws: (path: string, handler: (ws: WSWrapper, req: RequestContext) => void) => void }) {
     app.ws('/v1/realtime', (clientWs: WSWrapper, req: RequestContext) => {
-        let upstreamWs: any = null;
+        let upstreamWs: NodeWebSocket | null = null;
         let isAuthenticated = false;
         let userId: string | null = null;
         let userApiKey: string | null = null;
-        let messageBuffer: any[] = []; // Buffer messages until upstream connects
+        let messageBuffer: RealtimeMessage[] = []; // Buffer messages until upstream connects
 
         // 1. Authenticate Client
         // Query param 'api-key' or Header 'Authorization' (or 'api-key')
@@ -143,23 +145,22 @@ export function attachRealtimeWebSocket(app: { ws: (path: string, handler: (ws: 
             }
 
             try {
-                // Use 'any' cast to bypass strict DOM WebSocket constructor checks
-                upstreamWs = new (NodeWebSocket as any)(config.url, {
+                upstreamWs = new NodeWebSocket(config.url, {
                     headers: {
                         'Authorization': `Bearer ${config.apiKey}`,
                         'OpenAI-Beta': 'realtime=v1',
                     }
                 });
 
-                (upstreamWs as any).on('open', () => {
+                upstreamWs.on('open', () => {
                     // Flush buffer
                     for (const msg of messageBuffer) {
-                        (upstreamWs as any)?.send(msg);
+                        upstreamWs?.send(msg);
                     }
                     messageBuffer = [];
                 });
 
-                (upstreamWs as any).on('message', async (data: any) => {
+                upstreamWs.on('message', async (data: any) => {
                     // Forward to client
                     // uWS send expects string or ArrayBuffer
                     // WebSocket data is Buffer | ArrayBuffer | Buffer[]
@@ -181,7 +182,14 @@ export function attachRealtimeWebSocket(app: { ws: (path: string, handler: (ws: 
                                 const usage = event.response.usage;
                                 const total = (usage.input_tokens || 0) + (usage.output_tokens || 0);
                                 if (total > 0 && userApiKey) {
-                                    updateUserTokenUsage(total, userApiKey).catch(err => console.error('Realtime usage update failed', err));
+                                    updateUserTokenUsage(total, userApiKey).catch(err => {
+                                        logError({
+                                            message: 'Realtime usage update failed',
+                                            error: err,
+                                            userApiKey,
+                                            totalTokens: total,
+                                        });
+                                    });
                                 }
                             }
                         } catch { /* ignore parse error for usage tracking */ }
@@ -195,13 +203,13 @@ export function attachRealtimeWebSocket(app: { ws: (path: string, handler: (ws: 
                     }
                 });
 
-                (upstreamWs as any).on('error', (err: any) => {
-                    console.error('Realtime Upstream Error:', err);
+                upstreamWs.on('error', (err: any) => {
+                    logError({ message: 'Realtime Upstream Error', error: err });
                     clientWs.send(JSON.stringify({ type: 'error', error: { type: 'server_error', message: 'Upstream connection error.' } }));
                     clientWs.close();
                 });
 
-                (upstreamWs as any).on('close', () => {
+                upstreamWs.on('close', () => {
                     clientWs.close();
                 });
 
