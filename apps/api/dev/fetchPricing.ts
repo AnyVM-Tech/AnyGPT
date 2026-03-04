@@ -5,7 +5,7 @@
  * - OpenRouter API (for models they host — subtract their ~5% markup for direct pricing estimate)
  * - Manual entries for known official prices
  * 
- * Usage: node dist/dev/fetchPricing.js
+ * Usage: node dist/production/dev/fetchPricing.js
  */
 
 import fs from 'fs';

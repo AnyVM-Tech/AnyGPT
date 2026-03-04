@@ -2,7 +2,7 @@
 	"compilerOptions": {
 	  "target": "ES2022",
 	  "module": "ESNext",
-	  "outDir": "./dist",
+		"outDir": "./dist/production",
 	  "strict": true,
 	  "esModuleInterop": true,
 	  "skipLibCheck": true,
@@ -22,6 +22,8 @@
 	"exclude": [
 		"node_modules",
 		"dist",
+		"dist/production",
+		"dist/experimental",
 		"logs",
 		"providers.json",
 		"keys.json",

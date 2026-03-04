@@ -189,7 +189,17 @@ apps/api/
     # Start the compiled server
     pnpm start
     ```
-    The build process outputs JavaScript files to `dist/` and the start script runs `./dist/server.js`.
+    The production build outputs JavaScript files to `dist/production/` and the start script runs `./dist/production/server.js`.
+
+*   **Experimental Build & Start:**
+    ```bash
+    # Build the experimental bundle
+    pnpm run build:experimental
+
+    # Start the experimental bundle
+    pnpm run start:experimental
+    ```
+    The experimental build outputs JavaScript files to `dist/experimental/`.
 
 ## Testing
 

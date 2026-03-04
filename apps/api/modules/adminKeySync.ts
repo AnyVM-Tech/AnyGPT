@@ -162,7 +162,10 @@ async function releaseLock(): Promise<void> {
 
 function resolveScriptTarget(script: string): { cmd: string; args: string[] } {
   const tsPath = path.resolve(BASE_DIR, script);
-  const distPath = path.resolve(BASE_DIR, 'dist', script.replace(/\.ts$/, '.js'));
+  const distRoot = process.env.API_DIST_DIR
+    ? path.resolve(BASE_DIR, process.env.API_DIST_DIR)
+    : path.resolve(BASE_DIR, 'dist', 'production');
+  const distPath = path.resolve(distRoot, script.replace(/\.ts$/, '.js'));
 
   if ((RUNNER === 'tsgo' || RUNNER === 'node') && fs.existsSync(distPath)) {
     return { cmd: NODE_PATH, args: [distPath] };
