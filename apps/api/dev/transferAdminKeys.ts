@@ -3,6 +3,7 @@ import path from 'path';
 import axios from 'axios';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { createHash } from 'crypto';
+import { hashToken } from '../modules/redaction.js';
 import type { Provider, Model } from '../providers/interfaces.js';
 import { dataManager, LoadedProviders } from '../modules/dataManager.js';
 import { upsertProviderById } from '../modules/providerUpsert.js';
@@ -81,7 +82,8 @@ interface ProbeProviderStatus {
 }
 
 function hashId(key: string): string {
-  return createHash('sha256').update(key).digest('hex').slice(0, 8);
+  if (!key) return 'unknown';
+  return hashToken(key).slice(0, 12);
 }
 
 function readJsonFile<T>(filePath: string, fallback: T): T {
