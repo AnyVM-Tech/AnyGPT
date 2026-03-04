@@ -5,6 +5,9 @@ import { dataManager, LoadedProviders, LoadedProviderData } from '../modules/dat
 import { logError } from '../modules/errorLogger.js';
 import crypto from 'crypto';
 
+const WS_OPEN: 1 = 1; // NodeWebSocket.OPEN
+const WS_CONNECTING: 0 = 0; // NodeWebSocket.CONNECTING
+
 interface RealtimeConfig {
     url: string;
     apiKey: string;
@@ -71,7 +74,7 @@ async function pickRealtimeProvider(modelId: string): Promise<RealtimeConfig | n
             } else {
                 // For custom proxies, we might need to trust their URL or adapt it.
                 // Assuming standard OpenAI compatible proxies:
-                baseUrl = selected.provider_url.replace(/^http/, 'ws').replace(/\/chat\/completions$/, '/realtime');
+                baseUrl = selected.provider_url.replace(/^https?/, 'wss').replace(/\/chat\/completions$/, '/realtime');
             }
         } catch { /* ignore invalid URLs */ }
     }
@@ -90,6 +93,26 @@ export function attachRealtimeWebSocket(app: { ws: (path: string, handler: (ws: 
         let userId: string | null = null;
         let userApiKey: string | null = null;
         let messageBuffer: RealtimeMessage[] = []; // Buffer messages until upstream connects
+        const MAX_BUFFERED_MESSAGES = 100;
+        const UPSTREAM_CONNECT_TIMEOUT_MS = 15000;
+        let upstreamConnectTimeout: NodeJS.Timeout | null = null;
+
+        upstreamConnectTimeout = setTimeout(() => {
+            if (!upstreamWs || upstreamWs.readyState !== WS_OPEN) {
+                clientWs.send(JSON.stringify({
+                    type: 'error',
+                    error: {
+                        type: 'connection_error',
+                        message: 'Upstream connection failed to establish in time.'
+                    }
+                }));
+                try {
+                    clientWs.close();
+                } finally {
+                    messageBuffer = [];
+                }
+            }
+        }, UPSTREAM_CONNECT_TIMEOUT_MS);
 
         // 1. Authenticate Client
         // Query param 'api-key' or Header 'Authorization' (or 'api-key')
@@ -153,6 +176,10 @@ export function attachRealtimeWebSocket(app: { ws: (path: string, handler: (ws: 
                 });
 
                 upstreamWs.on('open', () => {
+                    if (upstreamConnectTimeout) {
+                        clearTimeout(upstreamConnectTimeout);
+                        upstreamConnectTimeout = null;
+                    }
                     // Flush buffer
                     for (const msg of messageBuffer) {
                         upstreamWs!.send(msg);
@@ -215,7 +242,7 @@ export function attachRealtimeWebSocket(app: { ws: (path: string, handler: (ws: 
                 });
 
             } catch (err: any) {
-                console.error('Realtime Connection Setup Error:', err);
+                logError('Realtime Connection Setup Error', err);
                 clientWs.send(JSON.stringify({ type: 'error', error: { type: 'server_error', message: 'Failed to connect to provider.' } }));
                 clientWs.close();
             }
@@ -224,30 +251,38 @@ export function attachRealtimeWebSocket(app: { ws: (path: string, handler: (ws: 
         clientWs.on('message', (msg: ArrayBuffer | string, isBinary: boolean) => {
             if (!isAuthenticated) {
                 // Buffer until auth & connection ready
-                if (typeof msg === 'string') {
-                    messageBuffer.push(Buffer.from(msg));
-                } else {
-                    messageBuffer.push(msg);
+                if (messageBuffer.length < MAX_BUFFERED_MESSAGES) {
+                    if (typeof msg === 'string') {
+                        messageBuffer.push(Buffer.from(msg));
+                    } else {
+                        messageBuffer.push(msg);
+                    }
                 }
                 return;
             }
 
-            if (upstreamWs && upstreamWs.readyState === 1 /* OPEN */) {
+            if (upstreamWs && upstreamWs.readyState === WS_OPEN) {
                 upstreamWs.send(msg);
             } else {
                 // Buffer or drop?
                 // If upstream is connecting, buffer.
-                if (typeof msg === 'string') {
-                    messageBuffer.push(Buffer.from(msg));
-                } else {
-                    messageBuffer.push(msg);
+                if (messageBuffer.length < MAX_BUFFERED_MESSAGES) {
+                    if (typeof msg === 'string') {
+                        messageBuffer.push(Buffer.from(msg));
+                    } else {
+                        messageBuffer.push(msg);
+                    }
                 }
             }
         });
 
         clientWs.on('close', () => {
+            if (upstreamConnectTimeout) {
+                clearTimeout(upstreamConnectTimeout);
+                upstreamConnectTimeout = null;
+            }
             if (upstreamWs) {
-                if (upstreamWs.readyState === 1 /* OPEN */ || upstreamWs.readyState === 0 /* CONNECTING */) {
+                if (upstreamWs.readyState === WS_OPEN || upstreamWs.readyState === WS_CONNECTING) {
                     upstreamWs.close();
                 }
             }
