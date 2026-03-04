@@ -6,6 +6,7 @@ import { normalizeApiKey } from '../modules/middlewareFactory.js';
 import { logError } from '../modules/errorLogger.js';
 import redis from '../modules/db.js';
 import { incrementSharedRateLimitCounters } from '../modules/rateLimitRedis.js';
+import { estimateTokensFromText } from '../modules/tokenEstimation.js';
 
 // Lightweight structures for WebSocket JSON protocol
 // Incoming message shapes
@@ -183,7 +184,7 @@ interface MessageResult {
   finish_reason?: string;
 }
 
-function estimateTokens(text: string): number { return Math.ceil(text.length / 4); }
+function estimateTokens(text: string): number { return estimateTokensFromText(text); }
 function prune(window: RateWindow, cutoff: number): void { window.timestamps = window.timestamps.filter(ts => ts >= cutoff); }
 
 export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrapper, req: RequestContext) => void) => void }) {
@@ -287,6 +288,8 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
           if (typeof content !== 'string' && !Array.isArray(content)) {
             return send({ type: 'error', code: 'bad_request', message: 'Last message content must be string or array', requestId });
           }
+          // Prefer the more explicit `reasoning_effort` field when present; fall back to
+          // the legacy/general `reasoning` field for backward compatibility.
           const normalizedReasoning =
             payload.reasoning_effort !== undefined
               ? payload.reasoning_effort
@@ -344,7 +347,7 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
                 await updateUserTokenUsage(totalTokenUsage, ctx.apiKey);
               } catch (updateErr) {
                 // Log usage update failures but do not block the response to the client
-                await logError({ message: 'Failed to update user token usage in WebSocket handler', apiKey: ctx.apiKey, totalTokenUsage, requestId, error: updateErr });
+                await logError({ message: 'Failed to update user token usage in WebSocket handler', totalTokenUsage, requestId, error: updateErr });
               }
 
               const finalPayload: ChatCompleteResponse = {
