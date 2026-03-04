@@ -10,13 +10,28 @@ interface RealtimeConfig {
     model: string;
 }
 
+function isOpenAIHost(urlStr?: string | null): boolean {
+    if (!urlStr) return false;
+    try {
+        const u = new URL(urlStr);
+        const host = u.hostname.toLowerCase();
+        if (host === 'api.openai.com' || host === 'openai.com') {
+            return true;
+        }
+        // Allow other subdomains of openai.com, e.g. foo.openai.com
+        return host.endsWith('.openai.com');
+    } catch {
+        return false;
+    }
+}
+
 async function pickRealtimeProvider(modelId: string): Promise<RealtimeConfig | null> {
     const providers = await dataManager.load<LoadedProviders>('providers');
     // Prioritize providers that explicitly list the model
     const candidates = providers.filter((p: LoadedProviderData) => 
         !p.disabled && 
         p.apiKey && 
-        (p.id.includes('openai') || p.provider_url?.includes('api.openai.com')) &&
+        (p.id.includes('openai') || isOpenAIHost(p.provider_url)) &&
         (p.models && modelId in p.models)
     );
 
@@ -28,7 +43,7 @@ async function pickRealtimeProvider(modelId: string): Promise<RealtimeConfig | n
         const fallbacks = providers.filter((p: LoadedProviderData) => 
             !p.disabled && 
             p.apiKey && 
-            (p.id.includes('openai') || p.provider_url?.includes('api.openai.com'))
+            (p.id.includes('openai') || isOpenAIHost(p.provider_url))
         );
         if (fallbacks.length > 0) {
             selected = fallbacks[Math.floor(Math.random() * fallbacks.length)];
@@ -47,7 +62,7 @@ async function pickRealtimeProvider(modelId: string): Promise<RealtimeConfig | n
     if (selected.provider_url) {
         try {
             const u = new URL(selected.provider_url);
-            if (u.hostname.includes('openai.com')) {
+            if (isOpenAIHost(selected.provider_url)) {
                 // If it's a standard OpenAI host, enforce wss protocol and /v1/realtime path
                 baseUrl = `wss://${u.hostname}/v1/realtime`;
             } else {
