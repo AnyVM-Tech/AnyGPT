@@ -1,10 +1,12 @@
 import { RequestContext, WSWrapper } from '../lib/uws-compat.js';
 import { messageHandler, ChatMessage } from '../providers/handler.js';
+import type { IMessage } from '../providers/interfaces.js';
 import { validateApiKeyAndUsage, updateUserTokenUsage } from '../modules/userData.js';
 import { normalizeApiKey } from '../modules/middlewareFactory.js';
 import { logError } from '../modules/errorLogger.js';
 import redis from '../modules/db.js';
 import { incrementSharedRateLimitCounters } from '../modules/rateLimitRedis.js';
+import { estimateTokensFromText } from '../modules/tokenEstimation.js';
 
 // Lightweight structures for WebSocket JSON protocol
 // Incoming message shapes
@@ -189,7 +191,7 @@ interface MessageResult {
   finish_reason?: string;
 }
 
-function estimateTokens(text: string): number { return Math.ceil(text.length / 4); }
+function estimateTokens(text: string): number { return estimateTokensFromText(text); }
 function prune(window: RateWindow, cutoff: number): void { window.timestamps = window.timestamps.filter(ts => ts >= cutoff); }
 
 export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrapper, req: RequestContext) => void) => void }) {
@@ -293,6 +295,8 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
           if (typeof content !== 'string' && !Array.isArray(content)) {
             return send({ type: 'error', code: 'bad_request', message: 'Last message content must be string or array', requestId });
           }
+          // Prefer the more explicit `reasoning_effort` field when present; fall back to
+          // the legacy/general `reasoning` field for backward compatibility.
           const normalizedReasoning =
             payload.reasoning_effort !== undefined
               ? payload.reasoning_effort
@@ -314,7 +318,7 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
 
           if (stream) {
             try {
-              const streamHandler = messageHandler.handleStreamingMessages(formattedMessages as ChatMessage[], model, ctx.apiKey, { requestId });
+              const streamHandler = messageHandler.handleStreamingMessages(formattedMessages as unknown as IMessage[], model, ctx.apiKey, { requestId });
 
               let totalTokenUsage = 0;
               let providerId: string | undefined;
@@ -350,7 +354,7 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
                 await updateUserTokenUsage(totalTokenUsage, ctx.apiKey);
               } catch (updateErr) {
                 // Log usage update failures but do not block the response to the client
-                await logError({ message: 'Failed to update user token usage in WebSocket handler', apiKey: ctx.apiKey, totalTokenUsage, requestId, error: updateErr });
+                await logError({ message: 'Failed to update user token usage in WebSocket handler', totalTokenUsage, requestId, error: updateErr });
               }
 
               const finalPayload: ChatCompleteResponse = {
@@ -384,7 +388,7 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
           }
 
           try {
-            const result: MessageResult = await messageHandler.handleMessages(formattedMessages as ChatMessage[], model, ctx.apiKey, requestId);
+            const result: MessageResult = await messageHandler.handleMessages(formattedMessages as unknown as IMessage[], model, ctx.apiKey, requestId);
             const totalTokens = typeof result.tokenUsage === 'number' ? result.tokenUsage : estimateTokens(result.response || '');
             await updateUserTokenUsage(totalTokens, ctx.apiKey);
 

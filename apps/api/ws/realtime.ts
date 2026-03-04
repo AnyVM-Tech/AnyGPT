@@ -97,23 +97,6 @@ export function attachRealtimeWebSocket(app: { ws: (path: string, handler: (ws: 
         const UPSTREAM_CONNECT_TIMEOUT_MS = 15000;
         let upstreamConnectTimeout: NodeJS.Timeout | null = null;
 
-        upstreamConnectTimeout = setTimeout(() => {
-            if (!upstreamWs || upstreamWs.readyState !== WS_OPEN) {
-                clientWs.send(JSON.stringify({
-                    type: 'error',
-                    error: {
-                        type: 'connection_error',
-                        message: 'Upstream connection failed to establish in time.'
-                    }
-                }));
-                try {
-                    clientWs.close();
-                } finally {
-                    messageBuffer = [];
-                }
-            }
-        }, UPSTREAM_CONNECT_TIMEOUT_MS);
-
         // 1. Authenticate Client
         // Query param 'api-key' or Header 'Authorization' (or 'api-key')
         // Note: uWS RequestContext headers are lowercase
@@ -150,10 +133,17 @@ export function attachRealtimeWebSocket(app: { ws: (path: string, handler: (ws: 
 
         // 3. Connect Upstream
         const connectPromise = validationPromise.then(async (valid) => {
-            if (!valid) return;
+            if (!valid) {
+                // Authentication failed; clear any buffered messages before closing.
+                messageBuffer.length = 0;
+                clientWs.send(JSON.stringify({ type: 'error', error: { type: 'authentication_error', message: 'Authentication failed.' } }));
+                clientWs.close();
+                return;
+            }
 
             const modelId = (req.query['model'] as string);
             if (!modelId) {
+                 messageBuffer.length = 0;
                  clientWs.send(JSON.stringify({ type: 'error', error: { type: 'invalid_request_error', message: 'Model parameter is required.' } }));
                  clientWs.close();
                  return;
@@ -162,10 +152,30 @@ export function attachRealtimeWebSocket(app: { ws: (path: string, handler: (ws: 
             const config = await pickRealtimeProvider(modelId);
 
             if (!config) {
+                messageBuffer.length = 0;
                 clientWs.send(JSON.stringify({ type: 'error', error: { type: 'server_error', message: 'No available provider for Realtime API.' } }));
                 clientWs.close();
                 return;
             }
+
+            // Start the upstream connection timeout only after authentication succeeds
+            // and just before initiating the upstream connection.
+            upstreamConnectTimeout = setTimeout(() => {
+                if (!upstreamWs || upstreamWs.readyState !== WS_OPEN) {
+                    clientWs.send(JSON.stringify({
+                        type: 'error',
+                        error: {
+                            type: 'connection_error',
+                            message: 'Upstream connection failed to establish in time.'
+                        }
+                    }));
+                    try {
+                        clientWs.close();
+                    } finally {
+                        messageBuffer.length = 0;
+                    }
+                }
+            }, UPSTREAM_CONNECT_TIMEOUT_MS);
 
             try {
                 upstreamWs = new NodeWebSocket(config.url, {
@@ -184,7 +194,7 @@ export function attachRealtimeWebSocket(app: { ws: (path: string, handler: (ws: 
                     for (const msg of messageBuffer) {
                         upstreamWs!.send(msg);
                     }
-                    messageBuffer = [];
+                    messageBuffer.length = 0;
                 });
 
                 upstreamWs.on('message', async (data: any) => {
@@ -232,7 +242,7 @@ export function attachRealtimeWebSocket(app: { ws: (path: string, handler: (ws: 
                 });
 
                 upstreamWs.on('error', (err: any) => {
-                    logError('Realtime Upstream Error', err);
+                    logError({ message: 'Realtime Upstream Error', error: err });
                     clientWs.send(JSON.stringify({ type: 'error', error: { type: 'server_error', message: 'Upstream connection error.' } }));
                     clientWs.close();
                 });
@@ -242,7 +252,12 @@ export function attachRealtimeWebSocket(app: { ws: (path: string, handler: (ws: 
                 });
 
             } catch (err: any) {
-                logError('Realtime Connection Setup Error', err);
+                logError({
+                    message: 'Realtime Connection Setup Error',
+                    error: err,
+                });
+                // Clear any buffered messages since we cannot establish the upstream connection.
+                messageBuffer.length = 0;
                 clientWs.send(JSON.stringify({ type: 'error', error: { type: 'server_error', message: 'Failed to connect to provider.' } }));
                 clientWs.close();
             }
@@ -250,13 +265,17 @@ export function attachRealtimeWebSocket(app: { ws: (path: string, handler: (ws: 
 
         clientWs.on('message', (msg: ArrayBuffer | string, isBinary: boolean) => {
             if (!isAuthenticated) {
-                // Buffer until auth & connection ready
+                // Buffer until auth & connection ready. If the buffer is full, inform the client and close.
                 if (messageBuffer.length < MAX_BUFFERED_MESSAGES) {
                     if (typeof msg === 'string') {
                         messageBuffer.push(Buffer.from(msg));
                     } else {
                         messageBuffer.push(msg);
                     }
+                } else {
+                    clientWs.send(JSON.stringify({ type: 'error', error: { type: 'rate_limit_error', message: 'Message buffer limit exceeded before authentication.' } }));
+                    messageBuffer.length = 0;
+                    clientWs.close();
                 }
                 return;
             }
@@ -286,6 +305,8 @@ export function attachRealtimeWebSocket(app: { ws: (path: string, handler: (ws: 
                     upstreamWs.close();
                 }
             }
+            // Ensure any buffered messages are released when the client disconnects.
+            messageBuffer.length = 0;
         });
     });
 }
