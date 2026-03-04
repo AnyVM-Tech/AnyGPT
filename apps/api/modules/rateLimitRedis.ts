@@ -54,24 +54,28 @@ const RATE_LIMIT_HASH_SECRET: string = process.env.RATE_LIMIT_HASH_SECRET
 let warnedDefaultSecret = false;
 
 // Derive a stable, computationally hardened hash for API keys used in rate limiting.
-// This uses iterated HMAC-SHA256 with a fixed number of rounds to increase
-// the cost over a single hash while remaining lightweight enough for per-request use.
+// Use PBKDF2 (a standard, iterated key-derivation function) to increase the
+// computational cost of deriving the hash while keeping it deterministic per API key.
 function deriveApiKeyHash(context: string, apiKey: string): string {
-  // Initial HMAC over context and apiKey
-  let digest = crypto.createHmac('sha256', RATE_LIMIT_HASH_SECRET)
-    .update(context + apiKey)
+  // Derive a context-bound salt from the shared secret to keep the result stable
+  // while preventing simple precomputation attacks.
+  const salt = crypto.createHmac('sha256', RATE_LIMIT_HASH_SECRET)
+    .update(context)
     .digest();
 
-  // Apply additional HMAC iterations to increase computational effort
-  const iterations = 1000;
-  for (let i = 0; i < iterations; i++) {
-    const hmac = crypto.createHmac('sha256', RATE_LIMIT_HASH_SECRET);
-    hmac.update(digest);
-    hmac.update('rate-limit:iter'); // domain separation label
-    digest = hmac.digest();
-  }
+  // Use a reasonably high iteration count for additional computational effort.
+  const iterations = 100_000;
+  const keyLength = 32; // 256-bit derived key
 
-  return digest.toString('hex');
+  const derived = crypto.pbkdf2Sync(
+    apiKey,
+    salt,
+    iterations,
+    keyLength,
+    'sha256',
+  );
+
+  return derived.toString('hex');
 }
 
 function hashApiKey(apiKey: string): string {
