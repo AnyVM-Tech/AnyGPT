@@ -3,6 +3,7 @@ import NodeWebSocket from 'ws';
 import { validateApiKeyAndUsage, updateUserTokenUsage } from '../modules/userData.js';
 import { dataManager, LoadedProviders, LoadedProviderData } from '../modules/dataManager.js';
 import { logError } from '../modules/errorLogger.js';
+import crypto from 'crypto';
 
 interface RealtimeConfig {
     url: string;
@@ -37,7 +38,7 @@ async function pickRealtimeProvider(modelId: string): Promise<RealtimeConfig | n
 
     let selected: LoadedProviderData | undefined;
     if (candidates.length > 0) {
-        selected = candidates[Math.floor(Math.random() * candidates.length)];
+        selected = candidates[crypto.randomInt(0, candidates.length)];
     } else {
         // Fallback: any valid OpenAI provider (assuming they might support it even if not listed)
         const fallbacks = providers.filter((p: LoadedProviderData) => 
@@ -46,7 +47,7 @@ async function pickRealtimeProvider(modelId: string): Promise<RealtimeConfig | n
             (p.id.includes('openai') || isOpenAIHost(p.provider_url))
         );
         if (fallbacks.length > 0) {
-            selected = fallbacks[Math.floor(Math.random() * fallbacks.length)];
+            selected = fallbacks[crypto.randomInt(0, fallbacks.length)];
         }
     }
 
