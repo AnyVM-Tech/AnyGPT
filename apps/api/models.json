@@ -327,7 +327,7 @@
       "created": 1772393604100,
       "owned_by": "google",
       "providers": 136,
-      "throughput": 37,
+      "throughput": 35,
       "capabilities": [
         "text",
         "image_input"
@@ -2569,7 +2569,7 @@
       "created": 1772602230251,
       "owned_by": "anthropic",
       "providers": 1,
-      "throughput": 50
+      "throughput": 23
     },
     {
       "id": "qwen/qwen3-coder-next",
