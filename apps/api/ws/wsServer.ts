@@ -1,5 +1,5 @@
 import { RequestContext, WSWrapper } from '../lib/uws-compat.js';
-import { messageHandler } from '../providers/handler.js';
+import { messageHandler, ChatMessage } from '../providers/handler.js';
 import { validateApiKeyAndUsage, updateUserTokenUsage } from '../modules/userData.js';
 import { normalizeApiKey } from '../modules/middlewareFactory.js';
 import { logError } from '../modules/errorLogger.js';
@@ -23,6 +23,16 @@ import { incrementSharedRateLimitCounters } from '../modules/rateLimitRedis.js';
 // - Pong: { type: 'pong' }
 
 interface RateWindow { timestamps: number[]; }
+
+// Internal representation of chat messages passed to messageHandler
+type WsChatMessage = {
+  role: string;
+  content: unknown;
+  model: { id: string };
+  tools?: unknown[];
+  tool_choice?: unknown;
+  reasoning?: unknown;
+};
 
 interface WsClientContext {
   apiKey?: string;
@@ -284,7 +294,7 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
             return send({ type: 'error', code: 'bad_request', message: 'Last message content must be string or array', requestId });
           }
           const normalizedReasoning =
-            payload.reasoning === undefined && payload.reasoning_effort !== undefined
+            payload.reasoning_effort !== undefined
               ? payload.reasoning_effort
               : payload.reasoning;
           const sharedMessageOptions = {
@@ -292,7 +302,7 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
             tool_choice: payload.tool_choice,
             reasoning: normalizedReasoning,
           };
-          const formattedMessages = messages.map((msg) => ({
+          const formattedMessages: WsChatMessage[] = messages.map((msg) => ({
             role: msg.role,
             content: msg.content,
             model: { id: model },
@@ -304,7 +314,7 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
 
           if (stream) {
             try {
-              const streamHandler = messageHandler.handleStreamingMessages(formattedMessages as any, model, ctx.apiKey, { requestId });
+              const streamHandler = messageHandler.handleStreamingMessages(formattedMessages as ChatMessage[], model, ctx.apiKey, { requestId });
 
               let totalTokenUsage = 0;
               let providerId: string | undefined;
@@ -331,7 +341,7 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
                 } else if (result.type === 'final') {
                   if (typeof result.tokenUsage === 'number') totalTokenUsage = result.tokenUsage;
                   if (result.providerId) providerId = result.providerId;
-                  if (Array.isArray(result.tool_calls) && result.tool_calls.length > 0) toolCalls = result.tool_calls;
+                  if (Array.isArray(result.tool_calls)) toolCalls = result.tool_calls;
                   if (result.finish_reason) finishReason = result.finish_reason;
                 }
               }
@@ -340,7 +350,7 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
                 await updateUserTokenUsage(totalTokenUsage, ctx.apiKey);
               } catch (updateErr) {
                 // Log usage update failures but do not block the response to the client
-                logError({ message: 'Failed to update user token usage in WebSocket handler', apiKey: ctx.apiKey, totalTokenUsage, requestId, error: updateErr });
+                await logError({ message: 'Failed to update user token usage in WebSocket handler', apiKey: ctx.apiKey, totalTokenUsage, requestId, error: updateErr });
               }
 
               const finalPayload: ChatCompleteResponse = {
@@ -374,7 +384,7 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
           }
 
           try {
-            const result: MessageResult = await messageHandler.handleMessages(formattedMessages as any, model, ctx.apiKey, requestId);
+            const result: MessageResult = await messageHandler.handleMessages(formattedMessages as ChatMessage[], model, ctx.apiKey, requestId);
             const totalTokens = typeof result.tokenUsage === 'number' ? result.tokenUsage : estimateTokens(result.response || '');
             await updateUserTokenUsage(totalTokens, ctx.apiKey);
 
