@@ -73,7 +73,7 @@ export function setupMockProviderConfig() {
   console.log('[TEST-SETUP] Created mock provider configuration');
 
   // Add test API key to keys.json
-  let existingKeys = {};
+  let existingKeys: Record<string, typeof testUserKey> = {};
   if (fs.existsSync(keysFilePath)) {
     try {
       existingKeys = JSON.parse(fs.readFileSync(keysFilePath, 'utf8'));
@@ -82,10 +82,14 @@ export function setupMockProviderConfig() {
     }
   }
 
-  const updatedKeys = {
+  const updatedKeys: Record<string, typeof testUserKey> = {
     ...existingKeys,
     [testApiKey]: testUserKey
   };
+
+  if (!updatedKeys['test-key-for-mock-provider']) {
+    updatedKeys['test-key-for-mock-provider'] = testUserKey;
+  }
 
   fs.writeFileSync(keysFilePath, JSON.stringify(updatedKeys, null, 2));
   console.log('[TEST-SETUP] Added test API key to keys.json');
