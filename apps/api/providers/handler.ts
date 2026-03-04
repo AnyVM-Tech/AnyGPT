@@ -1474,3 +1474,4 @@ export class MessageHandler {
 const GEMINI_INPUT_TOKEN_LIMIT = readEnvNumber('GEMINI_INPUT_TOKEN_LIMIT', 1_048_576);
 
 export { messageHandler };
+export { ChatMessage } from './interfaces.js';
