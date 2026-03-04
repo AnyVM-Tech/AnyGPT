@@ -183,9 +183,11 @@ export function attachRealtimeWebSocket(app: { ws: (path: string, handler: (ws: 
                                 const total = (usage.input_tokens || 0) + (usage.output_tokens || 0);
                                 if (total > 0 && userApiKey) {
                                     updateUserTokenUsage(total, userApiKey).catch(err => {
-                                        logError('Realtime usage update failed', {
+                                        logError({
+                                            message: 'Realtime usage update failed',
                                             error: err,
-                                            userApiKey,
+                                            apiKey: userApiKey,
+                                            userId,
                                             totalTokens: total,
                                         });
                                     });

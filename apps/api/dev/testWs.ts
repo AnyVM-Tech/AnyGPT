@@ -5,7 +5,7 @@ import path from 'path';
 const envFile = process.env.NODE_ENV === 'test' ? '.env.test' : '.env';
 dotenv.config({ path: path.resolve(process.cwd(), envFile) });
 
-import WebSocket from 'ws';
+import WebSocket, { RawData } from 'ws';
 
 const API_KEY = process.env.TEST_API_KEY || 'test-key-for-mock-provider';
 const url = process.env.WS_URL || 'ws://localhost:3000/ws';
@@ -17,9 +17,19 @@ ws.on('open', () => {
   ws.send(JSON.stringify({ type: 'auth', apiKey: API_KEY }));
 });
 
-ws.on('message', (raw: Buffer | string) => {
+ws.on('message', (raw: RawData) => {
   let msg: any;
-  try { msg = JSON.parse(raw.toString()); } catch { console.log('Non-JSON message', raw.toString()); return; }
+  let text: string;
+  if (typeof raw === 'string') {
+    text = raw;
+  } else if (Buffer.isBuffer(raw)) {
+    text = raw.toString();
+  } else if (raw instanceof ArrayBuffer) {
+    text = Buffer.from(raw).toString();
+  } else {
+    text = Buffer.from(raw.buffer, raw.byteOffset, raw.byteLength).toString();
+  }
+  try { msg = JSON.parse(text); } catch { console.log('Non-JSON message', text); return; }
   console.log('<<', msg);
   if (msg.type === 'auth.ok') {
     // Non-streaming request
