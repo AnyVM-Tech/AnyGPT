@@ -29,6 +29,19 @@ export function redactAuthorizationHeader(value?: string | null): string | null 
   return redactToken(trimmed);
 }
 
+// Derive a stable, hard-to-brute-force identifier for an API key using PBKDF2.
+// NOTE: Changing these parameters will change the resulting hashes.
+const HASH_TOKEN_ITERATIONS = 100_000;
+const HASH_TOKEN_KEYLEN = 32; // 32 bytes = 256 bits
+const HASH_TOKEN_DIGEST = 'sha256';
+
 export function hashToken(value: string, secret: string = DEFAULT_HASH_SECRET): string {
-  return crypto.createHmac('sha256', secret).update(value).digest('hex');
+  const derived = crypto.pbkdf2Sync(
+    value,
+    secret,
+    HASH_TOKEN_ITERATIONS,
+    HASH_TOKEN_KEYLEN,
+    HASH_TOKEN_DIGEST
+  );
+  return derived.toString('hex');
 }
