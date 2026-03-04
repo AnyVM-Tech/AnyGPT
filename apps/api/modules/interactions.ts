@@ -137,7 +137,7 @@ export async function pickGeminiProviderKey(): Promise<string> {
         }
         return fallback.apiKey;
     }
-    return candidates[Math.floor(Math.random() * candidates.length)].apiKey!;
+    return candidates[crypto.randomInt(candidates.length)].apiKey!;
 }
 
 export async function executeGeminiInteraction(request: InteractionRequest, providerApiKey?: string): Promise<any> {
