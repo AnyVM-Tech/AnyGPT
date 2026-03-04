@@ -293,7 +293,7 @@
       "created": 1772393604100,
       "owned_by": "google",
       "providers": 136,
-      "throughput": 54,
+      "throughput": 55,
       "capabilities": [
         "text",
         "image_input"
