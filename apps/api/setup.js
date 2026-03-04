@@ -5,12 +5,18 @@ import { createInterface } from 'readline'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 import chalk from 'chalk'
+import { randomBytes } from 'crypto'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 
 let rl = null
 let question = null
+
+function generateSecureAdminApiKey() {
+  // 16 bytes => 32 hex characters; adjust size if a longer key is desired
+  return randomBytes(16).toString('hex')
+}
 
 function initPrompt() {
   rl = createInterface({
@@ -281,7 +287,7 @@ async function main() {
       if (adminId) config.adminUser.id = adminId
 
       const adminKey = await question(chalk.white('Admin API Key (leave empty for auto-generation): '))
-      config.adminUser.apiKey = adminKey || `admin-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+      config.adminUser.apiKey = adminKey || `admin-${generateSecureAdminApiKey()}`
     }
 
     console.log(chalk.blue('\n🌐 OpenRouter Headers (required by OpenRouter)'))

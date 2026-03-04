@@ -161,13 +161,13 @@ export async function validateApiKeyAndUsage(apiKey: string): Promise<{ valid: b
   logger.debug(`[validateApiKeyAndUsage] Tier limits resolved for API key hash: ${apiKeyHash}`);
 
   if (!tierLimits) {
-      const errorMsg = `Invalid tier ('${userData.tier}') for key ${apiKey.substring(0,6)}...`;
+      const errorMsg = `Invalid tier ('${userData.tier}') for API key hash ${apiKeyHash}`;
       logger.warn(`[validateApiKeyAndUsage] ${errorMsg}`);
       return { valid: false, error: errorMsg, userData };
   }
 
   if (tierLimits.max_tokens !== null && userData.tokenUsage >= tierLimits.max_tokens) {
-      const errorMsg = `Token limit (${tierLimits.max_tokens}) reached for key ${apiKey.substring(0,6)}...`;
+      const errorMsg = `Token limit (${tierLimits.max_tokens}) reached for API key hash ${apiKeyHash}`;
       logger.warn(`[validateApiKeyAndUsage] ${errorMsg}`);
       return { valid: false, error: errorMsg, userData, tierLimits };
   }

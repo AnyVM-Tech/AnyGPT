@@ -120,7 +120,7 @@ async function ensureInitialAdminKey() {
             console.log('!!! INITIAL ADMIN API KEY GENERATED - SAVE THIS SECURELY AND STORE IT SAFELY !!!');
             console.log('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!');
             console.log(`  User ID: ${defaultAdminUserId}`);
-            console.log(`  API Key: ${newAdminApiKey}`);
+            console.log('  API Key: <generated and stored securely; do NOT log or share this value>');
             console.log(`  Role: admin`);
             console.log(`  Tier: ${adminTier}`);
             console.log("  Use this key with 'Authorization: Bearer <API_KEY>' header to access admin endpoints");
@@ -184,7 +184,7 @@ async function generalAuthMiddleware(request: Request, response: Response, next:
                 request.userTier = validationResult.userData.tier;
                 request.tierLimits = validationResult.tierLimits;
             } else {
-                console.warn(`GeneralAuth: Invalid or unrecognized API key provided. URI: ${request.path}, Key Prefix: ${apiKey.substring(0, Math.min(5, apiKey.length))}...`);
+                console.warn(`GeneralAuth: Invalid or unrecognized API key provided. URI: ${request.path}`);
             }
         } catch (error: any) {
             await logError({ message: 'Error during general API key validation', errorMessage: error.message, errorStack: error.stack, apiKeyProvided: !!apiKey }, request);

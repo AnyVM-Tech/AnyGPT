@@ -59,13 +59,24 @@ function normalizeTier(tier?: string): string | null {
 function summarizeApiKey(apiKey: string, user: { userId: string; role: string; tier: string; tokenUsage: number; requestCount: number }) {
     return {
         apiKeyMasked: redactToken(apiKey),
-        apiKeyHash: crypto.createHash('sha256').update(apiKey).digest('hex').slice(0, 12),
+        apiKeyHash: deriveApiKeyIdentifier(apiKey),
         userId: user.userId,
         role: user.role,
         tier: user.tier,
         tokenUsage: user.tokenUsage,
         requestCount: user.requestCount,
     };
+}
+
+function deriveApiKeyIdentifier(apiKey: string): string {
+    // Use a computationally expensive KDF to derive a short, non-reversible identifier.
+    const salt = 'admin-api-key-summary';
+    const iterations = 100000;
+    const keyLength = 32;
+    const digest = 'sha256';
+
+    const derived = crypto.pbkdf2Sync(apiKey, salt, iterations, keyLength, digest);
+    return derived.toString('hex').slice(0, 12);
 }
 
 function resolveApiKeySelector(keys: KeysFile, selector: { apiKey?: string; userId?: string }): { apiKey: string; user: KeysFile[string] } | null {

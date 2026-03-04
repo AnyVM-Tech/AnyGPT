@@ -12,7 +12,10 @@ program
   .action(async (userId: string) => {
     try {
       const apiKey = await generateAdminApiKey(userId);
-      console.log('Generated API key:', apiKey);
+      const maskedApiKey = typeof apiKey === 'string'
+        ? apiKey.replace(/.(?=.{4})/g, '*')
+        : '[non-string key]';
+      console.log('Generated API key for user:', userId, 'Key (masked):', maskedApiKey);
     } catch (error: any) {
       console.error('Error generating API key:', error.message);
     }

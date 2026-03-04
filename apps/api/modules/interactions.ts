@@ -36,7 +36,12 @@ function base64UrlDecode(input: string): Buffer {
 }
 
 function hashApiKey(apiKey: string): string {
-    return crypto.createHash('sha256').update(apiKey).digest('hex');
+    // Derive a stable, non-reversible identifier for the API key using a
+    // computationally expensive, secret-salted KDF rather than a fast hash.
+    const secret = getInteractionsSigningSecret();
+    // Use scrypt with a moderate work factor; 32-byte output is sufficient.
+    const derived = crypto.scryptSync(apiKey, secret, 32, { N: 1 << 15, r: 8, p: 1 });
+    return derived.toString('hex');
 }
 
 export function getInteractionsSigningSecret(): string {
@@ -137,7 +142,7 @@ export async function pickGeminiProviderKey(): Promise<string> {
         }
         return fallback.apiKey;
     }
-    return candidates[Math.floor(Math.random() * candidates.length)].apiKey!;
+    return candidates[crypto.randomInt(candidates.length)].apiKey!;
 }
 
 export async function executeGeminiInteraction(request: InteractionRequest, providerApiKey?: string): Promise<any> {

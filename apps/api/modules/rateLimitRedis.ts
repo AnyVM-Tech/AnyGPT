@@ -48,7 +48,9 @@ redis.call('EXPIRE', key, ttl)
 return {s_count, m_count, d_count}
 `;
 
-const RATE_LIMIT_HASH_SECRET = process.env.RATE_LIMIT_HASH_SECRET || process.env.API_KEY_HASH_SECRET || 'anygpt-rate-limit';
+const RATE_LIMIT_HASH_SECRET: string = process.env.RATE_LIMIT_HASH_SECRET
+  || process.env.API_KEY_HASH_SECRET
+  || crypto.randomBytes(32).toString('hex');
 const RATE_LIMIT_HASH_ITERATIONS = (() => {
   const raw = Number(process.env.RATE_LIMIT_HASH_ITERATIONS);
   if (Number.isFinite(raw) && raw >= 1000) return Math.floor(raw);
@@ -82,7 +84,6 @@ function getCachedApiKeyHash(apiKey: string): string | null {
     apiKeyHashCache.delete(apiKey);
     return null;
   }
-  // Refresh LRU position
   apiKeyHashCache.delete(apiKey);
   apiKeyHashCache.set(apiKey, entry);
   return entry.value;
@@ -97,7 +98,12 @@ function setCachedApiKeyHash(apiKey: string, value: string): void {
   apiKeyHashCache.set(apiKey, { value, expiresAt: Date.now() + RATE_LIMIT_HASH_CACHE_TTL_MS });
 }
 
+// Derive a stable, computationally hardened hash for API keys used in rate limiting.
+// Use PBKDF2 (a standard, iterated key-derivation function) to increase the
+// computational cost of deriving the hash while keeping it deterministic per API key.
 function deriveApiKeyHash(context: string, apiKey: string): string {
+  // Derive a context-bound salt from the shared secret to keep the result stable
+  // while preventing simple precomputation attacks.
   const salt = crypto.createHmac('sha256', RATE_LIMIT_HASH_SECRET)
     .update(context)
     .digest();
@@ -116,11 +122,12 @@ function deriveApiKeyHash(context: string, apiKey: string): string {
 function hashApiKey(apiKey: string): string {
   if (!process.env.RATE_LIMIT_HASH_SECRET && !process.env.API_KEY_HASH_SECRET && !warnedDefaultSecret) {
     warnedDefaultSecret = true;
-    logger.warn('[RateLimit] RATE_LIMIT_HASH_SECRET is not set; using default hash secret.');
+    logger.warn('[RateLimit] RATE_LIMIT_HASH_SECRET is not set; using a randomly generated per-process hash secret.');
   }
   const cached = getCachedApiKeyHash(apiKey);
   if (cached) return cached;
-  const derived = deriveApiKeyHash('rate-limit:api-key:', apiKey);
+  const context = 'rate-limit:api-key:';
+  const derived = deriveApiKeyHash(context, apiKey);
   setCachedApiKeyHash(apiKey, derived);
   return derived;
 }
