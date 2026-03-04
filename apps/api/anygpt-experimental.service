@@ -7,7 +7,7 @@ Type=simple
 WorkingDirectory=/home/skullcmd/AnyGPT/apps/api
 Environment=NODE_ENV=experimental
 Environment=API_DIST_DIR=dist/experimental
-Environment=PORT=3001
+Environment=PORT=3080
 Environment=NVM_DIR=/home/skullcmd/.nvm
 ExecStartPre=/usr/bin/bash -lc 'source /home/skullcmd/.nvm/nvm.sh && nvm exec 22 /home/skullcmd/AnyGPT/apps/api/node_modules/.bin/tsgo --project tsconfig.json --outDir ./dist/experimental --noEmit false'
 ExecStart=/usr/bin/bash -lc 'source /home/skullcmd/.nvm/nvm.sh && nvm exec 22 node ./dist/experimental/server.js'
