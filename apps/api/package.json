@@ -48,7 +48,7 @@
 	},
 	"devDependencies": {
 		"@types/jest": "^27.5.2",
-		"@types/node": "^20.19.35",
+		"@types/node": "^25.3.3",
 		"@types/ws": "^8.18.1",
 		"@typescript/native-preview": "7.0.0-dev.20260213.1",
 		"concurrently": "^8.2.2",
