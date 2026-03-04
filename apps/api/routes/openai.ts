@@ -74,6 +74,19 @@ async function incrementSharedCounters(apiKey: string) {
         return null;
     }
 }
+
+function isGeminiFreeTierZeroQuota(errorText: string): boolean {
+    const lower = String(errorText || '').toLowerCase();
+    if (!lower.includes('free_tier')) return false;
+    return /limit:\s*0/.test(lower);
+}
+
+function formatRateLimitMessage(retryAfterSeconds?: number | null): string {
+    if (retryAfterSeconds && retryAfterSeconds > 0) {
+        return `Rate limit or quota exceeded. Please retry after ${retryAfterSeconds}s.`;
+    }
+    return 'Rate limit or quota exceeded. Please retry later.';
+}
  
 // --- Request Extension ---
 declare module '../lib/uws-compat.js' {
@@ -1989,11 +2002,20 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
     let clientMessage = 'Internal Server Error';
     let clientReference = 'An unexpected error occurred while processing your chat request.';
     const errorMeta = error as any;
+    const retryAfterSeconds = extractRetryAfterSeconds(errorText);
+    const rateLimitMessage = formatRateLimitMessage(retryAfterSeconds);
+    const isFreeTierZeroQuota = isGeminiFreeTierZeroQuota(errorText);
+    const errorModelId = errorMeta?.modelId;
 
     // All providers rate-limited — return 429 with Retry-After
-    if (errorMeta?.allSkippedByRateLimit) {
+    if (isFreeTierZeroQuota) {
+        statusCode = 403;
+        clientMessage = errorModelId
+            ? `Model ${errorModelId} is not available for Gemini free-tier keys. Use a different model or a paid Gemini key.`
+            : 'This model is not available for Gemini free-tier keys. Use a different model or a paid Gemini key.';
+    } else if (errorMeta?.allSkippedByRateLimit) {
         statusCode = 429;
-        clientMessage = errorText;
+        clientMessage = rateLimitMessage;
     } else if (errorMeta?.code === 'INPUT_TOKENS_EXCEEDED' && errorMeta?.hasImageInput) {
         statusCode = 400;
         clientMessage = 'Bad Request: image input too large for the model limit. Reduce image size or use a smaller image URL.';
@@ -2005,10 +2027,10 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
         clientMessage = 'Invalid JSON';
     } else if (isRateLimitError(errorText)) {
         statusCode = 429;
-        clientMessage = errorText;
+        clientMessage = rateLimitMessage;
     } else if (errorText.includes('Unauthorized') || errorText.includes('limit reached')) {
         statusCode = errorText.includes('limit reached') ? 429 : 401;
-        clientMessage = errorText;
+        clientMessage = errorText.includes('limit reached') ? rateLimitMessage : errorText;
     } else if (
         errorText.toLowerCase().includes('requires more credits') ||
         errorText.toLowerCase().includes('insufficient credits') ||
@@ -2045,16 +2067,17 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
     }
 
     if (!response.completed) {
-       if (statusCode === 429) {
-           const retryAfterSeconds = extractRetryAfterSeconds(errorText);
-           if (retryAfterSeconds) {
-               response.setHeader('Retry-After', String(retryAfterSeconds));
-           }
+       if (statusCode === 429 && retryAfterSeconds) {
+           response.setHeader('Retry-After', String(retryAfterSeconds));
        }
        if (statusCode === 500) {
-           response.status(statusCode).json({ error: clientMessage, reference: clientReference, timestamp });
+            response.status(statusCode).json({ error: clientMessage, reference: clientReference, timestamp });
        } else {
-           response.status(statusCode).json({ error: clientMessage, timestamp });
+            const payload: Record<string, any> = { error: clientMessage, timestamp };
+            if (statusCode === 429 && retryAfterSeconds) {
+                payload.retry_after_seconds = retryAfterSeconds;
+            }
+            response.status(statusCode).json(payload);
        }
     } else { return; }
   }
@@ -2426,11 +2449,20 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
         let clientMessage = 'Internal Server Error';
         let clientReference = 'An unexpected error occurred while processing your responses request.';
         const errorMeta = error as any;
+        const retryAfterSeconds = extractRetryAfterSeconds(errorText);
+        const rateLimitMessage = formatRateLimitMessage(retryAfterSeconds);
+        const isFreeTierZeroQuota = isGeminiFreeTierZeroQuota(errorText);
+        const errorModelId = errorMeta?.modelId;
 
         // All providers rate-limited — return 429 with Retry-After
-        if (errorMeta?.allSkippedByRateLimit) {
+        if (isFreeTierZeroQuota) {
+            statusCode = 403;
+            clientMessage = errorModelId
+                ? `Model ${errorModelId} is not available for Gemini free-tier keys. Use a different model or a paid Gemini key.`
+                : 'This model is not available for Gemini free-tier keys. Use a different model or a paid Gemini key.';
+        } else if (errorMeta?.allSkippedByRateLimit) {
             statusCode = 429;
-            clientMessage = errorText;
+            clientMessage = rateLimitMessage;
         } else if (errorMeta?.code === 'INPUT_TOKENS_EXCEEDED' && errorMeta?.hasImageInput) {
             statusCode = 400;
             clientMessage = 'Bad Request: image input too large for the model limit. Reduce image size or use a smaller image URL.';
@@ -2442,10 +2474,10 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
             clientMessage = 'Invalid JSON';
         } else if (isRateLimitError(errorText)) {
             statusCode = 429;
-            clientMessage = errorText;
+            clientMessage = rateLimitMessage;
         } else if (errorText.includes('Unauthorized') || errorText.includes('limit reached')) {
             statusCode = errorText.includes('limit reached') ? 429 : 401;
-            clientMessage = errorText;
+            clientMessage = errorText.includes('limit reached') ? rateLimitMessage : errorText;
         } else if (
             errorText.toLowerCase().includes('requires more credits') ||
             errorText.toLowerCase().includes('insufficient credits') ||
@@ -2476,16 +2508,17 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
         }
 
         if (!response.completed) {
-            if (statusCode === 429) {
-                const retryAfterSeconds = extractRetryAfterSeconds(errorText);
-                if (retryAfterSeconds) {
-                    response.setHeader('Retry-After', String(retryAfterSeconds));
-                }
+            if (statusCode === 429 && retryAfterSeconds) {
+                response.setHeader('Retry-After', String(retryAfterSeconds));
             }
             if (statusCode === 500) {
                 response.status(statusCode).json({ error: clientMessage, reference: clientReference, timestamp });
             } else {
-                response.status(statusCode).json({ error: clientMessage, timestamp });
+                const payload: Record<string, any> = { error: clientMessage, timestamp };
+                if (statusCode === 429 && retryAfterSeconds) {
+                    payload.retry_after_seconds = retryAfterSeconds;
+                }
+                response.status(statusCode).json(payload);
             }
         } else { return; }
     }

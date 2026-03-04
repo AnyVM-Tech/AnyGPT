@@ -49,14 +49,80 @@ return {s_count, m_count, d_count}
 `;
 
 const RATE_LIMIT_HASH_SECRET = process.env.RATE_LIMIT_HASH_SECRET || process.env.API_KEY_HASH_SECRET || 'anygpt-rate-limit';
+const RATE_LIMIT_HASH_ITERATIONS = (() => {
+  const raw = Number(process.env.RATE_LIMIT_HASH_ITERATIONS);
+  if (Number.isFinite(raw) && raw >= 1000) return Math.floor(raw);
+  return 20_000;
+})();
+const RATE_LIMIT_HASH_KEYLEN = (() => {
+  const raw = Number(process.env.RATE_LIMIT_HASH_KEYLEN);
+  if (Number.isFinite(raw) && raw >= 16) return Math.floor(raw);
+  return 32;
+})();
+const RATE_LIMIT_HASH_DIGEST = 'sha256';
+const RATE_LIMIT_HASH_CACHE_TTL_MS = (() => {
+  const raw = Number(process.env.RATE_LIMIT_HASH_CACHE_TTL_MS);
+  if (Number.isFinite(raw) && raw >= 0) return Math.floor(raw);
+  return 5 * 60 * 1000;
+})();
+const RATE_LIMIT_HASH_CACHE_MAX = (() => {
+  const raw = Number(process.env.RATE_LIMIT_HASH_CACHE_MAX);
+  if (Number.isFinite(raw) && raw >= 0) return Math.floor(raw);
+  return 10_000;
+})();
+type HashCacheEntry = { value: string; expiresAt: number };
+const apiKeyHashCache = new Map<string, HashCacheEntry>();
 let warnedDefaultSecret = false;
+
+function getCachedApiKeyHash(apiKey: string): string | null {
+  if (RATE_LIMIT_HASH_CACHE_MAX <= 0 || RATE_LIMIT_HASH_CACHE_TTL_MS <= 0) return null;
+  const entry = apiKeyHashCache.get(apiKey);
+  if (!entry) return null;
+  if (entry.expiresAt <= Date.now()) {
+    apiKeyHashCache.delete(apiKey);
+    return null;
+  }
+  // Refresh LRU position
+  apiKeyHashCache.delete(apiKey);
+  apiKeyHashCache.set(apiKey, entry);
+  return entry.value;
+}
+
+function setCachedApiKeyHash(apiKey: string, value: string): void {
+  if (RATE_LIMIT_HASH_CACHE_MAX <= 0 || RATE_LIMIT_HASH_CACHE_TTL_MS <= 0) return;
+  if (apiKeyHashCache.size >= RATE_LIMIT_HASH_CACHE_MAX) {
+    const oldestKey = apiKeyHashCache.keys().next().value;
+    if (oldestKey) apiKeyHashCache.delete(oldestKey);
+  }
+  apiKeyHashCache.set(apiKey, { value, expiresAt: Date.now() + RATE_LIMIT_HASH_CACHE_TTL_MS });
+}
+
+function deriveApiKeyHash(context: string, apiKey: string): string {
+  const salt = crypto.createHmac('sha256', RATE_LIMIT_HASH_SECRET)
+    .update(context)
+    .digest();
+
+  const derived = crypto.pbkdf2Sync(
+    apiKey,
+    salt,
+    RATE_LIMIT_HASH_ITERATIONS,
+    RATE_LIMIT_HASH_KEYLEN,
+    RATE_LIMIT_HASH_DIGEST,
+  );
+
+  return derived.toString('hex');
+}
 
 function hashApiKey(apiKey: string): string {
   if (!process.env.RATE_LIMIT_HASH_SECRET && !process.env.API_KEY_HASH_SECRET && !warnedDefaultSecret) {
     warnedDefaultSecret = true;
     logger.warn('[RateLimit] RATE_LIMIT_HASH_SECRET is not set; using default hash secret.');
   }
-  return crypto.createHmac('sha256', RATE_LIMIT_HASH_SECRET).update(apiKey).digest('hex');
+  const cached = getCachedApiKeyHash(apiKey);
+  if (cached) return cached;
+  const derived = deriveApiKeyHash('rate-limit:api-key:', apiKey);
+  setCachedApiKeyHash(apiKey, derived);
+  return derived;
 }
 
 export async function incrementSharedRateLimitCounters(

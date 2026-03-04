@@ -165,6 +165,13 @@ async function setApiKeyCooldown(apiKey: string, overrideMs?: number): Promise<v
     }
 }
 
+function isZeroQuotaError(error: any): boolean {
+    const message = String(error?.message || error || '').toLowerCase();
+    if (!message) return false;
+    if (!message.includes('limit: 0')) return false;
+    return message.includes('free_tier') || message.includes('free tier') || message.includes('quota exceeded');
+}
+
 async function waitForCooldownOrDeadline(
     cooldownMs: number | null,
     requestStartTime: number,
@@ -747,8 +754,17 @@ export class MessageHandler {
                 return providers;
             }
 
+            if (AUTO_DISABLE_PROVIDERS && isZeroQuotaError(attemptError)) {
+                if (!providerData.disabled) {
+                    console.warn(`Disabling provider ${providerId} due to zero quota.`);
+                }
+                providerData.disabled = true;
+                modelData.disabled = true;
+                modelData.consecutive_errors = this.CONSECUTIVE_ERROR_THRESHOLD;
+                modelData.disabled_at = Date.now();
+                modelData.disable_count = (modelData.disable_count || 0) + 1;
             // Skip error counting entirely for excluded error patterns
-            if (isExcludedError(attemptError) || this.isToolUnsupportedError(attemptError)) {
+            } else if (isExcludedError(attemptError) || this.isToolUnsupportedError(attemptError)) {
                 // Don't increment errors or disable — treat as a non-event
             } else if (AUTO_DISABLE_PROVIDERS && this.isInvalidProviderCredentialError(attemptError)) {
                 if (!providerData.disabled) {
@@ -1029,7 +1045,6 @@ export class MessageHandler {
                     skippedByBlockedKey = 0;
                 }
             }
-
              // --- Update Stats & Save (Always, regardless of attempt outcome) ---
             try {
                 await dataManager.updateWithLock<LoadedProviders>('providers', async (currentProvidersData) => {
@@ -1376,7 +1391,6 @@ export class MessageHandler {
                         skippedByBlockedKey = 0;
                     }
                 }
-
                 if (this.isInsufficientCreditsError(error)) {
                     const added = this.appendCreditFallbackProviders(
                         allProvidersOriginal,
