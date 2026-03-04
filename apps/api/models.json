@@ -44,7 +44,7 @@
       "object": "model",
       "created": 1772393604098,
       "owned_by": "google",
-      "providers": 96,
+      "providers": 98,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -62,7 +62,7 @@
       "object": "model",
       "created": 1772393604098,
       "owned_by": "google",
-      "providers": 96,
+      "providers": 98,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -80,7 +80,7 @@
       "object": "model",
       "created": 1772393604098,
       "owned_by": "google",
-      "providers": 96,
+      "providers": 98,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -98,7 +98,7 @@
       "object": "model",
       "created": 1772393604098,
       "owned_by": "google",
-      "providers": 96,
+      "providers": 98,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -116,7 +116,7 @@
       "object": "model",
       "created": 1772393604098,
       "owned_by": "google",
-      "providers": 96,
+      "providers": 98,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -134,7 +134,7 @@
       "object": "model",
       "created": 1772393604098,
       "owned_by": "google",
-      "providers": 96,
+      "providers": 98,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -152,7 +152,7 @@
       "object": "model",
       "created": 1772393604099,
       "owned_by": "google",
-      "providers": 96,
+      "providers": 98,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -169,7 +169,7 @@
       "object": "model",
       "created": 1772393604099,
       "owned_by": "google",
-      "providers": 96,
+      "providers": 98,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -186,7 +186,7 @@
       "object": "model",
       "created": 1772393604099,
       "owned_by": "google",
-      "providers": 96,
+      "providers": 98,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -204,7 +204,7 @@
       "object": "model",
       "created": 1772393604099,
       "owned_by": "google",
-      "providers": 96,
+      "providers": 98,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -221,7 +221,7 @@
       "object": "model",
       "created": 1772393604099,
       "owned_by": "google",
-      "providers": 96,
+      "providers": 98,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -239,7 +239,7 @@
       "object": "model",
       "created": 1772393604099,
       "owned_by": "google",
-      "providers": 96,
+      "providers": 98,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -257,7 +257,7 @@
       "object": "model",
       "created": 1772393604099,
       "owned_by": "google",
-      "providers": 96,
+      "providers": 98,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -275,7 +275,7 @@
       "object": "model",
       "created": 1772393604099,
       "owned_by": "google",
-      "providers": 96,
+      "providers": 98,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -292,7 +292,7 @@
       "object": "model",
       "created": 1772393604100,
       "owned_by": "google",
-      "providers": 96,
+      "providers": 98,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -309,7 +309,7 @@
       "object": "model",
       "created": 1772393604100,
       "owned_by": "google",
-      "providers": 96,
+      "providers": 98,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -326,8 +326,8 @@
       "object": "model",
       "created": 1772393604100,
       "owned_by": "google",
-      "providers": 96,
-      "throughput": 35,
+      "providers": 98,
+      "throughput": 33,
       "capabilities": [
         "text",
         "image_input"
@@ -343,7 +343,7 @@
       "object": "model",
       "created": 1772393604100,
       "owned_by": "google",
-      "providers": 96,
+      "providers": 98,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -360,7 +360,7 @@
       "object": "model",
       "created": 1772393604100,
       "owned_by": "google",
-      "providers": 96,
+      "providers": 98,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -377,7 +377,7 @@
       "object": "model",
       "created": 1772393604100,
       "owned_by": "google",
-      "providers": 96,
+      "providers": 98,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -395,7 +395,7 @@
       "object": "model",
       "created": 1772393604100,
       "owned_by": "openai",
-      "providers": 96,
+      "providers": 98,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -412,7 +412,7 @@
       "object": "model",
       "created": 1772393604100,
       "owned_by": "google",
-      "providers": 96,
+      "providers": 98,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -428,7 +428,7 @@
       "object": "model",
       "created": 1772393604100,
       "owned_by": "google",
-      "providers": 96,
+      "providers": 98,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -444,7 +444,7 @@
       "object": "model",
       "created": 1772393604100,
       "owned_by": "google",
-      "providers": 96,
+      "providers": 98,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -462,7 +462,7 @@
       "object": "model",
       "created": 1772393604100,
       "owned_by": "google",
-      "providers": 96,
+      "providers": 98,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -480,7 +480,7 @@
       "object": "model",
       "created": 1772393604100,
       "owned_by": "google",
-      "providers": 96,
+      "providers": 98,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -498,7 +498,7 @@
       "object": "model",
       "created": 1772393604100,
       "owned_by": "google",
-      "providers": 96,
+      "providers": 98,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -516,7 +516,7 @@
       "object": "model",
       "created": 1772393604101,
       "owned_by": "google",
-      "providers": 96,
+      "providers": 98,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -534,7 +534,7 @@
       "object": "model",
       "created": 1772393604101,
       "owned_by": "google",
-      "providers": 96,
+      "providers": 98,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -552,7 +552,7 @@
       "object": "model",
       "created": 1772393604101,
       "owned_by": "google",
-      "providers": 96,
+      "providers": 98,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -570,7 +570,7 @@
       "object": "model",
       "created": 1772393604101,
       "owned_by": "google",
-      "providers": 96,
+      "providers": 98,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -588,7 +588,7 @@
       "object": "model",
       "created": 1772393604101,
       "owned_by": "google",
-      "providers": 96,
+      "providers": 98,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -608,7 +608,7 @@
       "object": "model",
       "created": 1772393604101,
       "owned_by": "google",
-      "providers": 96,
+      "providers": 98,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -628,7 +628,7 @@
       "object": "model",
       "created": 1772393604101,
       "owned_by": "google",
-      "providers": 96,
+      "providers": 98,
       "throughput": 50,
       "capabilities": [
         "text",
