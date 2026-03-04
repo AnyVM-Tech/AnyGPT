@@ -9,7 +9,7 @@ import {
     extractMessageFromRequestBody // Import helper
 } from '../modules/userData.js';
 import { RequestTimestampStore } from '../modules/rateLimit.js';
-import { runAuthMiddleware, runRateLimitMiddleware } from '../modules/middlewareFactory.js';
+import { runAuthMiddleware, runRateLimitMiddleware, extractBearerToken } from '../modules/middlewareFactory.js';
 
 dotenv.config();
 
@@ -29,7 +29,7 @@ async function authAndUsageMiddleware(request: Request, response: Response, next
         callNext: false,
         extractApiKey: (req) => {
             const authHeader = req.headers['authorization'] || req.headers['Authorization'];
-            return authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+            return extractBearerToken(typeof authHeader === 'string' ? authHeader : null);
         },
         onMissingApiKey: () => ({ status: 401, body: { error: { message: 'Invalid Authentication header', code: 'invalid_auth_header' } } }),
         onInvalidApiKey: (_req, details) => {

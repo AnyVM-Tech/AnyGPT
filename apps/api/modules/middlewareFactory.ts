@@ -1,6 +1,52 @@
 import { validateApiKeyAndUsage } from './userData.js';
 import { enforceInMemoryRateLimit, RateLimitDecision, RequestTimestampStore, TierRateLimits } from './rateLimit.js';
 
+const API_KEY_MIN_LENGTH = (() => {
+  const raw = Number(process.env.API_KEY_MIN_LENGTH);
+  if (Number.isFinite(raw) && raw >= 0) return Math.floor(raw);
+  return 32;
+})();
+
+const API_KEY_MAX_LENGTH = (() => {
+  const raw = Number(process.env.API_KEY_MAX_LENGTH);
+  if (Number.isFinite(raw) && raw >= 0) return Math.floor(raw);
+  return 512;
+})();
+
+function normalizeApiKeyValue(value: string | null): string | null {
+  if (!value) return null;
+  const token = String(value).trim();
+  if (!token) return null;
+  if (API_KEY_MIN_LENGTH > 0 && token.length < API_KEY_MIN_LENGTH) return null;
+  if (API_KEY_MAX_LENGTH > 0 && token.length > API_KEY_MAX_LENGTH) return null;
+  return token;
+}
+
+export function normalizeApiKey(value: string | null): string | null {
+  return normalizeApiKeyValue(value);
+}
+
+export function extractBearerToken(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const trimmed = String(value).trim();
+  if (!trimmed) return null;
+  if (/^Bearer\s+/i.test(trimmed)) {
+    return trimmed.replace(/^Bearer\s+/i, '').trim();
+  }
+  return trimmed;
+}
+
+function isValidRateLimitValue(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+}
+
+function isValidTierLimits(limits: TierRateLimits | undefined): limits is TierRateLimits {
+  if (!limits) return false;
+  return isValidRateLimitValue(limits.rps)
+    && isValidRateLimitValue(limits.rpm)
+    && isValidRateLimitValue(limits.rpd);
+}
+
 interface ResponsePayload {
   status: number;
   body: any;
@@ -29,8 +75,16 @@ async function sendJsonIfOpen(response: any, payload: ResponsePayload) {
 
 export async function runAuthMiddleware(request: any, response: any, next: () => void, handlers: AuthHandlers) {
   try {
-    const apiKey = handlers.extractApiKey(request);
+    const rawApiKey = handlers.extractApiKey(request);
+    const apiKey = normalizeApiKeyValue(rawApiKey);
     if (!apiKey) {
+      if (rawApiKey) {
+        return sendJsonIfOpen(response, await handlers.onInvalidApiKey(request, {
+          apiKey: rawApiKey,
+          statusCode: 401,
+          error: 'Invalid API key format.'
+        }));
+      }
       return sendJsonIfOpen(response, await handlers.onMissingApiKey(request));
     }
 
@@ -61,10 +115,10 @@ export async function runRateLimitMiddleware(
   store: RequestTimestampStore,
   handlers: RateLimitHandlers
 ) {
-  const apiKey = request.apiKey;
+  const apiKey = normalizeApiKeyValue(typeof request.apiKey === 'string' ? request.apiKey : null);
   const tierLimits = request.tierLimits as TierRateLimits | undefined;
 
-  if (!apiKey || !tierLimits) {
+  if (!apiKey || !isValidTierLimits(tierLimits)) {
     return sendJsonIfOpen(response, await handlers.onMissingContext(request));
   }
 

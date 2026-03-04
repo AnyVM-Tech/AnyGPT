@@ -48,9 +48,38 @@ interface ErrorLogEntry {
     errorDetails?: any;
 }
 
+const MAX_DETAIL_STRING_LENGTH = (() => {
+    const raw = Number(process.env.ERROR_LOG_MAX_DETAIL_CHARS);
+    if (Number.isFinite(raw) && raw >= 0) return Math.floor(raw);
+    return 4000;
+})();
+
+const MAX_DETAIL_KEYS = (() => {
+    const raw = Number(process.env.ERROR_LOG_MAX_DETAIL_KEYS);
+    if (Number.isFinite(raw) && raw >= 0) return Math.floor(raw);
+    return 60;
+})();
+
+function sanitizeValue(value: any): any {
+    if (typeof value === 'string') {
+        if (MAX_DETAIL_STRING_LENGTH > 0 && value.length > MAX_DETAIL_STRING_LENGTH) {
+            return `${value.slice(0, MAX_DETAIL_STRING_LENGTH)}…`;
+        }
+        return value;
+    }
+    if (Array.isArray(value)) {
+        return value.slice(0, 20).map((entry) => sanitizeValue(entry));
+    }
+    if (value && typeof value === 'object') {
+        return sanitizeDetails(value as Record<string, any>);
+    }
+    return value;
+}
+
 function sanitizeDetails(details: Record<string, any>): Record<string, any> {
     const sanitized: Record<string, any> = {};
-    for (const [key, value] of Object.entries(details)) {
+    const entries = Object.entries(details).slice(0, MAX_DETAIL_KEYS > 0 ? MAX_DETAIL_KEYS : undefined);
+    for (const [key, value] of entries) {
         if (value === undefined) continue; // Drop undefined values entirely
         const lowered = key.toLowerCase();
         if (['apikey', 'api_key', 'authorization', 'x-api-key', 'token', 'secret'].includes(lowered)) {
@@ -60,7 +89,7 @@ function sanitizeDetails(details: Record<string, any>): Record<string, any> {
         } else if (Array.isArray(value) && value.length === 0) {
             sanitized[key] = '(empty)'; // Make empty arrays visible
         } else {
-            sanitized[key] = value;
+            sanitized[key] = sanitizeValue(value);
         }
     }
     return sanitized;

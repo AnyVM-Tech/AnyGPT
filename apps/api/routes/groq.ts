@@ -10,7 +10,7 @@ import {
 } from '../modules/userData.js';
 import { logError } from '../modules/errorLogger.js'; // Changed import
 import { RequestTimestampStore } from '../modules/rateLimit.js';
-import { runAuthMiddleware, runRateLimitMiddleware } from '../modules/middlewareFactory.js';
+import { runAuthMiddleware, runRateLimitMiddleware, extractBearerToken } from '../modules/middlewareFactory.js';
 import { redactToken } from '../modules/redaction.js';
 
 dotenv.config();
@@ -32,7 +32,7 @@ async function authAndUsageMiddleware(request: Request, response: Response, next
     return runAuthMiddleware(request, response, next, {
         extractApiKey: (req) => {
             const authHeader = req.headers['authorization'] || req.headers['Authorization'];
-            return authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+            return extractBearerToken(typeof authHeader === 'string' ? authHeader : null);
         },
         onMissingApiKey: async (req) => {
             const errDetail = { message: 'Incorrect API key provided. You can find your API key at https://console.groq.com/keys.', type: 'invalid_request_error', param: null, code: 'invalid_api_key' };

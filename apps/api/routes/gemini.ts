@@ -9,7 +9,7 @@ import {
 } from '../modules/userData.js';
 import { logError } from '../modules/errorLogger.js'; // Changed import
 import { RequestTimestampStore } from '../modules/rateLimit.js';
-import { runAuthMiddleware, runRateLimitMiddleware } from '../modules/middlewareFactory.js';
+import { runAuthMiddleware, runRateLimitMiddleware, normalizeApiKey } from '../modules/middlewareFactory.js';
 import { redactToken } from '../modules/redaction.js';
 import {
     createInteractionToken,
@@ -99,7 +99,7 @@ async function authAndUsageMiddleware(request: Request, response: Response, next
   const timestamp = new Date().toISOString();
 
     return runAuthMiddleware(request, response, next, {
-        extractApiKey: (req) => req.headers['x-goog-api-key'] as string || null,
+        extractApiKey: (req) => normalizeApiKey(typeof req.headers['x-goog-api-key'] === 'string' ? req.headers['x-goog-api-key'] : null),
         onMissingApiKey: async (req) => {
             const errDetail = { message: "API key missing. Please pass an API key in 'x-goog-api-key' header.", code: 401, status: 'UNAUTHENTICATED' };
             await logError(errDetail, req);

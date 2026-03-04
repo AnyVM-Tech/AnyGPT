@@ -1,6 +1,7 @@
 import { RequestContext, WSWrapper } from '../lib/uws-compat.js';
 import { messageHandler } from '../providers/handler.js';
 import { validateApiKeyAndUsage, updateUserTokenUsage } from '../modules/userData.js';
+import { normalizeApiKey } from '../modules/middlewareFactory.js';
 import { logError } from '../modules/errorLogger.js';
 import redis from '../modules/db.js';
 import { incrementSharedRateLimitCounters } from '../modules/rateLimitRedis.js';
@@ -158,6 +159,9 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
 
     const rateCheck = async (): Promise<boolean> => {
       if (!ctx.apiKey || !ctx.tierLimits) return true; // until auth completes
+      if (ctx.tierLimits.rps <= 0 || ctx.tierLimits.rpm <= 0 || ctx.tierLimits.rpd <= 0) {
+        return false;
+      }
 
       const shared = await checkSharedRateLimit(ctx.apiKey, ctx.tierLimits);
       if (shared) {
@@ -201,8 +205,8 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
           return send({ type: 'pong' });
         case 'auth': {
           if (ctx.authenticated) return send({ type: 'auth.ok', already: true });
-          const apiKey = payload.apiKey;
-          if (!apiKey || typeof apiKey !== 'string') return send({ type: 'error', code: 'auth', message: 'apiKey required' });
+          const apiKey = normalizeApiKey(typeof payload.apiKey === 'string' ? payload.apiKey : null);
+          if (!apiKey) return send({ type: 'error', code: 'auth', message: 'apiKey required' });
           try {
             const validation = await validateApiKeyAndUsage(apiKey);
             if (!validation.valid || !validation.userData || !validation.tierLimits) {

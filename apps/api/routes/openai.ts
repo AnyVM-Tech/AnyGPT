@@ -18,7 +18,7 @@ import redis from '../modules/db.js';
 import tiersData from '../tiers.json' with { type: 'json' };
 import { incrementSharedRateLimitCounters } from '../modules/rateLimitRedis.js';
 import { enforceInMemoryRateLimit, evaluateSharedRateLimit, RequestTimestampStore } from '../modules/rateLimit.js';
-import { runAuthMiddleware, runRateLimitMiddleware } from '../modules/middlewareFactory.js';
+import { runAuthMiddleware, runRateLimitMiddleware, extractBearerToken, normalizeApiKey } from '../modules/middlewareFactory.js';
 import { dataManager, LoadedProviders, LoadedProviderData, type ModelsFileStructure } from '../modules/dataManager.js';
 import { logger } from '../modules/logger.js';
 import { redactAuthorizationHeader, redactToken, hashToken } from '../modules/redaction.js';
@@ -110,8 +110,9 @@ async function authAndUsageMiddleware(request: Request, response: Response, next
         callNext: true,
         extractApiKey: (req) => {
             const authHeader = req.headers['authorization'] || req.headers['Authorization'];
-            if (authHeader && authHeader.startsWith('Bearer ')) return authHeader.slice(7);
-            const apiKeyHeader = req.headers['api-key'];
+            const bearer = extractBearerToken(typeof authHeader === 'string' ? authHeader : null);
+            if (bearer) return bearer;
+            const apiKeyHeader = req.headers['api-key'] ?? req.headers['x-api-key'];
             return (typeof apiKeyHeader === 'string' && apiKeyHeader) ? apiKeyHeader : null;
         },
         onMissingApiKey: async (req) => {
@@ -135,14 +136,13 @@ async function authAndUsageMiddleware(request: Request, response: Response, next
 async function authKeyOnlyMiddleware(request: Request, response: Response, next: () => void) {
     try {
         const authHeader = request.headers['authorization'] || request.headers['Authorization'];
-        let apiKey: string | null = null;
-        if (authHeader && typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
-            apiKey = authHeader.slice(7);
-        } else if (typeof request.headers['api-key'] === 'string') {
+        let apiKey: string | null = extractBearerToken(typeof authHeader === 'string' ? authHeader : null);
+        if (!apiKey && typeof request.headers['api-key'] === 'string') {
             apiKey = request.headers['api-key'];
-        } else if (typeof request.headers['x-api-key'] === 'string') {
+        } else if (!apiKey && typeof request.headers['x-api-key'] === 'string') {
             apiKey = request.headers['x-api-key'];
         }
+        apiKey = normalizeApiKey(apiKey);
 
         if (!apiKey) {
             return response.status(401).json({
@@ -278,6 +278,9 @@ function extractResponsesRequestBody(requestBody: any): { message: IMessage; mod
 
 // Token estimation constants now imported from '../modules/tokenEstimation.js'
 const LOG_SENSITIVE_PAYLOADS = readEnvBool('LOG_SENSITIVE_PAYLOADS', false);
+if (LOG_SENSITIVE_PAYLOADS) {
+    console.warn('[Security] LOG_SENSITIVE_PAYLOADS is enabled. Disable in production to avoid logging sensitive data.');
+}
 const UPSTREAM_TIMEOUT_MS = readEnvNumber('UPSTREAM_TIMEOUT_MS', 120_000);
 const VIDEO_REQUEST_CACHE_TTL_MS = readEnvNumber('VIDEO_REQUEST_CACHE_TTL_MS', 60 * 60 * 1000);
 const IMAGE_FETCH_TIMEOUT_MS = readEnvNumber('IMAGE_FETCH_TIMEOUT_MS', 15_000);
@@ -1447,11 +1450,7 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
                         if (Array.isArray(lastMsg.content)) {
                             parsed.files.forEach(f => {
                                 const base64Data = f.data.toString('base64');
-                                if (LOG_SENSITIVE_PAYLOADS) {
-                                    console.log(`[Multipart] Injecting image. Type: ${f.type}, Base64Len: ${base64Data.length}, Prefix: ${base64Data.substring(0, 50)}...`);
-                                } else {
-                                    console.log(`[Multipart] Injecting image. Type: ${f.type}, Size: ${f.data.length}`);
-                                }
+                                console.log(`[Multipart] Injecting image. Type: ${f.type}, Size: ${f.data.length}`);
                                 lastMsg.content.push({
                                     type: 'image_url',
                                     image_url: { url: `data:${f.type};base64,${base64Data}` }
@@ -1470,11 +1469,7 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
             // Check if it's raw base64 or raw binary
             try {
                 const rawBuffer = await request.buffer();
-                if (LOG_SENSITIVE_PAYLOADS) {
-                    console.log(`[RawFallback] Buffer size: ${rawBuffer.length}, First 50 bytes: ${rawBuffer.subarray(0, 50).toString('hex')}`);
-                } else {
-                    console.log(`[RawFallback] Buffer size: ${rawBuffer.length}`);
-                }
+                console.log(`[RawFallback] Buffer size: ${rawBuffer.length}`);
                 if (rawBuffer.length > 10) {
                     const firstChar = rawBuffer[0];
                     // Check if JSON-like start ({ or [)
@@ -1521,11 +1516,7 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
                         mimeType = detectMimeTypeFromBuffer(rawBuffer) || 'image/jpeg';
                     }
 
-                    if (LOG_SENSITIVE_PAYLOADS) {
-                        console.log(`[RawFallback] Type: ${mimeType}, Base64Len: ${base64Data.length}, Prefix: ${base64Data.substring(0, 50)}...`);
-                    } else {
-                        console.log(`[RawFallback] Type: ${mimeType}, Base64Len: ${base64Data.length}`);
-                    }
+                    console.log(`[RawFallback] Type: ${mimeType}, Base64Len: ${base64Data.length}`);
 
                     // Use model from query if available, otherwise fail
                     const queryModel = (request.query && typeof request.query.model === 'string' && request.query.model) 
@@ -1564,6 +1555,19 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
         isNonChatModel(modelHint) === 'image-gen'
     ) {
         requestBody.messages = [{ role: 'user', content: requestBody.prompt }];
+    }
+
+    const normalizedMaxTokens = typeof requestBody?.max_tokens === 'number'
+        ? requestBody.max_tokens
+        : (typeof requestBody?.max_tokens === 'string' ? Number(requestBody.max_tokens) : undefined);
+    if (normalizedMaxTokens !== undefined) {
+        const maxTokensLimit = Math.max(0, Number(process.env.MAX_MAX_TOKENS || 0) || 0);
+        if (!Number.isFinite(normalizedMaxTokens) || normalizedMaxTokens <= 0) {
+            return response.status(400).json({ error: 'Invalid max_tokens value.', timestamp: new Date().toISOString() });
+        }
+        if (maxTokensLimit > 0 && normalizedMaxTokens > maxTokensLimit) {
+            return response.status(400).json({ error: `max_tokens exceeds limit (${maxTokensLimit}).`, timestamp: new Date().toISOString() });
+        }
     }
 
     const result = extractMessageFromRequestBody(requestBody);

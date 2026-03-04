@@ -15,6 +15,56 @@ let _avgBlendedRate: number = 0;
 let _pricingLastUpdated = 0;
 const PRICING_REFRESH_MS = 5 * 60 * 1000; // refresh every 5 minutes
 const CODEX_SINGLE_TURN_ONLY = process.env.CODEX_SINGLE_TURN_ONLY === '1';
+const MAX_MESSAGE_COUNT = (() => {
+  const raw = Number(process.env.MAX_MESSAGE_COUNT);
+  if (Number.isFinite(raw) && raw >= 0) return Math.floor(raw);
+  return 200;
+})();
+const MAX_MESSAGE_PARTS = (() => {
+  const raw = Number(process.env.MAX_MESSAGE_PARTS);
+  if (Number.isFinite(raw) && raw >= 0) return Math.floor(raw);
+  return 2000;
+})();
+const MAX_MESSAGE_CONTENT_CHARS = (() => {
+  const raw = Number(process.env.MAX_MESSAGE_CONTENT_CHARS);
+  if (Number.isFinite(raw) && raw >= 0) return Math.floor(raw);
+  return 1_000_000;
+})();
+const MAX_MODEL_ID_LENGTH = (() => {
+  const raw = Number(process.env.MAX_MODEL_ID_LENGTH);
+  if (Number.isFinite(raw) && raw >= 0) return Math.floor(raw);
+  return 200;
+})();
+const MAX_ROLE_LENGTH = (() => {
+  const raw = Number(process.env.MAX_ROLE_LENGTH);
+  if (Number.isFinite(raw) && raw >= 0) return Math.floor(raw);
+  return 32;
+})();
+const MAX_IMAGE_URL_LENGTH = (() => {
+  const raw = Number(process.env.MAX_IMAGE_URL_LENGTH);
+  if (Number.isFinite(raw) && raw >= 0) return Math.floor(raw);
+  return 4096;
+})();
+const MAX_IMAGE_BASE64_CHARS = (() => {
+  const raw = Number(process.env.MAX_IMAGE_BASE64_CHARS);
+  if (Number.isFinite(raw) && raw >= 0) return Math.floor(raw);
+  return 8_000_000;
+})();
+const MAX_AUDIO_BASE64_CHARS = (() => {
+  const raw = Number(process.env.MAX_AUDIO_BASE64_CHARS);
+  if (Number.isFinite(raw) && raw >= 0) return Math.floor(raw);
+  return 12_000_000;
+})();
+
+function ensureLength(value: string, max: number, label: string): void {
+  if (max > 0 && value.length > max) {
+    throw new Error(`${label} exceeds maximum length (${max}).`);
+  }
+}
+
+function isDataUrl(value: string): boolean {
+  return /^data:/i.test(value.trim());
+}
 
 async function refreshPricingCache(): Promise<void> {
   const now = Date.now();
@@ -191,14 +241,23 @@ export function extractMessageFromRequestBody(requestBody: any): { messages: { r
   try {
     if (!requestBody || typeof requestBody !== 'object') throw new Error('Invalid body.');
     if (!Array.isArray(requestBody.messages)) throw new Error('Invalid messages format.');
+    if (MAX_MESSAGE_COUNT > 0 && requestBody.messages.length > MAX_MESSAGE_COUNT) {
+      throw new Error(`Too many messages. Limit is ${MAX_MESSAGE_COUNT}.`);
+    }
     if (typeof requestBody.model !== 'string' || !requestBody.model) {
        throw new Error('model parameter is required.');
+    }
+    if (MAX_MODEL_ID_LENGTH > 0) {
+      ensureLength(requestBody.model, MAX_MODEL_ID_LENGTH, 'model');
     }
 
     // Basic validation for content: allow string or an array of typed parts
     const normalizedMessages = requestBody.messages.map((m: any) => {
       if (!m || typeof m !== 'object' || typeof m.role !== 'string') {
         throw new Error('Each message must include a role.');
+      }
+      if (MAX_ROLE_LENGTH > 0) {
+        ensureLength(m.role, MAX_ROLE_LENGTH, 'role');
       }
       const role = m.role;
       const content = m.content;
@@ -207,7 +266,13 @@ export function extractMessageFromRequestBody(requestBody: any): { messages: { r
       if (!isStringContent && !isArrayContent) {
         throw new Error('Message content must be a string or an array of content parts.');
       }
+      if (isStringContent && MAX_MESSAGE_CONTENT_CHARS > 0) {
+        ensureLength(content, MAX_MESSAGE_CONTENT_CHARS, 'message content');
+      }
       if (isArrayContent) {
+        if (MAX_MESSAGE_PARTS > 0 && content.length > MAX_MESSAGE_PARTS) {
+          throw new Error(`Too many message parts. Limit is ${MAX_MESSAGE_PARTS}.`);
+        }
         content.forEach((part: any) => {
           if (!part || typeof part !== 'object' || typeof part.type !== 'string') {
             throw new Error('Invalid content part: missing type.');
@@ -215,14 +280,27 @@ export function extractMessageFromRequestBody(requestBody: any): { messages: { r
           if (part.type === 'text' && typeof part.text !== 'string') {
             throw new Error('Text parts require a text field.');
           }
+          if (part.type === 'text' && MAX_MESSAGE_CONTENT_CHARS > 0) {
+            ensureLength(part.text, MAX_MESSAGE_CONTENT_CHARS, 'text content');
+          }
           if (part.type === 'image_url') {
             if (!part.image_url || typeof part.image_url.url !== 'string') {
               throw new Error('image_url parts require image_url.url.');
+            }
+            const url = part.image_url.url;
+            if (MAX_IMAGE_URL_LENGTH > 0) {
+              ensureLength(url, MAX_IMAGE_URL_LENGTH, 'image_url.url');
+            }
+            if (isDataUrl(url) && MAX_IMAGE_BASE64_CHARS > 0 && url.length > MAX_IMAGE_BASE64_CHARS) {
+              throw new Error(`image_url data is too large. Limit is ${MAX_IMAGE_BASE64_CHARS} characters.`);
             }
           }
           if (part.type === 'input_audio') {
             if (!part.input_audio || typeof part.input_audio.data !== 'string' || typeof part.input_audio.format !== 'string') {
               throw new Error('input_audio parts require base64 data and format.');
+            }
+            if (MAX_AUDIO_BASE64_CHARS > 0) {
+              ensureLength(part.input_audio.data, MAX_AUDIO_BASE64_CHARS, 'input_audio.data');
             }
           }
         });

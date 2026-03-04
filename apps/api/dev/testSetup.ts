@@ -1,14 +1,18 @@
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const projectRoot = path.resolve(__dirname, '..');
 
 // Create a test configuration that sets up providers.json to use the mock provider
 export function setupMockProviderConfig() {
   const mockPort = Number(process.env.MOCK_PROVIDER_PORT || '3001');
   const testApiKey = process.env.TEST_API_KEY || 'test-key-for-mock-provider';
-  const providersFilePath = path.resolve('./providers.json');
-  const keysFilePath = path.resolve('./keys.json');
-  const backupProvidersPath = path.resolve('./providers.json.backup');
-  const backupKeysPath = path.resolve('./keys.json.backup');
+  const providersFilePath = path.join(projectRoot, 'providers.json');
+  const keysFilePath = path.join(projectRoot, 'keys.json');
+  const backupProvidersPath = path.join(projectRoot, 'providers.json.backup');
+  const backupKeysPath = path.join(projectRoot, 'keys.json.backup');
   
   // Try to preserve existing response times and stats
   let existingProvider = null;
@@ -88,10 +92,10 @@ export function setupMockProviderConfig() {
 }
 
 export function restoreProviderConfig() {
-  const providersFilePath = path.resolve('./providers.json');
-  const keysFilePath = path.resolve('./keys.json');
-  const backupProvidersPath = path.resolve('./providers.json.backup');
-  const backupKeysPath = path.resolve('./keys.json.backup');
+  const providersFilePath = path.join(projectRoot, 'providers.json');
+  const keysFilePath = path.join(projectRoot, 'keys.json');
+  const backupProvidersPath = path.join(projectRoot, 'providers.json.backup');
+  const backupKeysPath = path.join(projectRoot, 'keys.json.backup');
 
   // Preserve response times and stats from the test run
   let updatedProviderData = null;

@@ -30,6 +30,7 @@ import { logError } from './modules/errorLogger.js'; // Import the logger
 import { initializeHandlerData } from './providers/handler.js';
 import { refreshProviderCountsInModelsFile } from './modules/modelUpdater.js';
 import { validateApiKeyAndUsage, TierData, generateUserApiKey, UserData } from './modules/userData.js'; // For generalAuthMiddleware
+import { extractBearerToken, normalizeApiKey } from './modules/middlewareFactory.js';
 import { dataManager, LoadedProviders, LoadedProviderData } from './modules/dataManager.js'; // Added LoadedProviders and LoadedProviderData
 import { redisReadyPromise } from './modules/db.js'; // Import the redisReadyPromise
 import { startAdminKeySyncScheduler } from './modules/adminKeySync.js';
@@ -165,13 +166,16 @@ async function generalAuthMiddleware(request: Request, response: Response, next:
     const authHeader = request.headers['authorization'] || request.headers['Authorization'] as string;
     let apiKey = '';
 
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-        apiKey = authHeader.slice(7);
+    const bearer = extractBearerToken(typeof authHeader === 'string' ? authHeader : null);
+    if (bearer) {
+        apiKey = bearer;
     } else if (request.headers['x-api-key'] && typeof request.headers['x-api-key'] === 'string') {
-        apiKey = request.headers['x-api-key'];
+        apiKey = request.headers['x-api-key'].trim();
     } else if (request.headers['api-key'] && typeof request.headers['api-key'] === 'string') {
-        apiKey = request.headers['api-key'];
+        apiKey = request.headers['api-key'].trim();
     }
+
+    apiKey = normalizeApiKey(apiKey) || '';
 
     if (apiKey) {
         try {
@@ -227,6 +231,12 @@ function guideUserForProviderSetup() {
     console.log('--------------------------------------------------------------------------------------\n');
 }
 
+const MAX_BODY_LENGTH = (() => {
+    const raw = Number(process.env.MAX_BODY_LENGTH);
+    if (Number.isFinite(raw) && raw >= 1024) return Math.floor(raw);
+    return 1024 * 1024 * 50;
+})();
+
 async function startServer() {
     console.log('Starting API server...');
 
@@ -264,7 +274,7 @@ async function startServer() {
     }
 
     const app = new HyperExpress.Server({
-        max_body_length: 1024 * 1024 * 50 // 50MB limit
+        max_body_length: MAX_BODY_LENGTH
     });
 
     // Ensure JSON files and initial admin key are set up AFTER Redis check

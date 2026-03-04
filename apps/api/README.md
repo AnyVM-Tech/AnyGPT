@@ -150,6 +150,20 @@ apps/api/
     *   `ADMIN_KEYS_MAX_BODY_BYTES`: Max body size for open admin key ingest endpoint (default: 4096).
     *   `ADMIN_KEYS_ALLOWED_PROVIDERS`: Optional comma-separated allowlist for provider IDs (default: unset, allows any provider).
     *   `ADMIN_METRICS_MAX_ERROR_LINES`: Max error log lines scanned for metrics (default: 200000).
+    *   `MAX_BODY_LENGTH`: Maximum request body size in bytes (default: 50MB).
+    *   `MAX_MAX_TOKENS`: Upper bound for `max_tokens` in OpenAI-compatible requests (default: disabled).
+    *   `API_KEY_MIN_LENGTH`: Minimum API key length enforced at auth (default: 32).
+    *   `API_KEY_MAX_LENGTH`: Maximum API key length enforced at auth (default: 512).
+    *   `MAX_MODEL_ID_LENGTH`: Maximum model id length for incoming payloads (default: 200).
+    *   `MAX_ROLE_LENGTH`: Maximum role string length (default: 32).
+    *   `MAX_MESSAGE_COUNT`: Max number of messages in a chat payload (default: 200).
+    *   `MAX_MESSAGE_PARTS`: Max number of content parts in a message (default: 2000).
+    *   `MAX_MESSAGE_CONTENT_CHARS`: Max length of any text content (default: 1,000,000).
+    *   `MAX_IMAGE_URL_LENGTH`: Max length of image_url strings (default: 4096).
+    *   `MAX_IMAGE_BASE64_CHARS`: Max size of base64 image data (default: 8,000,000).
+    *   `MAX_AUDIO_BASE64_CHARS`: Max size of base64 audio data (default: 12,000,000).
+    *   `ERROR_LOG_MAX_DETAIL_CHARS`: Cap length of individual log detail strings (default: 4000).
+    *   `ERROR_LOG_MAX_DETAIL_KEYS`: Cap number of detail keys per error record (default: 60).
 
     ### Provider Health & Capabilities
     *   `DISABLE_PROVIDER_AUTO_DISABLE`: Set to `true` to disable auto-disable behavior (default: auto-disable enabled).

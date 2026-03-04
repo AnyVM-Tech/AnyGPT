@@ -93,9 +93,11 @@ if (redis) {
         }, 20000); // 20 seconds timeout for promise
     });
 } else {
-    // If redis client was not created (e.g., missing env vars), create a rejected promise.
+    // If redis client was not created (e.g., missing env vars), skip Redis readiness tracking.
+    // This allows filesystem-only operation without triggering unhandled promise rejections.
     const errorMessage = criticalRedisConnectionError ? criticalRedisConnectionError.message : "Redis client could not be initialized.";
-    redisReadyPromise = Promise.reject(new Error(`[db.ts] Cannot connect to Redis: ${errorMessage}`));
+    console.warn(`[db.ts] Redis disabled: ${errorMessage}`);
+    redisReadyPromise = null;
 }
 
 // Event listeners (remain the same, but are more for ongoing monitoring after initial connection)

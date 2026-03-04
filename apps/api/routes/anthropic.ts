@@ -9,7 +9,7 @@ import {
 } from '../modules/userData.js';
 import { logError } from '../modules/errorLogger.js'; // Changed import
 import { RequestTimestampStore } from '../modules/rateLimit.js';
-import { runAuthMiddleware, runRateLimitMiddleware } from '../modules/middlewareFactory.js';
+import { runAuthMiddleware, runRateLimitMiddleware, normalizeApiKey } from '../modules/middlewareFactory.js';
 import { redactToken } from '../modules/redaction.js';
 
 dotenv.config();
@@ -29,7 +29,7 @@ async function authAndUsageMiddleware(request: Request, response: Response, next
   const timestamp = new Date().toISOString();
 
   return runAuthMiddleware(request, response, next, {
-    extractApiKey: (req) => req.headers['x-api-key'] as string || null,
+    extractApiKey: (req) => normalizeApiKey(typeof req.headers['x-api-key'] === 'string' ? req.headers['x-api-key'] : null),
     onMissingApiKey: async (req) => {
       const errDetail = { message: 'Missing API key (x-api-key header required).' };
       await logError(errDetail, req);
