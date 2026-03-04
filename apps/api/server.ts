@@ -120,7 +120,7 @@ async function ensureInitialAdminKey() {
             console.log('!!! INITIAL ADMIN API KEY GENERATED - SAVE THIS SECURELY AND STORE IT SAFELY !!!');
             console.log('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!');
             console.log(`  User ID: ${defaultAdminUserId}`);
-            console.log(`  API Key: ${newAdminApiKey}`);
+            console.log('  API Key: <generated and stored securely; do NOT log or share this value>');
             console.log(`  Role: admin`);
             console.log(`  Tier: ${adminTier}`);
             console.log("  Use this key with 'Authorization: Bearer <API_KEY>' header to access admin endpoints");
