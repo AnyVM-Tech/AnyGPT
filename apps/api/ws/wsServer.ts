@@ -1,5 +1,5 @@
 import { RequestContext, WSWrapper } from '../lib/uws-compat.js';
-import { messageHandler, ChatMessage } from '../providers/handler.js';
+import { messageHandler } from '../providers/handler.js';
 import type { IMessage } from '../providers/interfaces.js';
 import { validateApiKeyAndUsage, updateUserTokenUsage } from '../modules/userData.js';
 import { normalizeApiKey } from '../modules/middlewareFactory.js';
@@ -27,14 +27,7 @@ import { estimateTokensFromText } from '../modules/tokenEstimation.js';
 interface RateWindow { timestamps: number[]; }
 
 // Internal representation of chat messages passed to messageHandler
-type WsChatMessage = {
-  role: string;
-  content: unknown;
-  model: { id: string };
-  tools?: unknown[];
-  tool_choice?: unknown;
-  reasoning?: unknown;
-};
+type WsChatMessage = IMessage;
 
 interface WsClientContext {
   apiKey?: string;
@@ -318,7 +311,7 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
 
           if (stream) {
             try {
-              const streamHandler = messageHandler.handleStreamingMessages(formattedMessages as unknown as IMessage[], model, ctx.apiKey, { requestId });
+              const streamHandler = messageHandler.handleStreamingMessages(formattedMessages, model, ctx.apiKey, { requestId });
 
               let totalTokenUsage = 0;
               let providerId: string | undefined;
@@ -388,7 +381,7 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
           }
 
           try {
-            const result: MessageResult = await messageHandler.handleMessages(formattedMessages as unknown as IMessage[], model, ctx.apiKey, requestId);
+            const result: MessageResult = await messageHandler.handleMessages(formattedMessages, model, ctx.apiKey, requestId);
             const totalTokens = typeof result.tokenUsage === 'number' ? result.tokenUsage : estimateTokens(result.response || '');
             await updateUserTokenUsage(totalTokens, ctx.apiKey);
 
