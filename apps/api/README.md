@@ -206,7 +206,7 @@ apps/api/
     sudo systemctl status anygpt-api
     sudo systemctl status anygpt-experimental
     ```
-    The experimental service uses a separate build output and default port (3080).
+    The experimental service uses a separate build output and default port (3000).
 
 ## Testing
 
