@@ -2801,7 +2801,7 @@ async function pickOpenAIProviderKey(
         if (!fallback) return null;
         return { apiKey: fallback.apiKey!, baseUrl: extractOrigin(fallback.provider_url || 'https://api.openai.com') };
     }
-    const pick = candidates[Math.floor(Math.random() * candidates.length)];
+    const pick = candidates[crypto.randomInt(candidates.length)];
     return { apiKey: pick.apiKey!, baseUrl: extractOrigin(pick.provider_url || 'https://api.openai.com') };
 }
 
