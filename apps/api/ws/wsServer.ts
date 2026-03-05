@@ -258,7 +258,7 @@ if (redisSubscriber) {
   }
 }
 
-async function checkSharedRateLimit(apiKey: string, limits: TierLimits) {
+async function checkSharedRateLimit(apiKey: string) {
   try {
     return await incrementSharedRateLimitCounters(redis, WS_RATE_PREFIX, apiKey);
   } catch (err) {
@@ -384,9 +384,9 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
 
       const shared = await getSharedRateLimitForCtx();
       if (shared) {
-        if (ctx.tierLimits.rps > 0 && shared.rps > ctx.tierLimits.rps) return false;
-        if (ctx.tierLimits.rpm > 0 && shared.rpm > ctx.tierLimits.rpm) return false;
-        if (ctx.tierLimits.rpd > 0 && shared.rpd > ctx.tierLimits.rpd) return false;
+        if (ctx.tierLimits.rps > 0 && shared.rps >= ctx.tierLimits.rps) return false;
+        if (ctx.tierLimits.rpm > 0 && shared.rpm >= ctx.tierLimits.rpm) return false;
+        if (ctx.tierLimits.rpd > 0 && shared.rpd >= ctx.tierLimits.rpd) return false;
         ctx.rate.second.timestamps.push(now);
         ctx.rate.minute.timestamps.push(now);
         ctx.rate.day.timestamps.push(now);
@@ -403,7 +403,7 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
       return true;
     };
 
-    ws.on('message', async (raw: ArrayBuffer | string, isBinary: boolean) => {
+    ws.on('message', async (raw: ArrayBuffer | string) => {
       let payload: IncomingMessage;
       try {
         const text = typeof raw === 'string' ? raw : Buffer.from(raw as ArrayBuffer).toString('utf8');
@@ -476,7 +476,6 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
           const formattedMessages = messages.map((msg) => ({
             role: msg.role,
             content: msg.content as WsChatMessage['content'],
-            ...sharedMessageOptions,
           })) as WsChatMessage[];
 
           const started = Date.now();
@@ -484,7 +483,12 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
 
           if (stream) {
             try {
-              const streamHandler = messageHandler.handleStreamingMessages(formattedMessages, model, ctx.apiKey, { requestId });
+              const streamHandler = messageHandler.handleStreamingMessages(
+                formattedMessages,
+                model,
+                ctx.apiKey,
+                { requestId, ...sharedMessageOptions },
+              );
 
               let totalTokenUsage = 0;
               let explicitTokenUsage: number | undefined;
@@ -536,7 +540,9 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
               } catch (updateErr) {
                 // Log usage update failures but do not block the response to the client.
                 // Avoid logging the full API key; only include a masked suffix for correlation.
-                const redactedApiKey = ctx.apiKey ? `***${ctx.apiKey.slice(-4)}` : undefined;
+                const redactedApiKey = ctx.apiKey
+                  ? (ctx.apiKey.length > 4 ? `***${ctx.apiKey.slice(-4)}` : '***')
+                  : undefined;
                 await logError({
                   message: 'Failed to update user token usage in WebSocket handler',
                   apiKey: redactedApiKey,
@@ -577,7 +583,13 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
           }
 
           try {
-            const result: MessageResult = await messageHandler.handleMessages(formattedMessages, model, ctx.apiKey, requestId);
+            const result: MessageResult = await messageHandler.handleMessages(
+              formattedMessages,
+              model,
+              ctx.apiKey,
+              requestId,
+              sharedMessageOptions,
+            );
             const totalTokens = typeof result.tokenUsage === 'number' ? result.tokenUsage : estimateTokens(result.response || '');
             await updateUserTokenUsage(totalTokens, ctx.apiKey);
 
