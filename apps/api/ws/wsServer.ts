@@ -293,29 +293,6 @@ async function checkSharedRateLimit(apiKey: string) {
   }
 }
 
-/**
- * Result emitted by the streaming message handler used in the WebSocket layer.
- *
- * - `type` identifies the kind of event; typically `"chunk"` for an interim
- *   streamed piece of data, or `"final"` / completion-like values when the
- *   full response is ready.
- * - `chunk` is populated only for `"chunk"` events to carry the incremental
- *   text payload.
- * - `latency` is populated on the final/completion result to indicate end‑to‑end
- *   latency in milliseconds, when available.
- * - `providerId` is populated when the underlying provider/model that produced
- *   the data is known.
- * - `tokenUsage` is populated when token accounting information is available,
- *   most commonly on the final/completion result.
- */
-interface StreamResult {
-  type: string;
-  chunk?: string;
-  latency?: number;
-  providerId?: string;
-  tokenUsage?: number;
-}
-
 interface MessageResult {
   response: string;
   tokenUsage?: number;
@@ -520,23 +497,6 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
 
           if (stream) {
             try {
-              type StreamChunkResult = {
-                type: 'chunk';
-                chunk?: string;
-                tool_calls?: ToolCall[];
-                finish_reason?: string;
-              };
-
-              type StreamFinalResult = {
-                type: 'final';
-                tokenUsage?: number;
-                providerId?: string;
-                tool_calls?: ToolCall[];
-                finish_reason?: string;
-              };
-
-              type StreamResult = StreamChunkResult | StreamFinalResult;
-
               const streamHandler: AsyncIterable<StreamResult> = messageHandler.handleStreamingMessages(
                 formattedMessages,
                 model,
@@ -644,7 +604,6 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
               model,
               ctx.apiKey,
               requestId,
-              sharedMessageOptions,
             );
             const totalTokens = typeof result.tokenUsage === 'number' ? result.tokenUsage : estimateTokens(result.response || '');
             await updateUserTokenUsage(totalTokens, ctx.apiKey);
