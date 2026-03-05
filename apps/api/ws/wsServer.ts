@@ -29,6 +29,17 @@ interface RateWindow { timestamps: number[]; }
 // Internal representation of chat messages passed to messageHandler
 type WsChatMessage = IMessage;
 
+// Validates that every item in a content array has the required shape.
+function validateContentItems(content: unknown[]): boolean {
+  return content.every((item) => {
+    if (!item || typeof item !== 'object') return false;
+    const contentItem = item as { type?: unknown; text?: unknown };
+    if (typeof contentItem.type !== 'string') return false;
+    if (contentItem.type === 'text' && typeof contentItem.text !== 'string') return false;
+    return true;
+  });
+}
+
 // Helper for merging tool call arrays in streaming responses
 function mergeToolCalls(
   accumulated: ToolCall[] | undefined,
@@ -351,6 +362,23 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
 
       if (ctx.tierLimits.rps < 0 || ctx.tierLimits.rpm < 0 || ctx.tierLimits.rpd < 0) {
         // Invalid configuration: negative rate limits are not allowed.
+        logError({
+          message: 'Invalid rate limit configuration detected',
+          errorMessage: 'Invalid rate limit configuration detected',
+          tierLimits: ctx.tierLimits,
+        });
+        try {
+          ws.send(
+            JSON.stringify({
+              type: 'error',
+              code: 'config',
+              message:
+                'Server rate limit configuration is invalid. Please contact support.',
+            }),
+          );
+        } catch {
+          // Ignore send failures; connection may already be closing.
+        }
         return false;
       }
 
@@ -424,13 +452,7 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
             return send({ type: 'error', code: 'bad_request', message: 'Last message content must be string or array', requestId });
           }
           if (Array.isArray(content)) {
-            const allItemsValid = content.every((item) => {
-              if (!item || typeof item !== 'object') return false;
-              const contentItem = item as { type?: unknown; text?: unknown };
-              if (typeof contentItem.type !== 'string') return false;
-              if (contentItem.type === 'text' && typeof contentItem.text !== 'string') return false;
-              return true;
-            });
+            const allItemsValid = validateContentItems(content);
             if (!allItemsValid) {
               return send({
                 type: 'error',
@@ -451,12 +473,11 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
             tool_choice: payload.tool_choice,
             reasoning: normalizedReasoning,
           };
-          const formattedMessages: WsChatMessage[] = messages.map((msg) => ({
+          const formattedMessages = messages.map((msg) => ({
             role: msg.role,
             content: msg.content as WsChatMessage['content'],
-            model: { id: model },
             ...sharedMessageOptions,
-          }));
+          })) as WsChatMessage[];
 
           const started = Date.now();
           send({ type: 'chat.start', requestId });
