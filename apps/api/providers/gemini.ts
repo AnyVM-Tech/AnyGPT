@@ -14,6 +14,12 @@ dotenv.config();
 
 const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 const MODEL_CATALOG_TTL_MS = 5 * 60 * 1000;
+const GEMINI_STREAM_IDLE_TIMEOUT_MS = (() => {
+  const raw = process.env.GEMINI_STREAM_IDLE_TIMEOUT_MS;
+  const parsed = raw !== undefined ? Number(raw) : NaN;
+  if (Number.isFinite(parsed) && parsed >= 0) return Math.floor(parsed);
+  return 30_000;
+})();
 
 type GeminiModelCatalogItem = {
   id: string;
@@ -492,8 +498,44 @@ export class GeminiAI implements IAIProvider {
       const decoder = new TextDecoder();
       let buffer = '';
       let fullResponse = '';
+      let idleTimeoutId: NodeJS.Timeout | null = null;
+      let idleTimedOut = false;
+
+      const clearIdleTimeout = () => {
+        if (idleTimeoutId) clearTimeout(idleTimeoutId);
+        idleTimeoutId = null;
+      };
+
+      const scheduleIdleTimeout = () => {
+        if (!Number.isFinite(GEMINI_STREAM_IDLE_TIMEOUT_MS) || GEMINI_STREAM_IDLE_TIMEOUT_MS <= 0) return;
+        clearIdleTimeout();
+        idleTimeoutId = setTimeout(() => {
+          idleTimedOut = true;
+          try {
+            reader.cancel();
+          } catch {
+            // Ignore cancel errors
+          }
+        }, GEMINI_STREAM_IDLE_TIMEOUT_MS);
+      };
+
       while (true) {
-        const { done, value } = await reader.read();
+        scheduleIdleTimeout();
+        let readResult: ReadableStreamReadResult<Uint8Array>;
+        try {
+          readResult = await reader.read();
+        } catch (error) {
+          clearIdleTimeout();
+          if (idleTimedOut) {
+            throw new Error(`Gemini stream idle timeout after ${GEMINI_STREAM_IDLE_TIMEOUT_MS}ms`);
+          }
+          throw error;
+        }
+        clearIdleTimeout();
+        if (idleTimedOut) {
+          throw new Error(`Gemini stream idle timeout after ${GEMINI_STREAM_IDLE_TIMEOUT_MS}ms`);
+        }
+        const { done, value } = readResult;
         if (done) break;
 
         buffer += decoder.decode(value, { stream: true });

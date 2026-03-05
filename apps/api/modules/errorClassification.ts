@@ -51,6 +51,64 @@ export function extractRetryAfterSeconds(message: string): number | null {
     return Math.max(1, Math.ceil(ms / 1000));
 }
 
+// --- Rate Limit RPS ---
+
+function toRps(value: number, unit: 'rps' | 'rpm' | 'rpd'): number {
+    if (unit === 'rps') return value;
+    if (unit === 'rpm') return value / 60;
+    return value / 86400;
+}
+
+function parseNumber(value: string | undefined): number | null {
+    if (!value) return null;
+    const parsed = Number.parseFloat(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) return null;
+    return parsed;
+}
+
+function windowUnitToSeconds(unit: string): number | null {
+    const normalized = unit.toLowerCase();
+    if (['s', 'sec', 'secs', 'second', 'seconds'].includes(normalized)) return 1;
+    if (['m', 'min', 'mins', 'minute', 'minutes'].includes(normalized)) return 60;
+    if (['h', 'hr', 'hrs', 'hour', 'hours'].includes(normalized)) return 3600;
+    if (['d', 'day', 'days'].includes(normalized)) return 86400;
+    return null;
+}
+
+/**
+ * Extract an explicit rate limit (requests per second) from an error message.
+ * Returns null if no explicit limit is found.
+ */
+export function extractRateLimitRps(message: string): number | null {
+    if (!message) return null;
+    const sanitized = String(message).replace(/,/g, '');
+
+    const directPatterns: Array<{ regex: RegExp; unit: 'rps' | 'rpm' | 'rpd' }> = [
+        { regex: /(\d+(?:\.\d+)?)\s*(?:rps|reqs?\/s|requests?\/s|requests?\s*per\s*second)\b/i, unit: 'rps' },
+        { regex: /(\d+(?:\.\d+)?)\s*(?:rpm|reqs?\/m|requests?\/m|requests?\s*per\s*minute)\b/i, unit: 'rpm' },
+        { regex: /(\d+(?:\.\d+)?)\s*(?:rpd|requests?\s*per\s*day)\b/i, unit: 'rpd' },
+    ];
+
+    for (const { regex, unit } of directPatterns) {
+        const match = sanitized.match(regex);
+        const numeric = parseNumber(match?.[1]);
+        if (numeric !== null) return toRps(numeric, unit);
+    }
+
+    const windowMatch = sanitized.match(/(\d+(?:\.\d+)?)\s*requests?\s*(?:in|per)\s*(\d+(?:\.\d+)?)\s*(seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|days?|d)\b/i);
+    if (windowMatch) {
+        const count = parseNumber(windowMatch[1]);
+        const span = parseNumber(windowMatch[2]);
+        const secondsPerUnit = windowUnitToSeconds(windowMatch[3]);
+        if (count !== null && span !== null && secondsPerUnit !== null) {
+            const totalSeconds = span * secondsPerUnit;
+            if (totalSeconds > 0) return count / totalSeconds;
+        }
+    }
+
+    return null;
+}
+
 // --- Insufficient Credits ---
 
 export function isInsufficientCreditsError(error: any): boolean {
@@ -88,6 +146,7 @@ export function isModelAccessError(error: any): boolean {
         message.includes('does not have access to model') ||
         message.includes('model_not_found') ||
         message.includes('no gemini model available') ||
+        message.includes('no eligible image models found') ||
         message.includes('not found for api version') ||
         message.includes('model not found') ||
         message.includes('the model') && message.includes('does not exist') ||

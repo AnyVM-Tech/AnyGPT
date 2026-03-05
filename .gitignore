@@ -69,5 +69,9 @@ apps/api/logs/probe-errors.jsonl
 
 # LibreChat repo (cloned into apps/ui)
 apps/ui/librechat/
-apps/api/providers.json.backup
 apps/api/keys.json.backup
+.gitignore
+.gitignore
+apps/api/logs/nano-banana-sweep.log
+apps/api/providers.json.backup
+apps/api/providers.json.bak

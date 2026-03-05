@@ -33,6 +33,111 @@ interface PricingFile {
   models: Record<string, ModelPricing>;
 }
 
+type PricingMap = Record<string, Partial<ModelPricing>>;
+
+function splitModelId(modelId: string): { prefix: string | null; baseId: string } {
+  const parts = modelId.split('/');
+  if (parts.length <= 1) return { prefix: null, baseId: modelId };
+  return { prefix: parts[0], baseId: parts.slice(1).join('/') };
+}
+
+function guessProviderForModel(modelId: string): string | null {
+  const lower = modelId.toLowerCase();
+  if (lower.startsWith('gpt') || lower.includes('openai') || lower.includes('chatgpt') || lower.startsWith('o1') || lower.startsWith('o3') || lower.startsWith('o4')) return 'openai';
+  if (lower.includes('claude') || lower.includes('anthropic')) return 'anthropic';
+  if (lower.includes('gemini') || lower.includes('gemma') || lower.startsWith('imagen') || lower.includes('nano-banana') || lower.startsWith('veo')) return 'google';
+  if (lower.includes('llama') || lower.includes('meta-llama')) return 'meta';
+  if (lower.includes('mistral') || lower.includes('ministral') || lower.includes('mixtral')) return 'mistral.ai';
+  if (lower.includes('qwen')) return 'alibaba';
+  if (lower.includes('deepseek')) return 'deepseek';
+  if (lower.includes('grok') || lower.includes('xai') || lower.includes('x-ai')) return 'xai';
+  if (lower.includes('command') || lower.includes('cohere')) return 'cohere';
+  if (lower.includes('jamba') || lower.includes('ai21')) return 'ai21';
+  return null;
+}
+
+function buildPricingCandidates(modelId: string): string[] {
+  const candidates = new Set<string>();
+  const add = (value?: string | null) => {
+    if (!value) return;
+    candidates.add(value);
+  };
+
+  add(modelId);
+  const { baseId } = splitModelId(modelId);
+  add(baseId);
+
+  if (modelId.endsWith(':free')) {
+    const withoutFree = modelId.slice(0, -5);
+    add(withoutFree);
+    add(splitModelId(withoutFree).baseId);
+  }
+
+  if (modelId.endsWith(':exacto')) {
+    const withoutExacto = modelId.slice(0, -7);
+    add(withoutExacto);
+    add(splitModelId(withoutExacto).baseId);
+  }
+
+  if (modelId.endsWith('-mini')) {
+    const withoutMini = modelId.slice(0, -5);
+    add(withoutMini);
+    add(splitModelId(withoutMini).baseId);
+  }
+
+  if (modelId.includes('-thinking')) {
+    const withoutThinking = modelId.replace('-thinking', '');
+    add(withoutThinking);
+    add(splitModelId(withoutThinking).baseId);
+
+    const collapsedThinking = modelId.replace('-thinking-', '-');
+    add(collapsedThinking);
+    add(splitModelId(collapsedThinking).baseId);
+
+    const instructVariant = modelId.replace('-thinking', '-instruct');
+    add(instructVariant);
+    add(splitModelId(instructVariant).baseId);
+  }
+
+  return Array.from(candidates);
+}
+
+function resolveOfficialPricing(modelId: string): Partial<ModelPricing> | null {
+  for (const candidate of buildPricingCandidates(modelId)) {
+    const price = OFFICIAL_PRICES[candidate];
+    if (price) return price;
+  }
+  return null;
+}
+
+function resolveOpenRouterPricing(modelId: string, openrouterPrices: PricingMap): Partial<ModelPricing> | null {
+  if (openrouterPrices[modelId]) return openrouterPrices[modelId];
+  const { baseId } = splitModelId(modelId);
+  if (openrouterPrices[baseId]) return openrouterPrices[baseId];
+
+  const suffixMatches = Object.entries(openrouterPrices).filter(([key]) => key.endsWith(`/${baseId}`));
+  if (suffixMatches.length === 0) return null;
+  if (suffixMatches.length === 1) return suffixMatches[0][1];
+
+  const preferredProvider = guessProviderForModel(baseId);
+  if (preferredProvider) {
+    const preferred = suffixMatches.find(([key]) => key.startsWith(`${preferredProvider}/`));
+    if (preferred) return preferred[1];
+  }
+
+  return suffixMatches[0][1];
+}
+
+function buildPricingEntry(price: Partial<ModelPricing>, source: ModelPricing['source'], now: string): ModelPricing {
+  return {
+    input: price.input ?? 0,
+    output: price.output ?? 0,
+    ...price,
+    source,
+    updated_at: now,
+  } as ModelPricing;
+}
+
 // Official prices from provider documentation (as of Feb 2026)
 // All prices in $ per million tokens unless noted
 const OFFICIAL_PRICES: Record<string, Partial<ModelPricing>> = {
@@ -141,6 +246,8 @@ const OFFICIAL_PRICES: Record<string, Partial<ModelPricing>> = {
   'gpt-image-1': { input: 0, output: 0, per_image: 0.04, source: 'official' },
   'gpt-image-1-mini': { input: 0, output: 0, per_image: 0.02, source: 'official' },
   'gpt-image-1.5': { input: 0, output: 0, per_image: 0.04, source: 'official' },
+  'gpt-5-image': { input: 0, output: 0, per_image: 0.04, source: 'official' },
+  'gpt-5-image-mini': { input: 0, output: 0, per_image: 0.02, source: 'official' },
   'chatgpt-image-latest': { input: 0, output: 0, per_image: 0.04, source: 'official' },
   'dall-e-3': { input: 0, output: 0, per_image: 0.04, source: 'official' },
   'dall-e-2': { input: 0, output: 0, per_image: 0.02, source: 'official' },
@@ -226,8 +333,8 @@ const OFFICIAL_PRICES: Record<string, Partial<ModelPricing>> = {
   'grok-imagine-video': { input: 0, output: 0, per_request: 0.50, source: 'official' },
 };
 
-async function fetchOpenRouterPricing(): Promise<Record<string, Partial<ModelPricing>>> {
-  const prices: Record<string, Partial<ModelPricing>> = {};
+async function fetchOpenRouterPricing(): Promise<PricingMap> {
+  const prices: PricingMap = {};
   try {
     console.log('Fetching OpenRouter model pricing...');
     const res = await axios.get('https://openrouter.ai/api/v1/models', { timeout: 15000 });
@@ -241,11 +348,12 @@ async function fetchOpenRouterPricing(): Promise<Record<string, Partial<ModelPri
       const promptPrice = parseFloat(pricing.prompt || '0');
       const completionPrice = parseFloat(pricing.completion || '0');
       const imagePrice = parseFloat(pricing.image || '0');
+      const requestPrice = parseFloat(pricing.request || '0');
       
       // OpenRouter adds ~5% markup. Subtract to estimate direct pricing.
       const MARKUP = 0.95;
       
-      if (promptPrice > 0 || completionPrice > 0) {
+      if (promptPrice > 0 || completionPrice > 0 || imagePrice > 0 || requestPrice > 0) {
         prices[id] = {
           input: parseFloat((promptPrice * 1e6 * MARKUP).toFixed(6)),
           output: parseFloat((completionPrice * 1e6 * MARKUP).toFixed(6)),
@@ -253,6 +361,9 @@ async function fetchOpenRouterPricing(): Promise<Record<string, Partial<ModelPri
         };
         if (imagePrice > 0) {
           prices[id].per_image = parseFloat((imagePrice * MARKUP).toFixed(8));
+        }
+        if (requestPrice > 0) {
+          prices[id].per_request = parseFloat((requestPrice * MARKUP).toFixed(8));
         }
       }
     }
@@ -279,48 +390,50 @@ async function main() {
     console.warn('Could not load models.json:', err);
   }
 
+  const supplementalModelIds = Object.entries(OFFICIAL_PRICES)
+    .filter(([, price]) => price.per_image || price.per_request)
+    .map(([id]) => id);
+  modelIds = Array.from(new Set([...modelIds, ...supplementalModelIds]));
+
   // Fetch from OpenRouter
   const openrouterPrices = await fetchOpenRouterPricing();
 
-  // Merge: official > existing > openrouter
+  // Merge priority:
+  // 1) Official pricing entries
+  // 2) Provider-specific OpenRouter entries (for models with provider prefixes)
+  // 3) OpenRouter as fallback for unknown models
+  // 4) Preserve existing entries (non-official) if still missing
   const merged: Record<string, ModelPricing> = {};
   const now = new Date().toISOString();
 
   for (const modelId of modelIds) {
-    const official = OFFICIAL_PRICES[modelId];
+    const official = resolveOfficialPricing(modelId);
     const existingEntry = existing.models[modelId];
-    const orPrice = openrouterPrices[modelId];
-    // Also check with/without prefix
-    const strippedId = modelId.includes('/') ? modelId.split('/').pop()! : modelId;
-    const orPriceStripped = openrouterPrices[strippedId] || Object.entries(openrouterPrices).find(([k]) => k.endsWith('/' + modelId))?.[1];
+    const { prefix, baseId } = splitModelId(modelId);
 
     if (official) {
-      merged[modelId] = {
-        input: official.input ?? 0,
-        output: official.output ?? 0,
-        ...official,
-        source: 'official',
-        updated_at: now,
-      } as ModelPricing;
-    } else if (existingEntry?.source === 'official') {
+      merged[modelId] = buildPricingEntry(official, 'official', now);
+      continue;
+    }
+
+    if (existingEntry?.source === 'official') {
       merged[modelId] = existingEntry;
-    } else if (orPrice) {
-      merged[modelId] = {
-        input: orPrice.input ?? 0,
-        output: orPrice.output ?? 0,
-        ...orPrice,
-        source: 'openrouter',
-        updated_at: now,
-      } as ModelPricing;
-    } else if (orPriceStripped) {
-      merged[modelId] = {
-        input: orPriceStripped.input ?? 0,
-        output: orPriceStripped.output ?? 0,
-        ...orPriceStripped,
-        source: 'openrouter',
-        updated_at: now,
-      } as ModelPricing;
-    } else if (existingEntry) {
+      continue;
+    }
+
+    const providerSpecificPrice = prefix ? resolveOpenRouterPricing(modelId, openrouterPrices) : null;
+    if (providerSpecificPrice) {
+      merged[modelId] = buildPricingEntry(providerSpecificPrice, 'openrouter', now);
+      continue;
+    }
+
+    const fallbackPrice = resolveOpenRouterPricing(baseId, openrouterPrices);
+    if (fallbackPrice) {
+      merged[modelId] = buildPricingEntry(fallbackPrice, 'openrouter', now);
+      continue;
+    }
+
+    if (existingEntry) {
       merged[modelId] = existingEntry;
     }
     // Models without any pricing data are omitted

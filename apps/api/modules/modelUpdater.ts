@@ -197,7 +197,7 @@ function roundTo(value: number, decimals: number): number {
     return Math.round(value * factor) / factor;
 }
 
-function calculateDynamicPricing(modelId: string, providerCount: number): Record<string, any> | null {
+export function calculateDynamicPricing(modelId: string, providerCount: number): Record<string, any> | null {
     const basePricing = loadBasePricing();
     const isFree = isFreeModelId(modelId);
     const price = resolveBasePricing(modelId, basePricing);
@@ -236,7 +236,7 @@ function calculateDynamicPricing(modelId: string, providerCount: number): Record
     } else if (inp > 0) {
         shown.input = roundTo(targetBlended, TOKEN_PRICE_DECIMALS);
         shown.output = 0;
-    } else {
+    } else if (out > 0) {
         shown.input = 0;
         shown.output = roundTo(targetBlended, TOKEN_PRICE_DECIMALS);
     }
@@ -249,6 +249,19 @@ function calculateDynamicPricing(modelId: string, providerCount: number): Record
     if (price.per_image) shown.per_image = roundTo(price.per_image * 0.20, SPECIAL_PRICE_DECIMALS);
     if (price.per_request) shown.per_request = roundTo(price.per_request * 0.20, SPECIAL_PRICE_DECIMALS);
     if (price.image_input) shown.image_input = roundTo(price.image_input * 0.20, SPECIAL_PRICE_DECIMALS);
+
+    if (shown.input === undefined && shown.output === undefined) {
+        if (price.per_image || price.per_request || price.image_input) {
+            shown.input = 0;
+            shown.output = 0;
+        } else if (inp > 0) {
+            shown.input = roundTo(targetBlended, TOKEN_PRICE_DECIMALS);
+            shown.output = 0;
+        } else if (out > 0) {
+            shown.input = 0;
+            shown.output = roundTo(targetBlended, TOKEN_PRICE_DECIMALS);
+        }
+    }
 
     shown.unit = 'per_million_tokens';
     return shown;
@@ -503,25 +516,29 @@ export async function refreshProviderCountsInModelsFile(): Promise<void> {
         const newModelsWithoutCaps: string[] = [];
         for (const modelId of availableModelIds) {
             if (!existingModelIds.has(modelId)) {
+                const providerCount = activeProviderCounts[modelId] ?? 0;
+                if (providerCount <= 0) {
+                    continue;
+                }
                 const newModel: any = {
                     id: modelId,
                     object: MODEL_OBJECT_TYPE,
                     created: Date.now(),
                     owned_by: guessOwnedBy(modelId),
-                    providers: activeProviderCounts[modelId],
+                    providers: providerCount,
                     throughput: modelThroughput[modelId] || 50
                 };
                 const cachedCaps = capabilitiesCache[modelId];
                 if (cachedCaps && cachedCaps.length > 0) {
                     newModel.capabilities = [...cachedCaps];
                 }
-                const dynamicPrice = calculateDynamicPricing(modelId, activeProviderCounts[modelId]);
+                const dynamicPrice = calculateDynamicPricing(modelId, providerCount);
                 if (dynamicPrice) {
                     newModel.pricing = dynamicPrice;
                 }
                 updatedModels.push(newModel);
                 newModelsWithoutCaps.push(modelId);
-                console.log(`Added new model ${modelId} with ${activeProviderCounts[modelId]} provider(s), owned by: ${newModel.owned_by}`);
+                console.log(`Added new model ${modelId} with ${providerCount} provider(s), owned by: ${newModel.owned_by}`);
                 changesMade = true;
             }
         }
@@ -575,7 +592,8 @@ export async function refreshProviderCountsInModelsFile(): Promise<void> {
 
         // Trigger capability probing for models without capabilities
         const modelsNeedingProbe = Array.from(new Set([...allModelsWithoutCaps, ...modelsWithoutProbe]));
-        if (modelsNeedingProbe.length > 0) {
+        const disableProbeNotify = (process.env.DISABLE_MODEL_PROBE_NOTIFY || '').toLowerCase() === 'true';
+        if (modelsNeedingProbe.length > 0 && !disableProbeNotify) {
             try {
                 if (allModelsWithoutCaps.length > 0) {
                     console.log(`Models without capabilities: ${allModelsWithoutCaps.length} (${newModelsWithoutCaps.length} new, ${allModelsWithoutCaps.length - newModelsWithoutCaps.length} existing).`);

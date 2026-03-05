@@ -103,6 +103,10 @@
             "type": ["number", "null"],
             "description": "Calculated average token speed (tokens/sec, e.g., EMA)."
           },
+          "rate_limit_rps": {
+            "type": ["number", "null"],
+            "description": "Last observed or estimated request rate limit for this model (requests per second)."
+          },
           "disabled": {
             "type": "boolean",
             "default": false,

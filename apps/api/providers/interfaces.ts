@@ -23,6 +23,7 @@ export interface Model {
   avg_response_time: number | null;
   avg_provider_latency: number | null;
   avg_token_speed: number | null; // Calculated average token speed (tokens/sec, e.g., EMA)
+  rate_limit_rps?: number | null; // Last observed or estimated request rate limit (requests per second)
   capability_skips?: Partial<Record<ModelCapability, string>>; // Optional per-model capability skips
   disabled?: boolean; // Optional per-model disable flag
   disabled_at?: number; // Epoch ms when the model was disabled (for time-based auto-recovery)

@@ -9,6 +9,7 @@ const IMAGE_PROMPT = 'Generate a simple image of a blue square on a white backgr
 const args = process.argv.slice(2);
 const dryRun = args.includes('--dry-run');
 const includeDisabled = args.includes('--include-disabled');
+const allGemini = args.includes('--all-gemini') || args.includes('--all-google');
 const limitArg = args.find((arg) => arg.startsWith('--limit='));
 const limit = limitArg ? Number(limitArg.split('=')[1]) : undefined;
 const delayArg = args.find((arg) => arg.startsWith('--delay-ms='));
@@ -16,7 +17,9 @@ const delayMs = delayArg ? Number(delayArg.split('=')[1]) : 250;
 const providerFilterArg = args.find((arg) => arg.startsWith('--provider='));
 const providerFilter = providerFilterArg ? providerFilterArg.split('=')[1].trim().toLowerCase() : '';
 const removeMissingKey = args.includes('--remove-missing-key');
-const waitRedis = !args.includes('--no-wait-redis');
+  const waitRedis = !args.includes('--no-wait-redis');
+  const timeoutArg = args.find((arg) => arg.startsWith('--timeout-ms='));
+  const timeoutMs = timeoutArg ? Number(timeoutArg.split('=')[1]) : undefined;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -58,7 +61,12 @@ async function main() {
   const providers = await dataManager.load<LoadedProviders>('providers');
   let candidates = providers.filter((p) => p.models && MODEL_ID in p.models);
 
-  if (!includeDisabled) {
+  if (allGemini) {
+    candidates = providers.filter((p) => isGoogleFamilyProvider(p.id));
+    if (!includeDisabled) {
+      candidates = candidates.filter((p) => !p.disabled);
+    }
+  } else if (!includeDisabled) {
     candidates = candidates.filter((p) => !p.disabled);
   }
   if (providerFilter) {
@@ -68,7 +76,8 @@ async function main() {
     candidates = candidates.slice(0, limit);
   }
 
-  console.log(`Testing ${candidates.length} provider(s) for ${MODEL_ID}...`);
+  const scopeNote = allGemini ? ' (all Gemini/Imagen providers)' : '';
+  console.log(`Testing ${candidates.length} provider(s) for ${MODEL_ID}${scopeNote}...`);
 
   const removed: string[] = [];
   const kept: string[] = [];
@@ -81,8 +90,27 @@ async function main() {
     }
 
     try {
+      if (typeof timeoutMs === 'number' && Number.isFinite(timeoutMs) && timeoutMs > 0) {
+        process.env.UPSTREAM_TIMEOUT_MS = String(timeoutMs);
+      }
       const result = await testNanoBanana(provider);
       if (result.ok) {
+        if (!provider.models) {
+          provider.models = {};
+        }
+        if (!provider.models[MODEL_ID]) {
+          provider.models[MODEL_ID] = {
+            id: MODEL_ID,
+            token_generation_speed: 50,
+            response_times: [],
+            errors: 0,
+            consecutive_errors: 0,
+            avg_response_time: null,
+            avg_provider_latency: null,
+            avg_token_speed: null,
+            disabled: false,
+          };
+        }
         kept.push(provider.id);
         console.log(`ok: ${provider.id} -> ${MODEL_ID}`);
       } else {

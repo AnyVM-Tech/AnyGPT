@@ -466,7 +466,7 @@ function getKnownCapabilities(modelId: string): { caps: ModelCapability[]; reaso
   if (!id) return null;
 
   // Image generation models (Imagen, DALL-E, GPT-Image, Grok Imagine)
-  if (id.startsWith('imagen-') || id.startsWith('dall-e') || id.startsWith('gpt-image') || id === 'chatgpt-image-latest') {
+  if (id.startsWith('imagen-') || id.startsWith('dall-e') || id.startsWith('gpt-image') || id.includes('gpt-5-image') || id.includes('nano-banana') || id === 'chatgpt-image-latest') {
     return { caps: ['text', 'image_output'], reason: 'image generation model' };
   }
   if (id.includes('grok-imagine-image') || id.includes('grok-2-image')) {

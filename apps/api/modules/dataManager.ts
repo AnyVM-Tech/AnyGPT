@@ -15,6 +15,7 @@ interface ProviderModelData {
     avg_response_time: number | null;
     avg_provider_latency: number | null;
     avg_token_speed: number | null;
+    rate_limit_rps?: number | null;
     capability_skips?: Record<string, string>;
     disabled?: boolean;
     disabled_at?: number; // Epoch ms when the model was disabled (for time-based auto-recovery)
@@ -378,6 +379,9 @@ class DataManager {
         const disable_count = typeof (raw as any)?.disable_count === 'number' && (raw as any).disable_count >= 0
             ? Math.floor((raw as any).disable_count)
             : undefined;
+        const rateLimitRps = typeof (raw as any)?.rate_limit_rps === 'number' && Number.isFinite((raw as any).rate_limit_rps)
+            ? Math.max(0, Number((raw as any).rate_limit_rps))
+            : null;
         return {
             id: typeof raw?.id === 'string' && raw.id ? raw.id : modelId,
             token_generation_speed: typeof raw?.token_generation_speed === 'number' && !Number.isNaN(raw.token_generation_speed) ? raw.token_generation_speed : 50,
@@ -387,6 +391,7 @@ class DataManager {
             avg_response_time: typeof raw?.avg_response_time === 'number' ? raw.avg_response_time : null,
             avg_provider_latency: typeof raw?.avg_provider_latency === 'number' ? raw.avg_provider_latency : null,
             avg_token_speed: typeof raw?.avg_token_speed === 'number' ? raw.avg_token_speed : null,
+            rate_limit_rps: rateLimitRps,
             capability_skips: capabilitySkips && Object.keys(capabilitySkips).length ? capabilitySkips : undefined,
             disabled: Boolean((raw as any)?.disabled),
             ...(disabled_at !== undefined ? { disabled_at } : {}),
@@ -424,6 +429,7 @@ class DataManager {
             ...(normalizedFs.capability_skips || {}),
             ...(normalizedRedis.capability_skips || {}),
         };
+        const mergedRateLimitRps = normalizedRedis.rate_limit_rps ?? normalizedFs.rate_limit_rps ?? null;
         // For disabled_at / disable_count: prefer the more recent disable timestamp; take the higher count
         const mergedDisabledAt = (normalizedRedis.disabled_at && normalizedFs.disabled_at)
             ? Math.max(normalizedRedis.disabled_at, normalizedFs.disabled_at)
@@ -440,6 +446,7 @@ class DataManager {
             avg_response_time: normalizedRedis.avg_response_time ?? normalizedFs.avg_response_time,
             avg_provider_latency: normalizedRedis.avg_provider_latency ?? normalizedFs.avg_provider_latency,
             avg_token_speed: normalizedRedis.avg_token_speed ?? normalizedFs.avg_token_speed,
+            rate_limit_rps: mergedRateLimitRps,
             capability_skips: Object.keys(mergedSkips).length ? mergedSkips : undefined,
             disabled: Boolean(normalizedFs.disabled || normalizedRedis.disabled),
             ...(mergedDisabledAt !== undefined ? { disabled_at: mergedDisabledAt } : {}),

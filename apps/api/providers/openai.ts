@@ -229,6 +229,18 @@ export class OpenAI implements IAIProvider {
     return slashIndex > 0 ? id.slice(slashIndex) : id;
   }
 
+  private readEnvNumber(name: string, fallback: number): number {
+    const raw = process.env[name];
+    if (raw === undefined) return fallback;
+    const value = Number(raw);
+    return Number.isFinite(value) && value >= 0 ? value : fallback;
+  }
+
+  private getRequestTimeoutMs(): number {
+    const upstreamTimeout = this.readEnvNumber('UPSTREAM_TIMEOUT_MS', 120_000);
+    return this.readEnvNumber('OPENAI_TIMEOUT_MS', upstreamTimeout);
+  }
+
   private isComputerUseModel(modelId: string): boolean {
     const normalized = this.normalizeModelId(modelId);
     return normalized.includes('computer-use');
@@ -557,7 +569,7 @@ export class OpenAI implements IAIProvider {
         continue;
       }
 
-      if (type === 'image_url' && part.image_url) {
+      if ((type === 'input_image' || type === 'image_url') && part.image_url) {
         if (typeof part.image_url === 'string') {
           normalized.push({ type: 'input_image', image_url: part.image_url });
         } else if (typeof part.image_url.url === 'string') {
@@ -660,9 +672,11 @@ export class OpenAI implements IAIProvider {
   }
 
   private async postSseRequest(url: string, data: Record<string, any>, headers: Record<string, string>) {
+    const timeoutMs = this.getRequestTimeoutMs();
     const response = await axios.post(url, data, {
       headers,
       responseType: 'stream',
+      timeout: timeoutMs,
       validateStatus: () => true,
     });
 
@@ -1095,7 +1109,8 @@ export class OpenAI implements IAIProvider {
     const requestData = stripped.cleaned;
 
     try {
-      const response = await axios.post(url, requestData, { headers });
+      const timeoutMs = this.getRequestTimeoutMs();
+      const response = await axios.post(url, requestData, { headers, timeout: timeoutMs });
       const endTime = Date.now();
       const latency = endTime - startTime;
 
@@ -1127,7 +1142,7 @@ export class OpenAI implements IAIProvider {
         if (retried.removed.length > 0) {
           try {
             const retryStart = Date.now();
-            const retryResp = await axios.post(url, retried.cleaned, { headers });
+            const retryResp = await axios.post(url, retried.cleaned, { headers, timeout: this.getRequestTimeoutMs() });
             const retryLatency = Date.now() - retryStart;
             const retryText = this.extractResponseText(retryResp.data, useResponsesApi);
             if (retryText !== null && retryText !== undefined) {
@@ -1152,7 +1167,7 @@ export class OpenAI implements IAIProvider {
           const chatPayload = this.buildChatPayload(message, false);
           const chatStripped = this.stripUnsupportedParamsFromPayload(chatPayload, message.model.id);
           const chatStart = Date.now();
-          const chatResp = await axios.post(chatUrl, chatStripped.cleaned, { headers });
+          const chatResp = await axios.post(chatUrl, chatStripped.cleaned, { headers, timeout: this.getRequestTimeoutMs() });
           const chatLatency = Date.now() - chatStart;
           const chatText = this.extractResponseText(chatResp.data, false);
           if (chatText !== null && chatText !== undefined) {
@@ -1174,7 +1189,7 @@ export class OpenAI implements IAIProvider {
           const responsesPayload = this.buildResponsesPayload(message, false);
           const responsesStripped = this.stripUnsupportedParamsFromPayload(responsesPayload, message.model.id);
           const responsesStart = Date.now();
-          const responsesResp = await axios.post(responsesUrl, responsesStripped.cleaned, { headers });
+          const responsesResp = await axios.post(responsesUrl, responsesStripped.cleaned, { headers, timeout: this.getRequestTimeoutMs() });
           const responsesLatency = Date.now() - responsesStart;
           const responsesText = this.extractResponseText(responsesResp.data, true);
           if (responsesText !== null && responsesText !== undefined) {
