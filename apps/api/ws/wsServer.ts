@@ -106,6 +106,26 @@ interface ToolCall {
   function: ToolCallFunction;
 }
 
+// Stream result shapes emitted by messageHandler.handleStreamingMessages.
+// Both 'chunk' and 'final' variants may carry tool_calls and finish_reason,
+// which are accumulated downstream.
+type StreamChunkResult = {
+  type: 'chunk';
+  chunk?: string;
+  tool_calls?: ToolCall[];
+  finish_reason?: string;
+};
+
+type StreamFinalResult = {
+  type: 'final';
+  tokenUsage?: number;
+  providerId?: string;
+  tool_calls?: ToolCall[];
+  finish_reason?: string;
+};
+
+type StreamResult = StreamChunkResult | StreamFinalResult;
+
 // Simplified, OpenAI-compatible tool definition for chat completions
 interface WsToolFunction {
   name: string;
@@ -470,14 +490,25 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
           }
           // Prefer the more explicit `reasoning_effort` field when present; fall back to
           // the legacy/general `reasoning` field for backward compatibility.
-          const normalizedReasoning =
-            payload.reasoning_effort !== undefined
-              ? payload.reasoning_effort
-              : payload.reasoning;
+          const normalizedReasoningConfig = (() => {
+            // Start from the legacy reasoning object if it exists; otherwise use an empty config.
+            const baseConfig: WsReasoningConfig =
+              payload.reasoning && typeof payload.reasoning === 'object'
+                ? { ...payload.reasoning }
+                : {};
+            // If the newer reasoning_effort field is provided, let it override any effort value
+            // in the legacy config to avoid conflicting settings.
+            if (payload.reasoning_effort !== undefined) {
+              // We assume the reasoning config uses an `effort`-like field to represent this value.
+              // This keeps the downstream type consistent: always an object, never a raw string union.
+              baseConfig.effort = payload.reasoning_effort;
+            }
+            return baseConfig;
+          })();
           const sharedMessageOptions = {
             tools: Array.isArray(payload.tools) ? payload.tools : undefined,
             tool_choice: payload.tool_choice,
-            reasoning: normalizedReasoning,
+            reasoning: normalizedReasoningConfig,
           };
           const formattedMessages = messages.map((msg) => ({
             role: msg.role,
@@ -511,7 +542,7 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
                 model,
                 ctx.apiKey,
                 { requestId, ...sharedMessageOptions },
-              );
+              ) as AsyncIterable<StreamResult>;
 
               let totalTokenUsage = 0;
               let explicitTokenUsage: number | undefined;
@@ -613,6 +644,7 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
               model,
               ctx.apiKey,
               requestId,
+              sharedMessageOptions,
             );
             const totalTokens = typeof result.tokenUsage === 'number' ? result.tokenUsage : estimateTokens(result.response || '');
             await updateUserTokenUsage(totalTokens, ctx.apiKey);
