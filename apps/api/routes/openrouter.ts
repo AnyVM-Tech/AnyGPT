@@ -69,7 +69,6 @@ function normalizeImageFetchReferer(raw?: string | string[]): string | undefined
     } catch {
         return undefined;
     }
-    return undefined;
 }
 
 // --- Routes ---
@@ -185,7 +184,7 @@ router.post('/v6/chat/completions', authAndUsageMiddleware, rateLimitMiddleware,
         response.json(openRouterResponse);
  
    } catch (error: any) { 
-        console.error('OpenRouter Route - /api/v1/chat/completions error:', error.message, error.stack);
+        console.error('OpenRouter Route - /v6/chat/completions error:', error.message, error.stack);
         
         // Map internal errors to potential OpenRouter/OpenAI error formats
         if (error instanceof SyntaxError) return response.status(400).json({ error: { message: 'Invalid JSON payload.', code: 'invalid_json' }});
