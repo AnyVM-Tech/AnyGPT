@@ -833,7 +833,7 @@ export class MessageHandler {
         return modelId;
     }
 
-    async handleMessages(messages: IMessage[], modelId: string, apiKey: string, requestId?: string): Promise<any> {
+    async handleMessages(messages: IMessage[], modelId: string, apiKey: string, options?: { requestId?: string; tools?: any; tool_choice?: any; reasoning?: any }): Promise<any> {
          if (!messages?.length || !modelId || !apiKey) throw new Error("Invalid arguments");
          if (!messageHandler) throw new Error("Service temporarily unavailable.");
          modelId = this.applyModelReroute(modelId);
@@ -1018,7 +1018,7 @@ export class MessageHandler {
                         provider_latency: providerLatency,
                         observed_speed_tps: observedSpeedTps,
                         apiKey: apiKey,
-                        request_id: requestId
+                        request_id: options?.requestId
                     };
                  } else { 
                     sendMessageError = new Error(`Provider ${providerId} returned null result for model ${modelId}.`); 
@@ -1351,7 +1351,7 @@ export class MessageHandler {
                 }
 
                 console.log(`Provider ${providerId} is not streaming compatible. Simulating stream.`);
-                const result = await this.handleMessages(messages, modelId, apiKey, options?.requestId);
+                const result = await this.handleMessages(messages, modelId, apiKey, { requestId: options?.requestId });
                 const responseText = result.response;
                 const chunkSize = 5;
                 for (let i = 0; i < responseText.length; i += chunkSize) {

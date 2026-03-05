@@ -8,6 +8,7 @@ import * as path from 'path';
 // Low providers = higher price (scarcity), many providers = lower price (abundance)
 const COMP_BASE_RATE = 0.0233; // Competitor ULTRA effective rate per M tokens
 const UNDERCUT_FACTOR = 0.80;  // 20% cheaper than competitor
+const MODEL_OBJECT_TYPE = 'model' as const;
 
 interface BasePricing {
     input: number;
@@ -17,6 +18,32 @@ interface BasePricing {
     per_image?: number;
     per_request?: number;
     image_input?: number;
+}
+
+/**
+ * Extracts a token-per-second (TPS) value from raw model metadata.
+ *
+ * Priority:
+ *  - Prefer `avg_token_speed` when it is a positive number.
+ *  - Fallback to `token_generation_speed` when it is a positive number.
+ *
+ * Notes:
+ *  - Some providers report `token_generation_speed === 50` as a default/sentinel
+ *    value that does not reflect real throughput; we explicitly exclude that.
+ *  - Returns `null` if no valid TPS metric is available.
+ */
+function extractTokenSpeed(modelData: any): number | null {
+    const avgSpeed = modelData?.avg_token_speed;
+    if (typeof avgSpeed === 'number' && avgSpeed > 0) {
+        return avgSpeed;
+    }
+
+    const genSpeed = modelData?.token_generation_speed;
+    if (typeof genSpeed === 'number' && genSpeed > 0 && genSpeed !== 50) {
+        return genSpeed;
+    }
+
+    return null;
 }
 
 let basePricingCache: Record<string, BasePricing> | null = null;
@@ -216,7 +243,7 @@ function calculateDynamicPricing(modelId: string, providerCount: number): Record
 
     // Special pricing (audio, image) — scale with availability
     // Floor at 5% so audio pricing doesn't drop to zero for high provider counts.
-    const specialDiscount = Math.max(0.05, 1 - (0.90 + availDiscount * 0.5)); // 5-10% of official
+    const specialDiscount = Math.max(0.05, 0.10 - availDiscount * 0.5); // 5-10% of official
     if (price.audio_input) shown.audio_input = roundTo(price.audio_input * specialDiscount, TOKEN_PRICE_DECIMALS);
     if (price.audio_output) shown.audio_output = roundTo(price.audio_output * specialDiscount, TOKEN_PRICE_DECIMALS);
     if (price.per_image) shown.per_image = roundTo(price.per_image * 0.20, SPECIAL_PRICE_DECIMALS);
@@ -396,11 +423,7 @@ export async function refreshProviderCountsInModelsFile(): Promise<void> {
 
                         // Collect TPS data for throughput calculation
                         const modelData = provider.models[modelId] as any;
-                        const tps = typeof modelData?.avg_token_speed === 'number' && modelData.avg_token_speed > 0
-                            ? modelData.avg_token_speed
-                            : (typeof modelData?.token_generation_speed === 'number' && modelData.token_generation_speed > 0 && modelData.token_generation_speed !== 50
-                                ? modelData.token_generation_speed
-                                : null);
+                        const tps = extractTokenSpeed(modelData);
                         if (tps !== null && tps > 0.1 && tps < 5000) { // Filter outliers
                             if (!modelTpsSamples[modelId]) modelTpsSamples[modelId] = [];
                             modelTpsSamples[modelId].push(tps);
@@ -432,9 +455,10 @@ export async function refreshProviderCountsInModelsFile(): Promise<void> {
             if (newProviderCount > 0) {
                 // Keep models that have at least one active provider
                 if (model.providers !== newProviderCount) {
+                    const oldProviderCount = model.providers;
                     model.providers = newProviderCount;
                     changesMade = true;
-                    console.log(`Updated provider count for ${model.id}: ${model.providers} -> ${newProviderCount}`);
+                    console.log(`Updated provider count for ${model.id}: ${oldProviderCount} -> ${newProviderCount}`);
                 }
                 if (!model.owned_by || model.owned_by === 'unknown') {
                     const guessedOwner = guessOwnedBy(model.id);
@@ -481,7 +505,7 @@ export async function refreshProviderCountsInModelsFile(): Promise<void> {
             if (!existingModelIds.has(modelId)) {
                 const newModel: any = {
                     id: modelId,
-                    object: "model" as const,
+                    object: MODEL_OBJECT_TYPE,
                     created: Date.now(),
                     owned_by: guessOwnedBy(modelId),
                     providers: activeProviderCounts[modelId],
