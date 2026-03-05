@@ -420,7 +420,8 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
               let toolCalls: ToolCall[] | undefined;
               let finishReason: string | undefined;
 
-              const accumulateToolCalls = (calls: ToolCall[]) => {
+              const accumulateToolCalls = (calls: ToolCall[] | undefined) => {
+                if (!Array.isArray(calls) || calls.length === 0) return;
                 if (!toolCalls) {
                   toolCalls = [...calls];
                 } else {
@@ -432,9 +433,7 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
                 if (result.type === 'chunk') {
                   // Accumulate any tool calls observed in streaming chunks so complex
                   // tool_call sequences are preserved for the final summary.
-                  if (Array.isArray(result.tool_calls) && result.tool_calls.length > 0) {
-                    accumulateToolCalls(result.tool_calls);
-                  }
+                  accumulateToolCalls(result.tool_calls);
                   // Track latest finish_reason observed during streaming.
                   if (result.finish_reason) {
                     finishReason = result.finish_reason;
@@ -458,9 +457,7 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
                 } else if (result.type === 'final') {
                   if (typeof result.tokenUsage === 'number') totalTokenUsage = result.tokenUsage;
                   if (result.providerId) providerId = result.providerId;
-                  if (Array.isArray(result.tool_calls) && result.tool_calls.length > 0) {
-                    accumulateToolCalls(result.tool_calls);
-                  }
+                  accumulateToolCalls(result.tool_calls);
                   if (result.finish_reason) finishReason = result.finish_reason;
                 }
               }
