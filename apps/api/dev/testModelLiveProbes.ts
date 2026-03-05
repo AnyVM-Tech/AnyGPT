@@ -2141,7 +2141,7 @@ async function main() {
       const caps = new Set<ModelCapability>(declaredCaps);
       let endpointHintOverride: EndpointHint | undefined = undefined;
       const hintedEndpoint = probeHints.modelEndpointHints.get(model.id);
-      if (hintedEndpoint && hintedEndpoint !== endpointHintOverride) {
+      if (hintedEndpoint) {
         endpointHintOverride = hintedEndpoint;
       }
 
