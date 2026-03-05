@@ -335,7 +335,7 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
       if (cache && now - cache.fetchedAt <= SHARED_RATE_CACHE_TTL_MS) {
         return cache.value;
       }
-      const shared = await checkSharedRateLimit(ctx.apiKey, ctx.tierLimits);
+      const shared = await checkSharedRateLimit(ctx.apiKey);
       ctx.sharedRateCache = { value: shared, fetchedAt: now };
       return shared;
     };
@@ -588,7 +588,6 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
               model,
               ctx.apiKey,
               requestId,
-              sharedMessageOptions,
             );
             const totalTokens = typeof result.tokenUsage === 'number' ? result.tokenUsage : estimateTokens(result.response || '');
             await updateUserTokenUsage(totalTokens, ctx.apiKey);
