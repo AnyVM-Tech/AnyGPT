@@ -131,7 +131,7 @@ router.post('/v6/chat/completions', authAndUsageMiddleware, rateLimitMiddleware,
         }));
  
         // --- Call the central message handler with BASE model ID ---
-    const result = await messageHandler.handleMessages(formattedMessages, baseModelId, userApiKey, request.requestId);
+    const result = await messageHandler.handleMessages(formattedMessages, baseModelId, userApiKey, { requestId: request.requestId });
  
         const totalTokensUsed = typeof result.tokenUsage === 'number' ? result.tokenUsage : 0;
         const estimateTokens = (content: any) => {

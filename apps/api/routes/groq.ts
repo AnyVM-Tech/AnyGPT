@@ -112,7 +112,7 @@ router.post('/v4/chat/completions', authAndUsageMiddleware, rateLimitMiddleware,
             content: msg.content,
             model: { id: modelId }
         }));
-        const result = await messageHandler.handleMessages(formattedMessages, modelId, userApiKey, request.requestId);
+        const result = await messageHandler.handleMessages(formattedMessages, modelId, userApiKey, { requestId: request.requestId });
  
         const totalTokensUsed = typeof result.tokenUsage === 'number' ? result.tokenUsage : 0;
         const estimateTokens = (content: any) => {

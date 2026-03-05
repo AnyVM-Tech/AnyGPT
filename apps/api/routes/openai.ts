@@ -1958,7 +1958,7 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
 
     } else {
         // messageHandler call is already async
-        const result = await messageHandler.handleMessages(formattedMessages, modelId, userApiKey, request.requestId);
+        const result = await messageHandler.handleMessages(formattedMessages, modelId, userApiKey, { requestId: request.requestId });
         const assistantContent = formatAssistantContent(result.response);
     
         const totalTokensUsed = typeof result.tokenUsage === 'number' ? result.tokenUsage : 0;
@@ -2423,7 +2423,7 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
             return response.end();
         }
 
-        const result = await messageHandler.handleMessages([message], modelId, userApiKey, request.requestId);
+        const result = await messageHandler.handleMessages([message], modelId, userApiKey, { requestId: request.requestId });
         const assistantContent = formatAssistantContent(result.response);
         const totalTokensUsed = typeof result.tokenUsage === 'number' ? result.tokenUsage : 0;
         const promptTokensUsed = typeof result.promptTokens === 'number' ? result.promptTokens : undefined;
@@ -2670,7 +2670,7 @@ openaiRouter.post('/deployments/:deploymentId/chat/completions', authAndUsageMid
         const formattedMessages: IMessage[] = rawMessages.map(msg => ({ role: msg.role, content: msg.content, model: { id: deploymentId } }));
  
         // Call the central message handler
-        const result = await messageHandler.handleMessages(formattedMessages, deploymentId, userApiKey, request.requestId);
+        const result = await messageHandler.handleMessages(formattedMessages, deploymentId, userApiKey, { requestId: request.requestId });
  
         const totalTokensUsed = typeof result.tokenUsage === 'number' ? result.tokenUsage : 0;
         const promptTokensUsed = typeof result.promptTokens === 'number' ? result.promptTokens : undefined;

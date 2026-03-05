@@ -234,7 +234,7 @@ router.post('/models/:modelId/generateContent', authAndUsageMiddleware, rateLimi
                 system: systemInstructionText || undefined,
             } : {}),
         }));
-        const result = await messageHandler.handleMessages(formattedMessages, modelId, userApiKey, request.requestId);
+        const result = await messageHandler.handleMessages(formattedMessages, modelId, userApiKey, { requestId: request.requestId });
  
         const totalTokensUsed = typeof result.tokenUsage === 'number' ? result.tokenUsage : 0;
         const promptTokensUsed = typeof result.promptTokens === 'number' ? result.promptTokens : undefined;
