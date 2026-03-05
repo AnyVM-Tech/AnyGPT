@@ -29,6 +29,37 @@ interface RateWindow { timestamps: number[]; }
 // Internal representation of chat messages passed to messageHandler
 type WsChatMessage = IMessage;
 
+// Helper for merging tool call arrays in streaming responses
+function mergeToolCalls(
+  accumulated: ToolCall[] | undefined,
+  calls: ToolCall[] | undefined
+): ToolCall[] | undefined {
+  if (!Array.isArray(calls) || calls.length === 0) return accumulated;
+  if (!accumulated) {
+    return [...calls];
+  }
+  return accumulated.concat(calls);
+}
+
+// Helper for computing the finish reason from streaming responses
+function computeFinishReason(
+  explicitFinishReason: string | undefined,
+  toolCalls: ToolCall[] | undefined
+): string {
+  if (explicitFinishReason) {
+    return explicitFinishReason;
+  }
+  return toolCalls && toolCalls.length > 0 ? 'tool_calls' : 'stop';
+}
+
+// Helper for computing token usage, falling back to estimation when no explicit count is available
+function computeTokenUsage(usage: number | undefined, text: string): number {
+  if (typeof usage === 'number' && Number.isFinite(usage) && usage >= 0) {
+    return usage;
+  }
+  return estimateTokensFromText(text || '');
+}
+
 interface WsClientContext {
   apiKey?: string;
   userId?: string;
@@ -225,6 +256,21 @@ async function checkSharedRateLimit(apiKey: string, limits: TierLimits) {
   }
 }
 
+/**
+ * Result emitted by the streaming message handler used in the WebSocket layer.
+ *
+ * - `type` identifies the kind of event; typically `"chunk"` for an interim
+ *   streamed piece of data, or `"final"` / completion-like values when the
+ *   full response is ready.
+ * - `chunk` is populated only for `"chunk"` events to carry the incremental
+ *   text payload.
+ * - `latency` is populated on the final/completion result to indicate end‑to‑end
+ *   latency in milliseconds, when available.
+ * - `providerId` is populated when the underlying provider/model that produced
+ *   the data is known.
+ * - `tokenUsage` is populated when token accounting information is available,
+ *   most commonly on the final/completion result.
+ */
 interface StreamResult {
   type: string;
   chunk?: string;
@@ -420,25 +466,17 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
               const streamHandler = messageHandler.handleStreamingMessages(formattedMessages, model, ctx.apiKey, { requestId });
 
               let totalTokenUsage = 0;
+              let explicitTokenUsage: number | undefined;
               let providerId: string | undefined;
               let accumulatedToolCalls: ToolCall[] | undefined;
               let finishReason: string | undefined;
               let fullContent = '';
 
-              const accumulateToolCalls = (calls: ToolCall[] | undefined) => {
-                if (!Array.isArray(calls) || calls.length === 0) return;
-                if (!accumulatedToolCalls) {
-                  accumulatedToolCalls = [...calls];
-                } else {
-                  accumulatedToolCalls.push(...calls);
-                }
-              };
-
               for await (const result of streamHandler) {
                 if (result.type === 'chunk') {
                   // Accumulate any tool calls observed in streaming chunks so complex
                   // tool_call sequences are preserved for the final summary.
-                  accumulateToolCalls(result.tool_calls);
+                  accumulatedToolCalls = mergeToolCalls(accumulatedToolCalls, result.tool_calls);
                   fullContent += result.chunk || '';
                   // Track latest finish_reason observed during streaming.
                   if (result.finish_reason) {
@@ -461,12 +499,16 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
                   };
                   send(openaiStreamChunk);
                 } else if (result.type === 'final') {
-                  if (typeof result.tokenUsage === 'number') totalTokenUsage = result.tokenUsage;
+                  if (typeof result.tokenUsage === 'number') {
+                    explicitTokenUsage = result.tokenUsage;
+                  }
                   if (result.providerId) providerId = result.providerId;
-                  accumulateToolCalls(result.tool_calls);
+                  accumulatedToolCalls = mergeToolCalls(accumulatedToolCalls, result.tool_calls);
                   if (result.finish_reason) finishReason = result.finish_reason;
                 }
               }
+
+              totalTokenUsage = computeTokenUsage(explicitTokenUsage, fullContent);
 
               try {
                 await updateUserTokenUsage(totalTokenUsage, ctx.apiKey);
@@ -498,7 +540,7 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
                       content: fullContent,
                       ...(accumulatedToolCalls && accumulatedToolCalls.length > 0 ? { tool_calls: accumulatedToolCalls } : {}),
                     },
-                    finish_reason: finishReason || (accumulatedToolCalls?.length ? 'tool_calls' : 'stop'),
+                    finish_reason: computeFinishReason(finishReason, accumulatedToolCalls),
                   }],
                   usage: { total_tokens: totalTokenUsage }
                 },
