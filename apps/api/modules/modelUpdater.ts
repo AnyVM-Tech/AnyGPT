@@ -162,6 +162,14 @@ function estimateMultiplier(input: number, output: number): number {
     return 30;
 }
 
+const TOKEN_PRICE_DECIMALS = 6;
+const SPECIAL_PRICE_DECIMALS = 8;
+
+function roundTo(value: number, decimals: number): number {
+    const factor = 10 ** decimals;
+    return Math.round(value * factor) / factor;
+}
+
 function calculateDynamicPricing(modelId: string, providerCount: number): Record<string, any> | null {
     const basePricing = loadBasePricing();
     const isFree = isFreeModelId(modelId);
@@ -196,23 +204,24 @@ function calculateDynamicPricing(modelId: string, providerCount: number): Record
     const shown: Record<string, any> = {};
     if (inp > 0 && out > 0) {
         const ratio = inp / (inp + out);
-        shown.input = Math.round(targetBlended * 2 * ratio * 10000) / 10000;
-        shown.output = Math.round(targetBlended * 2 * (1 - ratio) * 10000) / 10000;
+        shown.input = roundTo(targetBlended * 2 * ratio, TOKEN_PRICE_DECIMALS);
+        shown.output = roundTo(targetBlended * 2 * (1 - ratio), TOKEN_PRICE_DECIMALS);
     } else if (inp > 0) {
-        shown.input = Math.round(targetBlended * 10000) / 10000;
+        shown.input = roundTo(targetBlended, TOKEN_PRICE_DECIMALS);
         shown.output = 0;
     } else {
         shown.input = 0;
-        shown.output = Math.round(targetBlended * 10000) / 10000;
+        shown.output = roundTo(targetBlended, TOKEN_PRICE_DECIMALS);
     }
 
     // Special pricing (audio, image) — scale with availability
-    const specialDiscount = 1 - (0.90 + availDiscount * 0.5); // 90-95% off official
-    if (price.audio_input) shown.audio_input = Math.round(price.audio_input * specialDiscount * 10000) / 10000;
-    if (price.audio_output) shown.audio_output = Math.round(price.audio_output * specialDiscount * 10000) / 10000;
-    if (price.per_image) shown.per_image = Math.round(price.per_image * 0.20 * 1000000) / 1000000;
-    if (price.per_request) shown.per_request = Math.round(price.per_request * 0.20 * 1000000) / 1000000;
-    if (price.image_input) shown.image_input = Math.round(price.image_input * 0.20 * 1000000) / 1000000;
+    // Floor at 5% so audio pricing doesn't drop to zero for high provider counts.
+    const specialDiscount = Math.max(0.05, 1 - (0.90 + availDiscount * 0.5)); // 5-10% of official
+    if (price.audio_input) shown.audio_input = roundTo(price.audio_input * specialDiscount, TOKEN_PRICE_DECIMALS);
+    if (price.audio_output) shown.audio_output = roundTo(price.audio_output * specialDiscount, TOKEN_PRICE_DECIMALS);
+    if (price.per_image) shown.per_image = roundTo(price.per_image * 0.20, SPECIAL_PRICE_DECIMALS);
+    if (price.per_request) shown.per_request = roundTo(price.per_request * 0.20, SPECIAL_PRICE_DECIMALS);
+    if (price.image_input) shown.image_input = roundTo(price.image_input * 0.20, SPECIAL_PRICE_DECIMALS);
 
     shown.unit = 'per_million_tokens';
     return shown;

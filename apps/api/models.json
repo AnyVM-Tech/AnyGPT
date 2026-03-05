@@ -16,8 +16,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0083,
-        "output": 0.0337,
+        "input": 0.008266,
+        "output": 0.033674,
         "unit": "per_million_tokens"
       }
     },
@@ -34,8 +34,8 @@
         "audio_output"
       ],
       "pricing": {
-        "input": 0.014,
-        "output": 0.0559,
+        "input": 0.014031,
+        "output": 0.055869,
         "unit": "per_million_tokens"
       }
     },
@@ -44,7 +44,7 @@
       "object": "model",
       "created": 1772393604098,
       "owned_by": "google",
-      "providers": 116,
+      "providers": 121,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -53,8 +53,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0067,
-        "output": 0.0268,
+        "input": 0.00671,
+        "output": 0.026842,
         "unit": "per_million_tokens"
       }
     },
@@ -63,7 +63,7 @@
       "object": "model",
       "created": 1772393604098,
       "owned_by": "google",
-      "providers": 116,
+      "providers": 121,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -72,8 +72,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0186,
-        "output": 0.1491,
+        "input": 0.01864,
+        "output": 0.14912,
         "unit": "per_million_tokens"
       }
     },
@@ -82,7 +82,7 @@
       "object": "model",
       "created": 1772393604098,
       "owned_by": "google",
-      "providers": 116,
+      "providers": 121,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -90,8 +90,8 @@
         "audio_input"
       ],
       "pricing": {
-        "input": 0.0067,
-        "output": 0.0268,
+        "input": 0.00671,
+        "output": 0.026842,
         "unit": "per_million_tokens"
       }
     },
@@ -100,7 +100,7 @@
       "object": "model",
       "created": 1772393604098,
       "owned_by": "google",
-      "providers": 116,
+      "providers": 121,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -108,8 +108,8 @@
         "audio_input"
       ],
       "pricing": {
-        "input": 0.0067,
-        "output": 0.0268,
+        "input": 0.00671,
+        "output": 0.026842,
         "unit": "per_million_tokens"
       }
     },
@@ -118,7 +118,7 @@
       "object": "model",
       "created": 1772393604098,
       "owned_by": "google",
-      "providers": 116,
+      "providers": 121,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -126,8 +126,8 @@
         "audio_input"
       ],
       "pricing": {
-        "input": 0.0067,
-        "output": 0.0268,
+        "input": 0.00671,
+        "output": 0.026842,
         "unit": "per_million_tokens"
       }
     },
@@ -136,7 +136,7 @@
       "object": "model",
       "created": 1772393604098,
       "owned_by": "google",
-      "providers": 116,
+      "providers": 121,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -144,8 +144,8 @@
         "audio_input"
       ],
       "pricing": {
-        "input": 0.0067,
-        "output": 0.0268,
+        "input": 0.00671,
+        "output": 0.026842,
         "unit": "per_million_tokens"
       }
     },
@@ -154,7 +154,7 @@
       "object": "model",
       "created": 1772393604099,
       "owned_by": "google",
-      "providers": 116,
+      "providers": 121,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -162,7 +162,7 @@
       ],
       "pricing": {
         "input": 0,
-        "output": 0.014,
+        "output": 0.01398,
         "unit": "per_million_tokens"
       }
     },
@@ -171,7 +171,7 @@
       "object": "model",
       "created": 1772393604099,
       "owned_by": "google",
-      "providers": 116,
+      "providers": 121,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -180,7 +180,7 @@
       ],
       "pricing": {
         "input": 0,
-        "output": 0.014,
+        "output": 0.01398,
         "unit": "per_million_tokens"
       }
     },
@@ -189,7 +189,7 @@
       "object": "model",
       "created": 1772393604099,
       "owned_by": "google",
-      "providers": 116,
+      "providers": 121,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -198,7 +198,7 @@
       ],
       "pricing": {
         "input": 0,
-        "output": 0.014,
+        "output": 0.01398,
         "unit": "per_million_tokens"
       }
     },
@@ -207,7 +207,7 @@
       "object": "model",
       "created": 1772393604099,
       "owned_by": "google",
-      "providers": 116,
+      "providers": 121,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -215,7 +215,7 @@
       ],
       "pricing": {
         "input": 0,
-        "output": 0.014,
+        "output": 0.01398,
         "unit": "per_million_tokens"
       }
     },
@@ -224,7 +224,7 @@
       "object": "model",
       "created": 1772393604099,
       "owned_by": "google",
-      "providers": 116,
+      "providers": 121,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -232,8 +232,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0067,
-        "output": 0.0268,
+        "input": 0.00671,
+        "output": 0.026842,
         "unit": "per_million_tokens"
       }
     },
@@ -242,7 +242,7 @@
       "object": "model",
       "created": 1772393604099,
       "owned_by": "google",
-      "providers": 116,
+      "providers": 121,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -250,8 +250,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0067,
-        "output": 0.0268,
+        "input": 0.00671,
+        "output": 0.026842,
         "unit": "per_million_tokens"
       }
     },
@@ -260,7 +260,7 @@
       "object": "model",
       "created": 1772393604099,
       "owned_by": "google",
-      "providers": 116,
+      "providers": 121,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -268,8 +268,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0186,
-        "output": 0.1491,
+        "input": 0.01864,
+        "output": 0.14912,
         "unit": "per_million_tokens"
       }
     },
@@ -278,15 +278,15 @@
       "object": "model",
       "created": 1772393604099,
       "owned_by": "google",
-      "providers": 116,
+      "providers": 121,
       "throughput": 50,
       "capabilities": [
         "text",
         "image_input"
       ],
       "pricing": {
-        "input": 0.0067,
-        "output": 0.0268,
+        "input": 0.00671,
+        "output": 0.026842,
         "unit": "per_million_tokens"
       }
     },
@@ -295,15 +295,15 @@
       "object": "model",
       "created": 1772393604100,
       "owned_by": "google",
-      "providers": 116,
-      "throughput": 62,
+      "providers": 121,
+      "throughput": 66,
       "capabilities": [
         "text",
         "image_input"
       ],
       "pricing": {
-        "input": 0.0067,
-        "output": 0.0268,
+        "input": 0.00671,
+        "output": 0.026842,
         "unit": "per_million_tokens"
       }
     },
@@ -312,15 +312,15 @@
       "object": "model",
       "created": 1772393604100,
       "owned_by": "google",
-      "providers": 116,
+      "providers": 121,
       "throughput": 50,
       "capabilities": [
         "text",
         "image_input"
       ],
       "pricing": {
-        "input": 0.0186,
-        "output": 0.1491,
+        "input": 0.01864,
+        "output": 0.14912,
         "unit": "per_million_tokens"
       }
     },
@@ -329,15 +329,15 @@
       "object": "model",
       "created": 1772393604100,
       "owned_by": "google",
-      "providers": 116,
-      "throughput": 32,
+      "providers": 121,
+      "throughput": 33,
       "capabilities": [
         "text",
         "image_input"
       ],
       "pricing": {
-        "input": 0.0067,
-        "output": 0.0268,
+        "input": 0.00671,
+        "output": 0.026842,
         "unit": "per_million_tokens"
       }
     },
@@ -346,7 +346,7 @@
       "object": "model",
       "created": 1772393604100,
       "owned_by": "google",
-      "providers": 116,
+      "providers": 121,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -354,8 +354,8 @@
         "audio_input"
       ],
       "pricing": {
-        "input": 0.0186,
-        "output": 0.1491,
+        "input": 0.01864,
+        "output": 0.14912,
         "unit": "per_million_tokens"
       }
     },
@@ -364,7 +364,7 @@
       "object": "model",
       "created": 1772393604100,
       "owned_by": "google",
-      "providers": 116,
+      "providers": 121,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -373,8 +373,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0186,
-        "output": 0.1491,
+        "input": 0.01864,
+        "output": 0.14912,
         "unit": "per_million_tokens"
       }
     },
@@ -383,7 +383,7 @@
       "object": "model",
       "created": 1772393604100,
       "owned_by": "google",
-      "providers": 116,
+      "providers": 121,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -391,8 +391,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0186,
-        "output": 0.1491,
+        "input": 0.01864,
+        "output": 0.14912,
         "unit": "per_million_tokens"
       }
     },
@@ -401,15 +401,15 @@
       "object": "model",
       "created": 1772393604100,
       "owned_by": "openai",
-      "providers": 116,
+      "providers": 121,
       "throughput": 50,
       "capabilities": [
         "text",
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0336,
-        "output": 0.1342,
+        "input": 0.033552,
+        "output": 0.134208,
         "unit": "per_million_tokens"
       }
     },
@@ -418,14 +418,14 @@
       "object": "model",
       "created": 1772393604100,
       "owned_by": "google",
-      "providers": 116,
+      "providers": 121,
       "throughput": 50,
       "capabilities": [
         "text"
       ],
       "pricing": {
         "input": 0,
-        "output": 0.014,
+        "output": 0.01398,
         "unit": "per_million_tokens"
       }
     },
@@ -434,14 +434,14 @@
       "object": "model",
       "created": 1772393604100,
       "owned_by": "google",
-      "providers": 116,
+      "providers": 121,
       "throughput": 50,
       "capabilities": [
         "text"
       ],
       "pricing": {
         "input": 0,
-        "output": 0.014,
+        "output": 0.01398,
         "unit": "per_million_tokens"
       }
     },
@@ -450,7 +450,7 @@
       "object": "model",
       "created": 1772393604100,
       "owned_by": "google",
-      "providers": 116,
+      "providers": 121,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -458,7 +458,7 @@
       ],
       "pricing": {
         "input": 0,
-        "output": 0.014,
+        "output": 0.01398,
         "per_image": 0.008,
         "unit": "per_million_tokens"
       }
@@ -468,7 +468,7 @@
       "object": "model",
       "created": 1772393604100,
       "owned_by": "google",
-      "providers": 116,
+      "providers": 121,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -476,7 +476,7 @@
       ],
       "pricing": {
         "input": 0,
-        "output": 0.014,
+        "output": 0.01398,
         "per_image": 0.016,
         "unit": "per_million_tokens"
       }
@@ -486,7 +486,7 @@
       "object": "model",
       "created": 1772393604100,
       "owned_by": "google",
-      "providers": 116,
+      "providers": 121,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -494,7 +494,7 @@
       ],
       "pricing": {
         "input": 0,
-        "output": 0.014,
+        "output": 0.01398,
         "per_image": 0.004,
         "unit": "per_million_tokens"
       }
@@ -504,7 +504,7 @@
       "object": "model",
       "created": 1772393604100,
       "owned_by": "google",
-      "providers": 116,
+      "providers": 121,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -512,7 +512,7 @@
       ],
       "pricing": {
         "input": 0,
-        "output": 0.014,
+        "output": 0.01398,
         "per_request": 0.07,
         "unit": "per_million_tokens"
       }
@@ -522,7 +522,7 @@
       "object": "model",
       "created": 1772393604101,
       "owned_by": "google",
-      "providers": 116,
+      "providers": 121,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -530,7 +530,7 @@
       ],
       "pricing": {
         "input": 0,
-        "output": 0.014,
+        "output": 0.01398,
         "per_request": 0.1,
         "unit": "per_million_tokens"
       }
@@ -540,7 +540,7 @@
       "object": "model",
       "created": 1772393604101,
       "owned_by": "google",
-      "providers": 116,
+      "providers": 121,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -548,7 +548,7 @@
       ],
       "pricing": {
         "input": 0,
-        "output": 0.014,
+        "output": 0.01398,
         "per_request": 0.05,
         "unit": "per_million_tokens"
       }
@@ -558,7 +558,7 @@
       "object": "model",
       "created": 1772393604101,
       "owned_by": "google",
-      "providers": 116,
+      "providers": 121,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -566,7 +566,7 @@
       ],
       "pricing": {
         "input": 0,
-        "output": 0.014,
+        "output": 0.01398,
         "per_request": 0.1,
         "unit": "per_million_tokens"
       }
@@ -576,7 +576,7 @@
       "object": "model",
       "created": 1772393604101,
       "owned_by": "google",
-      "providers": 116,
+      "providers": 121,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -584,7 +584,7 @@
       ],
       "pricing": {
         "input": 0,
-        "output": 0.014,
+        "output": 0.01398,
         "per_request": 0.05,
         "unit": "per_million_tokens"
       }
@@ -594,7 +594,7 @@
       "object": "model",
       "created": 1772393604101,
       "owned_by": "google",
-      "providers": 116,
+      "providers": 121,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -602,10 +602,10 @@
         "audio_output"
       ],
       "pricing": {
-        "input": 0.0067,
-        "output": 0.0268,
-        "audio_input": 0,
-        "audio_output": 0,
+        "input": 0.00671,
+        "output": 0.026842,
+        "audio_input": 0.05,
+        "audio_output": 0.6,
         "unit": "per_million_tokens"
       }
     },
@@ -614,7 +614,7 @@
       "object": "model",
       "created": 1772393604101,
       "owned_by": "google",
-      "providers": 116,
+      "providers": 121,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -622,10 +622,10 @@
         "audio_output"
       ],
       "pricing": {
-        "input": 0.0067,
-        "output": 0.0268,
-        "audio_input": 0,
-        "audio_output": 0,
+        "input": 0.00671,
+        "output": 0.026842,
+        "audio_input": 0.05,
+        "audio_output": 0.6,
         "unit": "per_million_tokens"
       }
     },
@@ -634,7 +634,7 @@
       "object": "model",
       "created": 1772393604101,
       "owned_by": "google",
-      "providers": 116,
+      "providers": 121,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -642,10 +642,10 @@
         "audio_output"
       ],
       "pricing": {
-        "input": 0.0067,
-        "output": 0.0268,
-        "audio_input": 0,
-        "audio_output": 0,
+        "input": 0.00671,
+        "output": 0.026842,
+        "audio_input": 0.05,
+        "audio_output": 0.6,
         "unit": "per_million_tokens"
       }
     },
@@ -664,7 +664,7 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0746,
+        "input": 0.07456,
         "output": 0.3728,
         "unit": "per_million_tokens"
       }
@@ -684,8 +684,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0168,
-        "output": 0.028,
+        "input": 0.016776,
+        "output": 0.02796,
         "unit": "per_million_tokens"
       }
     },
@@ -705,8 +705,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.1118,
-        "output": 0.3355,
+        "input": 0.11184,
+        "output": 0.33552,
         "unit": "per_million_tokens"
       }
     },
@@ -726,7 +726,7 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0746,
+        "input": 0.07456,
         "output": 0.3728,
         "unit": "per_million_tokens"
       }
@@ -747,7 +747,7 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0746,
+        "input": 0.07456,
         "output": 0.3728,
         "unit": "per_million_tokens"
       }
@@ -768,7 +768,7 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0746,
+        "input": 0.07456,
         "output": 0.3728,
         "unit": "per_million_tokens"
       }
@@ -789,7 +789,7 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0746,
+        "input": 0.07456,
         "output": 0.3728,
         "unit": "per_million_tokens"
       }
@@ -809,8 +809,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0186,
-        "output": 0.0746,
+        "input": 0.01864,
+        "output": 0.07456,
         "unit": "per_million_tokens"
       }
     },
@@ -860,8 +860,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0175,
-        "output": 0.0524,
+        "input": 0.017475,
+        "output": 0.052425,
         "unit": "per_million_tokens"
       }
     },
@@ -877,8 +877,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0336,
-        "output": 0.1342,
+        "input": 0.033552,
+        "output": 0.134208,
         "unit": "per_million_tokens"
       }
     },
@@ -895,8 +895,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0336,
-        "output": 0.1342,
+        "input": 0.033552,
+        "output": 0.134208,
         "unit": "per_million_tokens"
       }
     },
@@ -913,10 +913,10 @@
         "audio_output"
       ],
       "pricing": {
-        "input": 0.0671,
-        "output": 0.2684,
-        "audio_input": 0,
-        "audio_output": 0,
+        "input": 0.067104,
+        "output": 0.268416,
+        "audio_input": 1.5,
+        "audio_output": 3,
         "unit": "per_million_tokens"
       }
     },
@@ -934,10 +934,10 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0336,
-        "output": 0.1342,
-        "audio_input": 0,
-        "audio_output": 0,
+        "input": 0.033552,
+        "output": 0.134208,
+        "audio_input": 1.5,
+        "audio_output": 3,
         "unit": "per_million_tokens"
       }
     },
@@ -953,8 +953,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0336,
-        "output": 0.1342,
+        "input": 0.033552,
+        "output": 0.134208,
         "unit": "per_million_tokens"
       }
     },
@@ -970,8 +970,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.1748,
-        "output": 0.5243,
+        "input": 0.17475,
+        "output": 0.52425,
         "unit": "per_million_tokens"
       }
     },
@@ -1003,7 +1003,7 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0168,
+        "input": 0.016776,
         "output": 0,
         "unit": "per_million_tokens"
       }
@@ -1019,7 +1019,7 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0168,
+        "input": 0.016776,
         "output": 0,
         "unit": "per_million_tokens"
       }
@@ -1036,8 +1036,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.1748,
-        "output": 0.5243,
+        "input": 0.17475,
+        "output": 0.52425,
         "unit": "per_million_tokens"
       }
     },
@@ -1053,8 +1053,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.1748,
-        "output": 0.5243,
+        "input": 0.17475,
+        "output": 0.52425,
         "unit": "per_million_tokens"
       }
     },
@@ -1070,8 +1070,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0175,
-        "output": 0.0524,
+        "input": 0.017475,
+        "output": 0.052425,
         "unit": "per_million_tokens"
       }
     },
@@ -1087,8 +1087,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.1748,
-        "output": 0.5243,
+        "input": 0.17475,
+        "output": 0.52425,
         "unit": "per_million_tokens"
       }
     },
@@ -1104,8 +1104,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.1748,
-        "output": 0.5243,
+        "input": 0.17475,
+        "output": 0.52425,
         "unit": "per_million_tokens"
       }
     },
@@ -1122,9 +1122,9 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0336,
-        "output": 0.1342,
-        "image_input": 0.000383,
+        "input": 0.033552,
+        "output": 0.134208,
+        "image_input": 0.0003826,
         "unit": "per_million_tokens"
       }
     },
@@ -1141,8 +1141,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0839,
-        "output": 0.2516,
+        "input": 0.08388,
+        "output": 0.25164,
         "unit": "per_million_tokens"
       }
     },
@@ -1159,8 +1159,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0067,
-        "output": 0.0268,
+        "input": 0.00671,
+        "output": 0.026842,
         "unit": "per_million_tokens"
       }
     },
@@ -1177,8 +1177,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0067,
-        "output": 0.0268,
+        "input": 0.00671,
+        "output": 0.026842,
         "unit": "per_million_tokens"
       }
     },
@@ -1195,8 +1195,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0336,
-        "output": 0.1342,
+        "input": 0.033552,
+        "output": 0.134208,
         "unit": "per_million_tokens"
       }
     },
@@ -1215,10 +1215,10 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0336,
-        "output": 0.1342,
-        "audio_input": 0,
-        "audio_output": 0,
+        "input": 0.033552,
+        "output": 0.134208,
+        "audio_input": 2,
+        "audio_output": 4,
         "unit": "per_million_tokens"
       }
     },
@@ -1236,10 +1236,10 @@
         "audio_output"
       ],
       "pricing": {
-        "input": 0.0671,
-        "output": 0.2684,
-        "audio_input": 0,
-        "audio_output": 0,
+        "input": 0.067104,
+        "output": 0.268416,
+        "audio_input": 2,
+        "audio_output": 4,
         "unit": "per_million_tokens"
       }
     },
@@ -1255,7 +1255,7 @@
       ],
       "pricing": {
         "input": 0,
-        "output": 0.014,
+        "output": 0.01398,
         "unit": "per_million_tokens"
       }
     },
@@ -1273,10 +1273,10 @@
         "audio_output"
       ],
       "pricing": {
-        "input": 0.0671,
-        "output": 0.2684,
-        "audio_input": 0,
-        "audio_output": 0,
+        "input": 0.067104,
+        "output": 0.268416,
+        "audio_input": 2,
+        "audio_output": 4,
         "unit": "per_million_tokens"
       }
     },
@@ -1295,10 +1295,10 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0336,
-        "output": 0.1342,
-        "audio_input": 0,
-        "audio_output": 0,
+        "input": 0.033552,
+        "output": 0.134208,
+        "audio_input": 2,
+        "audio_output": 4,
         "unit": "per_million_tokens"
       }
     },
@@ -1316,10 +1316,10 @@
         "audio_output"
       ],
       "pricing": {
-        "input": 0.014,
-        "output": 0.0559,
-        "audio_input": 0,
-        "audio_output": 0,
+        "input": 0.01398,
+        "output": 0.05592,
+        "audio_input": 0.5,
+        "audio_output": 1,
         "unit": "per_million_tokens"
       }
     },
@@ -1338,10 +1338,10 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0067,
-        "output": 0.0268,
-        "audio_input": 0,
-        "audio_output": 0,
+        "input": 0.00671,
+        "output": 0.026842,
+        "audio_input": 0.5,
+        "audio_output": 1,
         "unit": "per_million_tokens"
       }
     },
@@ -1394,10 +1394,10 @@
         "audio_output"
       ],
       "pricing": {
-        "input": 0.014,
-        "output": 0.0559,
-        "audio_input": 0,
-        "audio_output": 0,
+        "input": 0.01398,
+        "output": 0.05592,
+        "audio_input": 0.5,
+        "audio_output": 1,
         "unit": "per_million_tokens"
       }
     },
@@ -1416,10 +1416,10 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0067,
-        "output": 0.0268,
-        "audio_input": 0,
-        "audio_output": 0,
+        "input": 0.00671,
+        "output": 0.026842,
+        "audio_input": 0.5,
+        "audio_output": 1,
         "unit": "per_million_tokens"
       }
     },
@@ -1435,8 +1435,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.014,
-        "output": 0.0559,
+        "input": 0.01398,
+        "output": 0.05592,
         "unit": "per_million_tokens"
       }
     },
@@ -1452,8 +1452,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.014,
-        "output": 0.0559,
+        "input": 0.01398,
+        "output": 0.05592,
         "unit": "per_million_tokens"
       }
     },
@@ -1469,8 +1469,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0336,
-        "output": 0.1342,
+        "input": 0.033552,
+        "output": 0.134208,
         "unit": "per_million_tokens"
       }
     },
@@ -1486,8 +1486,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0067,
-        "output": 0.0268,
+        "input": 0.00671,
+        "output": 0.026842,
         "unit": "per_million_tokens"
       }
     },
@@ -1503,8 +1503,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0067,
-        "output": 0.0268,
+        "input": 0.00671,
+        "output": 0.026842,
         "unit": "per_million_tokens"
       }
     },
@@ -1520,8 +1520,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.1678,
-        "output": 0.671,
+        "input": 0.16776,
+        "output": 0.67104,
         "unit": "per_million_tokens"
       }
     },
@@ -1537,8 +1537,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.1678,
-        "output": 0.671,
+        "input": 0.16776,
+        "output": 0.67104,
         "unit": "per_million_tokens"
       }
     },
@@ -1571,8 +1571,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.014,
-        "output": 0.0559,
+        "input": 0.01398,
+        "output": 0.05592,
         "unit": "per_million_tokens"
       }
     },
@@ -1605,8 +1605,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.014,
-        "output": 0.0559,
+        "input": 0.01398,
+        "output": 0.05592,
         "unit": "per_million_tokens"
       }
     },
@@ -1622,8 +1622,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0336,
-        "output": 0.1342,
+        "input": 0.033552,
+        "output": 0.134208,
         "unit": "per_million_tokens"
       }
     },
@@ -1639,8 +1639,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0336,
-        "output": 0.1342,
+        "input": 0.033552,
+        "output": 0.134208,
         "unit": "per_million_tokens"
       }
     },
@@ -1656,8 +1656,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.014,
-        "output": 0.0559,
+        "input": 0.01398,
+        "output": 0.05592,
         "unit": "per_million_tokens"
       }
     },
@@ -1673,8 +1673,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.014,
-        "output": 0.0559,
+        "input": 0.01398,
+        "output": 0.05592,
         "unit": "per_million_tokens"
       }
     },
@@ -1690,8 +1690,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0067,
-        "output": 0.0268,
+        "input": 0.00671,
+        "output": 0.026842,
         "unit": "per_million_tokens"
       }
     },
@@ -1707,8 +1707,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0067,
-        "output": 0.0268,
+        "input": 0.00671,
+        "output": 0.026842,
         "unit": "per_million_tokens"
       }
     },
@@ -1726,10 +1726,10 @@
         "audio_output"
       ],
       "pricing": {
-        "input": 0.0671,
-        "output": 0.2684,
-        "audio_input": 0,
-        "audio_output": 0,
+        "input": 0.067104,
+        "output": 0.268416,
+        "audio_input": 2,
+        "audio_output": 4,
         "unit": "per_million_tokens"
       }
     },
@@ -1748,10 +1748,10 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0336,
-        "output": 0.1342,
-        "audio_input": 0,
-        "audio_output": 0,
+        "input": 0.033552,
+        "output": 0.134208,
+        "audio_input": 2,
+        "audio_output": 4,
         "unit": "per_million_tokens"
       }
     },
@@ -1768,9 +1768,9 @@
         "audio_input"
       ],
       "pricing": {
-        "input": 0.0336,
-        "output": 0.1342,
-        "audio_input": 0,
+        "input": 0.033552,
+        "output": 0.134208,
+        "audio_input": 0.3,
         "unit": "per_million_tokens"
       }
     },
@@ -1786,8 +1786,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0671,
-        "output": 0.2684,
+        "input": 0.067104,
+        "output": 0.268416,
         "unit": "per_million_tokens"
       }
     },
@@ -1803,8 +1803,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0671,
-        "output": 0.2684,
+        "input": 0.067104,
+        "output": 0.268416,
         "unit": "per_million_tokens"
       }
     },
@@ -1821,8 +1821,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0671,
-        "output": 0.2684,
+        "input": 0.067104,
+        "output": 0.268416,
         "unit": "per_million_tokens"
       }
     },
@@ -1839,8 +1839,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.014,
-        "output": 0.0559,
+        "input": 0.01398,
+        "output": 0.05592,
         "unit": "per_million_tokens"
       }
     },
@@ -1857,8 +1857,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.014,
-        "output": 0.0559,
+        "input": 0.01398,
+        "output": 0.05592,
         "unit": "per_million_tokens"
       }
     },
@@ -1875,8 +1875,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0067,
-        "output": 0.0268,
+        "input": 0.00671,
+        "output": 0.026842,
         "unit": "per_million_tokens"
       }
     },
@@ -1893,8 +1893,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0067,
-        "output": 0.0268,
+        "input": 0.00671,
+        "output": 0.026842,
         "unit": "per_million_tokens"
       }
     },
@@ -1912,10 +1912,10 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0336,
-        "output": 0.1342,
-        "audio_input": 0,
-        "audio_output": 0,
+        "input": 0.033552,
+        "output": 0.134208,
+        "audio_input": 2,
+        "audio_output": 4,
         "unit": "per_million_tokens"
       }
     },
@@ -1932,10 +1932,10 @@
         "audio_output"
       ],
       "pricing": {
-        "input": 0.0671,
-        "output": 0.2684,
-        "audio_input": 0,
-        "audio_output": 0,
+        "input": 0.067104,
+        "output": 0.268416,
+        "audio_input": 2,
+        "audio_output": 4,
         "unit": "per_million_tokens"
       }
     },
@@ -1952,10 +1952,10 @@
         "audio_output"
       ],
       "pricing": {
-        "input": 0.0671,
-        "output": 0.2684,
-        "audio_input": 0,
-        "audio_output": 0,
+        "input": 0.067104,
+        "output": 0.268416,
+        "audio_input": 2,
+        "audio_output": 4,
         "unit": "per_million_tokens"
       }
     },
@@ -1973,10 +1973,10 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0336,
-        "output": 0.1342,
-        "audio_input": 0,
-        "audio_output": 0,
+        "input": 0.033552,
+        "output": 0.134208,
+        "audio_input": 2,
+        "audio_output": 4,
         "unit": "per_million_tokens"
       }
     },
@@ -1992,8 +1992,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0671,
-        "output": 0.2684,
+        "input": 0.067104,
+        "output": 0.268416,
         "unit": "per_million_tokens"
       }
     },
@@ -2045,10 +2045,10 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0067,
-        "output": 0.0268,
-        "audio_input": 0,
-        "audio_output": 0,
+        "input": 0.00671,
+        "output": 0.026842,
+        "audio_input": 0.5,
+        "audio_output": 1,
         "unit": "per_million_tokens"
       }
     },
@@ -2066,10 +2066,10 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0067,
-        "output": 0.0268,
-        "audio_input": 0,
-        "audio_output": 0,
+        "input": 0.00671,
+        "output": 0.026842,
+        "audio_input": 0.5,
+        "audio_output": 1,
         "unit": "per_million_tokens"
       }
     },
@@ -2084,8 +2084,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0671,
-        "output": 0.2684,
+        "input": 0.067104,
+        "output": 0.268416,
         "unit": "per_million_tokens"
       }
     },
@@ -2102,10 +2102,10 @@
         "audio_output"
       ],
       "pricing": {
-        "input": 0.014,
-        "output": 0.0559,
-        "audio_input": 0,
-        "audio_output": 0,
+        "input": 0.01398,
+        "output": 0.05592,
+        "audio_input": 0.5,
+        "audio_output": 1,
         "unit": "per_million_tokens"
       }
     },
@@ -2122,10 +2122,10 @@
         "audio_output"
       ],
       "pricing": {
-        "input": 0.014,
-        "output": 0.0559,
-        "audio_input": 0,
-        "audio_output": 0,
+        "input": 0.01398,
+        "output": 0.05592,
+        "audio_input": 0.5,
+        "audio_output": 1,
         "unit": "per_million_tokens"
       }
     },
@@ -2140,8 +2140,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0671,
-        "output": 0.2684,
+        "input": 0.067104,
+        "output": 0.268416,
         "unit": "per_million_tokens"
       }
     },
@@ -2157,8 +2157,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0671,
-        "output": 0.2684,
+        "input": 0.067104,
+        "output": 0.268416,
         "unit": "per_million_tokens"
       }
     },
@@ -2174,8 +2174,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0671,
-        "output": 0.2684,
+        "input": 0.067104,
+        "output": 0.268416,
         "unit": "per_million_tokens"
       }
     },
@@ -2191,8 +2191,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0671,
-        "output": 0.2684,
+        "input": 0.067104,
+        "output": 0.268416,
         "unit": "per_million_tokens"
       }
     },
@@ -2208,8 +2208,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0671,
-        "output": 0.2684,
+        "input": 0.067104,
+        "output": 0.268416,
         "unit": "per_million_tokens"
       }
     },
@@ -2225,8 +2225,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.014,
-        "output": 0.0559,
+        "input": 0.01398,
+        "output": 0.05592,
         "unit": "per_million_tokens"
       }
     },
@@ -2259,8 +2259,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0336,
-        "output": 0.1342,
+        "input": 0.033552,
+        "output": 0.134208,
         "unit": "per_million_tokens"
       }
     },
@@ -2277,8 +2277,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0336,
-        "output": 0.1342,
+        "input": 0.033552,
+        "output": 0.134208,
         "unit": "per_million_tokens"
       }
     },
@@ -2328,8 +2328,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0336,
-        "output": 0.1342,
+        "input": 0.033552,
+        "output": 0.134208,
         "unit": "per_million_tokens"
       }
     },
@@ -2346,10 +2346,10 @@
         "audio_output"
       ],
       "pricing": {
-        "input": 0.014,
-        "output": 0.0559,
-        "audio_input": 0,
-        "audio_output": 0,
+        "input": 0.01398,
+        "output": 0.05592,
+        "audio_input": 0.5,
+        "audio_output": 1,
         "unit": "per_million_tokens"
       }
     },
@@ -2367,10 +2367,10 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0067,
-        "output": 0.0268,
-        "audio_input": 0,
-        "audio_output": 0,
+        "input": 0.00671,
+        "output": 0.026842,
+        "audio_input": 0.5,
+        "audio_output": 1,
         "unit": "per_million_tokens"
       }
     },
@@ -2387,8 +2387,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0336,
-        "output": 0.1342,
+        "input": 0.033552,
+        "output": 0.134208,
         "unit": "per_million_tokens"
       }
     },
@@ -2404,8 +2404,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0719,
-        "output": 0.0959,
+        "input": 0.071897,
+        "output": 0.095863,
         "unit": "per_million_tokens"
       }
     },
@@ -2420,7 +2420,7 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0168,
+        "input": 0.016776,
         "output": 0,
         "unit": "per_million_tokens"
       }
@@ -2438,8 +2438,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0336,
-        "output": 0.1342,
+        "input": 0.033552,
+        "output": 0.134208,
         "unit": "per_million_tokens"
       }
     },
@@ -2456,8 +2456,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.0336,
-        "output": 0.1342,
+        "input": 0.033552,
+        "output": 0.134208,
         "unit": "per_million_tokens"
       }
     },
@@ -2473,8 +2473,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.1678,
-        "output": 0.671,
+        "input": 0.16776,
+        "output": 0.67104,
         "unit": "per_million_tokens"
       }
     },
@@ -2490,8 +2490,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.1678,
-        "output": 0.671,
+        "input": 0.16776,
+        "output": 0.67104,
         "unit": "per_million_tokens"
       }
     },
@@ -2506,7 +2506,7 @@
         "text"
       ],
       "pricing": {
-        "input": 0.2913,
+        "input": 0.29125,
         "output": 0.5825,
         "unit": "per_million_tokens"
       }
@@ -2524,9 +2524,9 @@
         "audio_input"
       ],
       "pricing": {
-        "input": 0.032,
-        "output": 0.1917,
-        "per_image": 0,
+        "input": 0.031954,
+        "output": 0.191726,
+        "per_image": 3.8e-7,
         "unit": "per_million_tokens"
       }
     },
@@ -2542,7 +2542,7 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0746,
+        "input": 0.07456,
         "output": 0.3728,
         "unit": "per_million_tokens"
       }
@@ -2559,8 +2559,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.008,
-        "output": 0.0479,
+        "input": 0.007989,
+        "output": 0.047931,
         "unit": "per_million_tokens"
       }
     },
@@ -2576,8 +2576,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0133,
-        "output": 0.0799,
+        "input": 0.013314,
+        "output": 0.079886,
         "unit": "per_million_tokens"
       }
     },
@@ -2592,8 +2592,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.011,
-        "output": 0.0449,
+        "input": 0.011034,
+        "output": 0.044886,
         "unit": "per_million_tokens"
       }
     },
@@ -2608,8 +2608,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0222,
-        "output": 0.071,
+        "input": 0.02219,
+        "output": 0.07101,
         "unit": "per_million_tokens"
       }
     },
@@ -2624,8 +2624,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0155,
-        "output": 0.0777,
+        "input": 0.015533,
+        "output": 0.077667,
         "unit": "per_million_tokens"
       }
     },
@@ -2641,7 +2641,7 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0746,
+        "input": 0.07456,
         "output": 0.3728,
         "unit": "per_million_tokens"
       }
@@ -2657,8 +2657,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0062,
-        "output": 0.0386,
+        "input": 0.00617,
+        "output": 0.038566,
         "unit": "per_million_tokens"
       }
     },
@@ -2706,8 +2706,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0112,
-        "output": 0.0336,
+        "input": 0.011184,
+        "output": 0.033552,
         "unit": "per_million_tokens"
       }
     },
@@ -2739,8 +2739,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0158,
-        "output": 0.0774,
+        "input": 0.015826,
+        "output": 0.077374,
         "unit": "per_million_tokens"
       }
     },
@@ -2755,8 +2755,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0112,
-        "output": 0.0447,
+        "input": 0.011184,
+        "output": 0.044736,
         "unit": "per_million_tokens"
       }
     },
@@ -2771,8 +2771,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0203,
-        "output": 0.2033,
+        "input": 0.020335,
+        "output": 0.203345,
         "unit": "per_million_tokens"
       }
     },
@@ -2820,8 +2820,8 @@
         "audio_input"
       ],
       "pricing": {
-        "input": 0.0447,
-        "output": 0.1789,
+        "input": 0.044736,
+        "output": 0.178944,
         "unit": "per_million_tokens"
       }
     },
@@ -2837,8 +2837,8 @@
         "audio_input"
       ],
       "pricing": {
-        "input": 0.0186,
-        "output": 0.0746,
+        "input": 0.01864,
+        "output": 0.07456,
         "unit": "per_million_tokens"
       }
     },
@@ -2853,8 +2853,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0058,
-        "output": 0.0389,
+        "input": 0.005835,
+        "output": 0.038901,
         "unit": "per_million_tokens"
       }
     },
@@ -2870,8 +2870,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0249,
-        "output": 0.1988,
+        "input": 0.024853,
+        "output": 0.198827,
         "unit": "per_million_tokens"
       }
     },
@@ -2887,8 +2887,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0224,
-        "output": 0.0224,
+        "input": 0.022368,
+        "output": 0.022368,
         "unit": "per_million_tokens"
       }
     },
@@ -2903,8 +2903,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0112,
-        "output": 0.0336,
+        "input": 0.011184,
+        "output": 0.033552,
         "unit": "per_million_tokens"
       }
     },
@@ -2920,8 +2920,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0089,
-        "output": 0.0358,
+        "input": 0.008947,
+        "output": 0.035789,
         "unit": "per_million_tokens"
       }
     },
@@ -2937,8 +2937,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0104,
-        "output": 0.0828,
+        "input": 0.010356,
+        "output": 0.082844,
         "unit": "per_million_tokens"
       }
     },
@@ -2953,8 +2953,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0124,
-        "output": 0.0435,
+        "input": 0.012376,
+        "output": 0.043544,
         "unit": "per_million_tokens"
       }
     },
@@ -2969,8 +2969,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0099,
-        "output": 0.0461,
+        "input": 0.009868,
+        "output": 0.046052,
         "unit": "per_million_tokens"
       }
     },
@@ -2987,8 +2987,9 @@
         "audio_input"
       ],
       "pricing": {
-        "input": 0.0133,
-        "output": 0.0799,
+        "input": 0.013314,
+        "output": 0.079886,
+        "per_image": 9e-8,
         "unit": "per_million_tokens"
       }
     },
@@ -3003,8 +3004,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0112,
-        "output": 0.0336,
+        "input": 0.011184,
+        "output": 0.033552,
         "unit": "per_million_tokens"
       }
     },
@@ -3019,8 +3020,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0103,
-        "output": 0.0344,
+        "input": 0.010324,
+        "output": 0.034412,
         "unit": "per_million_tokens"
       }
     },
@@ -3035,8 +3036,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0106,
-        "output": 0.0341,
+        "input": 0.010595,
+        "output": 0.034141,
         "unit": "per_million_tokens"
       }
     },
@@ -3067,8 +3068,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0089,
-        "output": 0.0358,
+        "input": 0.008947,
+        "output": 0.035789,
         "unit": "per_million_tokens"
       }
     },
@@ -3084,8 +3085,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0249,
-        "output": 0.1988,
+        "input": 0.024853,
+        "output": 0.198827,
         "unit": "per_million_tokens"
       }
     },
@@ -3101,8 +3102,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.1243,
-        "output": 0.9941,
+        "input": 0.124267,
+        "output": 0.994133,
         "unit": "per_million_tokens"
       }
     },
@@ -3118,8 +3119,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0249,
-        "output": 0.1988,
+        "input": 0.024853,
+        "output": 0.198827,
         "unit": "per_million_tokens"
       }
     },
@@ -3134,8 +3135,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0155,
-        "output": 0.0777,
+        "input": 0.015533,
+        "output": 0.077667,
         "unit": "per_million_tokens"
       }
     },
@@ -3167,8 +3168,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.014,
-        "output": 0.0419,
+        "input": 0.01398,
+        "output": 0.04194,
         "unit": "per_million_tokens"
       }
     },
@@ -3183,8 +3184,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0119,
-        "output": 0.044,
+        "input": 0.011889,
+        "output": 0.044031,
         "unit": "per_million_tokens"
       }
     },
@@ -3199,8 +3200,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0224,
-        "output": 0.0224,
+        "input": 0.022368,
+        "output": 0.022368,
         "unit": "per_million_tokens"
       }
     },
@@ -3232,8 +3233,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0249,
-        "output": 0.1988,
+        "input": 0.024853,
+        "output": 0.198827,
         "unit": "per_million_tokens"
       }
     },
@@ -3249,8 +3250,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.01,
-        "output": 0.0832,
+        "input": 0.009986,
+        "output": 0.083214,
         "unit": "per_million_tokens"
       }
     },
@@ -3266,8 +3267,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0224,
-        "output": 0.0224,
+        "input": 0.022368,
+        "output": 0.022368,
         "unit": "per_million_tokens"
       }
     },
@@ -3283,8 +3284,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0224,
-        "output": 0.0224,
+        "input": 0.022368,
+        "output": 0.022368,
         "unit": "per_million_tokens"
       }
     },
@@ -3300,8 +3301,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0224,
-        "output": 0.0224,
+        "input": 0.022368,
+        "output": 0.022368,
         "unit": "per_million_tokens"
       }
     },
@@ -3317,8 +3318,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.014,
-        "output": 0.0419,
+        "input": 0.01398,
+        "output": 0.04194,
         "unit": "per_million_tokens"
       }
     },
@@ -3349,8 +3350,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0103,
-        "output": 0.0344,
+        "input": 0.010324,
+        "output": 0.034412,
         "unit": "per_million_tokens"
       }
     },
@@ -3365,8 +3366,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.014,
-        "output": 0.0419,
+        "input": 0.01398,
+        "output": 0.04194,
         "unit": "per_million_tokens"
       }
     },
@@ -3381,8 +3382,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0172,
-        "output": 0.0275,
+        "input": 0.017206,
+        "output": 0.02753,
         "unit": "per_million_tokens"
       }
     },
@@ -3397,8 +3398,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0086,
-        "output": 0.0473,
+        "input": 0.008603,
+        "output": 0.047317,
         "unit": "per_million_tokens"
       }
     },
@@ -3414,7 +3415,7 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0746,
+        "input": 0.07456,
         "output": 0.3728,
         "unit": "per_million_tokens"
       }
@@ -3430,8 +3431,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0103,
-        "output": 0.0344,
+        "input": 0.010324,
+        "output": 0.034412,
         "unit": "per_million_tokens"
       }
     },
@@ -3446,8 +3447,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0149,
-        "output": 0.0298,
+        "input": 0.014912,
+        "output": 0.029824,
         "unit": "per_million_tokens"
       }
     },
@@ -3462,8 +3463,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0168,
-        "output": 0.028,
+        "input": 0.016776,
+        "output": 0.02796,
         "unit": "per_million_tokens"
       }
     },
@@ -3479,9 +3480,9 @@
         "image_output"
       ],
       "pricing": {
-        "input": 0.032,
-        "output": 0.1917,
-        "per_image": 0,
+        "input": 0.031954,
+        "output": 0.191726,
+        "per_image": 3.8e-7,
         "unit": "per_million_tokens"
       }
     },
@@ -3497,8 +3498,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0128,
-        "output": 0.032,
+        "input": 0.012782,
+        "output": 0.031954,
         "unit": "per_million_tokens"
       }
     },
@@ -3515,9 +3516,9 @@
         "audio_input"
       ],
       "pricing": {
-        "input": 0.032,
-        "output": 0.1917,
-        "per_image": 0,
+        "input": 0.031954,
+        "output": 0.191726,
+        "per_image": 3.8e-7,
         "unit": "per_million_tokens"
       }
     },
@@ -3549,8 +3550,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0249,
-        "output": 0.1988,
+        "input": 0.024853,
+        "output": 0.198827,
         "unit": "per_million_tokens"
       }
     },
@@ -3566,8 +3567,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0249,
-        "output": 0.1988,
+        "input": 0.024853,
+        "output": 0.198827,
         "unit": "per_million_tokens"
       }
     },
@@ -3583,8 +3584,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0249,
-        "output": 0.1988,
+        "input": 0.024853,
+        "output": 0.198827,
         "unit": "per_million_tokens"
       }
     },
@@ -3600,8 +3601,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0104,
-        "output": 0.0828,
+        "input": 0.010356,
+        "output": 0.082844,
         "unit": "per_million_tokens"
       }
     },
@@ -3616,8 +3617,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0089,
-        "output": 0.0358,
+        "input": 0.008947,
+        "output": 0.035789,
         "unit": "per_million_tokens"
       }
     },
@@ -3632,8 +3633,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0177,
-        "output": 0.0755,
+        "input": 0.017734,
+        "output": 0.075466,
         "unit": "per_million_tokens"
       }
     },
@@ -3649,7 +3650,7 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0373,
+        "input": 0.03728,
         "output": 0.1864,
         "unit": "per_million_tokens"
       }
@@ -3666,7 +3667,7 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0746,
+        "input": 0.07456,
         "output": 0.3728,
         "unit": "per_million_tokens"
       }
@@ -3683,8 +3684,8 @@
         "audio_input"
       ],
       "pricing": {
-        "input": 0.0112,
-        "output": 0.0336,
+        "input": 0.011184,
+        "output": 0.033552,
         "unit": "per_million_tokens"
       }
     },
@@ -3699,8 +3700,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0089,
-        "output": 0.0358,
+        "input": 0.008947,
+        "output": 0.035789,
         "unit": "per_million_tokens"
       }
     },
@@ -3733,8 +3734,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0112,
-        "output": 0.0336,
+        "input": 0.011184,
+        "output": 0.033552,
         "unit": "per_million_tokens"
       }
     },
@@ -3749,8 +3750,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0114,
-        "output": 0.0446,
+        "input": 0.011362,
+        "output": 0.044558,
         "unit": "per_million_tokens"
       }
     },
@@ -3766,8 +3767,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0089,
-        "output": 0.0358,
+        "input": 0.008947,
+        "output": 0.035789,
         "unit": "per_million_tokens"
       }
     },
@@ -3782,8 +3783,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0149,
-        "output": 0.0298,
+        "input": 0.014912,
+        "output": 0.029824,
         "unit": "per_million_tokens"
       }
     },
@@ -3798,8 +3799,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0149,
-        "output": 0.0298,
+        "input": 0.014912,
+        "output": 0.029824,
         "unit": "per_million_tokens"
       }
     },
@@ -3814,8 +3815,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.006,
-        "output": 0.0387,
+        "input": 0.005988,
+        "output": 0.038748,
         "unit": "per_million_tokens"
       }
     },
@@ -3831,8 +3832,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0155,
-        "output": 0.0777,
+        "input": 0.015533,
+        "output": 0.077667,
         "unit": "per_million_tokens"
       }
     },
@@ -3848,8 +3849,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0044,
-        "output": 0.0515,
+        "input": 0.004415,
+        "output": 0.051505,
         "unit": "per_million_tokens"
       }
     },
@@ -3865,8 +3866,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0062,
-        "output": 0.0386,
+        "input": 0.00617,
+        "output": 0.038566,
         "unit": "per_million_tokens"
       }
     },
@@ -3881,8 +3882,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.2237,
-        "output": 0.2237,
+        "input": 0.22368,
+        "output": 0.22368,
         "unit": "per_million_tokens"
       }
     },
@@ -3907,8 +3908,8 @@
       "providers": 1,
       "throughput": 50,
       "pricing": {
-        "input": 0.0447,
-        "output": 0.1789,
+        "input": 0.044736,
+        "output": 0.178944,
         "unit": "per_million_tokens"
       }
     },
@@ -3923,8 +3924,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0089,
-        "output": 0.0358,
+        "input": 0.008947,
+        "output": 0.035789,
         "unit": "per_million_tokens"
       }
     },
@@ -3939,8 +3940,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0089,
-        "output": 0.0358,
+        "input": 0.008947,
+        "output": 0.035789,
         "unit": "per_million_tokens"
       }
     },
@@ -3956,8 +3957,9 @@
         "image_output"
       ],
       "pricing": {
-        "input": 0.01,
-        "output": 0.0832,
+        "input": 0.009986,
+        "output": 0.083214,
+        "per_image": 6e-8,
         "unit": "per_million_tokens"
       }
     },
@@ -3973,8 +3975,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0089,
-        "output": 0.0358,
+        "input": 0.008947,
+        "output": 0.035789,
         "unit": "per_million_tokens"
       }
     },
@@ -3990,8 +3992,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0089,
-        "output": 0.0358,
+        "input": 0.008947,
+        "output": 0.035789,
         "unit": "per_million_tokens"
       }
     },
@@ -4003,8 +4005,8 @@
       "providers": 1,
       "throughput": 50,
       "pricing": {
-        "input": 0.1243,
-        "output": 0.9941,
+        "input": 0.124267,
+        "output": 0.994133,
         "unit": "per_million_tokens"
       }
     },
@@ -4019,8 +4021,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0159,
-        "output": 0.0773,
+        "input": 0.015872,
+        "output": 0.077328,
         "unit": "per_million_tokens"
       }
     },
@@ -4035,8 +4037,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0186,
-        "output": 0.0746,
+        "input": 0.01864,
+        "output": 0.07456,
         "unit": "per_million_tokens"
       }
     },
@@ -4052,7 +4054,7 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0746,
+        "input": 0.07456,
         "output": 0.3728,
         "unit": "per_million_tokens"
       }
@@ -4068,8 +4070,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0178,
-        "output": 0.027,
+        "input": 0.017763,
+        "output": 0.026973,
         "unit": "per_million_tokens"
       }
     },
@@ -4084,8 +4086,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0168,
-        "output": 0.028,
+        "input": 0.016776,
+        "output": 0.02796,
         "unit": "per_million_tokens"
       }
     },
@@ -4100,8 +4102,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0226,
-        "output": 0.0333,
+        "input": 0.022634,
+        "output": 0.033286,
         "unit": "per_million_tokens"
       }
     },
@@ -4118,8 +4120,9 @@
         "audio_input"
       ],
       "pricing": {
-        "input": 0.0089,
-        "output": 0.0358,
+        "input": 0.008947,
+        "output": 0.035789,
+        "per_image": 2e-8,
         "unit": "per_million_tokens"
       }
     },
@@ -4135,8 +4138,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0104,
-        "output": 0.0456,
+        "input": 0.010356,
+        "output": 0.045564,
         "unit": "per_million_tokens"
       }
     },
@@ -4152,8 +4155,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0104,
-        "output": 0.0456,
+        "input": 0.010356,
+        "output": 0.045564,
         "unit": "per_million_tokens"
       }
     },
@@ -4168,7 +4171,7 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0373,
+        "input": 0.03728,
         "output": 0.1864,
         "unit": "per_million_tokens"
       }
@@ -4184,8 +4187,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0155,
-        "output": 0.0777,
+        "input": 0.015533,
+        "output": 0.077667,
         "unit": "per_million_tokens"
       }
     },
@@ -4201,8 +4204,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0249,
-        "output": 0.1988,
+        "input": 0.024853,
+        "output": 0.198827,
         "unit": "per_million_tokens"
       }
     },
@@ -4217,8 +4220,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0094,
-        "output": 0.0353,
+        "input": 0.009395,
+        "output": 0.035341,
         "unit": "per_million_tokens"
       }
     },
@@ -4233,8 +4236,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0094,
-        "output": 0.0353,
+        "input": 0.009395,
+        "output": 0.035341,
         "unit": "per_million_tokens"
       }
     },
@@ -4250,8 +4253,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0128,
-        "output": 0.032,
+        "input": 0.012782,
+        "output": 0.031954,
         "unit": "per_million_tokens"
       }
     },
@@ -4266,8 +4269,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0075,
-        "output": 0.0373,
+        "input": 0.007456,
+        "output": 0.03728,
         "unit": "per_million_tokens"
       }
     },
@@ -4282,7 +4285,7 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0093,
+        "input": 0.00932,
         "output": 0.0466,
         "unit": "per_million_tokens"
       }
@@ -4298,8 +4301,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0062,
-        "output": 0.0497,
+        "input": 0.006213,
+        "output": 0.049707,
         "unit": "per_million_tokens"
       }
     },
@@ -4314,8 +4317,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0042,
-        "output": 0.0517,
+        "input": 0.004229,
+        "output": 0.051691,
         "unit": "per_million_tokens"
       }
     },
@@ -4330,8 +4333,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0089,
-        "output": 0.0358,
+        "input": 0.008947,
+        "output": 0.035789,
         "unit": "per_million_tokens"
       }
     },
@@ -4346,8 +4349,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0112,
-        "output": 0.0336,
+        "input": 0.011184,
+        "output": 0.033552,
         "unit": "per_million_tokens"
       }
     },
@@ -4362,8 +4365,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0112,
-        "output": 0.0336,
+        "input": 0.011184,
+        "output": 0.033552,
         "unit": "per_million_tokens"
       }
     },
@@ -4394,8 +4397,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0089,
-        "output": 0.0358,
+        "input": 0.008947,
+        "output": 0.035789,
         "unit": "per_million_tokens"
       }
     },
@@ -4410,8 +4413,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0155,
-        "output": 0.0777,
+        "input": 0.015533,
+        "output": 0.077667,
         "unit": "per_million_tokens"
       }
     },
@@ -4426,8 +4429,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.018,
-        "output": 0.0752,
+        "input": 0.018039,
+        "output": 0.075161,
         "unit": "per_million_tokens"
       }
     },
@@ -4442,8 +4445,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0058,
-        "output": 0.0389,
+        "input": 0.005835,
+        "output": 0.038901,
         "unit": "per_million_tokens"
       }
     },
@@ -4458,8 +4461,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0066,
-        "output": 0.0493,
+        "input": 0.006579,
+        "output": 0.049341,
         "unit": "per_million_tokens"
       }
     },
@@ -4474,8 +4477,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.011,
-        "output": 0.0338,
+        "input": 0.010973,
+        "output": 0.033763,
         "unit": "per_million_tokens"
       }
     },
@@ -4506,8 +4509,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0075,
-        "output": 0.0373,
+        "input": 0.007456,
+        "output": 0.03728,
         "unit": "per_million_tokens"
       }
     },
@@ -4523,8 +4526,8 @@
         "audio_input"
       ],
       "pricing": {
-        "input": 0.0447,
-        "output": 0.1789,
+        "input": 0.044736,
+        "output": 0.178944,
         "unit": "per_million_tokens"
       }
     },
@@ -4540,8 +4543,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0155,
-        "output": 0.0777,
+        "input": 0.015533,
+        "output": 0.077667,
         "unit": "per_million_tokens"
       }
     },
@@ -4556,8 +4559,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0089,
-        "output": 0.0358,
+        "input": 0.008947,
+        "output": 0.035789,
         "unit": "per_million_tokens"
       }
     },
@@ -4573,8 +4576,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0089,
-        "output": 0.0358,
+        "input": 0.008947,
+        "output": 0.035789,
         "unit": "per_million_tokens"
       }
     },
@@ -4606,8 +4609,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0447,
-        "output": 0.1789,
+        "input": 0.044736,
+        "output": 0.178944,
         "unit": "per_million_tokens"
       }
     },
@@ -4623,8 +4626,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0249,
-        "output": 0.1988,
+        "input": 0.024853,
+        "output": 0.198827,
         "unit": "per_million_tokens"
       }
     },
@@ -4640,8 +4643,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0249,
-        "output": 0.1988,
+        "input": 0.024853,
+        "output": 0.198827,
         "unit": "per_million_tokens"
       }
     },
@@ -4657,8 +4660,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0104,
-        "output": 0.0828,
+        "input": 0.010356,
+        "output": 0.082844,
         "unit": "per_million_tokens"
       }
     },
@@ -4674,8 +4677,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.005,
-        "output": 0.0398,
+        "input": 0.004971,
+        "output": 0.039765,
         "unit": "per_million_tokens"
       }
     },
@@ -4690,8 +4693,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0076,
-        "output": 0.0371,
+        "input": 0.007619,
+        "output": 0.037117,
         "unit": "per_million_tokens"
       }
     },
@@ -4706,8 +4709,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0076,
-        "output": 0.0371,
+        "input": 0.007619,
+        "output": 0.037117,
         "unit": "per_million_tokens"
       }
     },
@@ -4722,8 +4725,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0079,
-        "output": 0.0368,
+        "input": 0.007895,
+        "output": 0.036841,
         "unit": "per_million_tokens"
       }
     },
@@ -4739,8 +4742,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.1553,
-        "output": 0.7767,
+        "input": 0.155333,
+        "output": 0.776667,
         "unit": "per_million_tokens"
       }
     },
@@ -4755,8 +4758,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.014,
-        "output": 0.0419,
+        "input": 0.01398,
+        "output": 0.04194,
         "unit": "per_million_tokens"
       }
     },
@@ -4771,8 +4774,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0092,
-        "output": 0.0355,
+        "input": 0.00921,
+        "output": 0.035526,
         "unit": "per_million_tokens"
       }
     },
@@ -4787,8 +4790,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0103,
-        "output": 0.0344,
+        "input": 0.010324,
+        "output": 0.034412,
         "unit": "per_million_tokens"
       }
     },
@@ -4803,8 +4806,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.02,
-        "output": 0.0732,
+        "input": 0.019971,
+        "output": 0.073229,
         "unit": "per_million_tokens"
       }
     },
@@ -4835,8 +4838,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0059,
-        "output": 0.0388,
+        "input": 0.005934,
+        "output": 0.038802,
         "unit": "per_million_tokens"
       }
     },
@@ -4851,8 +4854,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0186,
-        "output": 0.0262,
+        "input": 0.018575,
+        "output": 0.026161,
         "unit": "per_million_tokens"
       }
     },
@@ -4867,8 +4870,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0224,
-        "output": 0.0224,
+        "input": 0.022368,
+        "output": 0.022368,
         "unit": "per_million_tokens"
       }
     },
@@ -4883,8 +4886,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0101,
-        "output": 0.0458,
+        "input": 0.010084,
+        "output": 0.045836,
         "unit": "per_million_tokens"
       }
     },
@@ -4899,8 +4902,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0061,
-        "output": 0.0498,
+        "input": 0.00609,
+        "output": 0.04983,
         "unit": "per_million_tokens"
       }
     },
@@ -4916,8 +4919,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0149,
-        "output": 0.0298,
+        "input": 0.014912,
+        "output": 0.029824,
         "unit": "per_million_tokens"
       }
     },
@@ -4934,8 +4937,9 @@
         "audio_input"
       ],
       "pricing": {
-        "input": 0.0089,
-        "output": 0.0358,
+        "input": 0.008947,
+        "output": 0.035789,
+        "per_image": 2e-8,
         "unit": "per_million_tokens"
       }
     },
@@ -4950,8 +4954,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0186,
-        "output": 0.0262,
+        "input": 0.018575,
+        "output": 0.026161,
         "unit": "per_million_tokens"
       }
     },
@@ -4966,8 +4970,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0186,
-        "output": 0.0746,
+        "input": 0.01864,
+        "output": 0.07456,
         "unit": "per_million_tokens"
       }
     },
@@ -4982,8 +4986,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0155,
-        "output": 0.0777,
+        "input": 0.015533,
+        "output": 0.077667,
         "unit": "per_million_tokens"
       }
     },
@@ -4998,8 +5002,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0112,
-        "output": 0.0336,
+        "input": 0.011184,
+        "output": 0.033552,
         "unit": "per_million_tokens"
       }
     },
@@ -5015,7 +5019,7 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0746,
+        "input": 0.07456,
         "output": 0.3728,
         "unit": "per_million_tokens"
       }
@@ -5031,8 +5035,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0088,
-        "output": 0.0359,
+        "input": 0.008821,
+        "output": 0.035915,
         "unit": "per_million_tokens"
       }
     },
@@ -5047,8 +5051,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.03,
-        "output": 0.0632,
+        "input": 0.029957,
+        "output": 0.063243,
         "unit": "per_million_tokens"
       }
     },
@@ -5063,8 +5067,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0224,
-        "output": 0.0336,
+        "input": 0.022368,
+        "output": 0.033552,
         "unit": "per_million_tokens"
       }
     },
@@ -5080,8 +5084,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0141,
-        "output": 0.0419,
+        "input": 0.014064,
+        "output": 0.041856,
         "unit": "per_million_tokens"
       }
     },
@@ -5096,8 +5100,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0113,
-        "output": 0.0446,
+        "input": 0.011346,
+        "output": 0.044574,
         "unit": "per_million_tokens"
       }
     },
@@ -5112,8 +5116,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0112,
-        "output": 0.0336,
+        "input": 0.011184,
+        "output": 0.033552,
         "unit": "per_million_tokens"
       }
     },
@@ -5129,8 +5133,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0112,
-        "output": 0.0336,
+        "input": 0.011184,
+        "output": 0.033552,
         "unit": "per_million_tokens"
       }
     },
@@ -5145,8 +5149,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0143,
-        "output": 0.0789,
+        "input": 0.014338,
+        "output": 0.078862,
         "unit": "per_million_tokens"
       }
     },
@@ -5163,8 +5167,9 @@
         "audio_input"
       ],
       "pricing": {
-        "input": 0.01,
-        "output": 0.0832,
+        "input": 0.009986,
+        "output": 0.083214,
+        "per_image": 6e-8,
         "unit": "per_million_tokens"
       }
     },
@@ -5181,9 +5186,9 @@
         "audio_input"
       ],
       "pricing": {
-        "input": 0.0249,
-        "output": 0.1988,
-        "per_image": 0,
+        "input": 0.024853,
+        "output": 0.198827,
+        "per_image": 2.4e-7,
         "unit": "per_million_tokens"
       }
     },
@@ -5214,8 +5219,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0168,
-        "output": 0.028,
+        "input": 0.016776,
+        "output": 0.02796,
         "unit": "per_million_tokens"
       }
     },
@@ -5230,7 +5235,7 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0746,
+        "input": 0.07456,
         "output": 0.3728,
         "unit": "per_million_tokens"
       }
@@ -5248,9 +5253,9 @@
         "audio_input"
       ],
       "pricing": {
-        "input": 0.0249,
-        "output": 0.1988,
-        "per_image": 0,
+        "input": 0.024853,
+        "output": 0.198827,
+        "per_image": 2.4e-7,
         "unit": "per_million_tokens"
       }
     },
@@ -5265,8 +5270,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0161,
-        "output": 0.0771,
+        "input": 0.016131,
+        "output": 0.077069,
         "unit": "per_million_tokens"
       }
     },
@@ -5282,8 +5287,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.1553,
-        "output": 0.7767,
+        "input": 0.155333,
+        "output": 0.776667,
         "unit": "per_million_tokens"
       }
     },
@@ -5299,7 +5304,7 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0746,
+        "input": 0.07456,
         "output": 0.3728,
         "unit": "per_million_tokens"
       }
@@ -5315,8 +5320,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0149,
-        "output": 0.0298,
+        "input": 0.014912,
+        "output": 0.029824,
         "unit": "per_million_tokens"
       }
     },
@@ -5332,8 +5337,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0155,
-        "output": 0.0777,
+        "input": 0.015533,
+        "output": 0.077667,
         "unit": "per_million_tokens"
       }
     },
@@ -5350,9 +5355,9 @@
         "audio_input"
       ],
       "pricing": {
-        "input": 0.0249,
-        "output": 0.1988,
-        "per_image": 0,
+        "input": 0.024853,
+        "output": 0.198827,
+        "per_image": 2.4e-7,
         "unit": "per_million_tokens"
       }
     },
@@ -5367,8 +5372,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0112,
-        "output": 0.0336,
+        "input": 0.011184,
+        "output": 0.033552,
         "unit": "per_million_tokens"
       }
     },
@@ -5384,8 +5389,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0224,
-        "output": 0.0224,
+        "input": 0.022368,
+        "output": 0.022368,
         "unit": "per_million_tokens"
       }
     },
@@ -5400,8 +5405,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0099,
-        "output": 0.0348,
+        "input": 0.009941,
+        "output": 0.034795,
         "unit": "per_million_tokens"
       }
     },
@@ -5416,8 +5421,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.005,
-        "output": 0.0398,
+        "input": 0.004971,
+        "output": 0.039765,
         "unit": "per_million_tokens"
       }
     },
@@ -5432,8 +5437,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0089,
-        "output": 0.0358,
+        "input": 0.008947,
+        "output": 0.035789,
         "unit": "per_million_tokens"
       }
     },
@@ -5448,8 +5453,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0112,
-        "output": 0.0336,
+        "input": 0.011184,
+        "output": 0.033552,
         "unit": "per_million_tokens"
       }
     },
@@ -5464,8 +5469,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0186,
-        "output": 0.0746,
+        "input": 0.01864,
+        "output": 0.07456,
         "unit": "per_million_tokens"
       }
     },
@@ -5481,8 +5486,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0186,
-        "output": 0.0746,
+        "input": 0.01864,
+        "output": 0.07456,
         "unit": "per_million_tokens"
       }
     },
@@ -5498,8 +5503,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0447,
-        "output": 0.1789,
+        "input": 0.044736,
+        "output": 0.178944,
         "unit": "per_million_tokens"
       }
     },
@@ -5515,8 +5520,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0186,
-        "output": 0.0746,
+        "input": 0.01864,
+        "output": 0.07456,
         "unit": "per_million_tokens"
       }
     },
@@ -5531,8 +5536,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0112,
-        "output": 0.0336,
+        "input": 0.011184,
+        "output": 0.033552,
         "unit": "per_million_tokens"
       }
     },
@@ -5548,8 +5553,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0447,
-        "output": 0.1789,
+        "input": 0.044736,
+        "output": 0.178944,
         "unit": "per_million_tokens"
       }
     },
@@ -5565,8 +5570,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0112,
-        "output": 0.0447,
+        "input": 0.011184,
+        "output": 0.044736,
         "unit": "per_million_tokens"
       }
     },
@@ -5582,8 +5587,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0089,
-        "output": 0.0358,
+        "input": 0.008947,
+        "output": 0.035789,
         "unit": "per_million_tokens"
       }
     },
@@ -5598,8 +5603,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0224,
-        "output": 0.0336,
+        "input": 0.022368,
+        "output": 0.033552,
         "unit": "per_million_tokens"
       }
     },
@@ -5614,8 +5619,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0224,
-        "output": 0.0336,
+        "input": 0.022368,
+        "output": 0.033552,
         "unit": "per_million_tokens"
       }
     },
@@ -5630,8 +5635,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0168,
-        "output": 0.028,
+        "input": 0.016776,
+        "output": 0.02796,
         "unit": "per_million_tokens"
       }
     },
@@ -5646,7 +5651,7 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0746,
+        "input": 0.07456,
         "output": 0.3728,
         "unit": "per_million_tokens"
       }
@@ -5663,8 +5668,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0089,
-        "output": 0.0358,
+        "input": 0.008947,
+        "output": 0.035789,
         "unit": "per_million_tokens"
       }
     },
@@ -5680,8 +5685,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0094,
-        "output": 0.0353,
+        "input": 0.009418,
+        "output": 0.035318,
         "unit": "per_million_tokens"
       }
     },
@@ -5697,8 +5702,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0112,
-        "output": 0.0336,
+        "input": 0.011184,
+        "output": 0.033552,
         "unit": "per_million_tokens"
       }
     },
@@ -5713,8 +5718,8 @@
         "text"
       ],
       "pricing": {
-        "input": 0.0092,
-        "output": 0.0355,
+        "input": 0.009224,
+        "output": 0.035512,
         "unit": "per_million_tokens"
       }
     },
@@ -5730,8 +5735,8 @@
         "image_input"
       ],
       "pricing": {
-        "input": 0.0172,
-        "output": 0.0275,
+        "input": 0.017206,
+        "output": 0.02753,
         "unit": "per_million_tokens"
       }
     }

@@ -247,12 +247,12 @@ async function fetchOpenRouterPricing(): Promise<Record<string, Partial<ModelPri
       
       if (promptPrice > 0 || completionPrice > 0) {
         prices[id] = {
-          input: parseFloat((promptPrice * 1e6 * MARKUP).toFixed(4)),
-          output: parseFloat((completionPrice * 1e6 * MARKUP).toFixed(4)),
+          input: parseFloat((promptPrice * 1e6 * MARKUP).toFixed(6)),
+          output: parseFloat((completionPrice * 1e6 * MARKUP).toFixed(6)),
           source: 'openrouter',
         };
         if (imagePrice > 0) {
-          prices[id].per_image = parseFloat((imagePrice * MARKUP).toFixed(6));
+          prices[id].per_image = parseFloat((imagePrice * MARKUP).toFixed(8));
         }
       }
     }
