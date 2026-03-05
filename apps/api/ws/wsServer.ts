@@ -365,9 +365,10 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
 
       if (ctx.tierLimits.rps < 0 || ctx.tierLimits.rpm < 0 || ctx.tierLimits.rpd < 0) {
         // Invalid configuration: negative rate limits are not allowed.
+        const configErrorMsg = 'Invalid rate limit configuration detected';
         logError({
-          message: 'Invalid rate limit configuration detected',
-          errorMessage: 'Invalid rate limit configuration detected',
+          message: configErrorMsg,
+          errorMessage: configErrorMsg,
           tierLimits: ctx.tierLimits,
         });
         try {
@@ -603,10 +604,25 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
               formattedMessages,
               model,
               ctx.apiKey,
-              requestId,
+              { requestId, ...sharedMessageOptions },
             );
             const totalTokens = typeof result.tokenUsage === 'number' ? result.tokenUsage : estimateTokens(result.response || '');
-            await updateUserTokenUsage(totalTokens, ctx.apiKey);
+            try {
+              await updateUserTokenUsage(totalTokens, ctx.apiKey);
+            } catch (usageErr) {
+              const usageError = usageErr as Error;
+              await logError({
+                message: 'WS token usage update error (non-streaming)',
+                errorMessage: usageError.message,
+                errorStack: usageError.stack,
+                context: {
+                  apiKey: redactApiKey(ctx.apiKey),
+                  totalTokens,
+                  requestId,
+                },
+              });
+              // Continue processing: response has already been generated successfully.
+            }
 
             const openaiResponse: OpenAIResponse = {
               id: `chatcmpl-${requestId || Date.now()}`,
