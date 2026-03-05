@@ -14,7 +14,7 @@ import crypto from 'crypto';
 
 dotenv.config();
 
-function estimateTokens(content: any): number {
+function estimateTokens(content: unknown): number {
     if (typeof content === 'string') {
         return Math.ceil(content.length / 4);
     }
@@ -87,7 +87,7 @@ router.post('/v6/chat/completions', authAndUsageMiddleware, rateLimitMiddleware,
         return response.status(500).json({ error: { message: 'Internal Server Error: Auth data missing.', code: 'internal_server_error' }}); 
    }
 
-   const userApiKey = request.apiKey!;
+   const userApiKey = request.apiKey;
    let originalModelId: string | undefined; // Store the originally requested model
 
    try {
@@ -97,6 +97,9 @@ router.post('/v6/chat/completions', authAndUsageMiddleware, rateLimitMiddleware,
             requestBody && typeof requestBody === 'object'
                 ? {
                       ...requestBody,
+                      // Normalize OpenAI/OpenRouter-style `reasoning_effort` to our internal `reasoning` field.
+                      // Some clients send `reasoning_effort` instead of `reasoning`; downstream handlers expect `reasoning`.
+                      // If the client has explicitly provided `reasoning`, we preserve it and do not override it with `reasoning_effort`.
                       ...(requestBody.reasoning === undefined &&
                       requestBody.reasoning_effort !== undefined
                           ? { reasoning: requestBody.reasoning_effort }
@@ -111,8 +114,16 @@ router.post('/v6/chat/completions', authAndUsageMiddleware, rateLimitMiddleware,
         }
 
         // --- Extract base model ID for internal handler (remove potential prefix) ---
+        // Expected formats: "provider/model-id" or "model-id" without a prefix.
+        // We always take the segment after the last '/', but validate that it is non-empty.
         const modelIdParts = originalModelId.split('/');
         const baseModelId = modelIdParts[modelIdParts.length - 1]; // Take the part after the last '/'
+
+        if (!baseModelId?.trim()) {
+            return response
+                .status(400)
+                .json({ error: { message: 'Invalid \'model\' value in request body.', code: 'invalid_model' } });
+        }
 
         // --- Map to internal format using BASE model ID ---
         const imageFetchReferer = normalizeImageFetchReferer(
@@ -145,7 +156,12 @@ router.post('/v6/chat/completions', authAndUsageMiddleware, rateLimitMiddleware,
         }));
  
         // --- Call the central message handler with BASE model ID ---
-    const result = await messageHandler.handleMessages(formattedMessages, baseModelId, userApiKey, { requestId: request.requestId });
+        const req = request as any;
+        const requestId =
+            typeof req.requestId === 'string' && req.requestId.length > 0
+                ? req.requestId
+                : crypto.randomUUID();
+        const result = await messageHandler.handleMessages(formattedMessages, baseModelId, userApiKey, { requestId });
  
         const totalTokensUsed = typeof result.tokenUsage === 'number' ? result.tokenUsage : 0;
         const promptTokens = typeof result.promptTokens === 'number'
