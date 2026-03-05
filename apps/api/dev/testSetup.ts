@@ -11,8 +11,8 @@ export function setupMockProviderConfig() {
   const mockPort = Number(process.env.MOCK_PROVIDER_PORT || '3001');
   const testApiKey = process.env.TEST_API_KEY || 'test-key-for-mock-provider';
   const hashSecret = process.env.API_KEY_HASH_SECRET || 'anygpt-api';
-  const hashIterations = Number(process.env.API_KEY_HASH_ITERATIONS || '20000') || 20000;
-  const hashKeylen = Number(process.env.API_KEY_HASH_KEYLEN || '32') || 32;
+  const hashIterations = Number(process.env.API_KEY_HASH_ITERATIONS || '20000');
+  const hashKeylen = Number(process.env.API_KEY_HASH_KEYLEN || '32');
   const hashDigest = 'sha256';
   const providersFilePath = path.join(projectRoot, 'providers.json');
   const keysFilePath = path.join(projectRoot, 'keys.json');
