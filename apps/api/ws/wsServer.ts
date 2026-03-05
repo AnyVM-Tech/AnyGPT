@@ -47,19 +47,68 @@ interface WsClientContext {
 
 interface TierLimits { rps: number; rpm: number; rpd: number; }
 
+interface ToolCallFunction {
+  name: string;
+  arguments: string;
+}
+
+interface ToolCall {
+  id: string;
+  type: 'function' | string;
+  function: ToolCallFunction;
+}
+
+// Simplified, OpenAI-compatible tool definition for chat completions
+interface WsToolFunction {
+  name: string;
+  description?: string;
+  parameters?: unknown;
+}
+
+interface WsToolDefinition {
+  type: 'function' | string;
+  function: WsToolFunction;
+  // Allow additional provider-specific fields without losing type safety
+  [key: string]: unknown;
+}
+
+type WsToolChoiceMode = 'auto' | 'none' | 'required';
+
+interface WsToolChoiceObject {
+  type: 'function' | string;
+  function: {
+    name: string;
+    // Extra fields are allowed for extensibility
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
+}
+
+type WsToolChoice = WsToolChoiceMode | WsToolChoiceObject;
+
+interface WsReasoningConfig {
+  // Whether to enable provider-specific reasoning / planning features
+  enabled?: boolean;
+  // Provider-specific configuration bag
+  options?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+type WsReasoningEffort = 'low' | 'medium' | 'high' | string;
+
 interface BaseMessage { type: string; }
 interface PingMessage extends BaseMessage { type: 'ping'; }
 interface AuthMessage extends BaseMessage { type: 'auth'; apiKey: string; }
 interface ChatCompletionsMessage extends BaseMessage {
   type: 'chat.completions';
   model: string;
-  messages: Array<{ role: string; content: any }>;
+  messages: Array<{ role: string; content: string | Array<{ type: string; text?: string }> }>;
   requestId?: string;
   stream?: boolean;
-  tools?: any[];
-  tool_choice?: any;
-  reasoning?: any;
-  reasoning_effort?: any;
+  tools?: WsToolDefinition[];
+  tool_choice?: WsToolChoice;
+  reasoning?: WsReasoningConfig;
+  reasoning_effort?: WsReasoningEffort;
 }
 
 type IncomingMessage = PingMessage | AuthMessage | ChatCompletionsMessage;
@@ -74,14 +123,14 @@ interface OpenAIStreamChunk {
   object: string;
   created: number;
   model: string;
-  choices: Array<{ index: number; delta: { content?: string; tool_calls?: any[] }; finish_reason: string | null }>;
+  choices: Array<{ index: number; delta: { content?: string; tool_calls?: ToolCall[] }; finish_reason: string | null }>;
 }
 interface OpenAIResponse {
   id: string;
   object: string;
   created: number;
   model: string;
-  choices: Array<{ index: number; message: { role: string; content: string; tool_calls?: any[] }; finish_reason: string }>;
+  choices: Array<{ index: number; message: { role: string; content: string; tool_calls?: ToolCall[] }; finish_reason: string }>;
   usage: { total_tokens: number };
 }
 interface ChatCompleteResponse extends BaseResponse {
@@ -188,7 +237,7 @@ interface MessageResult {
   response: string;
   tokenUsage?: number;
   providerId?: string;
-  tool_calls?: any[];
+  tool_calls?: ToolCall[];
   finish_reason?: string;
 }
 
@@ -327,9 +376,9 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
           if (Array.isArray(content)) {
             const allItemsValid = content.every((item) => {
               if (!item || typeof item !== 'object') return false;
-              const anyItem = item as { type?: unknown; text?: unknown };
-              if (typeof anyItem.type !== 'string') return false;
-              if (anyItem.type === 'text' && typeof anyItem.text !== 'string') return false;
+              const contentItem = item as { type?: unknown; text?: unknown };
+              if (typeof contentItem.type !== 'string') return false;
+              if (contentItem.type === 'text' && typeof contentItem.text !== 'string') return false;
               return true;
             });
             if (!allItemsValid) {
@@ -354,7 +403,7 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
           };
           const formattedMessages: WsChatMessage[] = messages.map((msg) => ({
             role: msg.role,
-            content: msg.content,
+            content: msg.content as WsChatMessage['content'],
             model: { id: model },
             ...sharedMessageOptions,
           }));
@@ -368,10 +417,10 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
 
               let totalTokenUsage = 0;
               let providerId: string | undefined;
-              let toolCalls: any[] | undefined;
+              let toolCalls: ToolCall[] | undefined;
               let finishReason: string | undefined;
 
-              const accumulateToolCalls = (calls: any[]) => {
+              const accumulateToolCalls = (calls: ToolCall[]) => {
                 if (!toolCalls) {
                   toolCalls = [...calls];
                 } else {
