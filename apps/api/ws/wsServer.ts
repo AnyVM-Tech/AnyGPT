@@ -303,22 +303,26 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
         return true;
       }
 
-      if (ctx.tierLimits.rps <= 0 || ctx.tierLimits.rpm <= 0 || ctx.tierLimits.rpd <= 0) {
+      if (ctx.tierLimits.rps < 0 || ctx.tierLimits.rpm < 0 || ctx.tierLimits.rpd < 0) {
+        // Invalid configuration: negative rate limits are not allowed.
         return false;
       }
 
       const shared = await getSharedRateLimitForCtx();
       if (shared) {
-        if (shared.rps > ctx.tierLimits.rps) return false;
-        if (shared.rpm > ctx.tierLimits.rpm) return false;
-        if (shared.rpd > ctx.tierLimits.rpd) return false;
+        if (ctx.tierLimits.rps > 0 && shared.rps > ctx.tierLimits.rps) return false;
+        if (ctx.tierLimits.rpm > 0 && shared.rpm > ctx.tierLimits.rpm) return false;
+        if (ctx.tierLimits.rpd > 0 && shared.rpd > ctx.tierLimits.rpd) return false;
+        ctx.rate.second.timestamps.push(now);
+        ctx.rate.minute.timestamps.push(now);
+        ctx.rate.day.timestamps.push(now);
         return true;
       }
 
       const { rps, rpm, rpd } = ctx.tierLimits;
-      if (ctx.rate.second.timestamps.length >= rps) return false;
-      if (ctx.rate.minute.timestamps.length >= rpm) return false;
-      if (ctx.rate.day.timestamps.length >= rpd) return false;
+      if (rps > 0 && ctx.rate.second.timestamps.length >= rps) return false;
+      if (rpm > 0 && ctx.rate.minute.timestamps.length >= rpm) return false;
+      if (rpd > 0 && ctx.rate.day.timestamps.length >= rpd) return false;
       ctx.rate.second.timestamps.push(now);
       ctx.rate.minute.timestamps.push(now);
       ctx.rate.day.timestamps.push(now);
@@ -417,15 +421,15 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
 
               let totalTokenUsage = 0;
               let providerId: string | undefined;
-              let toolCalls: ToolCall[] | undefined;
+              let accumulatedToolCalls: ToolCall[] | undefined;
               let finishReason: string | undefined;
 
               const accumulateToolCalls = (calls: ToolCall[] | undefined) => {
                 if (!Array.isArray(calls) || calls.length === 0) return;
-                if (!toolCalls) {
-                  toolCalls = [...calls];
+                if (!accumulatedToolCalls) {
+                  accumulatedToolCalls = [...calls];
                 } else {
-                  toolCalls.push(...calls);
+                  accumulatedToolCalls.push(...calls);
                 }
               };
 
@@ -489,10 +493,9 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
                     index: 0,
                     message: {
                       role: 'assistant',
-                      content: '',
-                      ...(toolCalls && toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
+                      ...(accumulatedToolCalls && accumulatedToolCalls.length > 0 ? { tool_calls: accumulatedToolCalls } : {}),
                     },
-                    finish_reason: finishReason || (toolCalls?.length ? 'tool_calls' : 'stop'),
+                    finish_reason: finishReason || (accumulatedToolCalls?.length ? 'tool_calls' : 'stop'),
                   }],
                   usage: { total_tokens: totalTokenUsage }
                 },
