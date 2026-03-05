@@ -97,8 +97,11 @@ export function setupMockProviderConfig() {
 
   const updatedKeys: Record<string, typeof testUserKey> = {
     ...existingKeys,
-    [testApiKey]: testUserKey
   };
+
+  if (!updatedKeys[testApiKey]) {
+    updatedKeys[testApiKey] = testUserKey;
+  }
 
   const hashedApiKey = deriveKeyHash(testApiKey);
   if (!updatedKeys[hashedApiKey]) {

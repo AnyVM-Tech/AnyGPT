@@ -22,6 +22,70 @@ interface BasePricing {
 let basePricingCache: Record<string, BasePricing> | null = null;
 let competitorMultsCache: Record<string, number> | null = null;
 
+type CapabilitiesCache = Record<string, string[]>;
+const CAPABILITIES_CACHE_PATH = path.resolve('logs', 'model-capabilities.json');
+const PROBE_TESTED_PATH = path.resolve('logs', 'probe-tested.json');
+
+type ProbeTestedFile = {
+    data?: Record<string, Record<string, string>>;
+    capability_skips?: Record<string, Record<string, string>>;
+};
+
+function loadCapabilitiesCache(): CapabilitiesCache {
+    try {
+        if (!fs.existsSync(CAPABILITIES_CACHE_PATH)) return {};
+        const raw = fs.readFileSync(CAPABILITIES_CACHE_PATH, 'utf8');
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object') return {};
+        const normalized: CapabilitiesCache = {};
+        for (const [modelId, caps] of Object.entries(parsed as Record<string, unknown>)) {
+            if (Array.isArray(caps)) {
+                const filtered = (caps as unknown[]).filter((cap): cap is string => typeof cap === 'string' && cap.length > 0);
+                if (filtered.length > 0) normalized[modelId] = filtered;
+            }
+        }
+        return normalized;
+    } catch {
+        return {};
+    }
+}
+
+function saveCapabilitiesCache(cache: CapabilitiesCache): void {
+    try {
+        fs.mkdirSync(path.dirname(CAPABILITIES_CACHE_PATH), { recursive: true });
+        fs.writeFileSync(CAPABILITIES_CACHE_PATH, JSON.stringify(cache, null, 2), 'utf8');
+    } catch {
+        // Ignore cache write failures; should not block model sync.
+    }
+}
+
+function loadProbeTested(): ProbeTestedFile {
+    try {
+        if (!fs.existsSync(PROBE_TESTED_PATH)) return { data: {}, capability_skips: {} };
+        const raw = fs.readFileSync(PROBE_TESTED_PATH, 'utf8');
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object') return { data: {}, capability_skips: {} };
+        if (!parsed.data || typeof parsed.data !== 'object') parsed.data = {};
+        if (!parsed.capability_skips || typeof parsed.capability_skips !== 'object') parsed.capability_skips = {};
+        return parsed as ProbeTestedFile;
+    } catch {
+        return { data: {}, capability_skips: {} };
+    }
+}
+
+function isProbeEntryEmpty(entry?: Record<string, string>): boolean {
+    return !entry || Object.keys(entry).length === 0;
+}
+
+function areCapabilitiesEqual(a: string[] | undefined, b: string[] | undefined): boolean {
+    if (!a || !b) return false;
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i += 1) {
+        if (a[i] !== b[i]) return false;
+    }
+    return true;
+}
+
 function loadBasePricing(): Record<string, BasePricing> {
     if (basePricingCache) return basePricingCache;
     try {
@@ -32,6 +96,58 @@ function loadBasePricing(): Record<string, BasePricing> {
     } catch {
         return {};
     }
+}
+
+function isFreeModelId(modelId: string): boolean {
+    return modelId.endsWith(':free') || modelId === 'openrouter/free';
+}
+
+function buildPricingCandidates(modelId: string): string[] {
+    const candidates = new Set<string>();
+    const add = (value?: string | null) => {
+        if (!value) return;
+        candidates.add(value);
+    };
+
+    add(modelId);
+    const stripped = modelId.includes('/') ? modelId.split('/').pop()! : modelId;
+    add(stripped);
+
+    if (modelId.endsWith(':free')) {
+        const withoutFree = modelId.slice(0, -5);
+        add(withoutFree);
+        add(withoutFree.includes('/') ? withoutFree.split('/').pop()! : withoutFree);
+    }
+
+    if (modelId.endsWith(':exacto')) {
+        const withoutExacto = modelId.slice(0, -7);
+        add(withoutExacto);
+        add(withoutExacto.includes('/') ? withoutExacto.split('/').pop()! : withoutExacto);
+    }
+
+    if (modelId.includes('-thinking')) {
+        const withoutThinking = modelId.replace('-thinking', '');
+        add(withoutThinking);
+        add(withoutThinking.includes('/') ? withoutThinking.split('/').pop()! : withoutThinking);
+
+        const collapsedThinking = modelId.replace('-thinking-', '-');
+        add(collapsedThinking);
+        add(collapsedThinking.includes('/') ? collapsedThinking.split('/').pop()! : collapsedThinking);
+
+        const instructVariant = modelId.replace('-thinking', '-instruct');
+        add(instructVariant);
+        add(instructVariant.includes('/') ? instructVariant.split('/').pop()! : instructVariant);
+    }
+
+    return Array.from(candidates);
+}
+
+function resolveBasePricing(modelId: string, basePricing: Record<string, BasePricing>): BasePricing | null {
+    for (const candidate of buildPricingCandidates(modelId)) {
+        const price = basePricing[candidate];
+        if (price) return price;
+    }
+    return null;
 }
 
 function estimateMultiplier(input: number, output: number): number {
@@ -48,9 +164,17 @@ function estimateMultiplier(input: number, output: number): number {
 
 function calculateDynamicPricing(modelId: string, providerCount: number): Record<string, any> | null {
     const basePricing = loadBasePricing();
-    const stripped = modelId.includes('/') ? modelId.split('/').pop()! : modelId;
-    const price = basePricing[modelId] || basePricing[stripped];
-    if (!price) return null;
+    const isFree = isFreeModelId(modelId);
+    const price = resolveBasePricing(modelId, basePricing);
+    if (!price) {
+        if (isFree || modelId.startsWith('openrouter/')) {
+            return { input: 0, output: 0, unit: 'per_million_tokens' };
+        }
+        return null;
+    }
+    if (isFree) {
+        return { input: 0, output: 0, unit: 'per_million_tokens' };
+    }
 
     const inp = price.input || 0;
     const out = price.output || 0;
@@ -247,6 +371,8 @@ export async function refreshProviderCountsInModelsFile(): Promise<void> {
             return;
         }
 
+        const capabilitiesCache = loadCapabilitiesCache();
+
         // Calculate active provider counts and average TPS for each model ID
         const activeProviderCounts: { [modelId: string]: number } = {};
         const availableModelIds = new Set<string>();
@@ -311,7 +437,7 @@ export async function refreshProviderCountsInModelsFile(): Promise<void> {
                 }
                 // Dynamic pricing based on provider availability
                 const dynamicPrice = calculateDynamicPricing(model.id, newProviderCount);
-                if (dynamicPrice) {
+                if (dynamicPrice && JSON.stringify((model as any).pricing || null) !== JSON.stringify(dynamicPrice)) {
                     (model as any).pricing = dynamicPrice;
                     changesMade = true;
                 }
@@ -322,6 +448,13 @@ export async function refreshProviderCountsInModelsFile(): Promise<void> {
                     if (currentThroughput !== realThroughput) {
                         (model as any).throughput = realThroughput;
                         changesMade = true;
+                    }
+                }
+                // Preserve current capabilities in cache for rehydration later.
+                if (Array.isArray(model.capabilities) && model.capabilities.length > 0) {
+                    const cached = capabilitiesCache[model.id];
+                    if (!cached || !areCapabilitiesEqual(cached, model.capabilities)) {
+                        capabilitiesCache[model.id] = [...model.capabilities];
                     }
                 }
                 updatedModels.push(model);
@@ -345,6 +478,14 @@ export async function refreshProviderCountsInModelsFile(): Promise<void> {
                     providers: activeProviderCounts[modelId],
                     throughput: modelThroughput[modelId] || 50
                 };
+                const cachedCaps = capabilitiesCache[modelId];
+                if (cachedCaps && cachedCaps.length > 0) {
+                    newModel.capabilities = [...cachedCaps];
+                }
+                const dynamicPrice = calculateDynamicPricing(modelId, activeProviderCounts[modelId]);
+                if (dynamicPrice) {
+                    newModel.pricing = dynamicPrice;
+                }
                 updatedModels.push(newModel);
                 newModelsWithoutCaps.push(modelId);
                 console.log(`Added new model ${modelId} with ${activeProviderCounts[modelId]} provider(s), owned by: ${newModel.owned_by}`);
@@ -382,11 +523,34 @@ export async function refreshProviderCountsInModelsFile(): Promise<void> {
             }
         }
 
+        // Track models that have never been scanned (no probe-tested entries or capability skips).
+        const probeTested = loadProbeTested();
+        const probeData = probeTested.data || {};
+        const probeSkips = probeTested.capability_skips || {};
+        const modelsWithoutProbe: string[] = [];
+        for (const model of updatedModels) {
+            const dataEntry = probeData[model.id];
+            const skipEntry = probeSkips[model.id];
+            if (isProbeEntryEmpty(dataEntry) && isProbeEntryEmpty(skipEntry)) {
+                modelsWithoutProbe.push(model.id);
+            }
+        }
+
+        if (Object.keys(capabilitiesCache).length > 0) {
+            saveCapabilitiesCache(capabilitiesCache);
+        }
+
         // Trigger capability probing for models without capabilities
-        if (allModelsWithoutCaps.length > 0) {
+        const modelsNeedingProbe = Array.from(new Set([...allModelsWithoutCaps, ...modelsWithoutProbe]));
+        if (modelsNeedingProbe.length > 0) {
             try {
-                console.log(`Models without capabilities: ${allModelsWithoutCaps.length} (${newModelsWithoutCaps.length} new, ${allModelsWithoutCaps.length - newModelsWithoutCaps.length} existing).`);
-                notifyNewModelsDiscovered(allModelsWithoutCaps);
+                if (allModelsWithoutCaps.length > 0) {
+                    console.log(`Models without capabilities: ${allModelsWithoutCaps.length} (${newModelsWithoutCaps.length} new, ${allModelsWithoutCaps.length - newModelsWithoutCaps.length} existing).`);
+                }
+                if (modelsWithoutProbe.length > 0) {
+                    console.log(`Models without probe history: ${modelsWithoutProbe.length}.`);
+                }
+                notifyNewModelsDiscovered(modelsNeedingProbe);
             } catch (err) {
                 console.warn('Failed to notify about models needing probing:', err);
             }

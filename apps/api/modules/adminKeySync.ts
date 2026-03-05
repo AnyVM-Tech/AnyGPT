@@ -44,6 +44,7 @@ const STARTUP_PROBE_COOLDOWN_MS = Math.max(0, Number(process.env.ADMIN_KEY_SYNC_
 const PROBE_MAX_MODELS = process.env.ADMIN_KEY_SYNC_PROBE_MAX_MODELS;
 const PROBE_ALL_CAPS = process.env.ADMIN_KEY_SYNC_PROBE_ALL_CAPS;
 const PROBE_KEYCHECK_ONLY = process.env.ADMIN_KEY_SYNC_PROBE_KEYCHECK_ONLY === '1';
+const PROBE_ON_DEMAND = process.env.ADMIN_KEY_SYNC_ON_DEMAND !== '0';
 const CHECK_DISABLED_KEYS = process.env.ADMIN_KEY_SYNC_CHECK_DISABLED !== '0';
 const DISABLED_KEY_CHECK_CONCURRENCY = Math.max(1, Number(process.env.ADMIN_KEY_SYNC_DISABLED_CONCURRENCY ?? 4));
 
@@ -296,6 +297,13 @@ async function runSync(reason: string, force = false): Promise<void> {
   }
 
   try {
+    if (reason === 'disabled-providers') {
+      if (CHECK_DISABLED_KEYS) {
+        await checkDisabledProviderKeys();
+      }
+      lastRunAt = Date.now();
+      return;
+    }
     const signature = getAdminKeysSignature();
     if (!force && signature && signature === lastAdminKeySignature) {
       lastRunAt = Date.now();
@@ -361,7 +369,7 @@ export function notifyAdminKeyReceived(): void {
  * Triggers a probe run so the new models get their capabilities tested.
  */
 export function notifyNewModelsDiscovered(modelIds: string[]): void {
-  if (!SYNC_ENABLED || !RUN_PROBES) return;
+  if (!SYNC_ENABLED || !RUN_PROBES || !PROBE_ON_DEMAND) return;
   if (modelIds.length === 0) return;
   console.log(`[AdminKeySync] New models without capabilities detected: ${modelIds.join(', ')}. Scheduling probe run.`);
   schedule('new-models', true);
@@ -369,6 +377,10 @@ export function notifyNewModelsDiscovered(modelIds: string[]): void {
 
 export function startAdminKeySyncScheduler(): void {
   if (!SYNC_ENABLED) return;
+  if (CHECK_DISABLED_KEYS) {
+    const disabledIntervalMs = Math.max(60_000, Math.min(INTERVAL_MS, 10 * 60 * 1000));
+    setInterval(() => schedule('disabled-providers', true), disabledIntervalMs);
+  }
   if (INTERVAL_MS > 0) {
     setInterval(() => schedule('interval', true), INTERVAL_MS);
   }
