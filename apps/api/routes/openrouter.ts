@@ -10,8 +10,16 @@ import {
 } from '../modules/userData.js';
 import { RequestTimestampStore } from '../modules/rateLimit.js';
 import { runAuthMiddleware, runRateLimitMiddleware, extractBearerToken } from '../modules/middlewareFactory.js';
+import crypto from 'crypto';
 
 dotenv.config();
+
+function estimateTokens(content: any): number {
+    if (typeof content === 'string') {
+        return Math.ceil(content.length / 4);
+    }
+    return Math.ceil(JSON.stringify(content ?? '').length / 4);
+}
 
 const router = new HyperExpress.Router(); // Use Router for modularity
 
@@ -85,10 +93,17 @@ router.post('/v6/chat/completions', authAndUsageMiddleware, rateLimitMiddleware,
    try {
         // Use the standard OpenAI-style extractor
         const requestBody = await request.json();
-        if (requestBody?.reasoning === undefined && requestBody?.reasoning_effort !== undefined) {
-            requestBody.reasoning = requestBody.reasoning_effort;
-        }
-        const { messages: rawMessages, model } = extractMessageFromRequestBody(requestBody);
+        const normalizedRequestBody =
+            requestBody && typeof requestBody === 'object'
+                ? {
+                      ...requestBody,
+                      ...(requestBody.reasoning === undefined &&
+                      requestBody.reasoning_effort !== undefined
+                          ? { reasoning: requestBody.reasoning_effort }
+                          : {}),
+                  }
+                : requestBody;
+        const { messages: rawMessages, model } = extractMessageFromRequestBody(normalizedRequestBody);
         originalModelId = model; // Store the requested model name
 
         if (!originalModelId) {
@@ -133,10 +148,6 @@ router.post('/v6/chat/completions', authAndUsageMiddleware, rateLimitMiddleware,
     const result = await messageHandler.handleMessages(formattedMessages, baseModelId, userApiKey, { requestId: request.requestId });
  
         const totalTokensUsed = typeof result.tokenUsage === 'number' ? result.tokenUsage : 0;
-        const estimateTokens = (content: any) => {
-            if (typeof content === 'string') return Math.ceil(content.length / 4);
-            return Math.ceil(JSON.stringify(content ?? '').length / 4);
-        };
         const promptTokens = typeof result.promptTokens === 'number'
             ? result.promptTokens
             : formattedMessages.reduce((sum, msg) => sum + estimateTokens(msg.content), 0);
@@ -146,7 +157,7 @@ router.post('/v6/chat/completions', authAndUsageMiddleware, rateLimitMiddleware,
         
         // --- Format response like OpenRouter (OpenAI compatible) ---
         const openRouterResponse = {
-            id: `or-${Date.now()}${Math.random().toString(16).slice(2)}`, // OpenRouter specific prefix maybe?
+            id: `or-${crypto.randomUUID()}`, // OpenRouter specific prefix maybe?
             object: "chat.completion",
             created: Math.floor(Date.now() / 1000),
             model: originalModelId, // Echo the *originally requested* model ID
@@ -163,11 +174,6 @@ router.post('/v6/chat/completions', authAndUsageMiddleware, rateLimitMiddleware,
                     finish_reason: result.finish_reason || (result.tool_calls?.length ? 'tool_calls' : "stop"),
                     // OpenRouter includes routing info here
                     // We can add placeholders or approximate if needed
-                     usage: { 
-                       completion_tokens: completionTokens, 
-                       prompt_tokens: promptTokens, 
-                       total_tokens: totalTokensUsed 
-                     }
                 }
             ],
             usage: { // Top-level usage is often included too
