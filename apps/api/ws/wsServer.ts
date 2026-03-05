@@ -26,6 +26,12 @@ import { estimateTokensFromText } from '../modules/tokenEstimation.js';
 
 interface RateWindow { timestamps: number[]; }
 
+// Helper to safely redact API keys for logging and error reporting.
+function redactApiKey(apiKey: string | undefined): string | undefined {
+  if (!apiKey) return undefined;
+  return apiKey.length > 4 ? `***${apiKey.slice(-4)}` : '***';
+}
+
 // Internal representation of chat messages passed to messageHandler
 type WsChatMessage = IMessage;
 
@@ -483,7 +489,24 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
 
           if (stream) {
             try {
-              const streamHandler = messageHandler.handleStreamingMessages(
+              type StreamChunkResult = {
+                type: 'chunk';
+                chunk?: string;
+                tool_calls?: ToolCall[];
+                finish_reason?: string;
+              };
+
+              type StreamFinalResult = {
+                type: 'final';
+                tokenUsage?: number;
+                providerId?: string;
+                tool_calls?: ToolCall[];
+                finish_reason?: string;
+              };
+
+              type StreamResult = StreamChunkResult | StreamFinalResult;
+
+              const streamHandler: AsyncIterable<StreamResult> = messageHandler.handleStreamingMessages(
                 formattedMessages,
                 model,
                 ctx.apiKey,
@@ -501,7 +524,9 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
                 if (result.type === 'chunk') {
                   // Accumulate any tool calls observed in streaming chunks so complex
                   // tool_call sequences are preserved for the final summary.
-                  accumulatedToolCalls = mergeToolCalls(accumulatedToolCalls, result.tool_calls);
+                  if (Array.isArray(result.tool_calls) && result.tool_calls.length > 0) {
+                    accumulatedToolCalls = mergeToolCalls(accumulatedToolCalls, result.tool_calls);
+                  }
                   fullContent += result.chunk || '';
                   // Track latest finish_reason observed during streaming.
                   if (result.finish_reason) {
@@ -528,7 +553,9 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
                     explicitTokenUsage = result.tokenUsage;
                   }
                   if (result.providerId) providerId = result.providerId;
-                  accumulatedToolCalls = mergeToolCalls(accumulatedToolCalls, result.tool_calls);
+                  if (Array.isArray(result.tool_calls) && result.tool_calls.length > 0) {
+                    accumulatedToolCalls = mergeToolCalls(accumulatedToolCalls, result.tool_calls);
+                  }
                   if (result.finish_reason) finishReason = result.finish_reason;
                 }
               }
@@ -540,9 +567,7 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
               } catch (updateErr) {
                 // Log usage update failures but do not block the response to the client.
                 // Avoid logging the full API key; only include a masked suffix for correlation.
-                const redactedApiKey = ctx.apiKey
-                  ? (ctx.apiKey.length > 4 ? `***${ctx.apiKey.slice(-4)}` : '***')
-                  : undefined;
+                const redactedApiKey = redactApiKey(ctx.apiKey);
                 await logError({
                   message: 'Failed to update user token usage in WebSocket handler',
                   apiKey: redactedApiKey,
