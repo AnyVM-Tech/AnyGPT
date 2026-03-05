@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -9,6 +10,10 @@ const projectRoot = path.resolve(__dirname, '..');
 export function setupMockProviderConfig() {
   const mockPort = Number(process.env.MOCK_PROVIDER_PORT || '3001');
   const testApiKey = process.env.TEST_API_KEY || 'test-key-for-mock-provider';
+  const hashSecret = process.env.API_KEY_HASH_SECRET || 'anygpt-api';
+  const hashIterations = Number(process.env.API_KEY_HASH_ITERATIONS || '20000') || 20000;
+  const hashKeylen = Number(process.env.API_KEY_HASH_KEYLEN || '32') || 32;
+  const hashDigest = 'sha256';
   const providersFilePath = path.join(projectRoot, 'providers.json');
   const keysFilePath = path.join(projectRoot, 'keys.json');
   const backupProvidersPath = path.join(projectRoot, 'providers.json.backup');
@@ -82,13 +87,31 @@ export function setupMockProviderConfig() {
     }
   }
 
+  const deriveKeyHash = (value: string) => crypto.pbkdf2Sync(
+    value,
+    hashSecret,
+    hashIterations,
+    hashKeylen,
+    hashDigest
+  ).toString('hex');
+
   const updatedKeys: Record<string, typeof testUserKey> = {
     ...existingKeys,
     [testApiKey]: testUserKey
   };
 
+  const hashedApiKey = deriveKeyHash(testApiKey);
+  if (!updatedKeys[hashedApiKey]) {
+    updatedKeys[hashedApiKey] = testUserKey;
+  }
+
   if (!updatedKeys['test-key-for-mock-provider']) {
     updatedKeys['test-key-for-mock-provider'] = testUserKey;
+  }
+
+  const hashedFallbackKey = deriveKeyHash('test-key-for-mock-provider');
+  if (!updatedKeys[hashedFallbackKey]) {
+    updatedKeys[hashedFallbackKey] = testUserKey;
   }
 
   fs.writeFileSync(keysFilePath, JSON.stringify(updatedKeys, null, 2));
