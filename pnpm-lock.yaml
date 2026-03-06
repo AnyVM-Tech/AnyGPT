@@ -147,8 +147,8 @@ importers:
         specifier: ^4.21.0
         version: 4.22.1
       express-rate-limit:
-        specifier: ^8.2.1
-        version: 8.2.1(express@4.22.1)
+        specifier: ^8.2.2
+        version: 8.2.2(express@4.22.1)
 
   apps/ui: {}
 
@@ -714,6 +714,9 @@ packages:
 
   '@types/node@20.19.35':
     resolution: {integrity: sha512-Uarfe6J91b9HAUXxjvSOdiO2UPOKLm07Q1oh0JHxoZ1y8HoqxDAu3gVrsrOHeiio0kSsoVBt4wFrKOm0dKxVPQ==}
+
+  '@types/node@20.19.37':
+    resolution: {integrity: sha512-8kzdPJ3FsNsVIurqBs7oodNnCEVbni9yUEkaHbgptDACOPW04jimGagZ51E6+lXUwJjgnBw+hyko/lkFWCldqw==}
 
   '@types/prettier@2.7.3':
     resolution: {integrity: sha512-+68kP9yzs4LMp7VNh8gdzMSPZFL44MLGqiHWvttYJe+6qnuVr4Ek9wSBQoveqY/r+LwjCcU29kNVkidwim+kYA==}
@@ -1320,8 +1323,8 @@ packages:
     resolution: {integrity: sha512-E1q5hSUG2AmYQwQJ041nvgpkODHQvB+RKlB4IYdru6uJsyFTRyZAP463M+1lINorwbqAmUggi6+WwkD8lCS/Dw==}
     engines: {node: ^10.13.0 || ^12.13.0 || ^14.15.0 || >=15.0.0}
 
-  express-rate-limit@8.2.1:
-    resolution: {integrity: sha512-PCZEIEIxqwhzw4KF0n7QF4QqruVTcF73O5kFKUnGOyjbCCgizBBiFaYpd/fnBLUMPw/BWw9OsiN7GgrNYr7j6g==}
+  express-rate-limit@8.2.2:
+    resolution: {integrity: sha512-Ybv7bqtOgA914MLwaHWVFXMpMYeR1MQu/D+z2MaLYteqBsTIp9sY3AU7mGNLMJv8eLg8uQMpE20I+L2Lv49nSg==}
     engines: {node: '>= 16'}
     peerDependencies:
       express: '>= 4.11'
@@ -1556,8 +1559,8 @@ packages:
     resolution: {integrity: sha512-HVBe9OFuqs+Z6n64q09PQvP1/R4Bm+30PAyyD4wIEqssh3v9L21QjCVk4kRLucMBcDokJTcLjsGeVRlq/nH6DA==}
     engines: {node: '>=12.22.0'}
 
-  ip-address@10.0.1:
-    resolution: {integrity: sha512-NWv9YLW4PoW2B7xtzaS3NCot75m6nK7Icdv0o3lfMceJVRfSoQwqD4wEH5rLwoKJwUiZ/rfpiVBhnaF0FK4HoA==}
+  ip-address@10.1.0:
+    resolution: {integrity: sha512-XXADHxXmvT9+CRxhXg56LJovE+bmWnEWB78LB83VZTprKTmaC5QfruXocxzTZ2Kl0DNwKuBdlIhjL8LeY8Sf8Q==}
     engines: {node: '>= 12'}
 
   ipaddr.js@1.9.1:
@@ -3279,7 +3282,7 @@ snapshots:
       '@jest/schemas': 29.6.3
       '@types/istanbul-lib-coverage': 2.0.6
       '@types/istanbul-reports': 3.0.4
-      '@types/node': 20.19.35
+      '@types/node': 20.19.37
       '@types/yargs': 17.0.35
       chalk: 4.1.2
     optional: true
@@ -3407,6 +3410,11 @@ snapshots:
   '@types/node@20.19.35':
     dependencies:
       undici-types: 6.21.0
+
+  '@types/node@20.19.37':
+    dependencies:
+      undici-types: 6.21.0
+    optional: true
 
   '@types/prettier@2.7.3': {}
 
@@ -4035,10 +4043,10 @@ snapshots:
       jest-matcher-utils: 27.5.1
       jest-message-util: 27.5.1
 
-  express-rate-limit@8.2.1(express@4.22.1):
+  express-rate-limit@8.2.2(express@4.22.1):
     dependencies:
       express: 4.22.1
-      ip-address: 10.0.1
+      ip-address: 10.1.0
 
   express@4.22.1:
     dependencies:
@@ -4320,7 +4328,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  ip-address@10.0.1: {}
+  ip-address@10.1.0: {}
 
   ipaddr.js@1.9.1: {}
 
@@ -4720,7 +4728,7 @@ snapshots:
   jest-util@29.7.0:
     dependencies:
       '@jest/types': 29.6.3
-      '@types/node': 20.19.35
+      '@types/node': 20.19.37
       chalk: 4.1.2
       ci-info: 3.9.0
       graceful-fs: 4.2.11
