@@ -27,10 +27,10 @@
 		"setup": "node setup.js",
 		"__comment_test__": "The main test script below uses concurrently to run the mock provider, server and the test runner",
 		"test": "concurrently --kill-others --success first --names \"MOCK,API,TEST\" -c \"bgYellow.bold,bgBlue.bold,bgMagenta.bold\" \"bash ../../bun.sh run test:mock\" \"bash ../../bun.sh run test:dev\" \"wait-on tcp:localhost:3101 tcp:localhost:3100 && bash ../../bun.sh run test:run\"",
-		"test:mock": "cross-env NODE_ENV=test MOCK_PROVIDER_PORT=3101 tsx ./dev/mockProvider.ts",
-		"test:dev": "cross-env NODE_ENV=test DATA_SOURCE_PREFERENCE=filesystem PORT=3100 CLUSTER_WORKERS=0 PORT_RETRY_COUNT=0 REDIS_URL= REDIS_USERNAME= REDIS_PASSWORD= REDIS_TLS=false REDIS_DB=0 REDIS_STARTUP_WAIT=0 bash -c 'tsx ./dev/testSetupCli.ts setup && tsx server.ts'",
-		"test:run": "cross-env NODE_ENV=test TEST_SETUP_MODE=external tsx ./dev/testApi.ts",
-		"test:ws": "cross-env NODE_ENV=test tsx ./dev/testWs.ts"
+		"test:mock": "cross-env NODE_ENV=test MOCK_PROVIDER_PORT=3101 bash ../../bun.sh run ./dev/mockProvider.ts",
+		"test:dev": "cross-env NODE_ENV=test DATA_SOURCE_PREFERENCE=filesystem PORT=3100 CLUSTER_WORKERS=0 PORT_RETRY_COUNT=0 REDIS_URL= REDIS_USERNAME= REDIS_PASSWORD= REDIS_TLS=false REDIS_DB=0 REDIS_STARTUP_WAIT=0 bash -c 'bash ../../bun.sh run ./dev/testSetupCli.ts setup && bash ../../bun.sh run ./server.bun.ts'",
+		"test:run": "cross-env NODE_ENV=test TEST_SETUP_MODE=external bash ../../bun.sh run ./dev/testApi.ts",
+		"test:ws": "cross-env NODE_ENV=test bash ../../bun.sh run ./dev/testWs.ts"
 	},
 	"dependencies": {
 		"@google/generative-ai": "^0.11.5",
