@@ -87,8 +87,8 @@ apps/api/
 
 ## Prerequisites
 
-*   Node.js (version specified in `package.json` or higher)
-*   pnpm (version specified in `package.json`)
+*   Node.js 20.x or 22.x
+*   Bun 1.3.10 or newer
 
 ## Setup
 
@@ -99,7 +99,7 @@ apps/api/
     ```
 3.  **Install dependencies:**
     ```bash
-    pnpm install
+    bun install
     ```
 4.  **Create a `.env` file** with your configuration. Key environment variables include:
 
@@ -191,27 +191,27 @@ apps/api/
 
 *   **Development Mode** (with hot-reloading via `tsx`):
     ```bash
-    pnpm run dev
+    bun run dev
     ```
-    This runs `server.ts` directly with TypeScript support.
+    This rebuilds the experimental output on change and restarts the Node runtime automatically.
 
 *   **Production Build & Start:**
     ```bash
     # Build the TypeScript code
-    pnpm run build
+    bun run build
     
     # Start the compiled server
-    pnpm start
+    bun run start
     ```
     The production build outputs JavaScript files to `dist/production/` and the start script runs `./dist/production/server.js`.
 
 *   **Experimental Build & Start:**
     ```bash
     # Build the experimental bundle
-    pnpm run build:experimental
+    bun run build:experimental
 
     # Start the experimental bundle
-    pnpm run start:experimental
+    bun run start:experimental
     ```
     The experimental build outputs JavaScript files to `dist/experimental/`.
 
@@ -230,20 +230,20 @@ The project includes a comprehensive testing suite with both unit tests and inte
 
 *   **Full Test Suite** (recommended):
     ```bash
-    pnpm test
+    bun run test
     ```
     This runs the mock provider, API server, and test runner concurrently, then cleans up automatically.
 
 *   **Individual Test Components**:
     ```bash
     # Run only the mock provider
-    pnpm run test:mock
+    bun run test:mock
     
     # Run only the API server in test mode
-    pnpm run test:dev
+    bun run test:dev
     
     # Run only the test scripts (requires servers to be running)
-    pnpm run test:run
+    bun run test:run
     ```
 
 ### Mock Provider Testing
@@ -252,10 +252,10 @@ The mock provider supports runtime configuration for realistic testing scenarios
 
 ```bash
 # Test the mock provider configuration
-pnpm exec tsx ./dev/testMockProvider.ts
+bun x tsx ./dev/testMockProvider.ts
 
 # Run the mock provider standalone
-pnpm run test:mock
+bun run test:mock
 ```
 
 See `dev/MOCK_SERVER_CONFIG.md` for detailed documentation on configuring response times, error rates, and other mock behaviors.
@@ -353,7 +353,7 @@ WebSocket messages share per-connection tracking and enforce tier limits (RPS/RP
 ### Example Node Test Scripts
  See `dev/testWs.ts`:
  ```bash
- TEST_API_KEY=YOUR_KEY pnpm exec tsx ./dev/testWs.ts
+ TEST_API_KEY=YOUR_KEY bun x tsx ./dev/testWs.ts
  ```
 A REST streaming test can be performed with `curl` as shown above.
 

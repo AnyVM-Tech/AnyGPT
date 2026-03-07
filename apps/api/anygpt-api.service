@@ -7,9 +7,9 @@ Type=simple
 WorkingDirectory=/home/skullcmd/AnyGPT/apps/api
 Environment=NODE_ENV=production
 Environment=API_DIST_DIR=dist/production
-Environment=NVM_DIR=/home/skullcmd/.nvm
-ExecStartPre=/usr/bin/bash -lc 'source /home/skullcmd/.nvm/nvm.sh && nvm exec 22 /home/skullcmd/AnyGPT/apps/api/node_modules/.bin/tsgo --project tsconfig.json --outDir ./dist/production --noEmit false'
-ExecStart=/usr/bin/bash -lc 'source /home/skullcmd/.nvm/nvm.sh && nvm exec 22 node ./dist/production/server.js'
+Environment=CLUSTER_WORKERS=auto
+ExecStartPre=/usr/bin/bash -lc '/home/skullcmd/.bun/bin/bun run build'
+ExecStart=/usr/bin/bash -lc '/home/skullcmd/.bun/bin/bun run start'
 Restart=always
 RestartSec=5
 User=skullcmd

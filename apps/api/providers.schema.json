@@ -107,6 +107,14 @@
             "type": ["number", "null"],
             "description": "Last observed or estimated request rate limit for this model (requests per second)."
           },
+          "rate_limit_requests": {
+            "type": ["number", "null"],
+            "description": "Last observed fixed request budget for this model within a provider-enforced window."
+          },
+          "rate_limit_window_ms": {
+            "type": ["number", "null"],
+            "description": "Window duration for rate_limit_requests, in milliseconds."
+          },
           "disabled": {
             "type": "boolean",
             "default": false,

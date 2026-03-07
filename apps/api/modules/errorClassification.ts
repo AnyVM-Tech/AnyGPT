@@ -109,6 +109,40 @@ export function extractRateLimitRps(message: string): number | null {
     return null;
 }
 
+export function extractRateLimitWindow(message: string): { requests: number; windowMs: number } | null {
+    if (!message) return null;
+    const sanitized = String(message).replace(/,/g, '');
+
+    const directPatterns: Array<{ regex: RegExp; windowMs: number }> = [
+        { regex: /(\d+(?:\.\d+)?)\s*(?:rps|reqs?\/s|requests?\/s|requests?\s*per\s*second)\b/i, windowMs: 1000 },
+        { regex: /(\d+(?:\.\d+)?)\s*(?:rpm|reqs?\/m|requests?\/m|requests?\s*per\s*minute)\b/i, windowMs: 60_000 },
+        { regex: /(\d+(?:\.\d+)?)\s*(?:rpd|requests?\s*per\s*day)\b/i, windowMs: 86_400_000 },
+    ];
+
+    for (const { regex, windowMs } of directPatterns) {
+        const match = sanitized.match(regex);
+        const requests = parseNumber(match?.[1]);
+        if (requests !== null) {
+            return { requests, windowMs };
+        }
+    }
+
+    const windowMatch = sanitized.match(/(\d+(?:\.\d+)?)\s*requests?\s*(?:in|per)\s*(\d+(?:\.\d+)?)\s*(seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|days?|d)\b/i);
+    if (windowMatch) {
+        const requests = parseNumber(windowMatch[1]);
+        const span = parseNumber(windowMatch[2]);
+        const secondsPerUnit = windowUnitToSeconds(windowMatch[3]);
+        if (requests !== null && span !== null && secondsPerUnit !== null) {
+            const windowMs = Math.ceil(span * secondsPerUnit * 1000);
+            if (windowMs > 0) {
+                return { requests, windowMs };
+            }
+        }
+    }
+
+    return null;
+}
+
 // --- Insufficient Credits ---
 
 export function isInsufficientCreditsError(error: any): boolean {

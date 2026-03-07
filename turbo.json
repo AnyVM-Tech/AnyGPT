@@ -7,7 +7,7 @@
 				"apps/ui/**",
 				"apps/ui/tsconfig.json",
 				"apps/ui/package.json",
-				"pnpm-lock.yaml"
+				"bun.lock"
 			]
 		},
 		"build:backend": {
@@ -16,7 +16,7 @@
 				"apps/api/**",
 				"apps/api/tsconfig.json",
 				"apps/api/package.json",
-				"pnpm-lock.yaml"
+				"bun.lock"
 			]
 		},
 		"build": {
@@ -30,13 +30,13 @@
 				"apps/**",
 				".eslintrc.js",
 				"package.json",
-				"pnpm-lock.yaml"
+				"bun.lock"
 			]
 		},
 		"test": {
 			"dependsOn": ["build"],
 			"outputs": [],
-			"inputs": ["apps/**", "tests/**", "package.json", "pnpm-lock.yaml"]
+			"inputs": ["apps/**", "tests/**", "package.json", "bun.lock"]
 		},
 		"dev": {
 			"dependsOn": [],
@@ -45,7 +45,7 @@
 				"apps/**",
 				"tsconfig.json",
 				"package.json",
-				"pnpm-lock.yaml"
+				"bun.lock"
 			],
 			"cache": false,
 			"persistent": true

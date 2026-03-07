@@ -127,7 +127,7 @@ async function main() {
       console.log(chalk.gray('Setup skipped (non-interactive or CI/test environment).'))
       return
     }
-    console.log(chalk.yellow('Setup skipped; .env not found. Run `pnpm setup` to generate one.'))
+    console.log(chalk.yellow('Setup skipped; .env not found. Run `bun run setup` to generate one.'))
     return
   }
 
@@ -319,8 +319,8 @@ async function main() {
   console.log(chalk.green('\n🎉 Setup complete!'))
   console.log(chalk.blue('\nNext steps:'))
   console.log(chalk.gray('1. cd apps/api'))
-  console.log(chalk.gray('2. pnpm install'))
-  console.log(chalk.gray('3. pnpm dev'))
+  console.log(chalk.gray('2. bun install'))
+  console.log(chalk.gray('3. bun run dev'))
 
   if (config.redis.enabled) {
     console.log(chalk.yellow('\n⚠️  Important: Make sure your Redis instance is accessible and credentials are correct.'))

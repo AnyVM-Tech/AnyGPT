@@ -23,6 +23,13 @@ interface ValidationResult {
   tier?: string;
 }
 
+type TargetKind = 'image' | 'video';
+type ProviderFamily = 'openai' | 'xai' | 'google' | '';
+
+interface PricingFile {
+  models?: Record<string, { per_image?: number; per_request?: number }>;
+}
+
 const NO_QUOTA_ERROR = 'NO_QUOTA';
 
 const DEFAULT_SPEED = 50;
@@ -69,6 +76,68 @@ const providerDefaults: Record<string, { chatUrl: string; modelsUrl: string; str
     streamingCompatible: true,
   },
 };
+
+let pricedMediaModelsCache: string[] | null = null;
+
+function getTargetKind(modelId: string): TargetKind | null {
+  const lower = String(modelId || '').toLowerCase();
+  if (!lower) return null;
+  if (lower.includes('grok-imagine-video') || lower.includes('imagine-video') || lower.startsWith('sora') || lower.startsWith('veo-')) {
+    return 'video';
+  }
+  if (
+    lower.startsWith('dall-e')
+    || lower.startsWith('gpt-image')
+    || lower.includes('gpt-image')
+    || lower.includes('chatgpt-image')
+    || lower.includes('image-gen')
+    || lower.includes('imagegen')
+    || lower.startsWith('imagen')
+    || lower.includes('nano-banana')
+    || lower.includes('grok-imagine')
+    || lower.includes('grok-2-image')
+  ) {
+    return 'image';
+  }
+  return null;
+}
+
+function getModelFamily(modelId: string): ProviderFamily {
+  const lower = String(modelId || '').toLowerCase();
+  if (lower.startsWith('imagen') || lower.includes('nano-banana') || lower.startsWith('veo-')) return 'google';
+  if (lower.includes('grok-')) return 'xai';
+  if (lower.includes('grok-imagine')) return 'xai';
+  if (lower.startsWith('dall-e') || lower.startsWith('gpt-image') || lower.includes('chatgpt-image') || lower.startsWith('sora')) return 'openai';
+  return '';
+}
+
+function getProviderFamily(provider: string): ProviderFamily {
+  const lower = String(provider || '').toLowerCase();
+  if (lower === 'gemini' || lower === 'google') return 'google';
+  if (lower === 'openai') return 'openai';
+  if (lower === 'xai') return 'xai';
+  return '';
+}
+
+function loadPricedMediaModels(): string[] {
+  if (pricedMediaModelsCache) return pricedMediaModelsCache;
+  try {
+    const raw = fs.readFileSync(path.resolve('pricing.json'), 'utf8');
+    const parsed = JSON.parse(raw) as PricingFile;
+    pricedMediaModelsCache = Object.keys(parsed.models || {}).filter((modelId) => Boolean(getTargetKind(modelId)));
+    return pricedMediaModelsCache;
+  } catch {
+    pricedMediaModelsCache = [];
+    return pricedMediaModelsCache;
+  }
+}
+
+function selectPricedMediaModelsForProvider(modelIds: string[], provider: string): string[] {
+  const family = getProviderFamily(provider);
+  if (!family) return [];
+  const listed = new Set(modelIds);
+  return loadPricedMediaModels().filter((modelId) => getModelFamily(modelId) === family && listed.has(modelId));
+}
 
 interface ProbeTestedFile {
   updated_at?: string;
@@ -441,10 +510,15 @@ async function main() {
           if (probeFilter.skipped > 0) {
             console.log(`ℹ️  ${entry.provider} key ${entry.key.slice(0, 6)}...: skipped ${probeFilter.skipped} model(s) without probe ok`);
           }
-          if (probeFilter.models.length === 0) {
+          const pricedMediaModels = selectPricedMediaModelsForProvider(validation.models, entry.provider || '');
+          if (pricedMediaModels.length > 0) {
+            console.log(`ℹ️  ${entry.provider} key ${entry.key.slice(0, 6)}...: keeping ${pricedMediaModels.length} priced media model(s) from /models listing`);
+          }
+          const importModels = Array.from(new Set([...probeFilter.models, ...pricedMediaModels]));
+          if (importModels.length === 0) {
             throw new Error('No probe-ok models to import');
           }
-          const modelsMap = buildModels(probeFilter.models, probeTested.capability_skips);
+          const modelsMap = buildModels(importModels, probeTested.capability_skips);
 
           const existing = existingKeyToProviders.get(entry.key);
           if (existing && existing.length) {
@@ -508,6 +582,11 @@ async function main() {
 
   if (dryRun) {
     console.log(`[dry-run] Would add ${added.length} provider(s). No file was changed.`);
+    return;
+  }
+
+  if (added.length === 0 && refreshedCount === 0 && failures.length === 0) {
+    console.log('No provider changes detected. Skipping providers save.');
     return;
   }
 

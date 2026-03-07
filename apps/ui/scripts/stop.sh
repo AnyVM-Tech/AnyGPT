@@ -2,6 +2,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "$ROOT/../.." && pwd)"
+BUN_SH="$REPO_ROOT/bun.sh"
 
 if [[ ! -d "$ROOT/librechat" ]]; then
   echo "LibreChat repo not found at $ROOT/librechat"
@@ -14,6 +16,6 @@ if [[ "${USE_DOCKER:-}" == "1" ]]; then
   echo "Stopping LibreChat Docker containers..."
   docker compose down
 else
-  npm run backend:stop
+  bash "$BUN_SH" run backend:stop
   echo "If frontend dev server is running, stop it with Ctrl+C in that terminal."
 fi

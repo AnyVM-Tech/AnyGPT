@@ -52,6 +52,7 @@ import {
     isToolUnsupportedError as isToolUnsupportedErrorShared,
     extractRetryAfterMs,
     extractRateLimitRps,
+    extractRateLimitWindow,
 } from '../modules/errorClassification.js';
 
 
@@ -100,6 +101,26 @@ const PROVIDER_RATE_LIMIT_WAKE_EARLY_MS = (() => {
     if (Number.isFinite(parsed) && parsed >= 0) return Math.floor(parsed);
     return RATE_LIMIT_WAKE_EARLY_MS;
 })();
+const SHARED_PROVIDER_WINDOW_SAFETY_RATIO = (() => {
+    const raw = Number(process.env.SHARED_PROVIDER_WINDOW_SAFETY_RATIO ?? 0.85);
+    if (!Number.isFinite(raw)) return 0.85;
+    return Math.min(0.99, Math.max(0.5, raw));
+})();
+const SHARED_PROVIDER_WINDOW_REQUEST_RESERVE = (() => {
+    const raw = Number(process.env.SHARED_PROVIDER_WINDOW_REQUEST_RESERVE ?? 1);
+    if (!Number.isFinite(raw) || raw < 0) return 1;
+    return Math.floor(raw);
+})();
+const SHARED_PROVIDER_WINDOW_JITTER_MS = (() => {
+    const raw = Number(process.env.SHARED_PROVIDER_WINDOW_JITTER_MS ?? 1500);
+    if (!Number.isFinite(raw) || raw < 0) return 1500;
+    return Math.floor(raw);
+})();
+const SHARED_PROVIDER_BURST_GAP_MS = (() => {
+    const raw = Number(process.env.SHARED_PROVIDER_BURST_GAP_MS ?? 5000);
+    if (!Number.isFinite(raw) || raw < 250) return 5000;
+    return Math.floor(raw);
+})();
 const REQUEST_DEADLINE_MS = (() => {
     const raw = process.env.REQUEST_DEADLINE_MS;
     const parsed = raw !== undefined ? Number(raw) : NaN;
@@ -134,6 +155,7 @@ const PROVIDER_COOLDOWN_MS = Math.max(0, Number(process.env.PROVIDER_COOLDOWN_MS
 const PROVIDER_COOLDOWN_REDIS_PREFIX = 'provider:cooldown:';
 const providerCooldowns = new Map<string, number>();
 const providerRateLimitStarts = new Map<string, number>();
+const providerRateLimitWindows = new Map<string, number[]>();
 const COOLDOWN_EVICTION_INTERVAL_MS = 5 * 60 * 1000; // Sweep expired entries every 5 minutes
 
 // Periodic eviction to prevent unbounded Map growth
@@ -166,32 +188,133 @@ function getProviderRateLimitKey(providerId: string, modelId: string): string {
     return `${providerId}::${String(modelId || '').toLowerCase()}`;
 }
 
+function isSharedRateLimitProvider(providerId: string): boolean {
+    const normalized = String(providerId || '').toLowerCase();
+    // Default to treating providers as shared-rate-limit backends unless they are
+    // clearly local/dedicated. This is safer for hosted providers where limits
+    // can drift due to other traffic outside this process.
+    if (!normalized) return true;
+    if (normalized.includes('ollama')) return false;
+    if (normalized.includes('mock')) return false;
+    if (normalized.includes('local')) return false;
+    return true;
+}
+
+function getEffectiveWindowBudget(providerId: string, rateLimitRequests: number): number {
+    const rawBudget = Math.max(1, Math.floor(rateLimitRequests));
+    if (!isSharedRateLimitProvider(providerId)) return rawBudget;
+    const scaledBudget = Math.max(1, Math.floor(rawBudget * SHARED_PROVIDER_WINDOW_SAFETY_RATIO));
+    const reservedBudget = Math.max(1, rawBudget - Math.min(SHARED_PROVIDER_WINDOW_REQUEST_RESERVE, Math.max(0, rawBudget - 1)));
+    return Math.max(1, Math.min(scaledBudget, reservedBudget));
+}
+
+function pruneProviderRateLimitWindow(
+    providerId: string,
+    modelId: string,
+    windowMs: number,
+    now: number = Date.now()
+): number[] {
+    if (!Number.isFinite(windowMs) || windowMs <= 0) return [];
+    const key = getProviderRateLimitKey(providerId, modelId);
+    const entries = providerRateLimitWindows.get(key);
+    if (!entries || entries.length === 0) return [];
+    const active = entries.filter((timestamp) => now - timestamp < windowMs);
+    if (active.length > 0) {
+        providerRateLimitWindows.set(key, active);
+    } else {
+        providerRateLimitWindows.delete(key);
+    }
+    return active;
+}
+
 function getProviderRateLimitWaitMs(
     providerId: string,
     modelId: string,
-    rateLimitRps?: number | null
+    rateLimitRps?: number | null,
+    rateLimitRequests?: number | null,
+    rateLimitWindowMs?: number | null
 ): { waitMs: number; earlyWakeMs: number | null } {
-    if (!Number.isFinite(rateLimitRps as number) || (rateLimitRps as number) <= 0) {
+    const hasRps = Number.isFinite(rateLimitRps as number) && (rateLimitRps as number) > 0;
+    const hasWindowBudget = Number.isFinite(rateLimitRequests as number)
+        && (rateLimitRequests as number) > 0
+        && Number.isFinite(rateLimitWindowMs as number)
+        && (rateLimitWindowMs as number) > 0;
+    if (!hasRps && !hasWindowBudget) {
         return { waitMs: 0, earlyWakeMs: null };
     }
-    const rps = Math.max(0.001, Number(rateLimitRps));
-    const intervalMs = Math.max(1, Math.floor(1000 / rps));
     const key = getProviderRateLimitKey(providerId, modelId);
-    const lastStart = providerRateLimitStarts.get(key);
-    if (!lastStart) return { waitMs: 0, earlyWakeMs: null };
-    const rawWaitMs = lastStart + intervalMs - Date.now();
+    const now = Date.now();
+    let rawWaitMs = 0;
+
+    if (hasRps) {
+        const rps = Math.max(0.001, Number(rateLimitRps));
+        const intervalMs = Math.max(1, Math.floor(1000 / rps));
+        const lastStart = providerRateLimitStarts.get(key);
+        if (lastStart) {
+            rawWaitMs = Math.max(rawWaitMs, lastStart + intervalMs - now);
+        }
+    }
+
+    if (hasWindowBudget) {
+        const allowedRequests = getEffectiveWindowBudget(providerId, Number(rateLimitRequests));
+        const windowMs = Math.max(1, Math.ceil(Number(rateLimitWindowMs)));
+        const activeStarts = pruneProviderRateLimitWindow(providerId, modelId, windowMs, now);
+        if (activeStarts.length >= allowedRequests) {
+            const releaseIndex = Math.max(0, activeStarts.length - allowedRequests);
+            rawWaitMs = Math.max(rawWaitMs, activeStarts[releaseIndex] + windowMs - now);
+        }
+    }
+
     if (rawWaitMs <= 0) return { waitMs: 0, earlyWakeMs: null };
     const cappedWaitMs = Math.min(rawWaitMs, RATE_LIMIT_WAIT_MAX_MS);
-    const earlyWakeMs = Math.max(0, PROVIDER_RATE_LIMIT_WAKE_EARLY_MS);
-    if (cappedWaitMs <= earlyWakeMs) {
-        return { waitMs: 0, earlyWakeMs: 0 };
-    }
-    return { waitMs: cappedWaitMs - earlyWakeMs, earlyWakeMs: 0 };
+    const earlyWakeMs = Math.max(
+        0,
+        PROVIDER_RATE_LIMIT_WAKE_EARLY_MS + (isSharedRateLimitProvider(providerId) ? SHARED_PROVIDER_WINDOW_JITTER_MS : 0)
+    );
+    return { waitMs: cappedWaitMs, earlyWakeMs };
 }
 
 function markProviderRateLimitStart(providerId: string, modelId: string): void {
     const key = getProviderRateLimitKey(providerId, modelId);
-    providerRateLimitStarts.set(key, Date.now());
+    const now = Date.now();
+    providerRateLimitStarts.set(key, now);
+    const timestamps = providerRateLimitWindows.get(key) ?? [];
+    timestamps.push(now);
+    if (timestamps.length > 2048) {
+        timestamps.splice(0, timestamps.length - 2048);
+    }
+    providerRateLimitWindows.set(key, timestamps);
+}
+
+function estimateRateLimitRequestsFromBurst(providerId: string, modelId: string, cooldownMs: number): number | null {
+    if (!Number.isFinite(cooldownMs) || cooldownMs <= 0) return null;
+    const key = getProviderRateLimitKey(providerId, modelId);
+    const timestamps = providerRateLimitWindows.get(key);
+    if (!timestamps || timestamps.length <= 1) return null;
+
+    const recentHorizonMs = Math.max(Math.ceil(cooldownMs * 6), 60_000);
+    const cutoff = Date.now() - recentHorizonMs;
+    const recent = timestamps.filter((timestamp) => timestamp >= cutoff);
+    if (recent.length <= 1) return null;
+
+    const burstGapMs = isSharedRateLimitProvider(providerId)
+        ? Math.min(SHARED_PROVIDER_BURST_GAP_MS, Math.max(1000, Math.ceil(cooldownMs * 0.1)))
+        : Math.min(10_000, Math.max(1000, Math.ceil(cooldownMs * 0.25)));
+    let burstCount = 1;
+    for (let i = recent.length - 1; i > 0; i--) {
+        const gapMs = recent[i] - recent[i - 1];
+        if (gapMs > burstGapMs) break;
+        burstCount += 1;
+    }
+
+    const successfulBeforeLimit = Math.max(1, burstCount - 1);
+    return successfulBeforeLimit;
+}
+
+function smoothPositiveInteger(previousValue: number | null | undefined, nextValue: number): number {
+    const next = Math.max(1, Math.round(nextValue));
+    if (!Number.isFinite(previousValue as number) || (previousValue as number) <= 0) return next;
+    return Math.max(1, Math.round((((previousValue as number) + next) / 2)));
 }
 
 async function isApiKeyCoolingDownForModel(apiKey: string, modelId: string): Promise<boolean> {
@@ -284,6 +407,11 @@ async function waitForCooldownOrDeadline(
     const remaining = deadlineMs > 0
         ? deadlineMs - (Date.now() - requestStartTime)
         : Number.POSITIVE_INFINITY;
+    if (remaining <= 0) return false;
+    // If the cooldown is already within the early-wake window, do not fail the
+    // request. Treat it as an immediate wake-up so the caller retries provider
+    // selection right away instead of surfacing a premature 429/503.
+    if (cappedDelay <= 0) return true;
     const waitMs = Math.min(cappedDelay, Math.max(0, remaining));
     if (waitMs <= 0) return false;
     await new Promise((resolve) => setTimeout(resolve, waitMs));
@@ -312,6 +440,16 @@ const validateModels = ajv.compile(modelsSchema);
 
 // --- Interfaces ---
 interface ProviderConfig { class: new (...args: any[]) => IAIProvider; args?: any[]; }
+
+interface HandleMessagesOptions extends Partial<IMessage> {
+    requestId?: string;
+    skipQueue?: boolean;
+}
+
+interface HandleStreamingOptions extends Partial<IMessage> {
+    disablePassthrough?: boolean;
+    requestId?: string;
+}
 
 let providerConfigs: { [providerId: string]: ProviderConfig } = {};
 let initialModelThroughputMap: Map<string, number> = new Map(); 
@@ -421,6 +559,36 @@ export class MessageHandler {
         const err = new Error(`Model not found: ${raw}. No provider (active or disabled) supports model ${raw}.`);
         (err as any).code = 'model_not_found';
         throw err;
+    }
+
+    private normalizeHandleMessagesArgs(
+        requestIdOrOptions?: string | HandleMessagesOptions,
+        options?: HandleMessagesOptions
+    ): { requestId?: string; options: HandleMessagesOptions } {
+        if (typeof requestIdOrOptions === 'string' || typeof requestIdOrOptions === 'undefined') {
+            return {
+                requestId: requestIdOrOptions,
+                options: options ?? {},
+            };
+        }
+
+        return {
+            requestId: requestIdOrOptions.requestId,
+            options: requestIdOrOptions,
+        };
+    }
+
+    private extractMessageOverrides(
+        options?: Partial<IMessage> & { requestId?: string; skipQueue?: boolean; disablePassthrough?: boolean }
+    ): Partial<IMessage> {
+        if (!options) return {};
+        const {
+            requestId: _requestId,
+            skipQueue: _skipQueue,
+            disablePassthrough: _disablePassthrough,
+            ...messageOverrides
+        } = options;
+        return messageOverrides;
     }
 
     private isGeminiFamilyProvider(providerId: string): boolean {
@@ -821,6 +989,9 @@ export class MessageHandler {
                 avg_response_time: null,
                 avg_provider_latency: null,
                 avg_token_speed: this.initialModelThroughputMap.get(modelId) ?? this.DEFAULT_GENERATION_SPEED,
+                rate_limit_rps: null,
+                rate_limit_requests: null,
+                rate_limit_window_ms: null,
                 disabled: false
             };
         }
@@ -842,11 +1013,25 @@ export class MessageHandler {
         // Update consecutive errors and disabled status
         if (isError) {
             if (this.isRateLimitOrQuotaError(attemptError)) {
-                const rateLimitRps = extractRateLimitRps(String(attemptError?.message || attemptError || ''));
+                const rateLimitMessage = String(attemptError?.message || attemptError || '');
+                const rateLimitRps = extractRateLimitRps(rateLimitMessage);
+                const rateLimitWindow = extractRateLimitWindow(rateLimitMessage);
+                const retryAfterMs = extractRetryAfterMs(rateLimitMessage);
+                if (rateLimitWindow !== null) {
+                    modelData.rate_limit_requests = smoothPositiveInteger(modelData.rate_limit_requests, rateLimitWindow.requests);
+                    modelData.rate_limit_window_ms = smoothPositiveInteger(modelData.rate_limit_window_ms, rateLimitWindow.windowMs);
+                } else if (retryAfterMs && retryAfterMs > 0) {
+                    const estimatedRequests = estimateRateLimitRequestsFromBurst(providerId, modelId, retryAfterMs);
+                    if (estimatedRequests !== null) {
+                        modelData.rate_limit_requests = smoothPositiveInteger(modelData.rate_limit_requests, estimatedRequests);
+                        modelData.rate_limit_window_ms = smoothPositiveInteger(modelData.rate_limit_window_ms, retryAfterMs);
+                    }
+                }
                 if (rateLimitRps !== null) {
                     modelData.rate_limit_rps = rateLimitRps;
+                } else if (rateLimitWindow !== null && rateLimitWindow.windowMs > 0) {
+                    modelData.rate_limit_rps = rateLimitWindow.requests / Math.max(0.001, rateLimitWindow.windowMs / 1000);
                 } else {
-                    const retryAfterMs = extractRetryAfterMs(String(attemptError?.message || attemptError || ''));
                     if (retryAfterMs && retryAfterMs > 0) {
                         modelData.rate_limit_rps = 1 / (retryAfterMs / 1000);
                     } else if (modelData.rate_limit_rps === undefined) {
@@ -945,9 +1130,13 @@ export class MessageHandler {
         messages: IMessage[],
         modelId: string,
         apiKey: string,
-        requestId?: string,
-        options?: { skipQueue?: boolean }
+        requestIdOrOptions?: string | HandleMessagesOptions,
+        legacyOptions?: HandleMessagesOptions
     ): Promise<any> {
+        const normalizedArgs = this.normalizeHandleMessagesArgs(requestIdOrOptions, legacyOptions);
+        const requestId = normalizedArgs.requestId;
+        const options = normalizedArgs.options;
+        const messageOverrides = this.extractMessageOverrides(options);
         const execute = async () => {
             if (!messages?.length || !modelId || !apiKey) throw new Error("Invalid arguments");
             if (!messageHandler) throw new Error("Service temporarily unavailable.");
@@ -1036,7 +1225,9 @@ export class MessageHandler {
                         const { waitMs, earlyWakeMs } = getProviderRateLimitWaitMs(
                             providerId,
                             modelId,
-                            modelStats?.rate_limit_rps
+                            modelStats?.rate_limit_rps,
+                            modelStats?.rate_limit_requests,
+                            modelStats?.rate_limit_window_ms
                         );
                         if (waitMs > 0) {
                             skippedByProviderRateLimit++;
@@ -1108,7 +1299,11 @@ export class MessageHandler {
                     const lastMessage = messages[messages.length - 1];
                     const hasRole = messages.some((msg) => typeof msg.role === 'string' && msg.role.trim().length > 0);
                     const includeMessages = messages.length > 1 || hasRole;
-                    const messageForProvider: IMessage = { ...lastMessage, model: { id: modelId } };
+                    const messageForProvider: IMessage = {
+                        ...lastMessage,
+                        ...messageOverrides,
+                        model: { id: modelId }
+                    };
                     if (includeMessages) {
                         messageForProvider.messages = messages.map((msg) => ({
                             role: typeof msg.role === 'string' && msg.role.trim() ? msg.role : 'user',
@@ -1181,19 +1376,12 @@ export class MessageHandler {
                         await setApiKeyCooldownForModel(providerApiKey, modelId, retryAfterMs ?? undefined);
                     }
                     console.warn(`Rate limit/quota hit for ${providerId}; skipping this key for the remainder of the request.`);
-                    if (shouldRespectCooldowns) {
-                        const waitCooldownMs = RATE_LIMIT_WAIT_PER_MESSAGE ? (retryAfterMs ?? null) : null;
-                        const waited = await waitForCooldownOrDeadline(waitCooldownMs, requestStartTime, REQUEST_DEADLINE_MS);
-                        if (waited) {
-                            if (shouldReuseProviderOrder) {
-                                idx = -1;
-                                triedProviderIds.clear();
-                                blockedApiKeys.clear();
-                            }
-                            blockedApiKeys.clear();
-                            skippedByCooldown = 0;
-                            skippedByBlockedKey = 0;
-                            skippedByProviderRateLimit = 0;
+                    if (shouldRespectCooldowns && retryAfterMs && retryAfterMs > 0) {
+                        nextCooldownMs = nextCooldownMs === null
+                            ? retryAfterMs
+                            : Math.min(nextCooldownMs, retryAfterMs);
+                        if (nextCooldownMs === retryAfterMs) {
+                            nextCooldownEarlyWakeMs = null;
                         }
                     }
                 }
@@ -1322,8 +1510,9 @@ export class MessageHandler {
         messages: IMessage[],
         modelId: string,
         apiKey: string,
-        options?: { disablePassthrough?: boolean; requestId?: string }
+        options?: HandleStreamingOptions
     ): AsyncGenerator<any, void, unknown> {
+        const messageOverrides = this.extractMessageOverrides(options);
         const release = await requestQueue.acquire();
         let queueReleased = false;
         const releaseQueue = () => {
@@ -1419,7 +1608,9 @@ export class MessageHandler {
                         const { waitMs, earlyWakeMs } = getProviderRateLimitWaitMs(
                             providerId,
                             modelId,
-                            modelStats?.rate_limit_rps
+                            modelStats?.rate_limit_rps,
+                            modelStats?.rate_limit_requests,
+                            modelStats?.rate_limit_window_ms
                         );
                         if (waitMs > 0) {
                             skippedByProviderRateLimit++;
@@ -1468,7 +1659,11 @@ export class MessageHandler {
                     const lastMessage = messages[messages.length - 1];
                     const hasRole = messages.some((msg) => typeof msg.role === 'string' && msg.role.trim().length > 0);
                     const includeMessages = messages.length > 1 || hasRole;
-                    const messageForProvider: IMessage = { ...lastMessage, model: { id: modelId } };
+                    const messageForProvider: IMessage = {
+                        ...lastMessage,
+                        ...messageOverrides,
+                        model: { id: modelId }
+                    };
                     if (includeMessages) {
                         messageForProvider.messages = messages.map((msg) => ({
                             role: typeof msg.role === 'string' && msg.role.trim() ? msg.role : 'user',
@@ -1563,6 +1758,7 @@ export class MessageHandler {
 
                         yield {
                             type: 'final',
+                            response: fullResponse,
                             tokenUsage: inputTokens + outputTokens,
                             promptTokens: inputTokens,
                             completionTokens: outputTokens,
@@ -1589,6 +1785,7 @@ export class MessageHandler {
 
                     yield {
                         type: 'final',
+                        response: responseText,
                         tokenUsage: result.tokenUsage || 0,
                         providerId: result.providerId,
                         latency: result.latency,
@@ -1610,19 +1807,12 @@ export class MessageHandler {
                             await setApiKeyCooldownForModel(providerApiKey, modelId, retryAfterMs ?? undefined);
                         }
                         console.warn(`Rate limit/quota hit for ${providerId}; skipping this key for the remainder of the request.`);
-                        if (shouldRespectCooldowns) {
-                            const waitCooldownMs = RATE_LIMIT_WAIT_PER_MESSAGE ? (retryAfterMs ?? null) : null;
-                            const waited = await waitForCooldownOrDeadline(waitCooldownMs, requestStartTime, REQUEST_DEADLINE_MS);
-                            if (waited) {
-                                if (shouldReuseProviderOrder) {
-                                    idx = -1;
-                                    triedProviderIds.clear();
-                                    blockedApiKeys.clear();
-                                }
-                                blockedApiKeys.clear();
-                                skippedByCooldown = 0;
-                                skippedByBlockedKey = 0;
-                                skippedByProviderRateLimit = 0;
+                        if (shouldRespectCooldowns && retryAfterMs && retryAfterMs > 0) {
+                            nextCooldownMs = nextCooldownMs === null
+                                ? retryAfterMs
+                                : Math.min(nextCooldownMs, retryAfterMs);
+                            if (nextCooldownMs === retryAfterMs) {
+                                nextCooldownEarlyWakeMs = null;
                             }
                         }
                     }

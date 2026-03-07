@@ -24,6 +24,8 @@ export interface Model {
   avg_provider_latency: number | null;
   avg_token_speed: number | null; // Calculated average token speed (tokens/sec, e.g., EMA)
   rate_limit_rps?: number | null; // Last observed or estimated request rate limit (requests per second)
+  rate_limit_requests?: number | null; // Last observed request budget for a fixed provider window
+  rate_limit_window_ms?: number | null; // Window duration for rate_limit_requests, in milliseconds
   capability_skips?: Partial<Record<ModelCapability, string>>; // Optional per-model capability skips
   disabled?: boolean; // Optional per-model disable flag
   disabled_at?: number; // Epoch ms when the model was disabled (for time-based auto-recovery)
@@ -126,6 +128,7 @@ export interface IMessage {
   instructions?: string;
   stream_options?: Record<string, any>;
   image_fetch_referer?: string;
+  service_tier?: string;
 }
 
 // --- Potentially for user management/API key tracking --- //

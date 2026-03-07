@@ -2,6 +2,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "$ROOT/../.." && pwd)"
+BUN_SH="$REPO_ROOT/bun.sh"
 
 bash "$ROOT/scripts/sync-config.sh"
 
@@ -9,17 +11,17 @@ cd "$ROOT/librechat"
 
 if [[ ! -d node_modules || ! -x node_modules/.bin/cross-env ]]; then
   echo "Installing LibreChat dependencies..."
-  npm install
+  bash "$BUN_SH" install
 fi
 
 if [[ ! -f node_modules/@librechat/data-schemas/dist/index.cjs ]] || [[ ! -f packages/data-provider/dist/react-query/index.es.js ]]; then
   echo "Building LibreChat workspace packages..."
-  npm run build:packages
+  bash "$BUN_SH" run build:packages
 fi
 
 if [[ ! -f client/dist/index.html ]]; then
   echo "Building LibreChat client..."
-  npm run build:client
+  bash "$BUN_SH" run build:client
 fi
 
 # Kill any process already using the LibreChat backend port (3080)
@@ -35,7 +37,7 @@ export HOST=0.0.0.0
 # Allow reverse-proxy hostnames through Vite's host check
 export VITE_ALLOWED_HOSTS="${VITE_ALLOWED_HOSTS:-gpt.anyvm.tech}"
 
-npm run backend:dev &
+bash "$BUN_SH" run backend:dev &
 BACKEND_PID=$!
 
 cleanup() {
@@ -45,4 +47,4 @@ cleanup() {
 }
 trap cleanup EXIT
 
-npm run frontend:dev
+bash "$BUN_SH" run frontend:dev

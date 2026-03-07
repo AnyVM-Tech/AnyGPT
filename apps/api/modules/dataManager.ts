@@ -16,6 +16,8 @@ interface ProviderModelData {
     avg_provider_latency: number | null;
     avg_token_speed: number | null;
     rate_limit_rps?: number | null;
+    rate_limit_requests?: number | null;
+    rate_limit_window_ms?: number | null;
     capability_skips?: Record<string, string>;
     disabled?: boolean;
     disabled_at?: number; // Epoch ms when the model was disabled (for time-based auto-recovery)

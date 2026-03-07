@@ -3,7 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 // Lightweight capability audit for models.json. Heuristic-based; does not call providers.
-// Run with: pnpm tsx ./dev/checkModelCapabilities.ts
+// Run with: bun x tsx ./dev/checkModelCapabilities.ts
 
 type ModelCapability = 'text' | 'image_input' | 'image_output' | 'audio_input' | 'audio_output' | 'tool_calling';
 interface ModelDefinition {

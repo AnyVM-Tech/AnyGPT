@@ -277,7 +277,8 @@ export class OpenAI implements IAIProvider {
     const normalized = this.normalizeModelId(modelId);
     if (this.isComputerUseModel(normalized)) return true;
     if (normalized.includes('codex')) return true;
-    if (normalized.includes('gpt-5.2')) return true;
+    // GPT-5-family models are Responses-first for reliable structured tool calling.
+    if (normalized.includes('gpt-5')) return true;
     if (normalized.includes('gpt-4.1')) return true;
     if (normalized.includes('o3') || normalized.includes('omni')) return true;
     // Match specific "pro" model families (e.g. "o1-pro", "o3-pro") without
@@ -401,6 +402,9 @@ export class OpenAI implements IAIProvider {
     if (typeof message.reasoning !== 'undefined' && this.supportsReasoningParam(message.model.id)) {
       target.reasoning = message.reasoning;
     }
+    if (typeof message.service_tier === 'string' && message.service_tier.trim()) {
+      target.service_tier = message.service_tier.trim();
+    }
 
     const hasAudioInput = this.hasAudioInputContent(message.content);
     const hasAudioModality = Array.isArray(message.modalities) && message.modalities.some((modality) => String(modality).toLowerCase() === 'audio');
@@ -523,6 +527,9 @@ export class OpenAI implements IAIProvider {
       } else {
         target.reasoning = message.reasoning;
       }
+    }
+    if (typeof message.service_tier === 'string' && message.service_tier.trim()) {
+      target.service_tier = message.service_tier.trim();
     }
     if (message.instructions) target.instructions = message.instructions;
     if (message.modalities) target.modalities = message.modalities;

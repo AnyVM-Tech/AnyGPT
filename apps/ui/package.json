@@ -1,6 +1,7 @@
 {
   "name": "anygpt-ui",
   "private": true,
+  "packageManager": "bun@1.3.10",
   "scripts": {
     "dev": "bash scripts/dev.sh",
     "start": "bash scripts/start.sh",

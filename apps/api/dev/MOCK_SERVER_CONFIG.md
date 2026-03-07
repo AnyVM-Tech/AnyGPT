@@ -112,7 +112,7 @@ curl -X POST http://localhost:3001/mock/config \
 
 Run the enhanced test to see configuration in action:
 ```bash
-pnpm exec tsx ./dev/testMockProvider.ts
+bun x tsx ./dev/testMockProvider.ts
 ```
 
 This test will:

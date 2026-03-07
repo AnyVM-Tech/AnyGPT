@@ -17,7 +17,7 @@ import path from 'path';
 // capability skips in logs/probe-tested.json (no tested_capabilities persisted).
 //
 // Run (prefer Node 20/22 per engines):
-//   cd apps/api && pnpm tsx ./dev/testModelLiveProbes.ts
+//   cd apps/api && bun x tsx ./dev/testModelLiveProbes.ts
 //
 // This will issue real API calls using keys from providers.json. Use cautiously to avoid quota use.
 
@@ -44,6 +44,10 @@ import path from 'path';
 //   CAP_TEST_SKIP_TESTED_OK: if "0", re-test models even if probe-tested has ok results (default: 1)
 //   CAP_TEST_PROVIDER_FILTER: comma-separated provider id substring(s) to probe (e.g. "openai,openrouter")
 //   CAP_TEST_PROVIDER_FAMILY: comma-separated provider family names to probe (e.g. "openai,gemini,openrouter")
+//   CAP_TEST_MODEL_FILTER: comma-separated model id substring(s) to probe (e.g. "gpt-5.4,gpt-5.2")
+//   CAP_TEST_API_KEY: inject a temporary OpenAI-compatible provider for the selected model filter(s)
+//   CAP_TEST_PROVIDER_URL: provider URL for the injected provider (defaults to OpenAI chat completions)
+//   CAP_TEST_PROVIDER_ID: provider id for the injected provider (default: openai-probe)
 //   CAP_TEST_KEYCHECK_ONLY: if "1", only validate provider keys/quotas and update providers.json (skip model probes)
 const REQUEST_TIMEOUT_MS = Number(process.env.CAP_TEST_TIMEOUT_MS ?? 15000);
 const IMAGE_TIMEOUT_MS = Number(process.env.CAP_TEST_IMAGE_TIMEOUT_MS ?? Math.max(REQUEST_TIMEOUT_MS, 30000));
@@ -78,14 +82,31 @@ const AUDIO_VOICE = process.env.CAP_TEST_AUDIO_VOICE ?? 'alloy';
 const AUDIO_FORMAT = process.env.CAP_TEST_AUDIO_FORMAT ?? 'wav';
 const KEYCHECK_ONLY = process.env.CAP_TEST_KEYCHECK_ONLY === '1';
 const args = process.argv.slice(2);
+const apiKeyArg = args.find((arg) => arg.startsWith('--api-key='));
+const modelFilterArg = args.find((arg) => arg.startsWith('--models=') || arg.startsWith('--model='));
+const providerIdArg = args.find((arg) => arg.startsWith('--provider-id='));
+const providerUrlArg = args.find((arg) => arg.startsWith('--provider-url='));
 const providerFilterArg = args.find((arg) => arg.startsWith('--providers=') || arg.startsWith('--provider='));
 const providerFamilyArg = args.find((arg) => arg.startsWith('--provider-family=') || arg.startsWith('--provider-families=') || arg.startsWith('--families='));
+const EXPLICIT_API_KEY = apiKeyArg
+  ? apiKeyArg.split('=')[1]
+  : (process.env.CAP_TEST_API_KEY ?? '');
+const MODEL_FILTER_RAW = modelFilterArg
+  ? modelFilterArg.split('=')[1]
+  : (process.env.CAP_TEST_MODEL_FILTER ?? process.env.CAP_TEST_MODELS ?? '');
+const EXPLICIT_PROVIDER_ID = providerIdArg
+  ? providerIdArg.split('=')[1]
+  : (process.env.CAP_TEST_PROVIDER_ID ?? 'openai-probe');
+const EXPLICIT_PROVIDER_URL = providerUrlArg
+  ? providerUrlArg.split('=')[1]
+  : (process.env.CAP_TEST_PROVIDER_URL ?? 'https://api.openai.com/v1/chat/completions');
 const PROVIDER_FILTER_RAW = providerFilterArg
   ? providerFilterArg.split('=')[1]
   : (process.env.CAP_TEST_PROVIDER_FILTER ?? process.env.CAP_TEST_PROVIDERS ?? '');
 const PROVIDER_FAMILY_RAW = providerFamilyArg
   ? providerFamilyArg.split('=')[1]
   : (process.env.CAP_TEST_PROVIDER_FAMILY ?? process.env.CAP_TEST_PROVIDER_FAMILIES ?? '');
+const MODEL_FILTERS = parseList(MODEL_FILTER_RAW);
 const PROVIDER_FILTERS = parseList(PROVIDER_FILTER_RAW);
 const PROVIDER_FAMILIES = parseList(PROVIDER_FAMILY_RAW);
 
@@ -1187,6 +1208,46 @@ function providerMatchesFilters(providerId: string): boolean {
   return false;
 }
 
+function modelMatchesFilters(modelId: string): boolean {
+  if (MODEL_FILTERS.length === 0) return true;
+  const id = modelId.toLowerCase();
+  return MODEL_FILTERS.some((token) => id.includes(token));
+}
+
+function buildSyntheticProvider(modelIds: string[]): LoadedProviderData | null {
+  if (!EXPLICIT_API_KEY) return null;
+  const uniqueModelIds = Array.from(new Set(modelIds.filter((id): id is string => typeof id === 'string' && id.length > 0)));
+  if (uniqueModelIds.length === 0) return null;
+
+  const models = Object.fromEntries(
+    uniqueModelIds.map((modelId) => [modelId, {
+      id: modelId,
+      token_generation_speed: 50,
+      response_times: [],
+      errors: 0,
+      consecutive_errors: 0,
+      avg_response_time: null,
+      avg_provider_latency: null,
+      avg_token_speed: null,
+      rate_limit_rps: null,
+      disabled: false,
+    }])
+  );
+
+  return {
+    id: EXPLICIT_PROVIDER_ID,
+    apiKey: EXPLICIT_API_KEY,
+    provider_url: EXPLICIT_PROVIDER_URL,
+    streamingCompatible: true,
+    models,
+    disabled: false,
+    avg_response_time: null,
+    avg_provider_latency: null,
+    errors: 0,
+    provider_score: null,
+  };
+}
+
 function getProviderSemaphore(providerId: string): Semaphore {
   let semaphore = providerSemaphores.get(providerId);
   if (!semaphore) {
@@ -1777,9 +1838,15 @@ async function main() {
   await dataManager.waitForRedisReadyAndBackfill();
   const modelsRaw = await dataManager.load<ModelsFileStructure>('models');
   const allProviders = await dataManager.load<LoadedProviders>('providers');
-  let providers = allProviders;
+  let providers = [...allProviders];
   const totalModels = modelsRaw.data.length;
-  const totalProviders = allProviders.length;
+  const syntheticProvider = buildSyntheticProvider(
+    (modelsRaw.data as Array<{ id: string }>).map((model) => model.id).filter((id) => modelMatchesFilters(id))
+  );
+  if (syntheticProvider) {
+    providers = [syntheticProvider, ...providers.filter((provider) => provider.id !== syntheticProvider.id)];
+  }
+  const totalProviders = allProviders.length + (syntheticProvider ? 1 : 0);
 
   if (PROVIDER_FILTERS.length > 0 || PROVIDER_FAMILIES.length > 0) {
     providers = providers.filter((p) => providerMatchesFilters(p.id));
@@ -1797,7 +1864,8 @@ async function main() {
   });
 
   const models = (modelsRaw.data as Array<{ id: string; capabilities?: ModelCapability[] }>)
-    .filter((model) => supportedModelIds.has(model.id));
+    .filter((model) => supportedModelIds.has(model.id))
+    .filter((model) => modelMatchesFilters(model.id));
 
   if (models.length === 0) {
     if (KEYCHECK_ONLY) {
@@ -1854,7 +1922,8 @@ async function main() {
     const modelNote = `${models.length}/${totalModels} models`;
     const familyNote = PROVIDER_FAMILIES.length ? ` families=${PROVIDER_FAMILIES.join(',')}` : '';
     const filterNote = PROVIDER_FILTERS.length ? ` filters=${PROVIDER_FILTERS.join(',')}` : '';
-    console.log(`Provider filter active (${providerNote}, ${modelNote}).${familyNote}${filterNote}`);
+    const modelFilterNote = MODEL_FILTERS.length ? ` model_filters=${MODEL_FILTERS.join(',')}` : '';
+    console.log(`Provider filter active (${providerNote}, ${modelNote}).${familyNote}${filterNote}${modelFilterNote}`);
   }
 
   const probeHints: ProbeLogHints = USE_PROBE_LOG

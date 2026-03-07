@@ -20,11 +20,12 @@ This folder replaces the previous UI with LibreChat. The LibreChat repo is expec
 
 4. Start LibreChat:
    ```bash
-   pnpm --filter anygpt-ui dev
+   cd apps/ui
+   bun run dev
    ```
    If dependencies are missing, run:
    ```bash
-   (cd apps/ui/librechat && npm install)
+   (cd apps/ui/librechat && bun install)
    ```
 
 ## What This Wrapper Does

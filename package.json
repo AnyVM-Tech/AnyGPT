@@ -1,56 +1,53 @@
 {
-	"name": "anygpt",
-	"version": "1.0.0",
-	"private": true,
-	"description": "AnyGPT, the only free API and apps you'll ever need",
-	"workspaces": [
-		"apps/*"
-	],
-	"scripts": {
-		"build": "tsc -b",
-		"dev": "turbo run dev",
-		"test": "turbo run test",
-		"lint": "turbo run lint",
-		"typecheck": "tsc --noEmit",
-		"format": "prettier --write ./",
-		"prepare": "husky",
-		"setup": "pnpm --filter anygpt-api run setup"
-	},
-	"devDependencies": {
-		"eslint": "^8.57.1",
-		"husky": "^9.1.7",
-		"prettier": "^3.8.1",
-		"turbo": "^2.8.13",
-		"typescript": "^5.9.3"
-	},
-	"packageManager": "pnpm@10.30.1",
-	"pnpm": {
-		"overrides": {
-			"next": "^15.5.10",
-			"@remix-run/router": "^1.23.2",
-			"@remix-run/server-runtime": "^2.17.3",
-			"react-router": "^6.30.2",
-			"vite": "^5.4.21",
-			"vite-plugin-static-copy": "^2.3.2",
-			"esbuild": "^0.25.0",
-			"glob": "^10.5.0",
-			"minimatch": "^10.2.1",
-			"brace-expansion": "^5.0.2",
-			"diff": "^4.0.4",
-			"qs": "^6.14.2",
-			"ajv": "^8.18.0",
-			"undici": "^6.23.0",
-			"cookie": "^0.7.0",
-			"on-headers": "^1.1.0",
-			"tmp": "^0.2.4",
-			"@babel/runtime": "^7.26.10",
-			"@babel/helpers": "^7.26.10",
-			"pnpm": "^10.29.2"
-		}
-	},
-	"dependencies": {
-		"chalk": "^5.6.2",
-		"commander": "^12.1.0",
-		"pnpm": "^10.30.3"
-	}
+  "name": "anygpt",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AnyGPT, the only free API and apps you'll ever need",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "dev": "turbo run dev",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write ./",
+    "prepare": "husky",
+    "setup": "bash ./bun.sh run -F anygpt-api setup"
+  },
+  "devDependencies": {
+    "eslint": "^8.57.1",
+    "husky": "^9.1.7",
+    "prettier": "^3.8.1",
+    "turbo": "^2.8.13",
+    "typescript": "^5.9.3"
+  },
+  "packageManager": "bun@1.3.10",
+  "overrides": {
+    "next": "^15.5.10",
+    "@remix-run/router": "^1.23.2",
+    "@remix-run/server-runtime": "^2.17.3",
+    "react-router": "^6.30.2",
+    "vite": "^5.4.21",
+    "vite-plugin-static-copy": "^2.3.2",
+    "esbuild": "^0.25.0",
+    "glob": "^10.5.0",
+    "minimatch": "^10.2.1",
+    "brace-expansion": "^5.0.2",
+    "diff": "^4.0.4",
+    "qs": "^6.14.2",
+    "ajv": "^8.18.0",
+    "undici": "^6.23.0",
+    "cookie": "^0.7.0",
+    "on-headers": "^1.1.0",
+    "tmp": "^0.2.4",
+    "@babel/runtime": "^7.26.10",
+    "@babel/helpers": "^7.26.10"
+  },
+  "dependencies": {
+    "chalk": "^5.6.2",
+    "commander": "^12.1.0"
+  }
 }

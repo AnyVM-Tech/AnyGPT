@@ -88,6 +88,10 @@ function formatRateLimitMessage(retryAfterSeconds?: number | null): string {
     }
     return 'Rate limit or quota exceeded. Please retry later.';
 }
+
+function getServiceTierForUserTier(userTier?: string): string {
+    return String(userTier || '').toLowerCase() === 'free' ? 'standard' : 'priority';
+}
  
 // --- Request Extension ---
 declare module '../lib/uws-compat.js' {
@@ -446,7 +450,94 @@ function formatAssistantContent(raw: string): string {
     if (raw.startsWith('data:image/')) {
         return `![generated image](${raw})`;
     }
+    const trimmed = raw.trim();
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+        try {
+            const parsed = JSON.parse(trimmed);
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                const entries = Object.entries(parsed);
+                if (entries.length === 1) {
+                    const [onlyKey, onlyValue] = entries[0];
+                    if (typeof onlyValue === 'string' && ['result', 'content', 'message', 'text'].includes(onlyKey)) {
+                        return onlyValue;
+                    }
+                    if (onlyValue && typeof onlyValue === 'object' && !Array.isArray(onlyValue)) {
+                        const nestedText = (onlyValue as any).text ?? (onlyValue as any).content ?? (onlyValue as any).message;
+                        if (typeof nestedText === 'string' && ['result', 'content', 'message', 'text'].includes(onlyKey)) {
+                            return nestedText;
+                        }
+                    }
+                }
+            }
+        } catch {
+            // Leave non-JSON or intentionally-JSON output unchanged.
+        }
+    }
     return raw;
+}
+
+function inferToolCallsFromJsonText(raw: string, tools: any[] | undefined, toolChoice?: any): any[] | undefined {
+    if (typeof raw !== 'string') return undefined;
+    if (!Array.isArray(tools) || tools.length === 0) return undefined;
+
+    const trimmed = raw.trim();
+    if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) return undefined;
+
+    let parsed: any;
+    try {
+        parsed = JSON.parse(trimmed);
+    } catch {
+        return undefined;
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+
+    const requestedToolName = typeof toolChoice === 'object' && toolChoice
+        ? (toolChoice?.function?.name || toolChoice?.name)
+        : undefined;
+
+    const keys = Object.keys(parsed);
+    const candidates = tools
+        .map((tool) => {
+            const fn = tool?.function;
+            const name = typeof fn?.name === 'string' ? fn.name : (typeof tool?.name === 'string' ? tool.name : undefined);
+            const params = fn?.parameters || tool?.parameters;
+            if (!name) return null;
+            if (requestedToolName && name !== requestedToolName) return null;
+
+            const properties = params && typeof params === 'object' && params.properties && typeof params.properties === 'object'
+                ? Object.keys(params.properties)
+                : [];
+            const required = params && typeof params === 'object' && Array.isArray(params.required)
+                ? params.required.filter((key: any) => typeof key === 'string')
+                : [];
+
+            const matchedRequired = required.filter((key: string) => keys.includes(key)).length;
+            const missingRequired = required.length - matchedRequired;
+            const matchedProperties = properties.filter((key: string) => keys.includes(key)).length;
+            const unexpectedKeys = properties.length > 0
+                ? keys.filter((key) => !properties.includes(key)).length
+                : 0;
+
+            if (required.length > 0 && missingRequired > 0) return null;
+            if (properties.length > 0 && matchedProperties === 0) return null;
+
+            const score = (matchedRequired * 100) + (matchedProperties * 10) - unexpectedKeys;
+            return { name, score };
+        })
+        .filter((candidate): candidate is { name: string; score: number } => Boolean(candidate))
+        .sort((a, b) => b.score - a.score);
+
+    const best = candidates[0];
+    if (!best) return undefined;
+
+    return [{
+        id: `call_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
+        type: 'function',
+        function: {
+            name: best.name,
+            arguments: JSON.stringify(parsed),
+        },
+    }];
 }
 
 function extractTextFromContent(content: any): string {
@@ -1779,6 +1870,87 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
         response.setHeader('Content-Type', 'text/event-stream');
         response.setHeader('Cache-Control', 'no-cache');
         response.setHeader('Connection', 'keep-alive');
+
+        if (Array.isArray(requestBody.tools) && requestBody.tools.length > 0) {
+            const started = Date.now();
+            const requestId = `chatcmpl-${Date.now()}`;
+            const result = await messageHandler.handleMessages(formattedMessages, modelId, userApiKey, { requestId: request.requestId });
+            const inferredToolCalls = (!result.tool_calls || result.tool_calls.length === 0)
+                ? inferToolCallsFromJsonText(result.response, requestBody.tools, requestBody.tool_choice)
+                : undefined;
+            const effectiveToolCalls = (result.tool_calls && result.tool_calls.length > 0)
+                ? result.tool_calls
+                : inferredToolCalls;
+            const assistantContent = effectiveToolCalls?.length ? '' : formatAssistantContent(result.response);
+
+            const totalTokensUsed = typeof result.tokenUsage === 'number' ? result.tokenUsage : 0;
+            const promptTokensUsed = typeof result.promptTokens === 'number' ? result.promptTokens : undefined;
+            const completionTokensUsed = typeof result.completionTokens === 'number' ? result.completionTokens : undefined;
+            await updateUserTokenUsage(totalTokensUsed, userApiKey, { modelId, promptTokens: promptTokensUsed, completionTokens: completionTokensUsed });
+
+            const roleChunk = {
+                id: requestId,
+                object: 'chat.completion.chunk',
+                created: Math.floor(started / 1000),
+                model: modelId,
+                choices: [{
+                    index: 0,
+                    delta: { role: 'assistant' },
+                    finish_reason: null
+                }]
+            };
+            response.write(`data: ${JSON.stringify(roleChunk)}\n\n`);
+
+            if (effectiveToolCalls?.length) {
+                const toolChunk = {
+                    id: requestId,
+                    object: 'chat.completion.chunk',
+                    created: Math.floor(started / 1000),
+                    model: modelId,
+                    choices: [{
+                        index: 0,
+                        delta: { tool_calls: effectiveToolCalls },
+                        finish_reason: null
+                    }]
+                };
+                response.write(`data: ${JSON.stringify(toolChunk)}\n\n`);
+            } else if (assistantContent) {
+                const contentChunk = {
+                    id: requestId,
+                    object: 'chat.completion.chunk',
+                    created: Math.floor(started / 1000),
+                    model: modelId,
+                    choices: [{
+                        index: 0,
+                        delta: { content: assistantContent },
+                        finish_reason: null
+                    }]
+                };
+                response.write(`data: ${JSON.stringify(contentChunk)}\n\n`);
+            }
+
+            const finalChunk = {
+                id: requestId,
+                object: 'chat.completion.chunk',
+                created: Math.floor(started / 1000),
+                model: modelId,
+                choices: [{
+                    index: 0,
+                    delta: {},
+                    finish_reason: effectiveToolCalls?.length ? 'tool_calls' : (result.finish_reason || 'stop')
+                }]
+            };
+            if (includeUsageInStream) {
+                (finalChunk as any).usage = {
+                    prompt_tokens: promptTokensUsed,
+                    completion_tokens: completionTokensUsed,
+                    total_tokens: totalTokensUsed
+                };
+            }
+            response.write(`data: ${JSON.stringify(finalChunk)}\n\n`);
+            response.write(`data: [DONE]\n\n`);
+            return response.end();
+        }
         
         const streamHandler = messageHandler.handleStreamingMessages(formattedMessages, modelId, userApiKey, { requestId: request.requestId });
         const started = Date.now();
@@ -1794,6 +1966,9 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
         let streamOutputText = '';
         let toolCallsFromStream: any[] | undefined;
         let finishReasonFromStream: string | undefined;
+        let sentAssistantRoleChunk = false;
+        const canInferToolCallsFromText = Array.isArray(requestBody.tools) && requestBody.tools.length > 0;
+        let bufferingStructuredJson = false;
 
         for await (const result of streamHandler) {
             if (result.type === 'passthrough') {
@@ -1844,6 +2019,36 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
             } else if (result.type === 'chunk') {
                 if (Array.isArray(result.tool_calls) && result.tool_calls.length > 0) toolCallsFromStream = result.tool_calls;
                 if (result.finish_reason) finishReasonFromStream = result.finish_reason;
+                if (typeof result.chunk === 'string' && result.chunk) streamOutputText += result.chunk;
+                if (!toolCallsFromStream && canInferToolCallsFromText) {
+                    const trimmedSoFar = streamOutputText.trimStart();
+                    if (bufferingStructuredJson || trimmedSoFar.startsWith('{') || trimmedSoFar.startsWith('[')) {
+                        bufferingStructuredJson = true;
+                    }
+                }
+                if (!sentAssistantRoleChunk) {
+                    const roleChunk = {
+                        id: requestId,
+                        object: 'chat.completion.chunk',
+                        created: Math.floor(started / 1000),
+                        model: modelId,
+                        choices: [{
+                            index: 0,
+                            delta: { role: 'assistant' },
+                            finish_reason: null
+                        }]
+                    };
+                    response.write(`data: ${JSON.stringify(roleChunk)}\n\n`);
+                    sentAssistantRoleChunk = true;
+                }
+                if (bufferingStructuredJson && !toolCallsFromStream) {
+                    continue;
+                }
+                const hasContentChunk = typeof result.chunk === 'string' && result.chunk.length > 0;
+                const hasToolCallChunk = Array.isArray(result.tool_calls) && result.tool_calls.length > 0;
+                if (!hasContentChunk && !hasToolCallChunk) {
+                    continue;
+                }
                 const openaiStreamChunk = {
                     id: requestId,
                     object: 'chat.completion.chunk',
@@ -1866,6 +2071,7 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
                 if (typeof result.tokenUsage === 'number') totalTokenUsage = result.tokenUsage;
                 if (typeof result.promptTokens === 'number') promptTokensFinal = result.promptTokens;
                 if (typeof result.completionTokens === 'number') completionTokensFinal = result.completionTokens;
+                if (typeof result.response === 'string' && result.response) streamOutputText = result.response;
                 if (Array.isArray(result.tool_calls) && result.tool_calls.length > 0) toolCallsFromStream = result.tool_calls;
                 if (result.finish_reason) finishReasonFromStream = result.finish_reason;
             }
@@ -1877,6 +2083,36 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
                 if (fallbackResult.type === 'chunk') {
                     if (Array.isArray(fallbackResult.tool_calls) && fallbackResult.tool_calls.length > 0) toolCallsFromStream = fallbackResult.tool_calls;
                     if (fallbackResult.finish_reason) finishReasonFromStream = fallbackResult.finish_reason;
+                    if (typeof fallbackResult.chunk === 'string' && fallbackResult.chunk) streamOutputText += fallbackResult.chunk;
+                    if (!toolCallsFromStream && canInferToolCallsFromText) {
+                        const trimmedSoFar = streamOutputText.trimStart();
+                        if (bufferingStructuredJson || trimmedSoFar.startsWith('{') || trimmedSoFar.startsWith('[')) {
+                            bufferingStructuredJson = true;
+                        }
+                    }
+                    if (!sentAssistantRoleChunk) {
+                        const roleChunk = {
+                            id: requestId,
+                            object: 'chat.completion.chunk',
+                            created: Math.floor(started / 1000),
+                            model: modelId,
+                            choices: [{
+                                index: 0,
+                                delta: { role: 'assistant' },
+                                finish_reason: null
+                            }]
+                        };
+                        response.write(`data: ${JSON.stringify(roleChunk)}\n\n`);
+                        sentAssistantRoleChunk = true;
+                    }
+                    if (bufferingStructuredJson && !toolCallsFromStream) {
+                        continue;
+                    }
+                    const hasFallbackContentChunk = typeof fallbackResult.chunk === 'string' && fallbackResult.chunk.length > 0;
+                    const hasFallbackToolCallChunk = Array.isArray(fallbackResult.tool_calls) && fallbackResult.tool_calls.length > 0;
+                    if (!hasFallbackContentChunk && !hasFallbackToolCallChunk) {
+                        continue;
+                    }
                     const openaiStreamChunk = {
                         id: requestId,
                         object: 'chat.completion.chunk',
@@ -1898,6 +2134,7 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
                     if (fallbackResult.tokenUsage) totalTokenUsage = fallbackResult.tokenUsage;
                     if (typeof fallbackResult.promptTokens === 'number') promptTokensFinal = fallbackResult.promptTokens;
                     if (typeof fallbackResult.completionTokens === 'number') completionTokensFinal = fallbackResult.completionTokens;
+                    if (typeof fallbackResult.response === 'string' && fallbackResult.response) streamOutputText = fallbackResult.response;
                     if (Array.isArray(fallbackResult.tool_calls) && fallbackResult.tool_calls.length > 0) toolCallsFromStream = fallbackResult.tool_calls;
                     if (fallbackResult.finish_reason) finishReasonFromStream = fallbackResult.finish_reason;
                 }
@@ -1933,7 +2170,44 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
         }
 
         await updateUserTokenUsage(totalTokenUsage, userApiKey, { modelId, promptTokens: finalPromptTokens, completionTokens: finalCompletionTokens });
-        
+
+        if ((!toolCallsFromStream || toolCallsFromStream.length === 0) && streamOutputText) {
+            const inferredToolCalls = inferToolCallsFromJsonText(streamOutputText, requestBody.tools, requestBody.tool_choice);
+            if (inferredToolCalls && inferredToolCalls.length > 0) {
+                toolCallsFromStream = inferredToolCalls;
+                finishReasonFromStream = 'tool_calls';
+                const inferredToolChunk = {
+                    id: requestId,
+                    object: 'chat.completion.chunk',
+                    created: Math.floor(started / 1000),
+                    model: modelId,
+                    choices: [{
+                        index: 0,
+                        delta: {
+                            tool_calls: inferredToolCalls,
+                        },
+                        finish_reason: null
+                    }]
+                };
+                response.write(`data: ${JSON.stringify(inferredToolChunk)}\n\n`);
+            } else if (bufferingStructuredJson && streamOutputText) {
+                const bufferedContentChunk = {
+                    id: requestId,
+                    object: 'chat.completion.chunk',
+                    created: Math.floor(started / 1000),
+                    model: modelId,
+                    choices: [{
+                        index: 0,
+                        delta: {
+                            content: streamOutputText,
+                        },
+                        finish_reason: null
+                    }]
+                };
+                response.write(`data: ${JSON.stringify(bufferedContentChunk)}\n\n`);
+            }
+        }
+         
         const finalChunk = {
             id: requestId,
             object: 'chat.completion.chunk',
@@ -1959,7 +2233,13 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
     } else {
         // messageHandler call is already async
         const result = await messageHandler.handleMessages(formattedMessages, modelId, userApiKey, { requestId: request.requestId });
-        const assistantContent = formatAssistantContent(result.response);
+        const inferredToolCalls = (!result.tool_calls || result.tool_calls.length === 0)
+            ? inferToolCallsFromJsonText(result.response, requestBody.tools, requestBody.tool_choice)
+            : undefined;
+        const effectiveToolCalls = (result.tool_calls && result.tool_calls.length > 0)
+            ? result.tool_calls
+            : inferredToolCalls;
+        const assistantContent = effectiveToolCalls?.length ? '' : formatAssistantContent(result.response);
     
         const totalTokensUsed = typeof result.tokenUsage === 'number' ? result.tokenUsage : 0;
         const promptTokensUsed = typeof result.promptTokens === 'number' ? result.promptTokens : undefined;
@@ -1979,12 +2259,12 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
                         message: {
                             role: "assistant",
                             content: assistantContent,
-                            ...(result.tool_calls && result.tool_calls.length > 0
-                                ? { tool_calls: result.tool_calls }
+                            ...(effectiveToolCalls && effectiveToolCalls.length > 0
+                                ? { tool_calls: effectiveToolCalls }
                                 : {}),
                         },
                         logprobs: null, // OpenAI includes this, set to null if not applicable
-                        finish_reason: result.finish_reason || (result.tool_calls?.length ? 'tool_calls' : "stop"),
+                        finish_reason: effectiveToolCalls?.length ? 'tool_calls' : (result.finish_reason || "stop"),
                     }
                 ],
             usage: {
@@ -2153,6 +2433,7 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
         }
 
         const { message, modelId, stream } = extractResponsesRequestBody(requestBody);
+        message.service_tier = getServiceTierForUserTier(request.userTier);
         const imageFetchReferer = normalizeImageFetchReferer(
             getHeaderValue(request.headers, 'x-image-fetch-referer') || getHeaderValue(request.headers, 'x-image-referer')
         );
@@ -2349,6 +2630,9 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
                 const fallbackStreamHandler = messageHandler.handleStreamingMessages([message], modelId, userApiKey, { disablePassthrough: true, requestId: request.requestId });
                 for await (const fallbackResult of fallbackStreamHandler) {
                     if (fallbackResult.type === 'chunk') {
+                        if (typeof fallbackResult.chunk !== 'string' || fallbackResult.chunk.length === 0) {
+                            continue;
+                        }
                         if (Array.isArray(fallbackResult.tool_calls) && fallbackResult.tool_calls.length > 0) {
                             toolCallsFromStream = fallbackResult.tool_calls;
                         }
@@ -2424,16 +2708,22 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
         }
 
         const result = await messageHandler.handleMessages([message], modelId, userApiKey, { requestId: request.requestId });
-        const assistantContent = formatAssistantContent(result.response);
+        const inferredToolCalls = (!result.tool_calls || result.tool_calls.length === 0)
+            ? inferToolCallsFromJsonText(result.response, Array.isArray(message.tools) ? message.tools : undefined, message.tool_choice)
+            : undefined;
+        const effectiveToolCalls = (result.tool_calls && result.tool_calls.length > 0)
+            ? result.tool_calls
+            : inferredToolCalls;
+        const assistantContent = effectiveToolCalls?.length ? '' : formatAssistantContent(result.response);
         const totalTokensUsed = typeof result.tokenUsage === 'number' ? result.tokenUsage : 0;
         const promptTokensUsed = typeof result.promptTokens === 'number' ? result.promptTokens : undefined;
         const completionTokensUsed = typeof result.completionTokens === 'number' ? result.completionTokens : undefined;
         await updateUserTokenUsage(totalTokensUsed, userApiKey, { modelId, promptTokens: promptTokensUsed, completionTokens: completionTokensUsed });
 
         const outputContent: any[] = [{ type: 'output_text', text: assistantContent }];
-        const outputText = (result.tool_calls && result.tool_calls.length > 0) ? '' : assistantContent;
-        if (result.tool_calls && result.tool_calls.length > 0) {
-            outputContent.splice(0, outputContent.length, { type: 'tool_calls', tool_calls: result.tool_calls });
+        const outputText = (effectiveToolCalls && effectiveToolCalls.length > 0) ? '' : assistantContent;
+        if (effectiveToolCalls && effectiveToolCalls.length > 0) {
+            outputContent.splice(0, outputContent.length, { type: 'tool_calls', tool_calls: effectiveToolCalls });
         }
 
         const responseBody = {
@@ -2441,7 +2731,7 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
             output: [{ content: outputContent }],
             output_text: outputText,
             usage: { input_tokens: promptTokensUsed, output_tokens: completionTokensUsed, total_tokens: totalTokensUsed },
-            ...(result.finish_reason ? { status: result.finish_reason } : {})
+            ...((result.finish_reason || effectiveToolCalls?.length) ? { status: effectiveToolCalls?.length ? 'tool_calls' : result.finish_reason } : {})
         };
 
         return response.json(responseBody);

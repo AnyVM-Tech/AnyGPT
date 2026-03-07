@@ -5,6 +5,6 @@ nix
   environment.systemPackages = with pkgs; [
     git
     nodejs
-    pnpm
+    bun
   ];
 }

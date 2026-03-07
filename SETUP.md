@@ -12,10 +12,10 @@ git clone <your-repo-url>
 cd AnyGPT-experimental
 
 # Install dependencies
-pnpm install
+bun install
 
 # Run the interactive setup
-pnpm setup
+bun run setup
 ```
 
 ### Setup Options
@@ -92,13 +92,13 @@ Once setup is complete:
 
 2. Start the development server:
    ```bash
-   pnpm dev
+   bun run dev
    ```
 
 3. (Optional) Start the UI (LibreChat):
    ```bash
    cd ../ui
-   pnpm dev
+   bun run dev
    ```
 
 ### Environment File
@@ -131,11 +131,11 @@ redis://username:password@host:port
 
 #### Port Already in Use
 - Change the PORT in your `.env` file
-- Or kill the process using the port: `npx kill-port 3000`
+- Or kill the process using the port: `bunx kill-port 3000`
 
 #### Missing Dependencies
-- Run `pnpm install` in the root directory
-- Run `pnpm install` in `apps/api`
+- Run `bun install` in the root directory
+- Run `bun install` in `apps/api`
 - LibreChat runs via Docker; see `apps/ui/README.md` for setup
 
 ### Re-running Setup
@@ -143,7 +143,7 @@ redis://username:password@host:port
 You can re-run the setup script at any time:
 
 ```bash
-pnpm setup
+bun run setup
 ```
 
 The script will ask if you want to overwrite your existing `.env` file.

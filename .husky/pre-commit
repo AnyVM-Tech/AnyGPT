@@ -1,1 +1,1 @@
-npm test
+bash ./bun.sh run test

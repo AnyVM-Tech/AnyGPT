@@ -1,4 +1,3 @@
-import uWS, { TemplatedApp, HttpRequest, HttpResponse, us_listen_socket } from 'uWebSockets.js';
 import { STATUS_CODES } from 'http';
 import { randomUUID } from 'crypto';
 
@@ -24,7 +23,31 @@ interface ServerOptions {
     max_body_length?: number;
 }
 
-interface RequestContext {
+interface RegisteredRoute {
+    method: HTTPMethod;
+    fullPath: string;
+    stack: Handler[];
+    maxBodyLength: number;
+    errorHandler?: ErrorHandler;
+}
+
+interface RegisteredFallback {
+    fullPath: string;
+    handler: NotFoundHandler;
+    maxBodyLength: number;
+}
+
+interface WsRoute {
+    path: string;
+    handler: (ws: WSWrapper, req: RequestContext) => void;
+}
+
+interface RequestInitOptions {
+    bodyReader: () => Promise<Buffer>;
+    ip?: string;
+}
+
+export interface RequestContext {
     path: string;
     url: string;
     method: string;
@@ -33,24 +56,10 @@ interface RequestContext {
     headers: Record<string, string>;
 }
 
-function addressBufferToString(buf: ArrayBuffer | undefined): string | undefined {
-    if (!buf) return undefined;
-    try {
-        return Buffer.from(buf).toString('utf8') || undefined;
-    } catch {
-        return undefined;
-    }
-}
+const DEFAULT_MAX_BODY_LENGTH = 50 * 1024 * 1024;
 
-function resolveClientIp(req: HttpRequest, headers: Record<string, string>): string | undefined {
-    const forwarded = headers['x-forwarded-for'] || headers['x-real-ip'];
-    if (forwarded) return forwarded.split(',')[0].trim();
-    const proxied = (req as any).getProxiedRemoteAddressAsText?.();
-    const proxiedStr = addressBufferToString(proxied);
-    if (proxiedStr) return proxiedStr;
-    const raw = (req as any).getRemoteAddressAsText?.();
-    const rawStr = addressBufferToString(raw);
-    return rawStr;
+if (typeof (globalThis as any).Bun?.serve !== 'function') {
+    throw new Error('Bun runtime required for apps/api/lib/uws-compat.ts');
 }
 
 function normalizePath(path: string): string {
@@ -86,11 +95,99 @@ function parseQuery(queryString: string): Record<string, string | string[]> {
     return result;
 }
 
-function extractParamNames(path: string): string[] {
-    return path.split('/').filter(Boolean).filter(part => part.startsWith(':')).map(part => part.slice(1));
+function splitPath(path: string): string[] {
+    return normalizePath(path).split('/').filter(Boolean);
 }
 
-class Request {
+function matchPath(pathPattern: string, actualPath: string): Record<string, string> | null {
+    const patternParts = splitPath(pathPattern);
+    const actualParts = splitPath(actualPath);
+    const params: Record<string, string> = {};
+
+    let i = 0;
+    let j = 0;
+    while (i < patternParts.length) {
+        const patternPart = patternParts[i];
+        if (patternPart === '*') {
+            return params;
+        }
+        const actualPart = actualParts[j];
+        if (actualPart === undefined) {
+            return null;
+        }
+        if (patternPart.startsWith(':')) {
+            params[patternPart.slice(1)] = decodeURIComponent(actualPart);
+        } else if (patternPart !== actualPart) {
+            return null;
+        }
+        i += 1;
+        j += 1;
+    }
+
+    if (j != actualParts.length) {
+        return null;
+    }
+
+    return params;
+}
+
+function toUint8Array(data: string | Buffer | ArrayBufferLike | Uint8Array): Uint8Array {
+    if (typeof data === 'string') {
+        return new TextEncoder().encode(data);
+    }
+    if (Buffer.isBuffer(data)) {
+        return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+    }
+    if (data instanceof Uint8Array) {
+        return data;
+    }
+    return new Uint8Array(data);
+}
+
+function toArrayBuffer(data: string | Buffer | ArrayBuffer | ArrayBufferView): ArrayBuffer {
+    if (typeof data === 'string') {
+        return new TextEncoder().encode(data).buffer;
+    }
+    if (data instanceof ArrayBuffer) {
+        return data;
+    }
+    if (Buffer.isBuffer(data)) {
+        return new Uint8Array(data.buffer, data.byteOffset, data.byteLength).slice().buffer;
+    }
+    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength).slice().buffer;
+}
+
+function buildHeadersRecord(headers: Headers): Record<string, string> {
+    const record: Record<string, string> = {};
+    headers.forEach((value, key) => {
+        record[key.toLowerCase()] = value;
+    });
+    return record;
+}
+
+function resolveClientIp(server: any, request: globalThis.Request, headers: Record<string, string>): string | undefined {
+    const forwarded = headers['x-forwarded-for'] || headers['x-real-ip'];
+    if (forwarded) return forwarded.split(',')[0].trim();
+    try {
+        return server?.requestIP?.(request)?.address;
+    } catch {
+        return undefined;
+    }
+}
+
+function buildRequestContext(request: globalThis.Request, params: Record<string, string>): RequestContext {
+    const url = new URL(request.url);
+    return {
+        path: normalizePath(url.pathname),
+        url: `${normalizePath(url.pathname)}${url.search}`,
+        method: request.method.toUpperCase(),
+        params,
+        query: parseQuery(url.search.slice(1)),
+        headers: buildHeadersRecord(request.headers),
+    };
+}
+
+export class Request {
     public path: string;
     public url: string;
     public method: string;
@@ -102,71 +199,75 @@ class Request {
     public requestId: string;
 
     private bodyCache?: Promise<Buffer>;
+    private bodyReader: () => Promise<Buffer>;
     private maxBodyLength: number;
-    private res: HttpResponse;
-    private req: HttpRequest;
 
-    constructor(res: HttpResponse, req: HttpRequest, ctx: RequestContext, maxBodyLength: number) {
-        this.res = res;
-        this.req = req;
+    constructor(ctx: RequestContext, maxBodyLength: number, options: RequestInitOptions) {
         this.path = ctx.path;
         this.url = ctx.url;
         this.method = ctx.method;
         this.params = ctx.params;
         this.query = ctx.query;
         this.headers = ctx.headers;
-        this.maxBodyLength = maxBodyLength;
-        this.ip = resolveClientIp(req, this.headers);
+        this.ip = options.ip;
         this.requestId = this.headers['x-request-id'] || `req_${randomUUID()}`;
-        // Start capturing the request body immediately so data arriving before handlers call .json()/.text() is buffered.
-        this.initBodyCapture();
+        this.bodyReader = options.bodyReader;
+        this.maxBodyLength = maxBodyLength;
     }
 
     async json<T = any>(): Promise<T> {
-        const text = await this.text();
-        return JSON.parse(text);
+        return JSON.parse(await this.text());
     }
 
     async text(): Promise<string> {
-        const buf = await this.buffer();
-        return buf.toString('utf8');
+        return (await this.buffer()).toString('utf8');
     }
 
     async buffer(): Promise<Buffer> {
-        return this.bodyCache || Promise.resolve(Buffer.alloc(0));
-    }
-
-    // Begin streaming the body immediately to avoid missing data if middlewares do async work before calling .json()
-    private initBodyCapture() {
-        if (this.bodyCache) return;
-        this.bodyCache = new Promise<Buffer>((resolve, reject) => {
-            const chunks: Buffer[] = [];
-            let received = 0;
-            this.res.onData((chunk, isLast) => {
-                received += chunk.byteLength;
-                if (received > this.maxBodyLength) {
-                    this.res.close();
-                    return reject(new Error('Payload too large'));
+        if (!this.bodyCache) {
+            this.bodyCache = (async () => {
+                const body = await this.bodyReader();
+                if (body.length > this.maxBodyLength) {
+                    throw new Error('Payload too large');
                 }
-                // Important: Create a copy of the chunk because uWS reuses the memory buffer
-                chunks.push(Buffer.from(chunk.slice(0)));
-                if (isLast) resolve(Buffer.concat(chunks));
-            });
-            this.res.onAborted(() => {
-                reject(new Error('Request aborted'));
-            });
-        });
+                return body;
+            })();
+        }
+        return this.bodyCache;
     }
 }
 
-class Response {
+export class Response {
     public completed = false;
+    public started = false;
 
     private statusCode = 200;
-    private headersSent = false;
     private headers: Record<string, string> = {};
-    private res: HttpResponse;
     private errorId?: string;
+    private bunController: ReadableStreamDefaultController<Uint8Array> | null = null;
+    private bunStream: ReadableStream<Uint8Array>;
+    private bunResponse: globalThis.Response | null = null;
+    private bodyChunks: Uint8Array[] = [];
+    private startedPromise: Promise<void>;
+    private resolveStarted!: () => void;
+
+    constructor() {
+        this.startedPromise = new Promise<void>((resolve) => {
+            this.resolveStarted = resolve;
+        });
+        this.bunStream = new ReadableStream<Uint8Array>({
+            start: (controller) => {
+                this.bunController = controller;
+                for (const chunk of this.bodyChunks) {
+                    controller.enqueue(chunk);
+                }
+            },
+            cancel: () => {
+                this.completed = true;
+                this.bunController = null;
+            },
+        });
+    }
 
     private attachErrorIdToBody(body: string): string {
         if (!this.errorId) return body;
@@ -175,45 +276,61 @@ class Response {
             if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
                 const record = parsed as Record<string, any>;
                 if (!('error_id' in record)) record.error_id = this.errorId;
-                if (typeof record.error === 'string') {
-                    if (!record.error.includes(this.errorId)) {
-                        record.error = `${record.error} (error_id: ${this.errorId})`;
-                    }
+                if (typeof record.error === 'string' && !record.error.includes(this.errorId)) {
+                    record.error = `${record.error} (error_id: ${this.errorId})`;
                 } else if (record.error && typeof record.error === 'object' && !Array.isArray(record.error)) {
                     const errorObj = record.error as Record<string, any>;
                     if (!('id' in errorObj)) errorObj.id = this.errorId;
                     if (typeof errorObj.message === 'string' && !errorObj.message.includes(this.errorId)) {
                         errorObj.message = `${errorObj.message} (error_id: ${this.errorId})`;
                     }
-                }
-                if (typeof record.message === 'string' && !record.message.includes(this.errorId)) {
+                } else if (typeof record.message === 'string' && !record.message.includes(this.errorId)) {
                     record.message = `${record.message} (error_id: ${this.errorId})`;
                 }
                 return JSON.stringify(record);
             }
         } catch {
-            // Non-JSON response
+            // ignore
         }
         if (body.includes(this.errorId)) return body;
         const suffix = `error_id: ${this.errorId}`;
         return body.endsWith('\n') ? `${body}${suffix}` : `${body}\n${suffix}`;
     }
 
-    private withCork(fn: () => void): void {
-        if (this.completed) return;
-        const maybeCork = (this.res as any).cork;
-        if (typeof maybeCork === 'function') {
-            maybeCork.call(this.res, fn);
-            return;
-        }
-        fn();
+    private markStarted(): void {
+        if (this.started) return;
+        this.started = true;
+        this.resolveStarted();
     }
 
-    constructor(res: HttpResponse) {
-        this.res = res;
-        this.res.onAborted(() => {
-            this.completed = true;
-        });
+    private enqueue(chunk?: string | Buffer | ArrayBufferLike | Uint8Array): void {
+        if (chunk === undefined) return;
+        const encoded = toUint8Array(chunk);
+        this.bodyChunks.push(encoded);
+        if (this.bunController) {
+            try {
+                this.bunController.enqueue(encoded);
+            } catch {
+                this.completed = true;
+                this.bunController = null;
+            }
+        }
+    }
+
+    private getCompletedBody(): Uint8Array | null {
+        if (this.bodyChunks.length === 0) return null;
+        const total = this.bodyChunks.reduce((sum, chunk) => sum + chunk.byteLength, 0);
+        const merged = new Uint8Array(total);
+        let offset = 0;
+        for (const chunk of this.bodyChunks) {
+            merged.set(chunk, offset);
+            offset += chunk.byteLength;
+        }
+        return merged;
+    }
+
+    waitForStart(): Promise<void> {
+        return this.startedPromise;
     }
 
     status(code: number): this {
@@ -226,19 +343,13 @@ class Response {
         return this;
     }
 
+    getHeader(name: string): string | undefined {
+        return this.headers[name];
+    }
+
     setErrorId(errorId: string): this {
         this.errorId = errorId;
         return this;
-    }
-
-    private writeHeadersIfNeeded() {
-        if (this.headersSent) return;
-        const statusText = STATUS_CODES[this.statusCode] || '';
-        this.res.writeStatus(`${this.statusCode} ${statusText}`.trim());
-        for (const [key, value] of Object.entries(this.headers)) {
-            this.res.writeHeader(key, value);
-        }
-        this.headersSent = true;
     }
 
     json(payload: any): void {
@@ -249,13 +360,9 @@ class Response {
             && (this.statusCode >= 400 || 'error' in payload || (payload as Record<string, any>).type === 'error');
         if (shouldAttachErrorId && this.errorId) {
             const payloadRecord = payload as Record<string, any>;
-            if (!('error_id' in payloadRecord)) {
-                payloadRecord.error_id = this.errorId;
-            }
-            if (typeof payloadRecord.error === 'string') {
-                if (!payloadRecord.error.includes(this.errorId)) {
-                    payloadRecord.error = `${payloadRecord.error} (error_id: ${this.errorId})`;
-                }
+            if (!('error_id' in payloadRecord)) payloadRecord.error_id = this.errorId;
+            if (typeof payloadRecord.error === 'string' && !payloadRecord.error.includes(this.errorId)) {
+                payloadRecord.error = `${payloadRecord.error} (error_id: ${this.errorId})`;
             } else if (payloadRecord.error && typeof payloadRecord.error === 'object' && !Array.isArray(payloadRecord.error)) {
                 const errorObj = payloadRecord.error as Record<string, any>;
                 if (!('id' in errorObj)) errorObj.id = this.errorId;
@@ -266,20 +373,16 @@ class Response {
                 payloadRecord.message = `${payloadRecord.message} (error_id: ${this.errorId})`;
             }
         }
-        const body = JSON.stringify(payload);
-        this.withCork(() => {
-            this.writeHeadersIfNeeded();
-            this.res.end(body);
-        });
+        this.markStarted();
+        this.enqueue(JSON.stringify(payload));
+        this.bunController?.close();
         this.completed = true;
     }
 
     write(chunk: string | Buffer): this {
         if (this.completed) return this;
-        this.withCork(() => {
-            this.writeHeadersIfNeeded();
-            this.res.write(chunk as any);
-        });
+        this.markStarted();
+        this.enqueue(chunk);
         return this;
     }
 
@@ -294,50 +397,79 @@ class Response {
                 output = this.attachErrorIdToBody(chunk);
             }
         }
-        this.withCork(() => {
-            this.writeHeadersIfNeeded();
-            if (output !== undefined) {
-                this.res.end(output as any);
-            } else {
-                this.res.end();
-            }
-        });
+        this.markStarted();
+        if (output !== undefined) {
+            this.enqueue(output);
+        }
+        this.bunController?.close();
         this.completed = true;
+    }
+
+    toWebResponse(): globalThis.Response {
+        if (!this.bunResponse) {
+            if (!this.started && !this.completed) {
+                this.end();
+            }
+            const headers = new Headers(this.headers);
+            if (this.completed) {
+                const body = this.getCompletedBody();
+                const completedBody = body ? Buffer.from(body) : null;
+                this.bunResponse = new globalThis.Response(completedBody as any, {
+                    status: this.statusCode,
+                    headers,
+                });
+            } else {
+                this.bunResponse = new globalThis.Response(this.bunStream, {
+                    status: this.statusCode,
+                    headers,
+                });
+            }
+        }
+        return this.bunResponse;
     }
 }
 
-function buildContext(res: HttpResponse, req: HttpRequest, path: string, paramNames: string[]): RequestContext {
-    const headers: Record<string, string> = {};
-    req.forEach((key, value) => {
-        headers[key.toLowerCase()] = value;
-    });
-
-    const params: Record<string, string> = {};
-    paramNames.forEach((name, index) => {
-        params[name] = req.getParameter(index) || '';
-    });
-
-    const urlPath = req.getUrl();
-    const queryString = req.getQuery();
-
-    return {
-        path: urlPath,
-        url: queryString ? `${urlPath}?${queryString}` : urlPath,
-        method: req.getMethod().toUpperCase(),
-        params,
-        query: parseQuery(queryString),
-        headers,
+async function runHandlers(
+    stack: Handler[],
+    request: Request,
+    response: Response,
+    handleError: (error: unknown) => Promise<void> | void,
+): Promise<void> {
+    const run = async (index: number): Promise<void> => {
+        if (response.completed) return;
+        const fn = stack[index];
+        if (!fn) return;
+        let nextCalled = false;
+        let nextPromise: Promise<void> | null = null;
+        const next: NextFunction = () => {
+            nextCalled = true;
+            nextPromise = run(index + 1);
+        };
+        try {
+            const maybe = fn(request, response, next);
+            if (maybe && typeof (maybe as Promise<any>).then === 'function') {
+                await maybe;
+            }
+            if (nextPromise) {
+                await nextPromise;
+            } else if (!nextCalled && !response.completed) {
+                await run(index + 1);
+            }
+        } catch (err) {
+            await handleError(err);
+        }
     };
+
+    await run(0);
 }
 
-class Router {
+export class Router {
     protected middlewares: MiddlewareDefinition[] = [];
     protected routes: RouteDefinition[] = [];
 
     use(pathOrHandler: string | Handler, ...handlers: Handler[]): this {
         if (typeof pathOrHandler === 'string') {
-            const path = normalizePath(pathOrHandler);
-            this.middlewares.push({ path, handlers });
+            this.middlewares.push({ path: normalizePath(pathOrHandler), handlers });
         } else {
             this.middlewares.push({ path: '/', handlers: [pathOrHandler, ...handlers] });
         }
@@ -357,122 +489,64 @@ class Router {
     options(path: string, ...handlers: Handler[]): this { return this.addRoute('options', path, handlers); }
     head(path: string, ...handlers: Handler[]): this { return this.addRoute('head', path, handlers); }
 
-    /**
-     * Registers this router onto a uWS app with an optional prefix and inherited middleware.
-     */
-    register(app: TemplatedApp, prefix: string, inherited: MiddlewareDefinition[], maxBodyLength: number, errorHandler?: ErrorHandler, notFoundHandler?: NotFoundHandler): void {
+    register(app: Server, prefix: string, inherited: MiddlewareDefinition[], maxBodyLength: number, errorHandler?: ErrorHandler, notFoundHandler?: NotFoundHandler): void {
         const basePrefix = normalizePath(prefix);
 
         for (const route of this.routes) {
             const fullPath = joinPaths(basePrefix, route.path);
-            const paramNames = extractParamNames(fullPath);
-
             const applicableMiddlewares: Handler[] = [];
-            for (const m of inherited) {
-                const inheritedPath = normalizePath(m.path);
+            for (const middleware of inherited) {
+                const inheritedPath = normalizePath(middleware.path);
                 if (inheritedPath === '/' || fullPath.startsWith(inheritedPath)) {
-                    applicableMiddlewares.push(...m.handlers);
+                    applicableMiddlewares.push(...middleware.handlers);
                 }
             }
-            for (const m of this.middlewares) {
-                const mwPath = joinPaths(basePrefix, m.path);
+            for (const middleware of this.middlewares) {
+                const mwPath = joinPaths(basePrefix, middleware.path);
                 if (fullPath.startsWith(mwPath)) {
-                    applicableMiddlewares.push(...m.handlers);
+                    applicableMiddlewares.push(...middleware.handlers);
                 }
             }
-
-            const stack = [...applicableMiddlewares, ...route.handlers];
-            const method = route.method === 'any' ? 'any' : route.method;
-
-            const uwsHandler = (res: HttpResponse, req: HttpRequest) => {
-                const ctx = buildContext(res, req, fullPath, paramNames);
-                const request = new Request(res, req, ctx, maxBodyLength);
-                const response = new Response(res);
-                response.setHeader('x-request-id', request.requestId);
-                response.setErrorId(request.requestId);
-
-                const handleError = (error: unknown) => {
-                    response.setErrorId(request.requestId);
-                    if (errorHandler) {
-                        try {
-                            const maybe = errorHandler(request, response, error);
-                            if (maybe && typeof (maybe as Promise<any>).then === 'function') {
-                                (maybe as Promise<any>).catch(() => {});
-                            }
-                        } catch {
-                            // swallow
-                        }
-                    }
-                    if (!response.completed) {
-                        response.status(500).json({ error: 'Internal Server Error' });
-                    }
-                };
-
-                const run = (i: number) => {
-                    if (response.completed) return;
-                    const fn = stack[i];
-                    if (!fn) return;
-                    let nextCalled = false;
-                    const next = () => {
-                        nextCalled = true;
-                        if (!response.completed) run(i + 1);
-                    };
-                    try {
-                        const maybe = fn(request, response, next);
-                        if (maybe && typeof (maybe as Promise<any>).then === 'function') {
-                            (maybe as Promise<any>).then(() => {
-                                if (!nextCalled && !response.completed) run(i + 1);
-                            }).catch(err => handleError(err));
-                        } else {
-                            if (!nextCalled && !response.completed) run(i + 1);
-                        }
-                    } catch (err) {
-                        handleError(err);
-                    }
-                };
-
-                run(0);
-            };
-
-            switch (method) {
-                case 'get': app.get(fullPath, uwsHandler); break;
-                case 'post': app.post(fullPath, uwsHandler); break;
-                case 'put': app.put(fullPath, uwsHandler); break;
-                case 'patch': app.patch(fullPath, uwsHandler); break;
-                case 'delete': app.del(fullPath, uwsHandler); break;
-                case 'options': app.options(fullPath, uwsHandler); break;
-                case 'head': app.head(fullPath, uwsHandler); break;
-                default: app.any(fullPath, uwsHandler); break;
-            }
+            app.__registerRoute({
+                method: route.method,
+                fullPath,
+                stack: [...applicableMiddlewares, ...route.handlers],
+                maxBodyLength,
+                errorHandler,
+            });
         }
 
-        // Optionally attach a not-found handler scoped to this prefix
         if (notFoundHandler) {
-            const fallbackPath = joinPaths(basePrefix, '/*');
-            app.any(fallbackPath, (res, req) => {
-                const ctx = buildContext(res, req, fallbackPath, extractParamNames(fallbackPath));
-                const request = new Request(res, req, ctx, maxBodyLength);
-                const response = new Response(res);
-                response.setHeader('x-request-id', request.requestId);
-                response.setErrorId(request.requestId);
-                notFoundHandler(request, response);
-                if (!response.completed) response.status(404).end();
+            app.__registerFallback({
+                fullPath: joinPaths(basePrefix, '/*'),
+                handler: notFoundHandler,
+                maxBodyLength,
             });
         }
     }
 }
 
-class Server extends Router {
-    private app: TemplatedApp;
+export class Server extends Router {
     private serverOptions: ServerOptions;
     private errorHandler?: ErrorHandler;
     private notFoundHandler?: NotFoundHandler;
-    private listenSocket?: us_listen_socket;
+    private registeredRoutes: RegisteredRoute[] = [];
+    private registeredFallbacks: RegisteredFallback[] = [];
+    private mountedRouters: Array<{ prefix: string; router: Router; leadingMiddleware: Handler[] }> = [];
+    private wsRoutes: WsRoute[] = [];
+    private bunServer: any;
 
     constructor(options: ServerOptions = {}) {
         super();
         this.serverOptions = options;
-        this.app = uWS.App();
+    }
+
+    __registerRoute(route: RegisteredRoute): void {
+        this.registeredRoutes.push(route);
+    }
+
+    __registerFallback(fallback: RegisteredFallback): void {
+        this.registeredFallbacks.push(fallback);
     }
 
     set_error_handler(handler: ErrorHandler): void {
@@ -484,148 +558,254 @@ class Server extends Router {
     }
 
     ws(path: string, handler: (ws: WSWrapper, req: RequestContext) => void): void {
-        const collectedPath = normalizePath(path);
-        this.app.ws(collectedPath, {
-            upgrade: (res, req, context) => {
-                const headers: Record<string, string> = {};
-                req.forEach((key, value) => { headers[key.toLowerCase()] = value; });
-                const fullUrl = req.getUrl();
-                const query = req.getQuery();
-                res.upgrade(
-                    { headers, url: fullUrl, query, method: req.getMethod() },
-                    req.getHeader('sec-websocket-key'),
-                    req.getHeader('sec-websocket-protocol'),
-                    req.getHeader('sec-websocket-extensions'),
-                    context
-                );
-            },
-            open: (ws) => {
-                const data = ws.getUserData() as any;
-                const reqCtx: RequestContext = {
-                    path: data.url,
-                    url: data.query ? `${data.url}?${data.query}` : data.url,
-                    method: (data.method || 'GET').toUpperCase(),
-                    params: {},
-                    query: parseQuery(data.query || ''),
-                    headers: data.headers || {},
-                };
-                const wrapper = new WSWrapper(ws);
-                handler(wrapper, reqCtx);
-            },
-            message: (ws, message, isBinary) => {
-                const wrapper = WSWrapper.from(ws);
-                if (wrapper) wrapper.emit('message', message, isBinary);
-            },
-            close: (ws, code, message) => {
-                const wrapper = WSWrapper.from(ws);
-                if (wrapper) wrapper.emit('close', code, message);
-            }
-        });
+        this.wsRoutes.push({ path: normalizePath(path), handler });
     }
 
-    listen(port: number): Promise<void> {
-        // Register all routes collected on this router
-        this.register(this.app, '/', [], this.serverOptions.max_body_length || 50 * 1024 * 1024, this.errorHandler, this.notFoundHandler);
+    override use(pathOrHandler: string | Handler, ...handlers: any[]): this {
+        const prefix = typeof pathOrHandler === 'string' ? pathOrHandler : '/';
+        const routerIndex = handlers.findIndex((handler) => handler instanceof Router);
+        if (routerIndex !== -1) {
+            const router = handlers[routerIndex] as Router;
+            const leadingMiddleware = handlers.filter((_, idx) => idx !== routerIndex) as Handler[];
+            this.mountedRouters.push({ prefix: normalizePath(prefix), router, leadingMiddleware });
+            return this;
+        }
+        return super.use(pathOrHandler as any, ...(handlers as Handler[]));
+    }
 
-        return new Promise((resolve, reject) => {
-            this.app.listen(port, (token) => {
-                if (!token) {
-                    reject(new Error(`Failed to listen on port ${port}`));
-                } else {
-                    this.listenSocket = token;
-                    resolve();
+    private buildRegistrations(): void {
+        this.registeredRoutes = [];
+        this.registeredFallbacks = [];
+        const maxBodyLength = this.serverOptions.max_body_length || DEFAULT_MAX_BODY_LENGTH;
+        super.register(this, '/', [], maxBodyLength, this.errorHandler, this.notFoundHandler);
+        for (const mount of this.mountedRouters) {
+            const inherited = [...this.middlewares];
+            if (mount.leadingMiddleware.length) {
+                inherited.push({ path: mount.prefix, handlers: mount.leadingMiddleware });
+            }
+            mount.router.register(this, mount.prefix, inherited, maxBodyLength, this.errorHandler, undefined);
+        }
+    }
+
+    private createErrorHandler(request: Request, response: Response, routeErrorHandler?: ErrorHandler) {
+        return async (error: unknown) => {
+            response.setErrorId(request.requestId);
+            if (routeErrorHandler) {
+                try {
+                    const maybe = routeErrorHandler(request, response, error);
+                    if (maybe && typeof (maybe as Promise<any>).then === 'function') {
+                        await maybe;
+                    }
+                } catch {
+                    // ignore secondary failures
                 }
-            });
+            }
+            if (!response.completed) {
+                response.status(500).json({ error: 'Internal Server Error' });
+            }
+        };
+    }
+
+    private findRegisteredRoute(method: string, path: string): { route: RegisteredRoute; params: Record<string, string> } | null {
+        const normalizedMethod = method.toLowerCase();
+        const normalizedPath = normalizePath(path);
+        for (const route of this.registeredRoutes) {
+            if (route.method !== 'any' && route.method !== normalizedMethod) continue;
+            const params = matchPath(route.fullPath, normalizedPath);
+            if (params) return { route, params };
+        }
+        return null;
+    }
+
+    private findFallback(path: string): RegisteredFallback | null {
+        const normalizedPath = normalizePath(path);
+        for (const fallback of this.registeredFallbacks) {
+            if (matchPath(fallback.fullPath, normalizedPath)) return fallback;
+        }
+        return null;
+    }
+
+    private findWsRoute(path: string): WsRoute | null {
+        const normalizedPath = normalizePath(path);
+        for (const route of this.wsRoutes) {
+            if (route.path === normalizedPath || matchPath(route.path, normalizedPath)) return route;
+        }
+        return null;
+    }
+
+    private async handleNotFound(request: globalThis.Request, server: any): Promise<globalThis.Response> {
+        const fallback = this.findFallback(new URL(request.url).pathname);
+        if (!fallback) {
+            return new globalThis.Response('Not Found', { status: 404 });
+        }
+        const ctx = buildRequestContext(request, {});
+        const wrappedRequest = new Request(ctx, fallback.maxBodyLength, {
+            bodyReader: async () => Buffer.from(await request.arrayBuffer()),
+            ip: resolveClientIp(server, request, ctx.headers),
+        });
+        const response = new Response();
+        response.setHeader('x-request-id', wrappedRequest.requestId);
+        response.setErrorId(wrappedRequest.requestId);
+        const maybe = fallback.handler(wrappedRequest, response);
+        if (maybe && typeof (maybe as Promise<any>).then === 'function') {
+            await maybe;
+        }
+        if (!response.started && !response.completed) {
+            response.status(404).end();
+        }
+        return response.toWebResponse();
+    }
+
+    private async handleRequest(request: globalThis.Request, server: any): Promise<Response | globalThis.Response | undefined> {
+        const url = new URL(request.url);
+        const upgradeHeader = request.headers.get('upgrade');
+        if (upgradeHeader && upgradeHeader.toLowerCase() === 'websocket') {
+            const wsRoute = this.findWsRoute(url.pathname);
+            if (wsRoute) {
+                const upgraded = server.upgrade(request, {
+                    data: {
+                        handler: wsRoute.handler,
+                        reqCtx: buildRequestContext(request, {}),
+                    },
+                });
+                if (upgraded) return undefined;
+            }
+            return new globalThis.Response('WebSocket upgrade failed', { status: 400 });
+        }
+
+        const match = this.findRegisteredRoute(request.method, url.pathname);
+        if (!match) {
+            return this.handleNotFound(request, server);
+        }
+
+        const ctx = buildRequestContext(request, match.params);
+        const wrappedRequest = new Request(ctx, match.route.maxBodyLength, {
+            bodyReader: async () => Buffer.from(await request.arrayBuffer()),
+            ip: resolveClientIp(server, request, ctx.headers),
+        });
+        const response = new Response();
+        response.setHeader('x-request-id', wrappedRequest.requestId);
+        response.setErrorId(wrappedRequest.requestId);
+        const handleError = this.createErrorHandler(wrappedRequest, response, match.route.errorHandler);
+        const execution = runHandlers(match.route.stack, wrappedRequest, response, handleError);
+
+        await Promise.race([response.waitForStart(), execution]);
+        if (response.started && !response.completed) {
+            const contentType = (response.getHeader('Content-Type') || response.getHeader('content-type') || '').toLowerCase();
+            const isStreamingResponse = contentType.includes('text/event-stream');
+            if (!isStreamingResponse) {
+                await execution;
+                if (!response.completed) {
+                    response.end();
+                }
+            }
+        } else if (!response.started && !response.completed) {
+            await execution;
+            if (!response.started && !response.completed) {
+                response.end();
+            }
+        }
+        return response.toWebResponse();
+    }
+
+    async listen(port: number): Promise<void> {
+        this.buildRegistrations();
+        const BunRuntime = (globalThis as any).Bun;
+        this.bunServer = BunRuntime.serve({
+            port,
+            reusePort: process.env.BUN_REUSE_PORT === '1',
+            fetch: (request: globalThis.Request, server: any) => this.handleRequest(request, server),
+            websocket: {
+                open: (ws: any) => {
+                    const data = ws.data as any;
+                    const wrapper = new WSWrapper(ws);
+                    data.wrapper = wrapper;
+                    data.handler(wrapper, data.reqCtx);
+                },
+                message: (ws: any, message: any) => {
+                    const data = ws.data as any;
+                    const wrapper = data.wrapper || WSWrapper.from(ws);
+                    if (!wrapper) return;
+                    const payload = typeof message === 'string' ? message : toArrayBuffer(message);
+                    wrapper.emit('message', payload, typeof message !== 'string');
+                },
+                close: (ws: any, code: number, reason: any) => {
+                    const data = ws.data as any;
+                    const wrapper = data.wrapper || WSWrapper.from(ws);
+                    if (!wrapper) return;
+                    if (typeof reason === 'string') {
+                        wrapper.emit('close', code, toArrayBuffer(reason));
+                    } else if (reason) {
+                        wrapper.emit('close', code, toArrayBuffer(reason));
+                    } else {
+                        wrapper.emit('close', code, new ArrayBuffer(0));
+                    }
+                },
+            },
         });
     }
 
     stop(): void {
-        if (this.listenSocket) {
-            uWS.us_listen_socket_close(this.listenSocket);
-            this.listenSocket = undefined;
+        try {
+            this.bunServer?.stop?.();
+        } catch {
+            // ignore
         }
-    }
-
-    /**
-     * Override to ensure nested routers are registered immediately.
-     */
-    override register(app: TemplatedApp, prefix: string, inherited: MiddlewareDefinition[], maxBodyLength: number, errorHandler?: ErrorHandler, notFoundHandler?: NotFoundHandler): void {
-        // Since Server is the root, we ignore incoming inherited middleware and use its own.
-        super.register(app, prefix, this.middlewares, maxBodyLength, errorHandler, notFoundHandler);
-    }
-
-    /**
-     * Mount a router or middleware at a path.
-     */
-    override use(pathOrHandler: string | Handler, ...handlers: any[]): this {
-        const prefix = typeof pathOrHandler === 'string' ? pathOrHandler : '/';
-        const maybeRouterIndex = handlers.findIndex(h => h instanceof Router);
-
-        if (maybeRouterIndex !== -1) {
-            const router = handlers[maybeRouterIndex] as Router;
-            const leadingMiddleware = handlers.filter((_, idx) => idx !== maybeRouterIndex) as Handler[];
-
-            if (leadingMiddleware.length) {
-                super.use(prefix, ...leadingMiddleware);
-            }
-
-            router.register(this.app, prefix, this.middlewares, this.serverOptions.max_body_length || 50 * 1024 * 1024, this.errorHandler, undefined);
-            return this;
-        }
-
-        return super.use(pathOrHandler as any, ...(handlers as Handler[]));
     }
 }
 
-type WsMessageHandler = (data: string | ArrayBuffer, isBinary: boolean) => void;
-type WsCloseHandler = (code: number, message: ArrayBuffer) => void;
+type WsMessageHandler = (data: string | ArrayBuffer, isBinary?: boolean) => void;
+type WsCloseHandler = (code: number, message?: ArrayBuffer) => void;
 
-type UwsSocket = uWS.WebSocket<any>;
-
-class WSWrapper {
-    private ws: UwsSocket;
-    private static map = new WeakMap<UwsSocket, WSWrapper>();
+export class WSWrapper {
+    private ws: any;
+    private static map = new WeakMap<object, WSWrapper>();
     private messageHandlers: WsMessageHandler[] = [];
     private closeHandlers: WsCloseHandler[] = [];
 
-    constructor(ws: UwsSocket) {
+    constructor(ws: any) {
         this.ws = ws;
-        WSWrapper.map.set(ws, this);
+        if (ws && typeof ws === 'object') {
+            WSWrapper.map.set(ws, this);
+        }
     }
 
-    static from(ws: UwsSocket): WSWrapper | undefined {
+    static from(ws: object): WSWrapper | undefined {
         return WSWrapper.map.get(ws);
     }
 
-    on(event: 'message', handler: WsMessageHandler): this;
-    on(event: 'close', handler: WsCloseHandler): this;
-    on(event: string, handler: any): this {
+    on(event: 'message' | 'close', handler: any): this {
         if (event === 'message') this.messageHandlers.push(handler as WsMessageHandler);
         else if (event === 'close') this.closeHandlers.push(handler as WsCloseHandler);
         return this;
     }
 
-    emit(event: 'message', data: ArrayBuffer | string, isBinary: boolean): void;
-    emit(event: 'close', code: number, message: ArrayBuffer): void;
-    emit(event: string, ...args: any[]): void {
+    emit(event: 'message' | 'close', ...args: any[]): void {
         if (event === 'message') {
-            this.messageHandlers.forEach(h => h(args[0], args[1]));
+            this.messageHandlers.forEach((handler) => handler(args[0], args[1]));
         } else if (event === 'close') {
-            this.closeHandlers.forEach(h => h(args[0], args[1]));
+            this.closeHandlers.forEach((handler) => handler(args[0], args[1]));
         }
     }
 
-    send(data: string | ArrayBuffer): void {
-        const isBinary = typeof data !== 'string';
-        this.ws.send(data, isBinary);
+    send(data: string | ArrayBufferLike): void {
+        if (!this.ws?.send) return;
+        if (typeof data === 'string') {
+            this.ws.send(data);
+        } else {
+            this.ws.send(toUint8Array(data));
+        }
     }
 
     close(code?: number, reason?: string): void {
-        this.ws.end(code ?? 1000, reason ? Buffer.from(reason) : undefined);
+        if (typeof this.ws?.close === 'function') {
+            this.ws.close(code ?? 1000, reason);
+        } else if (typeof this.ws?.end === 'function') {
+            this.ws.end(code ?? 1000, reason ? Buffer.from(reason) : undefined);
+        }
     }
 }
 
 const HyperExpressLike = { Server, Router };
 
-export { Server, Router, Request, Response, RequestContext, WSWrapper };
 export default HyperExpressLike;

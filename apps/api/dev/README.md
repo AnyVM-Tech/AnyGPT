@@ -16,13 +16,13 @@ The project uses different environment files for different scenarios:
 
 ```bash
 # Run the full test suite (starts mock provider, API server, and runs tests)
-pnpm test
+bun run test
 
 # Run individual components
-pnpm test:mock    # Start mock provider only
-pnpm test:dev     # Start API server in test mode
-pnpm test:run     # Run API tests (requires servers to be running)
-pnpm test:ws      # Run WebSocket tests (requires servers to be running)
+bun run test:mock    # Start mock provider only
+bun run test:dev     # Start API server in test mode
+bun run test:run     # Run API tests (requires servers to be running)
+bun run test:ws      # Run WebSocket tests (requires servers to be running)
 ```
 
 ### Test Environment

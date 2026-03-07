@@ -80,6 +80,7 @@ function computeTokenUsage(usage: number | undefined, text: string): number {
 interface WsClientContext {
   apiKey?: string;
   userId?: string;
+  userTier?: string;
   tierLimits?: TierLimits;
   rate: { second: RateWindow; minute: RateWindow; day: RateWindow };
   authenticated: boolean;
@@ -435,6 +436,7 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
             }
             ctx.apiKey = apiKey;
             ctx.userId = validation.userData.userId;
+            ctx.userTier = validation.userData.tier;
             ctx.tierLimits = validation.tierLimits;
             ctx.authenticated = true;
             return send({ type: 'auth.ok', tier: validation.userData.tier, role: validation.userData.role });
@@ -487,6 +489,7 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
             tools: Array.isArray(payload.tools) ? payload.tools : undefined,
             tool_choice: payload.tool_choice,
             reasoning: normalizedReasoningConfig,
+            service_tier: String(ctx.userTier || '').toLowerCase() === 'free' ? 'standard' : 'priority',
           };
           const formattedMessages = messages.map((msg) => ({
             role: msg.role,
