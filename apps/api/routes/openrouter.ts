@@ -156,10 +156,10 @@ router.post('/v6/chat/completions', authAndUsageMiddleware, rateLimitMiddleware,
         }));
  
         // --- Call the central message handler with BASE model ID ---
-        const req = request as any;
+        const maybeRequestId = (request as { requestId?: unknown }).requestId;
         const requestId =
-            typeof req.requestId === 'string' && req.requestId.length > 0
-                ? req.requestId
+            typeof maybeRequestId === 'string' && maybeRequestId.length > 0
+                ? maybeRequestId
                 : crypto.randomUUID();
         const result = await messageHandler.handleMessages(formattedMessages, baseModelId, userApiKey, { requestId });
  
@@ -173,7 +173,7 @@ router.post('/v6/chat/completions', authAndUsageMiddleware, rateLimitMiddleware,
         
         // --- Format response like OpenRouter (OpenAI compatible) ---
         const openRouterResponse = {
-            id: `or-${crypto.randomUUID()}`, // OpenRouter specific prefix maybe?
+            id: `or-${crypto.randomUUID()}`, // Intentional OpenRouter-style ID prefix
             object: "chat.completion",
             created: Math.floor(Date.now() / 1000),
             model: originalModelId, // Echo the *originally requested* model ID
@@ -205,31 +205,36 @@ router.post('/v6/chat/completions', authAndUsageMiddleware, rateLimitMiddleware,
  
         response.json(openRouterResponse);
  
-   } catch (error: any) { 
-        console.error('OpenRouter Route - /v6/chat/completions error:', error.message, error.stack);
+   } catch (error: unknown) { 
+        const err = error instanceof Error
+            ? error
+            : new Error(typeof error === 'string' ? error : JSON.stringify(error));
+        const errorMessageLower = err.message.toLowerCase();
+
+        console.error('OpenRouter Route - /v6/chat/completions error:', err.message, err.stack);
         
         // Map internal errors to potential OpenRouter/OpenAI error formats
-        if (error instanceof SyntaxError) return response.status(400).json({ error: { message: 'Invalid JSON payload.', code: 'invalid_json' }});
+        if (err instanceof SyntaxError) return response.status(400).json({ error: { message: 'Invalid JSON payload.', code: 'invalid_json' }});
         
-        if (error.message.includes('Unauthorized') || error.message.includes('Invalid API Key')) {
-             return response.status(401).json({ error: { message: error.message, code: 'invalid_api_key' }});
+        if (err.message.includes('Unauthorized') || err.message.includes('Invalid API Key')) {
+             return response.status(401).json({ error: { message: err.message, code: 'invalid_api_key' }});
         }
-        if (error.message.includes('limit reached') || error.message.includes('Rate limit exceeded')) {
-             return response.status(429).json({ error: { message: error.message, code: 'rate_limit_exceeded' }});
+        if (err.message.includes('limit reached') || err.message.includes('Rate limit exceeded')) {
+             return response.status(429).json({ error: { message: err.message, code: 'rate_limit_exceeded' }});
         }
         if (
-            error.message.toLowerCase().includes('requires more credits') ||
-            error.message.toLowerCase().includes('insufficient credits') ||
-            error.message.toLowerCase().includes('can only afford') ||
-            error.message.includes('status 402')
+            errorMessageLower.includes('requires more credits') ||
+            errorMessageLower.includes('insufficient credits') ||
+            errorMessageLower.includes('can only afford') ||
+            err.message.includes('status 402')
         ) {
              return response.status(402).json({ error: { message: 'Payment Required: insufficient credits for the requested max_tokens. Reduce max_tokens or add credits to the provider key.', code: 'payment_required' }});
         }
-         if (error.message.includes('No currently active provider supports model') || error.message.includes('No provider (active or disabled) supports model')) {
+         if (err.message.includes('No currently active provider supports model') || err.message.includes('No provider (active or disabled) supports model')) {
              // Model not found
              return response.status(404).json({ error: { message: `Unknown model: \`${originalModelId || 'unknown'}\`. Please use one of the available models.`, code: 'model_not_found' }});
         }
-         if (error.message.includes('Failed to process request')) {
+         if (err.message.includes('Failed to process request')) {
              // Generic failure after retries
              return response.status(503).json({ error: { message: 'Service temporarily unavailable. Please try again later.', code: 'service_unavailable' }});
          }

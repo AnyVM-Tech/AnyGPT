@@ -16,7 +16,12 @@ function parseWorkerCount(raw: string | undefined): number {
 }
 
 const WORKER_COUNT = parseWorkerCount(process.env.CLUSTER_WORKERS || process.env.BUN_WORKERS);
-const RESTART_DELAY_MS = Math.max(0, Number(process.env.BUN_WORKER_RESTART_DELAY_MS || 1000));
+const RESTART_DELAY_MS = (() => {
+	const raw = process.env.BUN_WORKER_RESTART_DELAY_MS;
+	const parsed = raw !== undefined ? Number(raw) : 1000;
+	const safe = Number.isFinite(parsed) ? parsed : 1000;
+	return Math.max(0, safe);
+})();
 const PORT_STRIDE = Math.max(0, Number(process.env.CLUSTER_PORT_STRIDE || 0));
 const BASE_PORT = Number(process.env.PORT || 3000) || 3000;
 const SCRIPT_PATH = fileURLToPath(new URL('./server.bun.ts', import.meta.url));
@@ -104,7 +109,7 @@ function shutdown(signal: NodeJS.Signals): void {
 async function main(): Promise<void> {
 	if (WORKER_COUNT <= 1) {
 		process.env.CLUSTER_WORKERS = '0';
-		await import('./server.bun.js');
+		await import('./server.bun.ts');
 		return;
 	}
 
@@ -115,9 +120,8 @@ async function main(): Promise<void> {
 		spawnWorker(index);
 	}
 
-	await new Promise(() => {
-		// Keep the launcher process alive while workers run.
-	});
+	// Keep the launcher process alive while workers run.
+	process.stdin.resume();
 }
 
 await main();

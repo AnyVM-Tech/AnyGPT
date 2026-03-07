@@ -5,11 +5,9 @@ import path from 'path';
 const envFile = process.env.NODE_ENV === 'test' ? '.env.test' : '.env';
 dotenv.config({ path: path.resolve(process.cwd(), envFile) });
 
-import { config } from 'dotenv';
 import { setupMockProviderConfig, restoreProviderConfig } from './testSetup.js';
 
 // Load environment variables (optional, server should have them)
-config();
 
 async function readResponseBody(response: globalThis.Response): Promise<string> {
   if (!response.body) {
@@ -55,7 +53,7 @@ async function sendChatRequest(
 
     const latency = Date.now() - startedAt;
     const rawBody = await readResponseBody(response);
-    let parsedBody: any = rawBody;
+    let parsedBody: unknown = rawBody;
 
     if ((response.headers.get('content-type') || '').includes('application/json') && rawBody) {
       try {
@@ -116,13 +114,31 @@ function validateStreamingResponse(rawStream: string): { ok: boolean; chunkCount
   };
 }
 
-function validateNonStreamingResponse(responseData: any): boolean {
+interface ChatCompletionChoiceMessage {
+  content: unknown;
+}
+
+interface ChatCompletionChoice {
+  message?: ChatCompletionChoiceMessage;
+}
+
+interface ChatCompletionUsage {
+  total_tokens: unknown;
+}
+
+interface ChatCompletionResponse {
+  choices?: unknown;
+  usage?: ChatCompletionUsage;
+}
+
+function validateNonStreamingResponse(responseData: ChatCompletionResponse): boolean {
+  const choices = responseData?.choices as ChatCompletionChoice[] | undefined;
   return Boolean(
-    responseData?.choices &&
-    Array.isArray(responseData.choices) &&
-    responseData.choices.length > 0 &&
-    responseData.choices[0]?.message &&
-    typeof responseData.choices[0].message.content === 'string' &&
+    choices &&
+    Array.isArray(choices) &&
+    choices.length > 0 &&
+    choices[0]?.message &&
+    typeof choices[0].message?.content === 'string' &&
     responseData?.usage &&
     typeof responseData.usage.total_tokens === 'number'
   );
@@ -164,11 +180,7 @@ async function testApiWithMockProvider() {
     console.log('[TEST] Latency:', response.latency, 'ms');
     console.log('[TEST] Content-Type:', response.contentType || '(none)');
     console.log('[TEST] Response Data:');
-    console.log(
-      typeof response.parsedBody === 'string'
-        ? JSON.stringify(response.parsedBody, null, 2)
-        : JSON.stringify(response.parsedBody, null, 2)
-    );
+    console.log(JSON.stringify(response.parsedBody, null, 2));
     console.log('[TEST] -----------------------');
 
     if (response.status !== 200) {
@@ -202,7 +214,7 @@ async function testApiWithMockProvider() {
     console.log(JSON.stringify(fallbackResponse.parsedBody, null, 2));
     console.log('[TEST] --------------------------------');
 
-    if (fallbackResponse.status === 200 && validateNonStreamingResponse(fallbackResponse.parsedBody)) {
+    if (fallbackResponse.status === 200 && validateNonStreamingResponse(fallbackResponse.parsedBody as ChatCompletionResponse)) {
       console.log('[TEST] ✅ API test completed successfully with non-streaming fallback validation.');
       return;
     }
@@ -210,9 +222,9 @@ async function testApiWithMockProvider() {
     console.error('[TEST] ❌ API test failed: Fallback non-streaming response was invalid.');
     process.exit(1);
 
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[TEST] --- API Test Failed ---');
-    if (error?.name === 'AbortError') {
+    if ((error as any)?.name === 'AbortError') {
       console.error('[TEST] Request timed out while waiting for the API response.');
     } else if (error instanceof Error) {
       console.error('[TEST] Error making API request:', error.message);
