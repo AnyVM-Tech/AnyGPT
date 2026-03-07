@@ -63,17 +63,17 @@ function spawnWorker(index: number): void {
 	});
 
 	workers.set(index, child);
-	console.log(`[Launcher] Spawned Bun worker ${index + 1}/${WORKER_COUNT} (pid ${child.pid}) on port ${env.PORT}${env.BUN_REUSE_PORT === '1' ? ' with reusePort' : ''}.`);
+	console.log(`[Launcher] Spawned Bun worker #${index + 1} (pid ${child.pid}).`);
 
 	child.exited.then((code: number) => {
 		workers.delete(index);
 		if (shuttingDown) return;
-		console.warn(`[Launcher] Worker ${index + 1}/${WORKER_COUNT} exited with code ${code}. Respawning...`);
+		console.warn(`[Launcher] Bun worker #${index + 1} exited with code ${code}. Respawning...`);
 		setTimeout(() => spawnWorker(index), RESTART_DELAY_MS);
 	}).catch((error: unknown) => {
 		workers.delete(index);
 		if (shuttingDown) return;
-		console.warn(`[Launcher] Worker ${index + 1}/${WORKER_COUNT} failed: ${error}. Respawning...`);
+		console.warn(`[Launcher] Bun worker #${index + 1} failed: ${error}. Respawning...`);
 		setTimeout(() => spawnWorker(index), RESTART_DELAY_MS);
 	});
 }
