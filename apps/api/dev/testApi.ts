@@ -145,6 +145,11 @@ function validateNonStreamingResponse(responseData: ChatCompletionResponse): boo
 }
 
 async function testApiWithMockProvider() {
+  // TEST_SETUP_MODE controls who is responsible for configuring the provider used in this test.
+  // - Default (unset or any value other than 'external'): this script will configure a mock provider
+  //   before the test runs (setupMockProviderConfig) and restore the original configuration afterward.
+  // - 'external': assume provider configuration is managed outside of this script (e.g. by CI or another
+  //   test harness); in this mode, no setup/restore is performed here.
   const manageSetup = process.env.TEST_SETUP_MODE !== 'external';
   if (manageSetup) {
     // Setup mock provider configuration

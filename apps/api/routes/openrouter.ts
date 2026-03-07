@@ -232,7 +232,7 @@ router.post('/v6/chat/completions', authAndUsageMiddleware, rateLimitMiddleware,
         }
          if (err.message.includes('No currently active provider supports model') || err.message.includes('No provider (active or disabled) supports model')) {
              // Model not found
-             return response.status(404).json({ error: { message: `Unknown model: \`${originalModelId || 'unknown'}\`. Please use one of the available models.`, code: 'model_not_found' }});
+             return response.status(404).json({ error: { message: `Unknown model: '${originalModelId || 'unknown'}'. Please use one of the available models.`, code: 'model_not_found' }});
         }
          if (err.message.includes('Failed to process request')) {
              // Generic failure after retries

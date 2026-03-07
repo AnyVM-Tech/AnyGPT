@@ -15,11 +15,19 @@ function parseWorkerCount(raw: string | undefined): number {
 	return Math.max(1, Math.floor(parsed));
 }
 
-const WORKER_COUNT = parseWorkerCount(process.env.CLUSTER_WORKERS || process.env.BUN_WORKERS);
+// Prefer CLUSTER_WORKERS as the canonical variable; BUN_WORKERS is supported for backward compatibility.
+const RAW_WORKER_ENV = process.env.CLUSTER_WORKERS ?? process.env.BUN_WORKERS;
+const WORKER_COUNT = parseWorkerCount(RAW_WORKER_ENV);
 const RESTART_DELAY_MS = (() => {
 	const raw = process.env.BUN_WORKER_RESTART_DELAY_MS;
 	const parsed = raw !== undefined ? Number(raw) : 1000;
 	const safe = Number.isFinite(parsed) ? parsed : 1000;
+	return Math.max(0, safe);
+})();
+const SHUTDOWN_TIMEOUT_MS = (() => {
+	const raw = process.env.SHUTDOWN_TIMEOUT_MS;
+	const parsed = raw !== undefined ? Number(raw) : 5000;
+	const safe = Number.isFinite(parsed) ? parsed : 5000;
 	return Math.max(0, safe);
 })();
 const PORT_STRIDE = Math.max(0, Number(process.env.CLUSTER_PORT_STRIDE || 0));
@@ -103,7 +111,7 @@ function shutdown(signal: NodeJS.Signals): void {
 			}
 		}
 		process.exit(0);
-	}, 5000).unref();
+	}, SHUTDOWN_TIMEOUT_MS).unref();
 }
 
 async function main(): Promise<void> {
