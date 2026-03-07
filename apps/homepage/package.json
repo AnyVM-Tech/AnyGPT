@@ -8,7 +8,7 @@
     "dev": "node serve.js"
   },
   "dependencies": {
-    "express": "^4.21.0",
+    "express": "^5.2.1",
     "express-rate-limit": "^8.2.1"
   }
 }
