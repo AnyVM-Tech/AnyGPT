@@ -117,7 +117,7 @@ function shutdown(signal: NodeJS.Signals): void {
 async function main(): Promise<void> {
 	if (WORKER_COUNT <= 1) {
 		process.env.CLUSTER_WORKERS = '0';
-		await import('./server.bun.ts');
+		await import('./server.bun.js');
 		return;
 	}
 
