@@ -428,7 +428,10 @@ async function startServer() {
         process.env.PORT = '3000';
     }
     const basePort = isNaN(configuredPort) || configuredPort <= 0 ? 3000 : configuredPort;
-    const maxPortRetries = Math.max(0, parseInt(process.env.PORT_RETRY_COUNT || '10', 10) || 10);
+    const reuseSharedPort = process.env.BUN_REUSE_PORT === '1';
+    const maxPortRetries = reuseSharedPort
+        ? 0
+        : Math.max(0, parseInt(process.env.PORT_RETRY_COUNT || '10', 10) || 10);
     let boundPort: number | null = null;
 
     for (let offset = 0; offset <= maxPortRetries; offset++) {

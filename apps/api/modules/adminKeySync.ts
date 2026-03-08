@@ -28,7 +28,9 @@ const BASE_DIR = findProjectRoot(__dirname);
 const ADMIN_KEYS_PATH = path.resolve(BASE_DIR, 'logs', 'admin-keys.jsonl');
 const TSX_PATH = path.resolve(BASE_DIR, 'node_modules', '.bin', 'tsx');
 const NODE_PATH = process.execPath;
-const RUNNER = String(process.env.ADMIN_KEY_SYNC_RUNNER || 'tsgo').toLowerCase();
+const CURRENT_RUNTIME_IS_BUN = typeof (globalThis as any).Bun !== 'undefined';
+const RUNNER = String(process.env.ADMIN_KEY_SYNC_RUNNER || (CURRENT_RUNTIME_IS_BUN ? 'bun' : 'tsgo')).toLowerCase();
+const RUNNER_EXPLICIT = typeof process.env.ADMIN_KEY_SYNC_RUNNER === 'string' && process.env.ADMIN_KEY_SYNC_RUNNER.trim().length > 0;
 const LOCK_KEY = 'admin-key-sync:lock';
 const LOCK_FILE = path.join(os.tmpdir(), 'anygpt-admin-key-sync.lock');
 const PROBE_TESTED_PATH = path.resolve(BASE_DIR, 'logs', 'probe-tested.json');
@@ -167,13 +169,41 @@ function resolveScriptTarget(script: string): { cmd: string; args: string[] } {
     ? path.resolve(BASE_DIR, process.env.API_DIST_DIR)
     : path.resolve(BASE_DIR, 'dist', 'production');
   const distPath = path.resolve(distRoot, script.replace(/\.ts$/, '.js'));
+  const sourceExists = fs.existsSync(tsPath);
+  const distExists = fs.existsSync(distPath);
+  const bunArgsFor = (targetPath: string): { cmd: string; args: string[] } => ({ cmd: NODE_PATH, args: ['run', targetPath] });
 
-  if ((RUNNER === 'tsgo' || RUNNER === 'node') && fs.existsSync(distPath)) {
+  if (!RUNNER_EXPLICIT && sourceExists && distExists) {
+    try {
+      const sourceMtime = fs.statSync(tsPath).mtimeMs;
+      const distMtime = fs.statSync(distPath).mtimeMs;
+      if (sourceMtime > distMtime) {
+        if (CURRENT_RUNTIME_IS_BUN) {
+          return bunArgsFor(tsPath);
+        }
+        return { cmd: TSX_PATH, args: [tsPath] };
+      }
+    } catch {
+      // Ignore stat failures and fall back to runner preference.
+    }
+  }
+
+  if (RUNNER === 'bun') {
+    if (sourceExists) return bunArgsFor(tsPath);
+    if (distExists) return bunArgsFor(distPath);
+    throw new Error(`[AdminKeySync] Runner=bun could not find script source or build output for ${script}.`);
+  }
+
+  if ((RUNNER === 'tsgo' || RUNNER === 'node') && distExists) {
     return { cmd: NODE_PATH, args: [distPath] };
   }
 
   if (RUNNER === 'tsgo') {
     throw new Error(`[AdminKeySync] Runner=tsgo requires compiled script at ${distPath}. Run build first.`);
+  }
+
+  if (CURRENT_RUNTIME_IS_BUN) {
+    return bunArgsFor(tsPath);
   }
 
   return { cmd: TSX_PATH, args: [tsPath] };
@@ -311,7 +341,8 @@ async function runSync(reason: string, force = false): Promise<void> {
     }
 
     lastAdminKeySignature = signature;
-    if (RUN_TRANSFER) {
+    const shouldRunTransfer = RUN_TRANSFER && reason !== 'new-models';
+    if (shouldRunTransfer) {
       await runScript('transferAdminKeys', 'dev/transferAdminKeys.ts');
     }
 
@@ -328,7 +359,7 @@ async function runSync(reason: string, force = false): Promise<void> {
       const probeEnv: Record<string, string> = {};
       if (PROBE_MAX_MODELS) probeEnv.CAP_TEST_MAX_MODELS = PROBE_MAX_MODELS;
       if (PROBE_ALL_CAPS) probeEnv.CAP_TEST_ALL_CAPS = PROBE_ALL_CAPS;
-      if (PROBE_KEYCHECK_ONLY) probeEnv.CAP_TEST_KEYCHECK_ONLY = '1';
+      if (PROBE_KEYCHECK_ONLY && reason !== 'new-models') probeEnv.CAP_TEST_KEYCHECK_ONLY = '1';
       await runScript('testModelLiveProbes', 'dev/testModelLiveProbes.ts', probeEnv);
     }
 

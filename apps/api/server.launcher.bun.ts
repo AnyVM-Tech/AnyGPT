@@ -33,6 +33,7 @@ const SHUTDOWN_TIMEOUT_MS = (() => {
 const PORT_STRIDE = Math.max(0, Number(process.env.CLUSTER_PORT_STRIDE || 0));
 const BASE_PORT = Number(process.env.PORT || 3000) || 3000;
 const SCRIPT_PATH = fileURLToPath(new URL('./server.bun.ts', import.meta.url));
+const SERVER_MODULE_URL = new URL('./server.bun.ts', import.meta.url).href;
 const SCRIPT_DIR = path.dirname(SCRIPT_PATH);
 const BUN_BIN = process.execPath;
 
@@ -58,6 +59,7 @@ function buildWorkerEnv(index: number): NodeJS.ProcessEnv {
 		env.BUN_REUSE_PORT = '0';
 	} else {
 		env.PORT = String(BASE_PORT);
+		env.PORT_RETRY_COUNT = '0';
 		env.BUN_REUSE_PORT = '1';
 	}
 
@@ -117,7 +119,7 @@ function shutdown(signal: NodeJS.Signals): void {
 async function main(): Promise<void> {
 	if (WORKER_COUNT <= 1) {
 		process.env.CLUSTER_WORKERS = '0';
-		await import('./server.bun.js');
+		await import(SERVER_MODULE_URL);
 		return;
 	}
 

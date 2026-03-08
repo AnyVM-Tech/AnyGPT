@@ -6,6 +6,7 @@ import { createHash } from 'crypto';
 import { hashToken } from '../modules/redaction.js';
 import type { Provider, Model } from '../providers/interfaces.js';
 import { dataManager, LoadedProviders } from '../modules/dataManager.js';
+import { refreshProviderCountsInModelsFile } from '../modules/modelUpdater.js';
 import { upsertProviderById } from '../modules/providerUpsert.js';
 import { checkKey } from '../modules/keyChecker.js';
 import { redisReadyPromise } from '../modules/db.js';
@@ -14,6 +15,13 @@ interface AdminKeyLogEntry {
   key?: string;
   provider?: string;
   tier?: number | null;
+}
+
+interface CandidateKeyEntry {
+  key: string;
+  provider: string;
+  tier: number | null;
+  source: 'admin-log' | 'existing-provider';
 }
 
 interface ValidationResult {
@@ -119,6 +127,17 @@ function getProviderFamily(provider: string): ProviderFamily {
   return '';
 }
 
+function resolveExistingProviderFamily(providerEntry: Pick<Provider, 'id' | 'provider_url'>): string | null {
+  const id = String(providerEntry.id || '').toLowerCase();
+  const url = String(providerEntry.provider_url || '').toLowerCase();
+  if (id.includes('openai') || url.includes('api.openai.com')) return 'openai';
+  if (id.includes('openrouter') || url.includes('openrouter.ai')) return 'openrouter';
+  if (id.includes('deepseek') || url.includes('api.deepseek.com')) return 'deepseek';
+  if (id.includes('xai') || id.includes('x-ai') || url.includes('api.x.ai')) return 'xai';
+  if (id.includes('gemini') || id === 'google' || url.includes('generativelanguage.googleapis.com')) return 'gemini';
+  return null;
+}
+
 function loadPricedMediaModels(): string[] {
   if (pricedMediaModelsCache) return pricedMediaModelsCache;
   try {
@@ -193,6 +212,11 @@ function hasOkProbeResult(entry?: Record<string, string>): boolean {
   return Object.values(entry).some((value) => typeof value === 'string' && value.toLowerCase().startsWith('ok'));
 }
 
+function isFineTunedModel(modelId: string): boolean {
+  const id = typeof modelId === 'string' ? modelId.toLowerCase() : '';
+  return id.startsWith('ft:') || id.includes(':ft-') || id.includes(':ft:');
+}
+
 function loadProbeTested(): ProbeTestedFile {
   if (!fs.existsSync(PROBE_TESTED_PATH)) return { data: {}, capability_skips: {} };
   try {
@@ -247,32 +271,45 @@ function loadProbeProviderStatus(): ProbeProviderStatus {
   return status;
 }
 
-function filterModelsWithProbe(
+function partitionModelsByProbeStatus(
   modelIds: string[],
-  probeData: ProbeTestedFile
-): { models: string[]; skipped: number } {
+  probeData: ProbeTestedFile,
+  readyModelIds: Set<string>,
+  pendingModelIds: Set<string>
+): { readyModels: string[]; pendingModels: string[]; skippedFineTunes: number } {
   const probeEntries = probeData.data || {};
-  if (Object.keys(probeEntries).length === 0) {
-    return { models: modelIds, skipped: 0 };
-  }
-  const filtered: string[] = [];
-  let skipped = 0;
+  const ready: string[] = [];
+  const pending: string[] = [];
+  let skippedFineTunes = 0;
+  const seen = new Set<string>();
 
   for (const modelId of modelIds) {
+    if (seen.has(modelId)) continue;
+    seen.add(modelId);
+    if (isFineTunedModel(modelId)) {
+      skippedFineTunes += 1;
+      continue;
+    }
     const entry = probeEntries[modelId];
-    if (hasOkProbeResult(entry)) {
-      filtered.push(modelId);
+    if (hasOkProbeResult(entry) || readyModelIds.has(modelId)) {
+      ready.push(modelId);
+      pendingModelIds.delete(modelId);
+      readyModelIds.add(modelId);
     } else {
-      skipped += 1;
+      pending.push(modelId);
+      if (!readyModelIds.has(modelId)) {
+        pendingModelIds.add(modelId);
+      }
     }
   }
 
-  return { models: filtered, skipped };
+  return { readyModels: ready, pendingModels: pending, skippedFineTunes };
 }
 
 function buildModels(
   modelIds: string[],
-  capabilitySkips?: Record<string, Record<string, string>>
+  capabilitySkips?: Record<string, Record<string, string>>,
+  pendingProbeModelIds: Set<string> = new Set()
 ): Record<string, Model> {
   const uniqueIds = Array.from(new Set(modelIds));
   return uniqueIds.reduce<Record<string, Model>>((acc, id) => {
@@ -286,6 +323,10 @@ function buildModels(
       avg_provider_latency: null,
       avg_token_speed: null,
     };
+    if (pendingProbeModelIds.has(id)) {
+      (acc[id] as Model).disabled = true;
+      (acc[id] as Model).pending_probe = true;
+    }
     const skips = capabilitySkips?.[id];
     if (skips && Object.keys(skips).length) {
       (acc[id] as Model).capability_skips = { ...skips };
@@ -300,6 +341,21 @@ function mergeModelStats(existing: Model | undefined, next: Model): Model {
     ...(existing.capability_skips || {}),
     ...(next.capability_skips || {}),
   };
+  const existingPendingProbe = typeof (existing as any).pending_probe === 'boolean'
+    ? Boolean((existing as any).pending_probe)
+    : undefined;
+  const nextPendingProbe = typeof (next as any).pending_probe === 'boolean'
+    ? Boolean((next as any).pending_probe)
+    : undefined;
+  let disabled = typeof (existing as any).disabled === 'boolean'
+    ? (existing as any).disabled
+    : (next as any).disabled;
+
+  if (nextPendingProbe === true) {
+    disabled = true;
+  } else if (existingPendingProbe && nextPendingProbe === false) {
+    disabled = false;
+  }
 
   return {
     ...next,
@@ -315,7 +371,8 @@ function mergeModelStats(existing: Model | undefined, next: Model): Model {
     avg_provider_latency: typeof existing.avg_provider_latency === 'number' ? existing.avg_provider_latency : next.avg_provider_latency,
     avg_token_speed: typeof existing.avg_token_speed === 'number' ? existing.avg_token_speed : next.avg_token_speed,
     capability_skips: Object.keys(mergedSkips).length ? mergedSkips : undefined,
-    disabled: typeof (existing as any).disabled === 'boolean' ? (existing as any).disabled : (next as any).disabled,
+    disabled,
+    pending_probe: typeof nextPendingProbe === 'boolean' ? nextPendingProbe : existingPendingProbe,
   };
 }
 
@@ -462,29 +519,69 @@ async function main() {
   const probeProviderStatus = loadProbeProviderStatus();
 
   const existingKeyToProviders = new Map<string, Provider[]>();
+  const readyImportedModelIds = new Set<string>();
+  const pendingImportedModelIds = new Set<string>();
   providers.forEach((p) => {
     if (!p.apiKey) return;
     const list = existingKeyToProviders.get(p.apiKey) || [];
     list.push(p);
     existingKeyToProviders.set(p.apiKey, list);
+    for (const [modelId, modelData] of Object.entries(p.models || {})) {
+      if ((modelData as any)?.pending_probe) pendingImportedModelIds.add(modelId);
+      else readyImportedModelIds.add(modelId);
+    }
   });
   const existingIds = new Set<string>(providers.map((p) => p.id));
 
-  const seenKeys = new Set<string>();
-  const candidates = adminEntries
-    .filter((entry) => entry && typeof entry.key === 'string' && typeof entry.provider === 'string')
-    .map((entry) => ({
-      key: entry.key!.trim(),
-      provider: entry.provider!.toLowerCase(),
+  const candidatesByIdentity = new Map<string, CandidateKeyEntry>();
+  let skippedAdminEntries = 0;
+
+  for (const entry of adminEntries) {
+    if (!entry || typeof entry.key !== 'string' || typeof entry.provider !== 'string') {
+      skippedAdminEntries += 1;
+      continue;
+    }
+    const key = entry.key.trim();
+    const provider = entry.provider.trim().toLowerCase();
+    if (!key || !provider) {
+      skippedAdminEntries += 1;
+      continue;
+    }
+    if (providerFilter && !providerFilter.includes(provider)) {
+      skippedAdminEntries += 1;
+      continue;
+    }
+    const identity = `${provider}:${key}`;
+    if (candidatesByIdentity.has(identity)) {
+      skippedAdminEntries += 1;
+      continue;
+    }
+    candidatesByIdentity.set(identity, {
+      key,
+      provider,
       tier: typeof entry.tier === 'number' ? entry.tier : null,
-    }))
-    .filter((entry) => {
-      if (!entry.key || !entry.provider) return false;
-      if (providerFilter && !providerFilter.includes(entry.provider)) return false;
-      if (seenKeys.has(entry.key)) return false;
-      seenKeys.add(entry.key);
-      return true;
+      source: 'admin-log',
     });
+  }
+
+  let discoveredExistingCandidates = 0;
+  for (const [apiKey, providerEntries] of existingKeyToProviders.entries()) {
+    const firstProvider = providerEntries[0];
+    const provider = firstProvider ? resolveExistingProviderFamily(firstProvider) : null;
+    if (!provider) continue;
+    if (providerFilter && !providerFilter.includes(provider)) continue;
+    const identity = `${provider}:${apiKey}`;
+    if (candidatesByIdentity.has(identity)) continue;
+    candidatesByIdentity.set(identity, {
+      key: apiKey,
+      provider,
+      tier: null,
+      source: 'existing-provider',
+    });
+    discoveredExistingCandidates += 1;
+  }
+
+  const candidates = Array.from(candidatesByIdentity.values());
 
   const limitedCandidates = typeof limit === 'number' && Number.isFinite(limit)
     ? candidates.slice(0, limit)
@@ -492,9 +589,9 @@ async function main() {
 
   const added: Provider[] = [];
   const failures: { provider: string; key: string; reason: string }[] = [];
-  const skippedExisting = adminEntries.length - candidates.length;
+  const skippedExisting = skippedAdminEntries;
 
-  console.log(`Found ${adminEntries.length} logged keys. ${skippedExisting} skipped (existing, duplicates, or filtered). Processing ${limitedCandidates.length} candidate(s).`);
+  console.log(`Found ${adminEntries.length} logged keys. ${skippedExisting} admin entries skipped (invalid, duplicate, or filtered). Added ${discoveredExistingCandidates} refresh candidate(s) from existing providers. Processing ${limitedCandidates.length} candidate(s).`);
 
   let refreshedCount = 0;
   const BATCH_SIZE = 20;
@@ -506,19 +603,40 @@ async function main() {
       await Promise.all(batch.map(async (entry) => {
         try {
           const validation = await validateKey(entry);
-          const probeFilter = filterModelsWithProbe(validation.models, probeTested);
-          if (probeFilter.skipped > 0) {
-            console.log(`ℹ️  ${entry.provider} key ${entry.key.slice(0, 6)}...: skipped ${probeFilter.skipped} model(s) without probe ok`);
+          const probePartition = partitionModelsByProbeStatus(
+            validation.models,
+            probeTested,
+            readyImportedModelIds,
+            pendingImportedModelIds
+          );
+          if (probePartition.pendingModels.length > 0) {
+            console.log(`ℹ️  ${entry.provider} key ${entry.key.slice(0, 6)}...: queued ${probePartition.pendingModels.length} new model(s) for probing`);
           }
-          const pricedMediaModels = selectPricedMediaModelsForProvider(validation.models, entry.provider || '');
-          if (pricedMediaModels.length > 0) {
-            console.log(`ℹ️  ${entry.provider} key ${entry.key.slice(0, 6)}...: keeping ${pricedMediaModels.length} priced media model(s) from /models listing`);
+          if (probePartition.skippedFineTunes > 0) {
+            console.log(`ℹ️  ${entry.provider} key ${entry.key.slice(0, 6)}...: skipped ${probePartition.skippedFineTunes} private fine-tune model(s)`);
           }
-          const importModels = Array.from(new Set([...probeFilter.models, ...pricedMediaModels]));
+          const importModels = Array.from(new Set([...probePartition.readyModels, ...probePartition.pendingModels]));
           if (importModels.length === 0) {
-            throw new Error('No probe-ok models to import');
+            throw new Error('No importable models after filtering');
           }
-          const modelsMap = buildModels(importModels, probeTested.capability_skips);
+          const modelsMap = buildModels(importModels, probeTested.capability_skips, new Set(probePartition.pendingModels));
+          probePartition.readyModels
+            .filter((modelId) => pendingImportedModelIds.has(modelId))
+            .forEach((modelId) => {
+              if (!modelsMap[modelId]) return;
+              modelsMap[modelId].pending_probe = false;
+              modelsMap[modelId].disabled = false;
+            });
+
+          probePartition.readyModels.forEach((modelId) => {
+            readyImportedModelIds.add(modelId);
+            pendingImportedModelIds.delete(modelId);
+          });
+          probePartition.pendingModels.forEach((modelId) => {
+            if (!readyImportedModelIds.has(modelId)) {
+              pendingImportedModelIds.add(modelId);
+            }
+          });
 
           const existing = existingKeyToProviders.get(entry.key);
           if (existing && existing.length) {
@@ -592,6 +710,16 @@ async function main() {
 
   await dataManager.save<LoadedProviders>('providers', providers);
   console.log(`Saved ${added.length} new provider(s) and refreshed ${refreshedCount} existing provider(s).`);
+
+  const previousDisableSync = process.env.DISABLE_MODEL_SYNC;
+  process.env.DISABLE_MODEL_SYNC = 'false';
+  try {
+    await refreshProviderCountsInModelsFile();
+    console.log('Synchronized models.json after provider refresh.');
+  } finally {
+    if (typeof previousDisableSync === 'string') process.env.DISABLE_MODEL_SYNC = previousDisableSync;
+    else delete process.env.DISABLE_MODEL_SYNC;
+  }
 
   if (failures.length) {
     console.log('Failed keys:');

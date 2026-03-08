@@ -8,6 +8,14 @@ endpoints:
       models:
         default:
           - "gpt-4o-mini"
+          - "gpt-5-mini"
+          - "gpt-5.4"
+          - "gpt-4.1-mini"
+          - "gemini-2.5-flash"
+          - "gemini-2.5-pro"
+          - "deepseek-chat"
+          - "deepseek-reasoner"
+          - "anthropic/claude-sonnet-4.5"
         fetch: true
       titleConvo: true
       titleModel: "current_model"

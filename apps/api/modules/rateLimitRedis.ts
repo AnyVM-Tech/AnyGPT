@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import type { Redis } from 'ioredis';
+import type { Redis } from './db.js';
 import { logger } from './logger.js';
 
 export interface SharedRateCounts {

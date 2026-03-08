@@ -294,6 +294,18 @@ function isOkResult(value: unknown): boolean {
   return typeof value === 'string' && value.toLowerCase().startsWith('ok');
 }
 
+function inferCapabilitiesFromStoredResults(entry?: Record<string, string>): ModelCapability[] {
+  if (!entry) return [];
+  const caps = new Set<ModelCapability>();
+  if (isOkResult(entry.text)) caps.add('text');
+  if (isOkResult(entry.image_input)) caps.add('image_input');
+  if (isOkResult(entry.image_output)) caps.add('image_output');
+  if (isOkResult(entry.audio_input)) caps.add('audio_input');
+  if (isOkResult(entry.audio_output)) caps.add('audio_output');
+  if (isOkResult(entry.tool_calling)) caps.add('tool_calling');
+  return ALL_CAPABILITIES.filter((cap) => caps.has(cap));
+}
+
 function isRetryableSkipValue(value: unknown): boolean {
   if (typeof value !== 'string') return false;
   const lower = value.toLowerCase();
@@ -1838,6 +1850,10 @@ async function main() {
   await dataManager.waitForRedisReadyAndBackfill();
   const modelsRaw = await dataManager.load<ModelsFileStructure>('models');
   const allProviders = await dataManager.load<LoadedProviders>('providers');
+  const initialProviderModelIds = new Map<string, Set<string>>();
+  allProviders.forEach((provider) => {
+    initialProviderModelIds.set(provider.id, new Set(Object.keys(provider.models || {})));
+  });
   let providers = [...allProviders];
   const totalModels = modelsRaw.data.length;
   const syntheticProvider = buildSyntheticProvider(
@@ -1885,6 +1901,14 @@ async function main() {
   let knownCapsAssigned = 0;
   for (const model of models) {
     if (model.capabilities && Array.isArray(model.capabilities) && model.capabilities.length > 0) continue;
+    const storedCaps = inferCapabilitiesFromStoredResults(probeTested.data?.[model.id]);
+    if (storedCaps.length > 0) {
+      (model as any).capabilities = storedCaps;
+      providersChanged = true;
+      knownCapsAssigned++;
+      activatePendingModelProviders(model.id);
+      continue;
+    }
     const knownCaps = getKnownCapabilities(model.id);
     if (knownCaps) {
       (model as any).capabilities = knownCaps.caps;
@@ -1953,6 +1977,23 @@ async function main() {
     appendProbeLog({ type: 'provider_model_removed', providerId: provider.id, modelId, reason });
   }
 
+  function activatePendingModelProviders(modelId: string) {
+    let changed = false;
+    for (const provider of allProviders) {
+      const modelData = provider.models?.[modelId] as any;
+      if (!modelData?.pending_probe) continue;
+      modelData.pending_probe = false;
+      modelData.disabled = false;
+      modelData.disabled_at = undefined;
+      modelData.disable_count = 0;
+      modelData.consecutive_errors = 0;
+      changed = true;
+    }
+    if (changed) {
+      providersChanged = true;
+    }
+  }
+
   function blockProviderCapability(providerId: string, cap: ModelCapability, reason: string) {
     let caps = providerBlockedCaps.get(providerId);
     if (!caps) {
@@ -1963,6 +2004,33 @@ async function main() {
       caps.add(cap);
       appendProbeLog({ type: 'provider_cap_blocked', providerId, capability: cap, reason });
     }
+  }
+
+  function mergeProviderProbeUpdates(currentProviders: LoadedProviders, probedProviders: LoadedProviders): LoadedProviders {
+    const probedById = new Map<string, LoadedProviderData>(probedProviders.map((provider) => [provider.id, provider]));
+    return currentProviders.map((currentProvider) => {
+      const probedProvider = probedById.get(currentProvider.id);
+      if (!probedProvider) return currentProvider;
+
+      const mergedModels = { ...(currentProvider.models || {}) } as Record<string, any>;
+      const initialModels = initialProviderModelIds.get(currentProvider.id) || new Set<string>();
+
+      for (const initialModelId of initialModels) {
+        if (!(probedProvider.models || {})[initialModelId] && mergedModels[initialModelId]) {
+          delete mergedModels[initialModelId];
+        }
+      }
+
+      for (const [modelId, modelData] of Object.entries(probedProvider.models || {})) {
+        mergedModels[modelId] = { ...(mergedModels[modelId] || {}), ...modelData };
+      }
+
+      return {
+        ...currentProvider,
+        ...probedProvider,
+        models: mergedModels,
+      };
+    });
   }
 
   async function keyCheckWorker() {
@@ -2059,6 +2127,7 @@ async function main() {
         pt.audio_output = 'ok (realtime)';
         pt._status = 'ok (realtime model — WebSocket only)';
         probeTested.data[model.id] = pt;
+        activatePendingModelProviders(model.id);
         appendProbeLog({ type: 'probe_skip', modelId: model.id, reason: 'realtime model (WebSocket only, capabilities assigned directly)' });
         continue;
       }
@@ -2074,6 +2143,7 @@ async function main() {
         }
         pt._status = `ok (${knownCaps.reason})`;
         probeTested.data[model.id] = pt;
+        activatePendingModelProviders(model.id);
         appendProbeLog({ type: 'probe_skip', modelId: model.id, reason: `known capabilities assigned: ${knownCaps.reason}` });
         continue;
       }
@@ -2090,6 +2160,7 @@ async function main() {
         pt.text = 'ok (private fine-tune — assumed text)';
         pt._status = 'ok (private fine-tune)';
         probeTested.data[model.id] = pt;
+        activatePendingModelProviders(model.id);
         continue;
       }
 
@@ -2127,6 +2198,7 @@ async function main() {
               (model as any).capabilities = ['text'];
               providersChanged = true;
             }
+            activatePendingModelProviders(model.id);
           } else {
             pt.text = `fail: embeddings ${embRes.status}`;
             pt._status = `fail: embeddings ${embRes.status}`;
@@ -2683,6 +2755,9 @@ async function main() {
 
       const nextCaps = ALL_CAPABILITIES.filter((cap) => caps.has(cap));
       model.capabilities = nextCaps;
+      if (nextCaps.length > 0) {
+        activatePendingModelProviders(model.id);
+      }
       const finalStoredSkips = capabilitySkipStore[model.id];
       if (finalStoredSkips) {
         for (const cap of Object.keys(finalStoredSkips)) {
@@ -2717,7 +2792,9 @@ async function main() {
   probeTested.updated_at = new Date().toISOString();
   saveProbeTested(probeTested);
   if (providersChanged) {
-    await dataManager.save('providers', allProviders);
+    await dataManager.updateWithLock<LoadedProviders>('providers', async (currentProviders) => {
+      return mergeProviderProbeUpdates(currentProviders, allProviders);
+    });
     console.log('providers.json updated (disabled no-quota/invalid keys).');
   }
   console.log('models.json updated with capability updates.');

@@ -3,6 +3,7 @@ import path from 'path';
 import redis from '../modules/db.js'; // Import redis client
 import type { Request } from '../lib/uws-compat.js';
 import { logger } from './logger.js';
+import { isInsufficientCreditsError, isModelAccessError } from './errorClassification.js';
 import { hashToken, redactToken } from './redaction.js';
 
 const logDirectory = path.resolve(process.cwd(), 'logs'); // Logs at the workspace root
@@ -47,6 +48,12 @@ interface ErrorLogEntry {
     errorStack?: string;
     errorDetails?: any;
 }
+
+type NormalizedErrorPayload = {
+    message: string;
+    stack?: string;
+    details?: Record<string, any>;
+};
 
 const MAX_DETAIL_STRING_LENGTH = (() => {
     const raw = Number(process.env.ERROR_LOG_MAX_DETAIL_CHARS);
@@ -95,6 +102,103 @@ function sanitizeDetails(details: Record<string, any>): Record<string, any> {
     return sanitized;
 }
 
+function rewriteErrorStackMessage(stack: string | undefined, message: string): string | undefined {
+    if (!stack) return undefined;
+    const lines = String(stack).split('\n');
+    if (lines.length === 0) return `Error: ${message}`;
+    if (lines[0].trim().startsWith('at ')) {
+        return [`Error: ${message}`, ...lines].join('\n');
+    }
+    lines[0] = `Error: ${message}`;
+    return lines.join('\n');
+}
+
+function isProviderAttemptAggregateError(message: string): boolean {
+    return (
+        message.startsWith('Failed to process request:') ||
+        message.startsWith('Failed to process streaming request:')
+    );
+}
+
+function isLikelyUserSideRequestFailure(error: any, details?: Record<string, any>): boolean {
+    const messages = [
+        details?.lastProviderError,
+        error?.lastProviderError,
+        error?.message,
+        error,
+    ]
+        .filter((value) => typeof value === 'string' && value.length > 0)
+        .map((value) => String(value).toLowerCase());
+
+    return messages.some((message) => {
+        if (!message) return false;
+        if (isModelAccessError(message) || isInsufficientCreditsError(message)) return true;
+        return (
+            message.startsWith('invalid request') ||
+            message.startsWith('failed to parse') ||
+            message.includes('bad request') ||
+            message.includes('invalid json') ||
+            message.includes('invalid argument') ||
+            message.includes('invalid request body') ||
+            message.includes('could not extract valid user parts') ||
+            message.includes('input token count exceeds') ||
+            message.includes('maximum number of tokens allowed') ||
+            message.includes('image input too large') ||
+            message.includes('image exceeds') ||
+            message.includes('fetching image from url') ||
+            message.includes('cannot fetch content from the provided url') ||
+            message.includes('image_url') ||
+            message.includes('not available for gemini free-tier keys') ||
+            (message.includes('free_tier') && message.includes('limit: 0'))
+        );
+    });
+}
+
+function summarizeAggregateProviderFailure(error: any, details?: Record<string, any>): string {
+    const message = String(error?.message || error || '');
+    const isStreaming = message.startsWith('Failed to process streaming request:');
+    const prefix = isStreaming ? 'Failed to process streaming request' : 'Failed to process request';
+    const modelId = details?.modelId ?? error?.modelId;
+    const attemptedProviders = details?.attemptedProviders ?? error?.attemptedProviders;
+    const candidateProviders = Number(details?.candidateProviders ?? error?.candidateProviders);
+    const allSkippedByRateLimit = details?.allSkippedByRateLimit ?? error?.allSkippedByRateLimit;
+    const modelSuffix = modelId ? ` for model ${modelId}` : '';
+
+    if (Array.isArray(attemptedProviders) && attemptedProviders.length > 0) {
+        return `${prefix} after ${attemptedProviders.length} provider attempt(s)${modelSuffix}.`;
+    }
+
+    if (allSkippedByRateLimit === true && Number.isFinite(candidateProviders) && candidateProviders > 0) {
+        return `${prefix}: all ${candidateProviders} provider(s)${modelSuffix} are temporarily unavailable.`;
+    }
+
+    return `${prefix}${modelSuffix}.`;
+}
+
+function normalizeErrorPayloadForLogging(error: any, payload: NormalizedErrorPayload): NormalizedErrorPayload {
+    if (!isProviderAttemptAggregateError(payload.message)) return payload;
+
+    const hasRepeatedProviderDetail =
+        payload.message.includes('Last error:') ||
+        (typeof payload.details?.lastProviderError === 'string' && payload.details.lastProviderError.length > 0);
+
+    if (!hasRepeatedProviderDetail) return payload;
+    if (isLikelyUserSideRequestFailure(error, payload.details)) return payload;
+
+    const nextDetails = { ...(payload.details || {}) };
+    delete nextDetails.lastProviderError;
+    if (nextDetails.failureOrigin === undefined) {
+        nextDetails.failureOrigin = 'upstream_provider';
+    }
+
+    const nextMessage = summarizeAggregateProviderFailure(error, nextDetails);
+    return {
+        message: nextMessage,
+        stack: rewriteErrorStackMessage(payload.stack, nextMessage),
+        details: nextDetails,
+    };
+}
+
 // Renamed function to reflect potential Redis logging
 export async function logError(error: any, request?: Request): Promise<void> {
     const timestamp = new Date().toISOString();
@@ -118,10 +222,6 @@ export async function logError(error: any, request?: Request): Promise<void> {
     }
 
     if (error instanceof Error) {
-        logEntry.errorMessage = error.message || '(empty error message)';
-        if (error.stack) {
-            logEntry.errorStack = error.stack;
-        }
         // Capture all enumerable properties (modelId, attemptedProviders, etc.)
         const details: Record<string, any> = {};
         for (const key in error) {
@@ -136,20 +236,36 @@ export async function logError(error: any, request?: Request): Promise<void> {
         if (meta.status !== undefined && !details.status) details.status = meta.status;
         if (meta.modelId !== undefined && !details.modelId) details.modelId = meta.modelId;
 
-        if (Object.keys(details).length > 0) {
-            logEntry.errorDetails = sanitizeDetails(details);
+        const normalized = normalizeErrorPayloadForLogging(error, {
+            message: error.message || '(empty error message)',
+            stack: error.stack,
+            details: Object.keys(details).length > 0 ? details : undefined,
+        });
+
+        logEntry.errorMessage = normalized.message;
+        if (normalized.stack) {
+            logEntry.errorStack = normalized.stack;
+        }
+        if (normalized.details && Object.keys(normalized.details).length > 0) {
+            logEntry.errorDetails = sanitizeDetails(normalized.details);
         }
     } else if (typeof error === 'object' && error !== null) {
-        logEntry.errorMessage = error.message || error.errorMessage || error.error || '(no message property)';
-        if (error.stack) {
-            logEntry.errorStack = error.stack;
-        }
         const otherProps = { ...error };
         delete otherProps.message;
         delete otherProps.stack;
-        // Keep all other properties as details for context
-        if (Object.keys(otherProps).length > 0) {
-            logEntry.errorDetails = sanitizeDetails(otherProps);
+
+        const normalized = normalizeErrorPayloadForLogging(error, {
+            message: error.message || error.errorMessage || error.error || '(no message property)',
+            stack: error.stack,
+            details: Object.keys(otherProps).length > 0 ? otherProps : undefined,
+        });
+
+        logEntry.errorMessage = normalized.message;
+        if (normalized.stack) {
+            logEntry.errorStack = normalized.stack;
+        }
+        if (normalized.details && Object.keys(normalized.details).length > 0) {
+            logEntry.errorDetails = sanitizeDetails(normalized.details);
         }
     } else if (typeof error === 'string') {
         logEntry.errorMessage = error || '(empty string error)';

@@ -10,15 +10,16 @@ const KEYCLOAK_REALM = 'anyvm';
 const KEYCLOAK_CLIENT_ID = 'AnyGPT';
 const DASHBOARD_URL = '/c/new';   // LibreChat new-chat page
 const LOGIN_URL = '/login';        // LibreChat login (has Keycloak button)
+const DOCS_URL = '/openapi.json';
 
 // Button templates
 function loginButtons() {
   return `
-    <a href="${LOGIN_URL}" class="btn-gradient inline-flex items-center px-8 py-3.5 rounded-xl text-white font-semibold text-base transition-all hover:-translate-y-0.5">
+    <a href="${LOGIN_URL}" class="btn btn-primary">
       Get Started
     </a>
-    <a href="#features" class="inline-flex items-center px-6 py-3.5 rounded-xl text-gray-300 font-medium text-base transition-all hover:bg-white/5">
-      Learn More ↓
+    <a href="#api" class="btn btn-secondary">
+      View API Example
     </a>
   `;
 }
@@ -26,40 +27,46 @@ function loginButtons() {
 function dashboardButtons(name) {
   const greeting = name ? `Welcome, ${name}` : 'Welcome back';
   return `
-    <a href="${DASHBOARD_URL}" class="btn-gradient inline-flex items-center px-8 py-3.5 rounded-xl text-white font-semibold text-base transition-all hover:-translate-y-0.5">
+    <a href="${DASHBOARD_URL}" class="btn btn-primary">
       Open Dashboard →
     </a>
-    <span class="text-gray-400 text-sm">${greeting}</span>
+    <span class="welcome-pill">${greeting}</span>
   `;
 }
 
 function navLoginButtons() {
   return `
-    <a href="#features" class="hidden sm:inline-flex items-center px-4 py-2 rounded-lg text-brand text-sm font-medium transition-all hover:bg-brand/10">Features</a>
-    <a href="#models" class="hidden sm:inline-flex items-center px-4 py-2 rounded-lg text-brand text-sm font-medium transition-all hover:bg-brand/10">Models</a>
-    <a href="${LOGIN_URL}" class="btn-gradient inline-flex items-center px-5 py-2 rounded-lg text-white text-sm font-semibold transition-all">Login</a>
+    <a href="${DOCS_URL}" target="_blank" rel="noreferrer" class="btn btn-secondary btn-compact hidden md:inline-flex">API Docs</a>
+    <a href="${LOGIN_URL}" class="btn btn-primary btn-compact">Login</a>
   `;
 }
 
 function navDashboardButtons(name) {
   return `
-    <span class="hidden sm:inline text-gray-400 text-sm">${name || ''}</span>
-    <a href="${DASHBOARD_URL}" class="btn-gradient inline-flex items-center px-5 py-2 rounded-lg text-white text-sm font-semibold transition-all">Dashboard</a>
+    <span class="hidden xl:inline nav-name">${name || 'Workspace'}</span>
+    <a href="${DOCS_URL}" target="_blank" rel="noreferrer" class="btn btn-secondary btn-compact hidden md:inline-flex">API Docs</a>
+    <a href="${DASHBOARD_URL}" class="btn btn-primary btn-compact">Dashboard</a>
   `;
 }
 
 function ctaLoginButtons() {
   return `
-    <a href="${LOGIN_URL}" class="btn-gradient inline-flex items-center px-8 py-3.5 rounded-xl text-white font-semibold text-base transition-all hover:-translate-y-0.5">
+    <a href="${LOGIN_URL}" class="btn btn-primary">
       Get Started Free
+    </a>
+    <a href="${DOCS_URL}" target="_blank" rel="noreferrer" class="btn btn-secondary">
+      API Docs
     </a>
   `;
 }
 
 function ctaDashboardButtons() {
   return `
-    <a href="${DASHBOARD_URL}" class="btn-gradient inline-flex items-center px-8 py-3.5 rounded-xl text-white font-semibold text-base transition-all hover:-translate-y-0.5">
+    <a href="${DASHBOARD_URL}" class="btn btn-primary">
       Open Dashboard →
+    </a>
+    <a href="${DOCS_URL}" target="_blank" rel="noreferrer" class="btn btn-secondary">
+      API Docs
     </a>
   `;
 }

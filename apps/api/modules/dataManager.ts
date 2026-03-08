@@ -1,7 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import redis, { redisReadyPromise } from './db.js'; 
-import { Redis } from 'ioredis'; 
+import redis, { redisReadyPromise, Redis } from './db.js'; 
 
 // --- Define or Import Data Structure Interfaces ---
 
@@ -272,10 +271,8 @@ class DataManager {
             const redisStringifiedData = JSON.stringify(data);
             const redisField = redisHashFields[dataType];
             const legacyRedisKey = legacyRedisKeys[dataType];
-            await this.redisClient!.multi()
-                .hset(redisHashKey, redisField, redisStringifiedData)
-                .del(legacyRedisKey)
-                .exec();
+            await this.redisClient!.hset(redisHashKey, redisField, redisStringifiedData);
+            await this.redisClient!.del(legacyRedisKey);
             console.log(`[DataManager] Redis backfill saved for: ${dataType}`);
         } catch (err) {
             console.error(`[DataManager] Redis backfill failed for ${dataType}:`, err);
@@ -587,10 +584,8 @@ class DataManager {
 
         if (this.isRedisReady()) {
             try {
-                await this.redisClient!.multi()
-                    .hset(redisHashKey, redisHashFields.keys, JSON.stringify(merged))
-                    .del(legacyRedisKeys.keys)
-                    .exec();
+                await this.redisClient!.hset(redisHashKey, redisHashFields.keys, JSON.stringify(merged));
+                await this.redisClient!.del(legacyRedisKeys.keys);
             } catch (err) {
                 console.error('[DataManager] Failed writing merged keys to Redis:', err);
             }
@@ -640,10 +635,8 @@ class DataManager {
 
         if (this.isRedisReady()) {
             try {
-                await this.redisClient!.multi()
-                    .hset(redisHashKey, redisHashFields.providers, JSON.stringify(merged))
-                    .del(legacyRedisKeys.providers)
-                    .exec();
+                await this.redisClient!.hset(redisHashKey, redisHashFields.providers, JSON.stringify(merged));
+                await this.redisClient!.del(legacyRedisKeys.providers);
             } catch (err) {
                 console.error('[DataManager] Failed writing merged providers to Redis:', err);
             }
@@ -951,17 +944,18 @@ class DataManager {
 
         if (this.isRedisReady()) {
             for (let attempt = 0; attempt < maxRetries; attempt++) {
+                const txClient = this.redisClient!.duplicate();
                 try {
-                    await this.redisClient!.watch(redisHashKey);
-                    let currentRaw = await this.redisClient!.hget(redisHashKey, redisField);
+                    await txClient.watch(redisHashKey);
+                    let currentRaw = await txClient.hget(redisHashKey, redisField);
                     if (!currentRaw) {
-                        currentRaw = await this.redisClient!.get(legacyRedisKey);
+                        currentRaw = await txClient.get(legacyRedisKey);
                     }
 
                     const currentData = currentRaw ? (JSON.parse(currentRaw) as T) : (defaultEmptyData[dataType] as T);
                     const updated = await updater(this.cloneData(currentData));
 
-                    const tx = this.redisClient!.multi();
+                    const tx = txClient.multi();
                     tx.hset(redisHashKey, redisField, JSON.stringify(updated));
                     tx.del(legacyRedisKey);
                     const execResult = await tx.exec();
@@ -976,7 +970,8 @@ class DataManager {
                 } catch (err) {
                     console.warn(`[DataManager] Redis updateWithLock attempt ${attempt + 1} failed for ${dataType}:`, err);
                 } finally {
-                    try { await this.redisClient!.unwatch(); } catch { /* ignore */ }
+                    try { await txClient.unwatch(); } catch { /* ignore */ }
+                    try { await txClient.quit(); } catch { /* ignore */ }
                 }
             }
             console.warn(`[DataManager] Falling back to filesystem update for ${dataType} after Redis contention.`);
@@ -1086,10 +1081,8 @@ class DataManager {
             }
 
             try {
-                await this.redisClient!.multi()
-                    .hset(redisHashKey, redisField, redisStringifiedData)
-                    .del(legacyRedisKey)
-                    .exec();
+                await this.redisClient!.hset(redisHashKey, redisField, redisStringifiedData);
+                await this.redisClient!.del(legacyRedisKey);
                 redisSuccess = true;
                 console.log(`[DataManager] Data saved successfully to Redis for: ${dataType}`);
             } catch (err) {

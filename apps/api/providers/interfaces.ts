@@ -28,6 +28,7 @@ export interface Model {
   rate_limit_window_ms?: number | null; // Window duration for rate_limit_requests, in milliseconds
   capability_skips?: Partial<Record<ModelCapability, string>>; // Optional per-model capability skips
   disabled?: boolean; // Optional per-model disable flag
+  pending_probe?: boolean; // True when imported from provider API but not yet capability-probed
   disabled_at?: number; // Epoch ms when the model was disabled (for time-based auto-recovery)
   disable_count?: number; // How many times this model has been disabled (for exponential backoff)
 }

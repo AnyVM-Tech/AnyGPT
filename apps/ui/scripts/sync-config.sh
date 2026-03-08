@@ -3,6 +3,19 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LIBRECHAT_DIR="$ROOT/librechat"
+ENV_FILE="$LIBRECHAT_DIR/.env"
+
+upsert_env_var() {
+  local file="$1"
+  local key="$2"
+  local value="$3"
+  local tmp_file
+
+  tmp_file="$(mktemp)"
+  awk -v key="$key" 'index($0, key "=") != 1 { print }' "$file" > "$tmp_file"
+  printf '%s=%s\n' "$key" "$value" >> "$tmp_file"
+  mv "$tmp_file" "$file"
+}
 
 if [[ ! -d "$LIBRECHAT_DIR" ]]; then
   echo "LibreChat repo not found at $LIBRECHAT_DIR"
@@ -21,34 +34,33 @@ if [[ "${USE_DOCKER:-}" == "1" ]]; then
 fi
 
 # --- .env bootstrap ---
-if [[ ! -f "$LIBRECHAT_DIR/.env" ]]; then
-  cp "$LIBRECHAT_DIR/.env.example" "$LIBRECHAT_DIR/.env"
-  echo "Created $LIBRECHAT_DIR/.env from .env.example"
+if [[ ! -f "$ENV_FILE" ]]; then
+  cp "$LIBRECHAT_DIR/.env.example" "$ENV_FILE"
+  echo "Created $ENV_FILE from .env.example"
 fi
 
-if ! grep -q "ANYGPT_BASE_URL" "$LIBRECHAT_DIR/.env"; then
-  cat "$ROOT/config/anygpt.env.example" >> "$LIBRECHAT_DIR/.env"
-  echo "Appended AnyGPT env defaults into $LIBRECHAT_DIR/.env"
+if ! grep -q "ANYGPT_BASE_URL" "$ENV_FILE"; then
+  cat "$ROOT/config/anygpt.env.example" >> "$ENV_FILE"
+  echo "Appended AnyGPT env defaults into $ENV_FILE"
 fi
 
-# --- Keycloak-only auth: enable social login, disable local registration ---
-if grep -q "^ALLOW_SOCIAL_LOGIN=false" "$LIBRECHAT_DIR/.env"; then
-  sed -i 's/^ALLOW_SOCIAL_LOGIN=false/ALLOW_SOCIAL_LOGIN=true/' "$LIBRECHAT_DIR/.env"
-  echo "Enabled ALLOW_SOCIAL_LOGIN"
-fi
-if grep -q "^ALLOW_SOCIAL_REGISTRATION=false" "$LIBRECHAT_DIR/.env"; then
-  sed -i 's/^ALLOW_SOCIAL_REGISTRATION=false/ALLOW_SOCIAL_REGISTRATION=true/' "$LIBRECHAT_DIR/.env"
-  echo "Enabled ALLOW_SOCIAL_REGISTRATION"
-fi
-if grep -q "^ALLOW_REGISTRATION=true" "$LIBRECHAT_DIR/.env"; then
-  sed -i 's/^ALLOW_REGISTRATION=true/ALLOW_REGISTRATION=false/' "$LIBRECHAT_DIR/.env"
-  echo "Disabled local ALLOW_REGISTRATION (Keycloak-only)"
-fi
+# --- Keycloak-first auth: enable SSO, disable local email auth/registration ---
+upsert_env_var "$ENV_FILE" "ALLOW_EMAIL_LOGIN" "false"
+upsert_env_var "$ENV_FILE" "ALLOW_SOCIAL_LOGIN" "true"
+upsert_env_var "$ENV_FILE" "ALLOW_SOCIAL_REGISTRATION" "true"
+upsert_env_var "$ENV_FILE" "ALLOW_REGISTRATION" "false"
+upsert_env_var "$ENV_FILE" "ALLOW_PASSWORD_RESET" "false"
+upsert_env_var "$ENV_FILE" "APP_TITLE" "AnyGPT"
+upsert_env_var "$ENV_FILE" "CUSTOM_FOOTER" '"Powered by AnyVM"'
+upsert_env_var "$ENV_FILE" "HELP_AND_FAQ_URL" "/"
+upsert_env_var "$ENV_FILE" "OPENID_BUTTON_LABEL" "Continue with AnyVM SSO"
+upsert_env_var "$ENV_FILE" "OPENID_IMAGE_URL" "/assets/AnyVM-logo.png"
+echo "Applied AnyGPT branding and Keycloak defaults"
 
 # --- Generate OPENID_SESSION_SECRET if still placeholder ---
-if grep -q "OPENID_SESSION_SECRET=replace_with_random_session_secret" "$LIBRECHAT_DIR/.env"; then
+if grep -q "OPENID_SESSION_SECRET=replace_with_random_session_secret" "$ENV_FILE"; then
   SESSION_SECRET=$(openssl rand -hex 32)
-  sed -i "s/OPENID_SESSION_SECRET=replace_with_random_session_secret/OPENID_SESSION_SECRET=${SESSION_SECRET}/" "$LIBRECHAT_DIR/.env"
+  sed -i "s/OPENID_SESSION_SECRET=replace_with_random_session_secret/OPENID_SESSION_SECRET=${SESSION_SECRET}/" "$ENV_FILE"
   echo "Generated random OPENID_SESSION_SECRET"
 fi
 

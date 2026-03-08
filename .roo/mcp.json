@@ -1,0 +1,51 @@
+{
+	"mcpServers": {
+		"brave-search": {
+			"command": "npx",
+			"args": [
+				"-y",
+				"@modelcontextprotocol/server-brave-search"
+			],
+			"env": {
+				"BRAVE_API_KEY": "BSAnaws8pXPT_xG8hu0yASDRA53y9i-"
+			},
+			"alwaysAllow": [
+				"brave_web_search"
+			]
+		},
+		"playwright": {
+			"type": "stdio",
+			"command": "npx",
+			"args": [
+				"-y",
+				"@playwright/mcp",
+				"--headless",
+				"--caps",
+				"vision,devtools",
+				"--isolated"
+			],
+			"alwaysAllow": [
+				"browser_navigate",
+				"browser_install",
+				"browser_take_screenshot",
+				"browser_resize",
+				"browser_network_requests",
+				"browser_run_code"
+			]
+		},
+		"browser-devtools": {
+			"type": "stdio",
+			"command": "npx",
+			"args": [
+				"-y",
+				"browser-devtools-mcp"
+			],
+			"disabledTools": [
+				"stub_intercept-http-request",
+				"stub_mock-http-response"
+			],
+			"alwaysAllow": [],
+			"disabled": true
+		}
+	}
+}

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AnyGPT — Multi-Model AI Gateway</title>
   <meta name="description" content="AnyGPT provides unified access to GPT-4o, Claude, Gemini, DeepSeek, and more through a single OpenAI-compatible API.">
-  <link rel="icon" type="image/svg+xml" href="/AnyVM-logo.svg">
+  <link rel="icon" type="image/svg+xml" href="/AnyGPT.svg">
 
   <!-- Tailwind CSS (same as LibreChat) -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -44,173 +44,338 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
   <script src="https://cdn.jsdelivr.net/npm/keycloak-js@25.0.6/dist/keycloak.min.js"></script>
-
-  <style>
-    html { scroll-behavior: smooth; }
-    body { -webkit-font-smoothing: antialiased; }
-    .gradient-text {
-      background: linear-gradient(135deg, #2472b7, #47b9e7, #62bfe7);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-    }
-    .hero-glow {
-      background:
-        radial-gradient(ellipse 60% 50% at 50% 0%, rgba(36, 114, 183, 0.15) 0%, transparent 70%),
-        radial-gradient(ellipse 40% 40% at 70% 20%, rgba(71, 185, 231, 0.08) 0%, transparent 60%);
-    }
-    .btn-gradient {
-      background: linear-gradient(135deg, #2472b7, #47b9e7);
-    }
-    .btn-gradient:hover {
-      box-shadow: 0 4px 20px rgba(71, 185, 231, 0.4);
-    }
-    .code-kw { color: #ff7b72; }
-    .code-str { color: #a5d6ff; }
-  </style>
 </head>
-<body class="bg-surface-primary text-gray-100 font-sans">
+<body class="text-gray-100 font-sans">
+  <div class="page-shell">
+    <div class="page-noise" aria-hidden="true"></div>
 
-  <!-- Navigation -->
-  <nav class="fixed top-0 left-0 right-0 z-50 bg-surface-primary/85 backdrop-blur-xl border-b border-border">
-    <div class="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
-      <a href="/" class="flex items-center gap-2.5 no-underline text-gray-100">
-        <img src="/AnyVM-logo.svg" alt="AnyGPT" class="w-8 h-8 rounded-md">
-        <span class="text-lg font-bold tracking-tight">AnyGPT</span>
-      </a>
-      <div class="flex items-center gap-3" id="nav-actions">
-        <!-- Populated by JS -->
+    <nav class="fixed top-0 left-0 right-0 z-50 border-b border-white/10 bg-surface-primary/70 backdrop-blur-2xl">
+      <div class="max-w-7xl mx-auto px-6 h-18 min-h-[4.5rem] flex items-center justify-between gap-4">
+        <a href="/" class="flex items-center gap-3 no-underline text-gray-100">
+          <span class="logo-mark logo-mark--asset">
+            <img src="/AnyGPT.svg" alt="AnyGPT logo" class="logo-mark-image">
+          </span>
+          <span class="text-lg font-bold tracking-tight">AnyGPT</span>
+        </a>
+
+        <div class="hidden lg:flex items-center gap-6 text-sm">
+          <a href="#features" class="nav-link-static">Features</a>
+          <a href="#models" class="nav-link-static">Models</a>
+          <a href="#api" class="nav-link-static">API</a>
+        </div>
+
+        <div class="flex items-center gap-3" id="nav-actions">
+          <!-- Populated by JS -->
+        </div>
       </div>
-    </div>
-  </nav>
+    </nav>
 
-  <!-- Hero -->
-  <section class="relative pt-40 pb-24 overflow-hidden text-center">
-    <div class="hero-glow absolute inset-0 pointer-events-none"></div>
-    <div class="relative z-10 max-w-6xl mx-auto px-6">
-      <div class="inline-block px-4 py-1.5 rounded-full bg-brand/10 border border-brand/20 text-brand text-xs font-semibold uppercase tracking-wider mb-6">
-        Powered by AnyVM
-      </div>
-      <h1 class="text-5xl md:text-6xl lg:text-7xl font-extrabold tracking-tight leading-[1.1] mb-5">
-        One API.<br>
-        <span class="gradient-text">Every Model.</span>
-      </h1>
-      <p class="max-w-xl mx-auto text-lg text-gray-400 leading-relaxed mb-9">
-        Access GPT-4o, Claude, Gemini, DeepSeek, and dozens more AI models
-        through a single, OpenAI-compatible API gateway.
-      </p>
-      <div class="flex items-center justify-center gap-4 flex-wrap" id="hero-actions">
-        <noscript>
-          <a href="/login" class="btn-gradient inline-flex items-center px-8 py-3.5 rounded-xl text-white font-semibold text-base transition-all">Get Started</a>
-        </noscript>
-      </div>
-    </div>
-  </section>
+    <main>
+      <section class="relative overflow-hidden pt-36 pb-20 md:pt-40 md:pb-24">
+        <div class="hero-orb orb-left" aria-hidden="true"></div>
+        <div class="hero-orb orb-right" aria-hidden="true"></div>
 
-  <!-- Features -->
-  <section class="py-24" id="features">
-    <div class="max-w-6xl mx-auto px-6">
-      <h2 class="text-center text-3xl font-bold tracking-tight mb-3">Why AnyGPT?</h2>
-      <p class="text-center text-gray-400 text-lg max-w-lg mx-auto mb-12">Everything you need to run AI across your organization.</p>
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+        <div class="max-w-7xl mx-auto px-6">
+          <div class="hero-grid">
+            <div class="hero-copy">
+              <div class="eyebrow-pill mb-6"><span class="eyebrow-dot"></span> Unified AI gateway · built by AnyVM</div>
+              <h1 class="text-5xl md:text-6xl lg:text-7xl font-extrabold tracking-tight leading-[1.02] mb-6 max-w-4xl">
+                Ship one polished
+                <span class="gradient-text">AI gateway</span>
+                for every model.
+              </h1>
+              <p class="max-w-2xl text-lg md:text-xl text-gray-300/90 leading-relaxed mb-8">
+                AnyGPT gives your team one OpenAI-compatible entry point for GPT-4o, Claude, Gemini, DeepSeek,
+                and more—with SSO, smart routing, spend controls, and a built-in LibreChat workspace already wired in.
+              </p>
 
-        <div class="bg-surface-tertiary border border-border rounded-xl p-7 transition-all hover:bg-surface-hover hover:border-border-light hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/20">
-          <div class="text-3xl mb-3">🔀</div>
-          <h3 class="text-base font-semibold mb-2">Multi-Model Access</h3>
-          <p class="text-gray-400 text-sm leading-relaxed">Switch between OpenAI, Anthropic, Google, Meta, and more — all through a single API key and endpoint.</p>
-        </div>
+              <div class="hero-points" role="list" aria-label="AnyGPT highlights">
+                <div class="hero-point" role="listitem">
+                  <span class="hero-point-icon" aria-hidden="true">✦</span>
+                  <span>OpenAI-compatible SDK flow</span>
+                </div>
+                <div class="hero-point" role="listitem">
+                  <span class="hero-point-icon" aria-hidden="true">✦</span>
+                  <span>Keycloak-backed access control</span>
+                </div>
+                <div class="hero-point" role="listitem">
+                  <span class="hero-point-icon" aria-hidden="true">✦</span>
+                  <span>LibreChat workspace included</span>
+                </div>
+              </div>
 
-        <div class="bg-surface-tertiary border border-border rounded-xl p-7 transition-all hover:bg-surface-hover hover:border-border-light hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/20">
-          <div class="text-3xl mb-3">🔌</div>
-          <h3 class="text-base font-semibold mb-2">OpenAI-Compatible API</h3>
-          <p class="text-gray-400 text-sm leading-relaxed">Drop-in replacement for the OpenAI API. Use your existing SDKs, tools, and integrations without changes.</p>
-        </div>
+              <div class="flex flex-wrap items-center gap-4" id="hero-actions">
+                <noscript>
+                  <a href="/login" class="btn btn-primary">Get Started</a>
+                  <a href="#api" class="btn btn-secondary">View API Example</a>
+                </noscript>
+              </div>
 
-        <div class="bg-surface-tertiary border border-border rounded-xl p-7 transition-all hover:bg-surface-hover hover:border-border-light hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/20">
-          <div class="text-3xl mb-3">💬</div>
-          <h3 class="text-base font-semibold mb-2">Chat Interface</h3>
-          <p class="text-gray-400 text-sm leading-relaxed">Beautiful built-in chat UI powered by LibreChat. Conversations, presets, and multi-modal support out of the box.</p>
-        </div>
+              <div class="stat-grid">
+                <div class="stat-chip">
+                  <span class="stat-value">1 endpoint</span>
+                  <span class="stat-copy">OpenAI-compatible API across multiple providers and models.</span>
+                </div>
+                <div class="stat-chip">
+                  <span class="stat-value">Smart failover</span>
+                  <span class="stat-copy">Automatic fallback and routing when a provider slows down or fails.</span>
+                </div>
+                <div class="stat-chip">
+                  <span class="stat-value">SSO ready</span>
+                  <span class="stat-copy">Keycloak-backed authentication with centralized access control.</span>
+                </div>
+              </div>
+            </div>
 
-        <div class="bg-surface-tertiary border border-border rounded-xl p-7 transition-all hover:bg-surface-hover hover:border-border-light hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/20">
-          <div class="text-3xl mb-3">🔐</div>
-          <h3 class="text-base font-semibold mb-2">Enterprise Auth</h3>
-          <p class="text-gray-400 text-sm leading-relaxed">Keycloak-powered SSO with OpenID Connect. Role-based access, centralized user management, and audit trails.</p>
-        </div>
+            <div class="hero-visual">
+              <div class="glass-panel hero-window hero-brand-panel">
+                <div class="brand-panel-grid">
+                  <div class="hero-logo-stage">
+                    <div class="hero-logo-frame hero-logo-frame--asset">
+                      <img src="/AnyGPT.svg" alt="AnyGPT logo" class="hero-logo-image hero-logo-image--svg">
+                    </div>
+                    <div class="hero-stage-pulse">
+                      <span class="pulse-dot" aria-hidden="true"></span>
+                      5+ provider routes online
+                    </div>
+                  </div>
 
-        <div class="bg-surface-tertiary border border-border rounded-xl p-7 transition-all hover:bg-surface-hover hover:border-border-light hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/20">
-          <div class="text-3xl mb-3">⚡</div>
-          <h3 class="text-base font-semibold mb-2">Intelligent Routing</h3>
-          <p class="text-gray-400 text-sm leading-relaxed">Automatic provider failover, load balancing, and smart routing across API keys for maximum uptime.</p>
-        </div>
+                  <div class="brand-copy-stack">
+                    <div class="brand-heading-row">
+                      <div class="preview-label preview-label--brand">Live product signal</div>
+                      <div class="status-chip">Multi-model ready</div>
+                    </div>
+                    <h3 class="text-2xl font-semibold tracking-tight">One branded surface for routing, chat, and access control.</h3>
+                    <p class="text-gray-300/85 leading-relaxed">
+                      Keep the front door clean while AnyGPT handles identity, provider selection, and a polished
+                      LibreChat workspace behind the scenes.
+                    </p>
 
-        <div class="bg-surface-tertiary border border-border rounded-xl p-7 transition-all hover:bg-surface-hover hover:border-border-light hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/20">
-          <div class="text-3xl mb-3">📊</div>
-          <h3 class="text-base font-semibold mb-2">Usage Tracking</h3>
-          <p class="text-gray-400 text-sm leading-relaxed">Per-user token tracking, tier-based rate limits, and real-time metrics. Know exactly how your AI budget is spent.</p>
-        </div>
+                    <div class="brand-rail">
+                      <span>Unified entry point</span>
+                      <span>SSO + API keys</span>
+                      <span>Workspace included</span>
+                    </div>
 
-      </div>
-    </div>
-  </section>
+                    <div class="brand-signal-grid">
+                      <div class="signal-card">
+                        <span>Base URL</span>
+                        <strong>gpt.anyvm.tech/v1</strong>
+                      </div>
+                      <div class="signal-card">
+                        <span>Authentication</span>
+                        <strong>Keycloak + team login</strong>
+                      </div>
+                      <div class="signal-card">
+                        <span>Routing</span>
+                        <strong>OpenAI • Claude • Gemini</strong>
+                      </div>
+                      <div class="signal-card">
+                        <span>Workspace</span>
+                        <strong>LibreChat + API access</strong>
+                      </div>
+                    </div>
 
-  <!-- Models -->
-  <section class="py-20" id="models">
-    <div class="max-w-6xl mx-auto px-6">
-      <h2 class="text-center text-3xl font-bold tracking-tight mb-3">Supported Models</h2>
-      <p class="text-center text-gray-400 text-lg max-w-lg mx-auto mb-12">Access the latest models from leading AI providers, all in one place.</p>
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <div class="brand-footnote">A focused AnyGPT surface powered by the same AnyVM multi-model platform.</div>
+                  </div>
+                </div>
+              </div>
 
-        <div class="bg-surface-tertiary border border-border rounded-xl p-6 transition-all hover:border-brand-dark">
-          <div class="text-xs font-bold uppercase tracking-widest text-brand mb-2">OpenAI</div>
-          <div class="text-gray-400 text-sm leading-relaxed">GPT-4o · GPT-4o Mini · o1 · o3-mini</div>
-        </div>
+              <div class="floating-badge badge-top">✦ Unified API + workspace</div>
+              <div class="floating-badge badge-bottom">Built by AnyVM</div>
+            </div>
+          </div>
 
-        <div class="bg-surface-tertiary border border-border rounded-xl p-6 transition-all hover:border-brand-dark">
-          <div class="text-xs font-bold uppercase tracking-widest text-brand mb-2">Anthropic</div>
-          <div class="text-gray-400 text-sm leading-relaxed">Claude 4 Sonnet · Claude 3.5 Haiku · Claude 3.5 Sonnet</div>
-        </div>
-
-        <div class="bg-surface-tertiary border border-border rounded-xl p-6 transition-all hover:border-brand-dark">
-          <div class="text-xs font-bold uppercase tracking-widest text-brand mb-2">Google</div>
-          <div class="text-gray-400 text-sm leading-relaxed">Gemini 2.5 Pro · Gemini 2.0 Flash · Gemini 2.5 Flash</div>
-        </div>
-
-        <div class="bg-surface-tertiary border border-border rounded-xl p-6 transition-all hover:border-brand-dark">
-          <div class="text-xs font-bold uppercase tracking-widest text-brand mb-2">DeepSeek</div>
-          <div class="text-gray-400 text-sm leading-relaxed">DeepSeek V3 · DeepSeek R1</div>
-        </div>
-
-        <div class="bg-surface-tertiary border border-border rounded-xl p-6 transition-all hover:border-brand-dark">
-          <div class="text-xs font-bold uppercase tracking-widest text-brand mb-2">Meta</div>
-          <div class="text-gray-400 text-sm leading-relaxed">Llama 4 Scout · Llama 4 Maverick · Llama 3.3 70B</div>
-        </div>
-
-        <div class="bg-surface-tertiary border border-border rounded-xl p-6 transition-all hover:border-brand-dark">
-          <div class="text-xs font-bold uppercase tracking-widest text-brand mb-2">More</div>
-          <div class="text-gray-400 text-sm leading-relaxed">Groq · Ollama · OpenRouter · and growing…</div>
-        </div>
-
-      </div>
-    </div>
-  </section>
-
-  <!-- API Code Example -->
-  <section class="py-20" id="api">
-    <div class="max-w-6xl mx-auto px-6">
-      <h2 class="text-center text-3xl font-bold tracking-tight mb-3">Simple API Integration</h2>
-      <p class="text-center text-gray-400 text-lg max-w-lg mx-auto mb-12">Use any OpenAI-compatible SDK. Just change the base URL.</p>
-      <div class="max-w-2xl mx-auto bg-[#0d1117] border border-border rounded-xl overflow-hidden">
-        <div class="flex items-center justify-between px-5 py-3 bg-white/[0.02] border-b border-border">
-          <span class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Python</span>
-          <div class="flex gap-1.5">
-            <span class="w-2.5 h-2.5 rounded-full bg-red-500"></span>
-            <span class="w-2.5 h-2.5 rounded-full bg-yellow-500"></span>
-            <span class="w-2.5 h-2.5 rounded-full bg-green-500"></span>
+          <div class="glass-panel trust-strip">
+            <span class="trust-label">From authentication to daily AI workflows</span>
+            <div class="trust-items">
+              <span>OpenAI SDK ready</span>
+              <span>LibreChat included</span>
+              <span>Provider failover</span>
+              <span>Keycloak SSO</span>
+            </div>
           </div>
         </div>
-        <pre class="p-5 overflow-x-auto font-mono text-sm leading-7 text-[#c9d1d9]"><code><span class="code-kw">from</span> openai <span class="code-kw">import</span> OpenAI
+      </section>
+
+      <section class="py-24" id="features">
+        <div class="max-w-7xl mx-auto px-6">
+          <div class="section-intro">
+            <div class="section-kicker">Why teams choose AnyGPT</div>
+            <h2 class="text-3xl md:text-4xl font-bold tracking-tight mb-4">All the hard parts of multi-model AI, already handled.</h2>
+            <p class="text-gray-400 text-lg leading-relaxed">
+              Deliver a cleaner experience to developers and end users with one gateway for authentication,
+              provider orchestration, chat access, and spend visibility.
+            </p>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+            <article class="feature-card">
+              <div class="feature-icon">🔀</div>
+              <div class="feature-label">Routing</div>
+              <h3 class="text-xl font-semibold mb-3">Multi-model access</h3>
+              <p class="text-gray-400 leading-relaxed">Switch between OpenAI, Anthropic, Google, Meta, and more through a single API key and endpoint.</p>
+            </article>
+
+            <article class="feature-card">
+              <div class="feature-icon">🔌</div>
+              <div class="feature-label">Compatibility</div>
+              <h3 class="text-xl font-semibold mb-3">OpenAI-compatible SDK flow</h3>
+              <p class="text-gray-400 leading-relaxed">Keep your existing SDKs, tools, and prompts. Change the base URL and start routing across providers.</p>
+            </article>
+
+            <article class="feature-card">
+              <div class="feature-icon">💬</div>
+              <div class="feature-label">Workspace</div>
+              <h3 class="text-xl font-semibold mb-3">Built-in LibreChat experience</h3>
+              <p class="text-gray-400 leading-relaxed">Give users a polished chat interface with presets, conversations, and multimodal workflows out of the box.</p>
+            </article>
+
+            <article class="feature-card">
+              <div class="feature-icon">🔐</div>
+              <div class="feature-label">Security</div>
+              <h3 class="text-xl font-semibold mb-3">Enterprise authentication</h3>
+              <p class="text-gray-400 leading-relaxed">Use Keycloak-powered SSO, role-aware access, and centralized identity controls across your AI surface area.</p>
+            </article>
+
+            <article class="feature-card">
+              <div class="feature-icon">⚡</div>
+              <div class="feature-label">Resilience</div>
+              <h3 class="text-xl font-semibold mb-3">Intelligent provider failover</h3>
+              <p class="text-gray-400 leading-relaxed">Balance requests, recover from quota issues, and keep latency predictable with smart routing logic.</p>
+            </article>
+
+            <article class="feature-card">
+              <div class="feature-icon">📊</div>
+              <div class="feature-label">Visibility</div>
+              <h3 class="text-xl font-semibold mb-3">Usage and spend insight</h3>
+              <p class="text-gray-400 leading-relaxed">Track per-user usage, enforce tiers, and understand how requests move across your providers and models.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="py-20" id="models">
+        <div class="max-w-7xl mx-auto px-6">
+          <div class="section-intro">
+            <div class="section-kicker">Supported ecosystem</div>
+            <h2 class="text-3xl md:text-4xl font-bold tracking-tight mb-4">Access the latest model families from one polished entry point.</h2>
+            <p class="text-gray-400 text-lg leading-relaxed">
+              Mix frontier reasoning, fast inference, open models, and chat-friendly defaults without changing your app architecture.
+            </p>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+            <article class="model-card">
+              <div class="model-label">OpenAI</div>
+              <h3 class="text-xl font-semibold mb-3">Flagship reasoning and multimodal chat</h3>
+              <div class="tag-row">
+                <span class="model-tag">GPT-4o</span>
+                <span class="model-tag">GPT-4o Mini</span>
+                <span class="model-tag">o1</span>
+                <span class="model-tag">o3-mini</span>
+              </div>
+            </article>
+
+            <article class="model-card">
+              <div class="model-label">Anthropic</div>
+              <h3 class="text-xl font-semibold mb-3">Long-context assistants for teams and workflows</h3>
+              <div class="tag-row">
+                <span class="model-tag">Claude 4 Sonnet</span>
+                <span class="model-tag">Claude 3.5 Sonnet</span>
+                <span class="model-tag">Claude 3.5 Haiku</span>
+              </div>
+            </article>
+
+            <article class="model-card">
+              <div class="model-label">Google</div>
+              <h3 class="text-xl font-semibold mb-3">Fast Gemini routes for general chat and higher-throughput workloads</h3>
+              <div class="tag-row">
+                <span class="model-tag">Gemini 2.5 Pro</span>
+                <span class="model-tag">Gemini 2.5 Flash</span>
+                <span class="model-tag">Gemini 2.0 Flash</span>
+              </div>
+            </article>
+
+            <article class="model-card">
+              <div class="model-label">DeepSeek</div>
+              <h3 class="text-xl font-semibold mb-3">High-value reasoning and code-oriented inference</h3>
+              <div class="tag-row">
+                <span class="model-tag">DeepSeek V3</span>
+                <span class="model-tag">DeepSeek R1</span>
+              </div>
+            </article>
+
+            <article class="model-card">
+              <div class="model-label">Meta</div>
+              <h3 class="text-xl font-semibold mb-3">Open-weight model options for flexible deployment strategies</h3>
+              <div class="tag-row">
+                <span class="model-tag">Llama 4 Scout</span>
+                <span class="model-tag">Llama 4 Maverick</span>
+                <span class="model-tag">Llama 3.3 70B</span>
+              </div>
+            </article>
+
+            <article class="model-card">
+              <div class="model-label">More providers</div>
+              <h3 class="text-xl font-semibold mb-3">Extend with routing layers, local models, and additional vendors</h3>
+              <div class="tag-row">
+                <span class="model-tag">Groq</span>
+                <span class="model-tag">Ollama</span>
+                <span class="model-tag">OpenRouter</span>
+                <span class="model-tag">and more</span>
+              </div>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="py-20" id="api">
+        <div class="max-w-7xl mx-auto px-6">
+          <div class="glass-panel api-layout">
+            <div>
+              <div class="section-intro section-intro--left mb-0">
+                <div class="section-kicker">Developer experience</div>
+                <h2 class="text-3xl md:text-4xl font-bold tracking-tight mb-4">Switch providers without rewriting your app.</h2>
+                <p class="text-gray-400 text-lg leading-relaxed">
+                  Use any OpenAI-compatible SDK, then let AnyGPT handle routing, auth, and provider selection behind the scenes.
+                </p>
+              </div>
+
+              <div class="info-stack">
+                <article class="info-card">
+                  <strong>Minimal integration</strong>
+                  <span class="text-gray-400 leading-relaxed">Point your client at a single base URL and keep your existing request patterns.</span>
+                </article>
+                <article class="info-card">
+                  <strong>Safer operations</strong>
+                  <span class="text-gray-400 leading-relaxed">Centralize API keys, provider policies, and rate control instead of spreading them across apps.</span>
+                </article>
+                <article class="info-card">
+                  <strong>Better user experience</strong>
+                  <span class="text-gray-400 leading-relaxed">Pair the API with LibreChat so teams get both a polished UI and a programmable gateway.</span>
+                </article>
+              </div>
+
+              <ul class="check-list list-none p-0">
+                <li>Compatible with standard OpenAI-style chat completion flows</li>
+                <li>Built for authentication, quotas, and provider resiliency</li>
+                <li>Ready for internal tools, product teams, and AI operations</li>
+              </ul>
+            </div>
+
+            <div class="code-window">
+              <div class="code-window-bar">
+                <span class="text-xs font-semibold text-gray-400 uppercase tracking-[0.18em]">Python</span>
+                <div class="window-dots">
+                  <span class="bg-red-400"></span>
+                  <span class="bg-yellow-400"></span>
+                  <span class="bg-emerald-400"></span>
+                </div>
+              </div>
+              <pre><code><span class="code-kw">from</span> openai <span class="code-kw">import</span> OpenAI
 
 client = OpenAI(
     base_url=<span class="code-str">"https://gpt.anyvm.tech/v1"</span>,
@@ -219,36 +384,51 @@ client = OpenAI(
 
 response = client.chat.completions.create(
     model=<span class="code-str">"gpt-4o"</span>,
-    messages=[{<span class="code-str">"role"</span>: <span class="code-str">"user"</span>, <span class="code-str">"content"</span>: <span class="code-str">"Hello!"</span>}]
+    messages=[
+        {<span class="code-str">"role"</span>: <span class="code-str">"system"</span>, <span class="code-str">"content"</span>: <span class="code-str">"Be concise."</span>},
+        {<span class="code-str">"role"</span>: <span class="code-str">"user"</span>, <span class="code-str">"content"</span>: <span class="code-str">"Summarize our launch plan."</span>}
+    ]
 )</code></pre>
-      </div>
-    </div>
-  </section>
+            </div>
+          </div>
+        </div>
+      </section>
 
-  <!-- CTA -->
-  <section class="py-20 text-center bg-gradient-to-b from-transparent to-brand-dark/5">
-    <div class="max-w-6xl mx-auto px-6">
-      <h2 class="text-3xl font-bold mb-3">Ready to get started?</h2>
-      <p class="text-gray-400 text-lg mb-8">Sign up and start using the most powerful AI models in seconds.</p>
-      <div class="flex items-center justify-center gap-4 flex-wrap" id="cta-actions">
-        <!-- Populated by JS -->
-      </div>
-    </div>
-  </section>
+      <section class="py-24">
+        <div class="max-w-7xl mx-auto px-6">
+          <div class="cta-card">
+            <div class="max-w-2xl">
+              <div class="section-kicker">Start shipping</div>
+              <h2 class="text-3xl md:text-4xl font-bold tracking-tight mb-4">Launch one clean entry point for every AI model your team needs.</h2>
+              <p class="text-gray-300 text-lg leading-relaxed">
+                Sign in, open the dashboard, or connect your app to the API and start building with a more polished multi-model stack.
+              </p>
+            </div>
 
-  <!-- Footer -->
-  <footer class="py-8 border-t border-border">
-    <div class="max-w-6xl mx-auto px-6 flex items-center justify-between flex-wrap gap-4">
-      <div class="flex items-center gap-2.5 text-gray-500 text-sm">
-        <img src="/AnyVM-logo.svg" alt="AnyVM" class="w-6 h-6 rounded">
-        <span>AnyGPT by AnyVM</span>
+            <div class="flex items-center justify-center gap-4 flex-wrap" id="cta-actions">
+              <!-- Populated by JS -->
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="py-8 border-t border-white/10">
+      <div class="max-w-7xl mx-auto px-6 flex items-center justify-between flex-wrap gap-4">
+        <div class="flex items-center gap-3 text-gray-500 text-sm">
+          <span class="logo-mark logo-mark--asset !w-9 !h-9">
+            <img src="/AnyGPT.svg" alt="AnyGPT logo" class="logo-mark-image">
+          </span>
+          <span>AnyGPT by AnyVM</span>
+        </div>
+        <div class="flex gap-6 flex-wrap">
+          <a href="/v1/models" target="_blank" class="footer-link text-sm">API Models</a>
+          <a href="/openapi.json" target="_blank" class="footer-link text-sm">API Docs</a>
+          <a href="/login" class="footer-link text-sm">Login</a>
+        </div>
       </div>
-      <div class="flex gap-6">
-        <a href="/v1/models" target="_blank" class="text-gray-500 text-sm hover:text-brand transition-colors">API Models</a>
-        <a href="/openapi.json" target="_blank" class="text-gray-500 text-sm hover:text-brand transition-colors">API Docs</a>
-      </div>
-    </div>
-  </footer>
+    </footer>
+  </div>
 
   <script src="/script.js"></script>
 </body>

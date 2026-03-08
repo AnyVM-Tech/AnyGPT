@@ -10,6 +10,8 @@
   "scripts": {
     "build": "tsc -b",
     "dev": "turbo run dev",
+    "frontend:dev": "bash ./scripts/run-frontend-stack.sh dev",
+    "frontend:start": "bash ./scripts/run-frontend-stack.sh start",
     "test": "turbo run test",
     "lint": "turbo run lint",
     "typecheck": "tsc --noEmit",
