@@ -41,7 +41,7 @@
 		"cross-env": "^7.0.3",
 		"dotenv": "^16.6.1",
 		"eventsource": "^2.0.2",
-		"openai": "^4.104.0",
+		"openai": "^6.27.0",
 		"selenium-webdriver": "^4.41.0",
 		"uuid": "^11.1.0",
 		"ws": "^8.19.0"
