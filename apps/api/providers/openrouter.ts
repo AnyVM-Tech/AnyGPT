@@ -443,11 +443,21 @@ export class OpenRouterAI implements IAIProvider {
       model: message.model.id,
       messages: messages.map((entry) => {
         const rawRole = typeof entry.role === 'string' ? entry.role.trim() : '';
-        const role = rawRole === 'tool' ? 'assistant' : (rawRole || 'user');
-        return {
+        const role = rawRole || 'user';
+        const normalized: Record<string, any> = {
           role,
           content: this.normalizeMessageContent(entry.content),
         };
+        if (Array.isArray((entry as any).tool_calls) && (entry as any).tool_calls.length > 0) {
+          normalized.tool_calls = (entry as any).tool_calls;
+        }
+        if (typeof (entry as any).tool_call_id === 'string' && (entry as any).tool_call_id.trim()) {
+          normalized.tool_call_id = (entry as any).tool_call_id.trim();
+        }
+        if (typeof (entry as any).name === 'string' && (entry as any).name.trim()) {
+          normalized.name = (entry as any).name.trim();
+        }
+        return normalized;
       }),
       stream,
     };

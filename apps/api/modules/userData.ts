@@ -15,6 +15,7 @@ let _avgBlendedRate: number = 0;
 let _pricingLastUpdated = 0;
 const PRICING_REFRESH_MS = 5 * 60 * 1000; // refresh every 5 minutes
 const CODEX_SINGLE_TURN_ONLY = process.env.CODEX_SINGLE_TURN_ONLY === '1';
+const RESPONSES_SINGLE_TURN_ONLY = process.env.RESPONSES_SINGLE_TURN_ONLY !== '0';
 const MAX_MESSAGE_COUNT = (() => {
   const raw = Number(process.env.MAX_MESSAGE_COUNT);
   if (Number.isFinite(raw) && raw >= 0) return Math.floor(raw);
@@ -64,6 +65,31 @@ function ensureLength(value: string, max: number, label: string): void {
 
 function isDataUrl(value: string): boolean {
   return /^data:/i.test(value.trim());
+}
+
+function isResponsesSingleTurnModel(normalizedModelId: string): boolean {
+  return normalizedModelId.includes('codex')
+    || normalizedModelId.includes('gpt-5')
+    || normalizedModelId.includes('gpt-4.1');
+}
+
+function collapseMessagesToLatestUserTurn(
+  messages: { role: string; content: any }[],
+  maxMessages: number = MAX_MESSAGE_COUNT,
+): { role: string; content: any }[] {
+  const systemMessages = messages.filter((msg) => msg.role === 'system' || msg.role === 'developer');
+  const lastUserMessage = [...messages].reverse().find((msg) => msg.role === 'user');
+  if (!lastUserMessage) return messages;
+  if (maxMessages > 0 && maxMessages <= 1) return [lastUserMessage];
+
+  const allowedSystemMessages = maxMessages > 0
+    ? Math.max(maxMessages - 1, 0)
+    : systemMessages.length;
+  const keptSystemMessages = allowedSystemMessages > 0
+    ? systemMessages.slice(-allowedSystemMessages)
+    : [];
+
+  return [...keptSystemMessages, lastUserMessage];
 }
 
 async function refreshPricingCache(): Promise<void> {
@@ -237,13 +263,14 @@ export async function getTierLimits(apiKey: string): Promise<TierData | null> {
 }
 
 // Parse and validate request body for chat/completions; caller supplies the already-parsed body.
-export function extractMessageFromRequestBody(requestBody: any): { messages: { role: string; content: any }[]; model: string; max_tokens?: number } { 
+export function extractMessageFromRequestBody(requestBody: any): {
+  messages: { role: string; content: any; tool_calls?: any[]; tool_call_id?: string; name?: string }[];
+  model: string;
+  max_tokens?: number;
+} {
   try {
     if (!requestBody || typeof requestBody !== 'object') throw new Error('Invalid body.');
     if (!Array.isArray(requestBody.messages)) throw new Error('Invalid messages format.');
-    if (MAX_MESSAGE_COUNT > 0 && requestBody.messages.length > MAX_MESSAGE_COUNT) {
-      throw new Error(`Too many messages. Limit is ${MAX_MESSAGE_COUNT}.`);
-    }
     if (typeof requestBody.model !== 'string' || !requestBody.model) {
        throw new Error('model parameter is required.');
     }
@@ -260,20 +287,29 @@ export function extractMessageFromRequestBody(requestBody: any): { messages: { r
         ensureLength(m.role, MAX_ROLE_LENGTH, 'role');
       }
       const role = m.role;
+      const toolCalls = Array.isArray(m.tool_calls) ? m.tool_calls : undefined;
+      const toolCallId = typeof m.tool_call_id === 'string' && m.tool_call_id.trim() ? m.tool_call_id.trim() : undefined;
+      const name = typeof m.name === 'string' && m.name.trim() ? m.name.trim() : undefined;
       const content = m.content;
       const isStringContent = typeof content === 'string';
       const isArrayContent = Array.isArray(content);
-      if (!isStringContent && !isArrayContent) {
+      const allowEmptyAssistantToolContent =
+        (content === null || typeof content === 'undefined')
+        && role === 'assistant'
+        && Array.isArray(toolCalls)
+        && toolCalls.length > 0;
+      if (!isStringContent && !isArrayContent && !allowEmptyAssistantToolContent) {
         throw new Error('Message content must be a string or an array of content parts.');
       }
-      if (isStringContent && MAX_MESSAGE_CONTENT_CHARS > 0) {
-        ensureLength(content, MAX_MESSAGE_CONTENT_CHARS, 'message content');
+      const normalizedContent = allowEmptyAssistantToolContent ? '' : content;
+      if (typeof normalizedContent === 'string' && MAX_MESSAGE_CONTENT_CHARS > 0) {
+        ensureLength(normalizedContent, MAX_MESSAGE_CONTENT_CHARS, 'message content');
       }
-      if (isArrayContent) {
-        if (MAX_MESSAGE_PARTS > 0 && content.length > MAX_MESSAGE_PARTS) {
+      if (Array.isArray(normalizedContent)) {
+        if (MAX_MESSAGE_PARTS > 0 && normalizedContent.length > MAX_MESSAGE_PARTS) {
           throw new Error(`Too many message parts. Limit is ${MAX_MESSAGE_PARTS}.`);
         }
-        content.forEach((part: any) => {
+        normalizedContent.forEach((part: any) => {
           if (!part || typeof part !== 'object' || typeof part.type !== 'string') {
             throw new Error('Invalid content part: missing type.');
           }
@@ -305,7 +341,14 @@ export function extractMessageFromRequestBody(requestBody: any): { messages: { r
           }
         });
       }
-      return { role, content };
+      const normalizedMessage: { role: string; content: any; tool_calls?: any[]; tool_call_id?: string; name?: string } = {
+        role,
+        content: normalizedContent,
+      };
+      if (Array.isArray(toolCalls) && toolCalls.length > 0) normalizedMessage.tool_calls = toolCalls;
+      if (toolCallId) normalizedMessage.tool_call_id = toolCallId;
+      if (name) normalizedMessage.name = name;
+      return normalizedMessage;
     });
     
     let maxTokens: number | undefined = undefined;
@@ -328,13 +371,42 @@ export function extractMessageFromRequestBody(requestBody: any): { messages: { r
     }
 
     const normalizedModelId = String(requestBody.model || '').toLowerCase();
-    if (CODEX_SINGLE_TURN_ONLY && normalizedModelId.includes('codex')) {
-      const systemMessages = trimmedMessages.filter((msg: { role: string; content: any }) => msg.role === 'system' || msg.role === 'developer');
+    const isCodexModel = normalizedModelId.includes('codex');
+    const userMessages = trimmedMessages.filter((msg: { role: string; content: any }) => msg.role === 'user');
+    const hasToolingRequest = (Array.isArray(requestBody.tools) && requestBody.tools.length > 0)
+      || typeof requestBody.tool_choice !== 'undefined';
+    const hasStructuredHistory = trimmedMessages.some((msg: { role: string; content: any; tool_calls?: any[]; tool_call_id?: string; name?: string }) =>
+      msg.role === 'assistant'
+      || msg.role === 'tool'
+      || (Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0)
+      || typeof msg.tool_call_id === 'string'
+      || typeof msg.name === 'string'
+    );
+    const canSafelyCollapseToSingleTurn = !hasToolingRequest && !hasStructuredHistory;
+    const shouldCollapseToSingleTurn =
+      canSafelyCollapseToSingleTurn
+      && (
+        (isCodexModel && CODEX_SINGLE_TURN_ONLY)
+        || (RESPONSES_SINGLE_TURN_ONLY && isResponsesSingleTurnModel(normalizedModelId) && userMessages.length > 1)
+      );
+
+    if (shouldCollapseToSingleTurn) {
+      trimmedMessages = collapseMessagesToLatestUserTurn(trimmedMessages);
+    }
+
+    if (MAX_MESSAGE_COUNT > 0 && trimmedMessages.length > MAX_MESSAGE_COUNT) {
+      trimmedMessages = collapseMessagesToLatestUserTurn(trimmedMessages, MAX_MESSAGE_COUNT);
+    }
+
+    if (MAX_MESSAGE_COUNT > 0 && trimmedMessages.length > MAX_MESSAGE_COUNT) {
+      throw new Error(`Too many messages. Limit is ${MAX_MESSAGE_COUNT}.`);
+    }
+
+    if (CODEX_SINGLE_TURN_ONLY && isCodexModel) {
       const lastUserMessage = [...trimmedMessages].reverse().find((msg: { role: string; content: any }) => msg.role === 'user');
       if (!lastUserMessage) {
         throw new Error('At least one user message is required.');
       }
-      trimmedMessages = [...systemMessages, lastUserMessage];
       const userContent = lastUserMessage.content;
       if (typeof userContent === 'string' && userContent.trim().length < 2) {
         throw new Error('User message too short for codex; provide a longer prompt.');

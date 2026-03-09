@@ -1308,6 +1308,15 @@ export class MessageHandler {
                         messageForProvider.messages = messages.map((msg) => ({
                             role: typeof msg.role === 'string' && msg.role.trim() ? msg.role : 'user',
                             content: msg.content,
+                            ...(Array.isArray((msg as any).tool_calls) && (msg as any).tool_calls.length > 0
+                                ? { tool_calls: (msg as any).tool_calls }
+                                : {}),
+                            ...(typeof (msg as any).tool_call_id === 'string' && (msg as any).tool_call_id.trim()
+                                ? { tool_call_id: (msg as any).tool_call_id.trim() }
+                                : {}),
+                            ...(typeof (msg as any).name === 'string' && (msg as any).name.trim()
+                                ? { name: (msg as any).name.trim() }
+                                : {}),
                         }));
                     }
                     markProviderRateLimitStart(providerId, modelId);
@@ -1668,6 +1677,15 @@ export class MessageHandler {
                         messageForProvider.messages = messages.map((msg) => ({
                             role: typeof msg.role === 'string' && msg.role.trim() ? msg.role : 'user',
                             content: msg.content,
+                            ...(Array.isArray((msg as any).tool_calls) && (msg as any).tool_calls.length > 0
+                                ? { tool_calls: (msg as any).tool_calls }
+                                : {}),
+                            ...(typeof (msg as any).tool_call_id === 'string' && (msg as any).tool_call_id.trim()
+                                ? { tool_call_id: (msg as any).tool_call_id.trim() }
+                                : {}),
+                            ...(typeof (msg as any).name === 'string' && (msg as any).name.trim()
+                                ? { name: (msg as any).name.trim() }
+                                : {}),
                         }));
                     }
 

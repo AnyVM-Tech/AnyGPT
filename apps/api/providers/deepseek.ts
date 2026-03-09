@@ -24,10 +24,25 @@ export class DeepseekAI implements IAIProvider {
   private buildMessages(message: IMessage) {
     const sourceMessages = Array.isArray(message.messages) && message.messages.length > 0
       ? message.messages
-      : [{ role: message.role || 'user', content: message.content }];
+      : [{
+          role: message.role || 'user',
+          content: message.content,
+          ...(Array.isArray(message.tool_calls) && message.tool_calls.length > 0 ? { tool_calls: message.tool_calls } : {}),
+          ...(typeof message.tool_call_id === 'string' && message.tool_call_id.trim() ? { tool_call_id: message.tool_call_id.trim() } : {}),
+          ...(typeof message.name === 'string' && message.name.trim() ? { name: message.name.trim() } : {}),
+        }];
     return sourceMessages.map((entry) => ({
       role: typeof entry.role === 'string' && entry.role.trim() ? entry.role : 'user',
       content: entry.content,
+      ...(Array.isArray((entry as any).tool_calls) && (entry as any).tool_calls.length > 0
+        ? { tool_calls: (entry as any).tool_calls }
+        : {}),
+      ...(typeof (entry as any).tool_call_id === 'string' && (entry as any).tool_call_id.trim()
+        ? { tool_call_id: (entry as any).tool_call_id.trim() }
+        : {}),
+      ...(typeof (entry as any).name === 'string' && (entry as any).name.trim()
+        ? { name: (entry as any).name.trim() }
+        : {}),
     }));
   }
 

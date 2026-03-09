@@ -6,7 +6,7 @@
       "object": "model",
       "created": 1772393604097,
       "owned_by": "deepseek",
-      "providers": 74,
+      "providers": 73,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -26,7 +26,7 @@
       "object": "model",
       "created": 1772393604098,
       "owned_by": "deepseek",
-      "providers": 74,
+      "providers": 73,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -44,7 +44,7 @@
       "object": "model",
       "created": 1772393604098,
       "owned_by": "google",
-      "providers": 134,
+      "providers": 145,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -63,7 +63,7 @@
       "object": "model",
       "created": 1772393604098,
       "owned_by": "google",
-      "providers": 134,
+      "providers": 145,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -82,7 +82,7 @@
       "object": "model",
       "created": 1772393604098,
       "owned_by": "google",
-      "providers": 134,
+      "providers": 145,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -100,7 +100,7 @@
       "object": "model",
       "created": 1772393604098,
       "owned_by": "google",
-      "providers": 134,
+      "providers": 145,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -118,7 +118,7 @@
       "object": "model",
       "created": 1772393604098,
       "owned_by": "google",
-      "providers": 134,
+      "providers": 145,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -136,7 +136,7 @@
       "object": "model",
       "created": 1772393604098,
       "owned_by": "google",
-      "providers": 134,
+      "providers": 145,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -154,7 +154,7 @@
       "object": "model",
       "created": 1772393604099,
       "owned_by": "google",
-      "providers": 134,
+      "providers": 145,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -169,7 +169,7 @@
       "object": "model",
       "created": 1772393604099,
       "owned_by": "google",
-      "providers": 134,
+      "providers": 145,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -185,7 +185,7 @@
       "object": "model",
       "created": 1772393604099,
       "owned_by": "google",
-      "providers": 134,
+      "providers": 145,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -201,7 +201,7 @@
       "object": "model",
       "created": 1772393604099,
       "owned_by": "google",
-      "providers": 134,
+      "providers": 145,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -216,7 +216,7 @@
       "object": "model",
       "created": 1772393604099,
       "owned_by": "google",
-      "providers": 134,
+      "providers": 145,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -234,7 +234,7 @@
       "object": "model",
       "created": 1772393604099,
       "owned_by": "google",
-      "providers": 134,
+      "providers": 145,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -252,7 +252,7 @@
       "object": "model",
       "created": 1772393604099,
       "owned_by": "google",
-      "providers": 134,
+      "providers": 145,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -270,7 +270,7 @@
       "object": "model",
       "created": 1772393604099,
       "owned_by": "google",
-      "providers": 134,
+      "providers": 145,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -288,8 +288,8 @@
       "object": "model",
       "created": 1772393604100,
       "owned_by": "google",
-      "providers": 134,
-      "throughput": 93,
+      "providers": 145,
+      "throughput": 98,
       "capabilities": [
         "text",
         "image_input",
@@ -306,7 +306,7 @@
       "object": "model",
       "created": 1772393604100,
       "owned_by": "google",
-      "providers": 134,
+      "providers": 145,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -323,8 +323,8 @@
       "object": "model",
       "created": 1772393604100,
       "owned_by": "google",
-      "providers": 134,
-      "throughput": 27,
+      "providers": 145,
+      "throughput": 30,
       "capabilities": [
         "text",
         "image_input"
@@ -340,7 +340,7 @@
       "object": "model",
       "created": 1772393604100,
       "owned_by": "google",
-      "providers": 134,
+      "providers": 145,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -358,7 +358,7 @@
       "object": "model",
       "created": 1772393604100,
       "owned_by": "google",
-      "providers": 134,
+      "providers": 145,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -377,7 +377,7 @@
       "object": "model",
       "created": 1772393604100,
       "owned_by": "google",
-      "providers": 134,
+      "providers": 145,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -395,7 +395,7 @@
       "object": "model",
       "created": 1772393604100,
       "owned_by": "openai",
-      "providers": 134,
+      "providers": 145,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -412,7 +412,7 @@
       "object": "model",
       "created": 1772393604100,
       "owned_by": "google",
-      "providers": 134,
+      "providers": 145,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -426,7 +426,7 @@
       "object": "model",
       "created": 1772393604100,
       "owned_by": "google",
-      "providers": 134,
+      "providers": 145,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -440,7 +440,7 @@
       "object": "model",
       "created": 1772393604100,
       "owned_by": "google",
-      "providers": 134,
+      "providers": 145,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -458,7 +458,7 @@
       "object": "model",
       "created": 1772393604100,
       "owned_by": "google",
-      "providers": 134,
+      "providers": 145,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -476,7 +476,7 @@
       "object": "model",
       "created": 1772393604100,
       "owned_by": "google",
-      "providers": 134,
+      "providers": 145,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -494,7 +494,7 @@
       "object": "model",
       "created": 1772393604100,
       "owned_by": "google",
-      "providers": 134,
+      "providers": 145,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -512,7 +512,7 @@
       "object": "model",
       "created": 1772393604101,
       "owned_by": "google",
-      "providers": 134,
+      "providers": 145,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -530,7 +530,7 @@
       "object": "model",
       "created": 1772393604101,
       "owned_by": "google",
-      "providers": 134,
+      "providers": 145,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -548,7 +548,7 @@
       "object": "model",
       "created": 1772393604101,
       "owned_by": "google",
-      "providers": 134,
+      "providers": 145,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -566,7 +566,7 @@
       "object": "model",
       "created": 1772393604101,
       "owned_by": "google",
-      "providers": 134,
+      "providers": 145,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -584,7 +584,7 @@
       "object": "model",
       "created": 1772393604101,
       "owned_by": "google",
-      "providers": 134,
+      "providers": 145,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -604,7 +604,7 @@
       "object": "model",
       "created": 1772393604101,
       "owned_by": "google",
-      "providers": 134,
+      "providers": 145,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -624,7 +624,7 @@
       "object": "model",
       "created": 1772393604101,
       "owned_by": "google",
-      "providers": 134,
+      "providers": 145,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -1195,6 +1195,7 @@
       "throughput": 50,
       "capabilities": [
         "text",
+        "image_input",
         "tool_calling"
       ],
       "pricing": {
@@ -1289,7 +1290,8 @@
       "throughput": 50,
       "capabilities": [
         "text",
-        "image_input"
+        "image_input",
+        "tool_calling"
       ],
       "pricing": {
         "input": 0.033552,
@@ -1358,6 +1360,7 @@
       "throughput": 50,
       "capabilities": [
         "text",
+        "image_input",
         "tool_calling"
       ],
       "pricing": {
@@ -1375,6 +1378,7 @@
       "throughput": 50,
       "capabilities": [
         "text",
+        "image_input",
         "tool_calling"
       ],
       "pricing": {
@@ -1392,6 +1396,7 @@
       "throughput": 50,
       "capabilities": [
         "text",
+        "image_input",
         "tool_calling"
       ],
       "pricing": {
@@ -1409,6 +1414,7 @@
       "throughput": 50,
       "capabilities": [
         "text",
+        "image_input",
         "tool_calling"
       ],
       "pricing": {
@@ -1426,6 +1432,7 @@
       "throughput": 50,
       "capabilities": [
         "text",
+        "image_input",
         "tool_calling"
       ],
       "pricing": {
@@ -1443,6 +1450,7 @@
       "throughput": 50,
       "capabilities": [
         "text",
+        "image_input",
         "tool_calling"
       ],
       "pricing": {
@@ -1460,6 +1468,7 @@
       "throughput": 50,
       "capabilities": [
         "text",
+        "image_input",
         "tool_calling"
       ],
       "pricing": {
@@ -1477,6 +1486,7 @@
       "throughput": 50,
       "capabilities": [
         "text",
+        "image_input",
         "tool_calling"
       ],
       "pricing": {
@@ -1494,6 +1504,7 @@
       "throughput": 50,
       "capabilities": [
         "text",
+        "image_input",
         "tool_calling"
       ],
       "pricing": {
@@ -1511,6 +1522,7 @@
       "throughput": 50,
       "capabilities": [
         "text",
+        "image_input",
         "tool_calling"
       ],
       "pricing": {
@@ -1528,6 +1540,7 @@
       "throughput": 50,
       "capabilities": [
         "text",
+        "image_input",
         "tool_calling"
       ],
       "pricing": {
@@ -1607,6 +1620,7 @@
       "throughput": 50,
       "capabilities": [
         "text",
+        "image_input",
         "tool_calling"
       ],
       "pricing": {
@@ -1624,6 +1638,7 @@
       "throughput": 50,
       "capabilities": [
         "text",
+        "image_input",
         "tool_calling"
       ],
       "pricing": {
@@ -1813,6 +1828,7 @@
       "throughput": 50,
       "capabilities": [
         "text",
+        "image_input",
         "tool_calling"
       ],
       "pricing": {
@@ -1905,7 +1921,8 @@
       "providers": 155,
       "throughput": 50,
       "capabilities": [
-        "text"
+        "text",
+        "image_input"
       ],
       "pricing": {
         "input": 0.067104,
@@ -1961,7 +1978,8 @@
       "providers": 155,
       "throughput": 50,
       "capabilities": [
-        "text"
+        "text",
+        "image_input"
       ],
       "pricing": {
         "input": 0.067104,
@@ -1978,6 +1996,7 @@
       "throughput": 50,
       "capabilities": [
         "text",
+        "image_input",
         "tool_calling"
       ],
       "pricing": {
@@ -1995,6 +2014,7 @@
       "throughput": 50,
       "capabilities": [
         "text",
+        "image_input",
         "tool_calling"
       ],
       "pricing": {
@@ -2012,6 +2032,7 @@
       "throughput": 50,
       "capabilities": [
         "text",
+        "image_input",
         "tool_calling"
       ],
       "pricing": {
@@ -2029,6 +2050,7 @@
       "throughput": 50,
       "capabilities": [
         "text",
+        "image_input",
         "tool_calling"
       ],
       "pricing": {
@@ -2046,6 +2068,7 @@
       "throughput": 50,
       "capabilities": [
         "text",
+        "image_input",
         "tool_calling"
       ],
       "pricing": {
@@ -2063,6 +2086,7 @@
       "throughput": 50,
       "capabilities": [
         "text",
+        "image_input",
         "tool_calling"
       ],
       "pricing": {
@@ -2080,6 +2104,7 @@
       "throughput": 50,
       "capabilities": [
         "text",
+        "image_input",
         "tool_calling"
       ],
       "pricing": {
@@ -2115,6 +2140,7 @@
       "throughput": 50,
       "capabilities": [
         "text",
+        "image_input",
         "tool_calling"
       ],
       "pricing": {
@@ -2132,6 +2158,7 @@
       "throughput": 50,
       "capabilities": [
         "text",
+        "image_input",
         "tool_calling"
       ],
       "pricing": {
@@ -2149,6 +2176,7 @@
       "throughput": 50,
       "capabilities": [
         "text",
+        "image_input",
         "tool_calling"
       ],
       "pricing": {
@@ -2294,6 +2322,7 @@
       "throughput": 50,
       "capabilities": [
         "text",
+        "image_input",
         "tool_calling"
       ],
       "pricing": {
@@ -2311,6 +2340,7 @@
       "throughput": 50,
       "capabilities": [
         "text",
+        "image_input",
         "tool_calling"
       ],
       "pricing": {
@@ -2508,7 +2538,8 @@
       "providers": 130,
       "throughput": 50,
       "capabilities": [
-        "text"
+        "text",
+        "image_output"
       ],
       "pricing": {
         "per_image": 0.008,
@@ -2525,7 +2556,8 @@
       "providers": 129,
       "throughput": 50,
       "capabilities": [
-        "text"
+        "text",
+        "image_output"
       ],
       "pricing": {
         "per_image": 0.004,
@@ -2542,7 +2574,8 @@
       "providers": 129,
       "throughput": 50,
       "capabilities": [
-        "text"
+        "text",
+        "image_output"
       ],
       "pricing": {
         "per_image": 0.008,
@@ -2559,44 +2592,11 @@
       "providers": 129,
       "throughput": 50,
       "capabilities": [
-        "text"
+        "text",
+        "image_output"
       ],
       "pricing": {
         "per_image": 0.008,
-        "input": 0,
-        "output": 0,
-        "unit": "per_million_tokens"
-      }
-    },
-    {
-      "id": "dall-e-3",
-      "object": "model",
-      "created": 1772839064426,
-      "owned_by": "openai",
-      "providers": 129,
-      "throughput": 50,
-      "capabilities": [
-        "text"
-      ],
-      "pricing": {
-        "per_image": 0.008,
-        "input": 0,
-        "output": 0,
-        "unit": "per_million_tokens"
-      }
-    },
-    {
-      "id": "dall-e-2",
-      "object": "model",
-      "created": 1772839064426,
-      "owned_by": "openai",
-      "providers": 131,
-      "throughput": 50,
-      "capabilities": [
-        "text"
-      ],
-      "pricing": {
-        "per_image": 0.004,
         "input": 0,
         "output": 0,
         "unit": "per_million_tokens"
@@ -2610,7 +2610,8 @@
       "providers": 129,
       "throughput": 50,
       "capabilities": [
-        "text"
+        "text",
+        "image_output"
       ],
       "pricing": {
         "per_image": 0.02,
@@ -2627,7 +2628,8 @@
       "providers": 129,
       "throughput": 50,
       "capabilities": [
-        "text"
+        "text",
+        "image_output"
       ],
       "pricing": {
         "per_image": 0.04,
@@ -3841,7 +3843,8 @@
       "providers": 13,
       "throughput": 50,
       "capabilities": [
-        "text"
+        "text",
+        "tool_calling"
       ],
       "pricing": {
         "input": 0.00727,
@@ -5507,7 +5510,9 @@
       "providers": 13,
       "throughput": 50,
       "capabilities": [
-        "image_input"
+        "text",
+        "image_input",
+        "tool_calling"
       ],
       "pricing": {
         "input": 0.18174,
@@ -6138,7 +6143,8 @@
         "text",
         "image_input",
         "image_output",
-        "audio_output"
+        "audio_output",
+        "tool_calling"
       ]
     },
     {
@@ -6438,24 +6444,6 @@
       "pricing": {
         "input": 0.0233,
         "output": 0.1864,
-        "per_image": 0.008,
-        "unit": "per_million_tokens"
-      }
-    },
-    {
-      "id": "nano-banana-pro-preview",
-      "object": "model",
-      "created": 1773006498851,
-      "owned_by": "google",
-      "providers": 2,
-      "throughput": 50,
-      "capabilities": [
-        "text",
-        "image_output"
-      ],
-      "pricing": {
-        "input": 0.008388,
-        "output": 0.033552,
         "per_image": 0.008,
         "unit": "per_million_tokens"
       }

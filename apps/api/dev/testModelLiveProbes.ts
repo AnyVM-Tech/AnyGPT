@@ -315,6 +315,14 @@ function isRetryableSkipValue(value: unknown): boolean {
     || lower.includes('rate limited')
     || lower.includes('status 429')
     || lower.includes('timeout')
+    || lower.includes('quota exceeded')
+    || lower.includes('no available capacity')
+    || lower.includes('no access')
+    || lower.includes('organization verification required')
+    || lower.includes('image generation unavailable')
+    || lower.includes('image input rate limit')
+    || lower.includes('input-images rate limit')
+    || lower.includes('audio endpoint requires openai provider')
   );
 }
 
@@ -326,7 +334,19 @@ function isImageGenerationUnavailableSkipValue(value: unknown, testName?: string
 
 function isRetryableSkipReason(reason: string): boolean {
   const lower = reason.toLowerCase();
-  return lower.includes('rate limit') || lower.includes('rate-limited') || lower.includes('timeout');
+  return (
+    lower.includes('rate limit')
+    || lower.includes('rate-limited')
+    || lower.includes('timeout')
+    || lower.includes('quota exceeded')
+    || lower.includes('no available capacity')
+    || lower.includes('no access')
+    || lower.includes('organization verification required')
+    || lower.includes('image generation unavailable')
+    || lower.includes('image input rate limit')
+    || lower.includes('input-images rate limit')
+    || lower.includes('audio endpoint requires openai provider')
+  );
 }
 
 function isAccessError(outcomeLower: string): boolean {
@@ -499,8 +519,11 @@ function getKnownCapabilities(modelId: string): { caps: ModelCapability[]; reaso
   if (!id) return null;
 
   // Image generation models (Imagen, DALL-E, GPT-Image, Grok Imagine)
-  if (id.startsWith('imagen-') || id.startsWith('dall-e') || id.startsWith('gpt-image') || id.includes('gpt-5-image') || id.includes('nano-banana') || id === 'chatgpt-image-latest') {
+  if (id.startsWith('imagen-') || id.startsWith('dall-e') || id.startsWith('gpt-image') || id.includes('gpt-5-image') || id === 'chatgpt-image-latest') {
     return { caps: ['text', 'image_output'], reason: 'image generation model' };
+  }
+  if (id.includes('nano-banana')) {
+    return { caps: ['text', 'image_input', 'image_output'], reason: 'nano banana multimodal image model' };
   }
   if (id.includes('grok-imagine-image') || id.includes('grok-2-image')) {
     return { caps: ['text', 'image_output'], reason: 'xAI image generation model' };
@@ -1900,20 +1923,25 @@ async function main() {
   // This runs before any probing/skipping so even models blocked by rate limits get capabilities
   let knownCapsAssigned = 0;
   for (const model of models) {
-    if (model.capabilities && Array.isArray(model.capabilities) && model.capabilities.length > 0) continue;
+    const capSet = new Set<ModelCapability>(
+      Array.isArray(model.capabilities) ? (model.capabilities as ModelCapability[]) : []
+    );
+    let capsChanged = false;
+    const addCaps = (caps: ModelCapability[]) => {
+      for (const cap of caps) {
+        if (!capSet.has(cap)) {
+          capSet.add(cap);
+          capsChanged = true;
+        }
+      }
+    };
     const storedCaps = inferCapabilitiesFromStoredResults(probeTested.data?.[model.id]);
     if (storedCaps.length > 0) {
-      (model as any).capabilities = storedCaps;
-      providersChanged = true;
-      knownCapsAssigned++;
-      activatePendingModelProviders(model.id);
-      continue;
+      addCaps(storedCaps);
     }
     const knownCaps = getKnownCapabilities(model.id);
     if (knownCaps) {
-      (model as any).capabilities = knownCaps.caps;
-      providersChanged = true;
-      knownCapsAssigned++;
+      addCaps(knownCaps.caps);
       const pt = probeTested.data[model.id] || {};
       for (const cap of knownCaps.caps) {
         if (!pt[cap]) pt[cap] = `ok (known: ${knownCaps.reason})`;
@@ -1923,13 +1951,17 @@ async function main() {
     }
     // Fine-tunes get text capability
     if (isFineTunedModel(model.id)) {
-      (model as any).capabilities = ['text'];
-      providersChanged = true;
-      knownCapsAssigned++;
+      addCaps(['text']);
       const pt = probeTested.data[model.id] || {};
       if (!pt.text) pt.text = 'ok (fine-tune — assumed text)';
       if (!pt._status) pt._status = 'ok (fine-tune)';
       probeTested.data[model.id] = pt;
+    }
+    if (capsChanged) {
+      (model as any).capabilities = ALL_CAPABILITIES.filter((cap) => capSet.has(cap));
+      providersChanged = true;
+      knownCapsAssigned++;
+      activatePendingModelProviders(model.id);
     }
   }
   if (knownCapsAssigned > 0) {

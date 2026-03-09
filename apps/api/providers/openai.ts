@@ -352,15 +352,31 @@ export class OpenAI implements IAIProvider {
   private normalizeChatMessages(message: IMessage) {
     const source = Array.isArray(message.messages) && message.messages.length > 0
       ? message.messages
-      : [{ role: message.role || 'user', content: message.content }];
+      : [{
+          role: message.role || 'user',
+          content: message.content,
+          ...(Array.isArray(message.tool_calls) && message.tool_calls.length > 0 ? { tool_calls: message.tool_calls } : {}),
+          ...(typeof message.tool_call_id === 'string' && message.tool_call_id.trim() ? { tool_call_id: message.tool_call_id.trim() } : {}),
+          ...(typeof message.name === 'string' && message.name.trim() ? { name: message.name.trim() } : {}),
+        }];
 
     return source.map((entry) => {
       const rawRole = typeof entry.role === 'string' ? entry.role.trim() : '';
-      const role = rawRole === 'tool' ? 'assistant' : (rawRole || 'user');
-      return {
+      const role = rawRole || 'user';
+      const normalized: Record<string, any> = {
         role,
         content: this.normalizeChatContent(entry.content),
       };
+      if (Array.isArray((entry as any).tool_calls) && (entry as any).tool_calls.length > 0) {
+        normalized.tool_calls = (entry as any).tool_calls;
+      }
+      if (typeof (entry as any).tool_call_id === 'string' && (entry as any).tool_call_id.trim()) {
+        normalized.tool_call_id = (entry as any).tool_call_id.trim();
+      }
+      if (typeof (entry as any).name === 'string' && (entry as any).name.trim()) {
+        normalized.name = (entry as any).name.trim();
+      }
+      return normalized;
     });
   }
 
@@ -593,12 +609,119 @@ export class OpenAI implements IAIProvider {
     return normalized;
   }
 
+  private stringifyResponsesValue(value: any, fallback: string): string {
+    if (typeof value === 'string') return value;
+    if (typeof value === 'undefined') return fallback;
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
+
+  private normalizeResponsesSpecialInputItem(entry: any): any | null {
+    if (!entry || typeof entry !== 'object') return null;
+
+    const type = String(entry.type || '').toLowerCase();
+    if (type === 'function_call_output') {
+      const callId = typeof entry.call_id === 'string' && entry.call_id.trim()
+        ? entry.call_id.trim()
+        : undefined;
+      if (!callId) return null;
+
+      return {
+        type: 'function_call_output',
+        call_id: callId,
+        output: this.stringifyResponsesValue(entry.output, ''),
+      };
+    }
+
+    if (type === 'function_call') {
+      const name = typeof entry.name === 'string' && entry.name.trim()
+        ? entry.name.trim()
+        : (typeof entry.function?.name === 'string' && entry.function.name.trim() ? entry.function.name.trim() : undefined);
+      if (!name) return null;
+
+      const normalized: Record<string, any> = {
+        type: 'function_call',
+        name,
+        arguments: this.stringifyResponsesValue(
+          entry.arguments ?? entry.function?.arguments ?? entry.args ?? entry.parameters,
+          '{}',
+        ),
+      };
+
+      if (typeof entry.id === 'string' && entry.id.trim()) normalized.id = entry.id.trim();
+      if (typeof entry.call_id === 'string' && entry.call_id.trim()) normalized.call_id = entry.call_id.trim();
+      if (typeof entry.status === 'string' && entry.status.trim()) normalized.status = entry.status.trim();
+
+      return normalized;
+    }
+
+    return null;
+  }
+
+  private hasStatefulResponsesInputEntry(entry: any): boolean {
+    if (!entry || typeof entry !== 'object') return false;
+
+    const type = String(entry.type || '').toLowerCase();
+    if (type === 'function_call' || type === 'function_call_output') return true;
+
+    const role = typeof entry.role === 'string' ? entry.role.trim().toLowerCase() : '';
+    if (role === 'assistant' || role === 'tool') return true;
+
+    if (Array.isArray(entry.tool_calls) && entry.tool_calls.length > 0) return true;
+
+    const content = Array.isArray(entry.content) ? entry.content : [];
+    return content.some((part: any) => {
+      if (!part || typeof part !== 'object') return false;
+      const partType = String(part.type || '').toLowerCase();
+      if (partType === 'function_call' || partType === 'function_call_output') return true;
+      if (Array.isArray(part.tool_calls) && part.tool_calls.length > 0) return true;
+      return false;
+    });
+  }
+
   private normalizeResponsesInput(rawInput: any): any[] {
-    if (Array.isArray(rawInput) && rawInput.length > 0 && rawInput.every((entry) => entry && typeof entry === 'object' && 'role' in entry)) {
-      return rawInput.map((entry: any) => ({
-        ...entry,
-        content: this.normalizeResponsesContentParts(entry.content),
-      }));
+    if (Array.isArray(rawInput) && rawInput.length > 0) {
+      const normalizedItems: any[] = [];
+      let bufferedUserContent: any[] = [];
+
+      const flushBufferedUserContent = () => {
+        if (bufferedUserContent.length === 0) return;
+        normalizedItems.push({ role: 'user', content: bufferedUserContent });
+        bufferedUserContent = [];
+      };
+
+      for (const entry of rawInput) {
+        const role = entry && typeof entry === 'object' && typeof entry.role === 'string'
+          ? entry.role.trim()
+          : '';
+        if (role) {
+          flushBufferedUserContent();
+          normalizedItems.push({
+            ...entry,
+            role,
+            content: this.normalizeResponsesContentParts(entry.content),
+          });
+          continue;
+        }
+
+        const specialItem = this.normalizeResponsesSpecialInputItem(entry);
+        if (specialItem) {
+          flushBufferedUserContent();
+          normalizedItems.push(specialItem);
+          continue;
+        }
+
+        const normalizedParts = this.normalizeResponsesContentParts(entry);
+        if (normalizedParts.length > 0) {
+          bufferedUserContent.push(...normalizedParts);
+        }
+      }
+
+      flushBufferedUserContent();
+      if (normalizedItems.length > 0) return normalizedItems;
     }
 
     const normalizedContent = this.normalizeResponsesContentParts(rawInput);
@@ -753,13 +876,30 @@ export class OpenAI implements IAIProvider {
     const normalizedModelId = this.normalizeModelId(message.model.id);
     const isCodexModel = normalizedModelId.includes('codex');
     const codexSingleTurnEnv = process.env.CODEX_SINGLE_TURN_ONLY === '1';
-    if (isCodexModel && codexSingleTurnEnv) {
+    const responsesSingleTurnEnabled = process.env.RESPONSES_SINGLE_TURN_ONLY !== '0';
+    const isResponsesSingleTurnModel =
+      isCodexModel
+      || normalizedModelId.includes('gpt-5')
+      || normalizedModelId.includes('gpt-4.1');
+    const hasToolDefinitions = Array.isArray(message.tools) && message.tools.length > 0;
+    const hasToolChoice = typeof message.tool_choice !== 'undefined';
+    const hasStatefulInput = Boolean(message.previous_response_id)
+      || normalizedInput.some((entry: any) => this.hasStatefulResponsesInputEntry(entry));
+    const canSafelyCollapseToSingleTurn = !hasToolDefinitions && !hasToolChoice && !hasStatefulInput;
+    const userEntries = normalizedInput.filter(
+      (entry: any) => entry && typeof entry === 'object' && entry.role === 'user'
+    );
+    const shouldCollapseToSingleTurn =
+      canSafelyCollapseToSingleTurn
+      && (
+        (isCodexModel && codexSingleTurnEnv)
+        || (responsesSingleTurnEnabled && isResponsesSingleTurnModel && userEntries.length > 1)
+      );
+    if (shouldCollapseToSingleTurn) {
       const systemEntries = normalizedInput.filter(
         (entry: any) => entry && typeof entry === 'object' && (entry.role === 'system' || entry.role === 'developer')
       );
-      const lastUserEntry = [...normalizedInput]
-        .reverse()
-        .find((entry: any) => entry && typeof entry === 'object' && entry.role === 'user');
+      const lastUserEntry = userEntries[userEntries.length - 1];
       if (lastUserEntry) {
         normalizedInput = [...systemEntries, lastUserEntry];
       }

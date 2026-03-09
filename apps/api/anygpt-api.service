@@ -16,3 +16,4 @@ User=skullcmd
 
 [Install]
 WantedBy=multi-user.target
+Alias=anygpt.service

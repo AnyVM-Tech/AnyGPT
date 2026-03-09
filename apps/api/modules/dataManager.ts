@@ -2,6 +2,77 @@ import fs from 'fs';
 import path from 'path';
 import redis, { redisReadyPromise, Redis } from './db.js'; 
 
+const BunRuntime = (globalThis as any).Bun;
+const HAS_BUN_FILE_IO = typeof BunRuntime?.file === 'function' && typeof BunRuntime?.write === 'function';
+
+function createEnoentError(filePath: string): NodeJS.ErrnoException {
+    const err = new Error(`ENOENT: no such file or directory, open '${filePath}'`) as NodeJS.ErrnoException;
+    err.code = 'ENOENT';
+    err.errno = -2;
+    err.syscall = 'open';
+    err.path = filePath;
+    return err;
+}
+
+async function readTextFile(filePath: string): Promise<string> {
+    if (HAS_BUN_FILE_IO) {
+        const file = BunRuntime.file(filePath);
+        const size = typeof file?.size === 'number' ? file.size : 0;
+        if (size === 0) {
+            const exists = typeof file?.exists === 'function'
+                ? await file.exists()
+                : fs.existsSync(filePath);
+            if (!exists) throw createEnoentError(filePath);
+        }
+        return await file.text();
+    }
+    return await fs.promises.readFile(filePath, 'utf8');
+}
+
+async function writeTextFile(filePath: string, contents: string): Promise<void> {
+    if (HAS_BUN_FILE_IO) {
+        await BunRuntime.write(filePath, contents);
+        return;
+    }
+    await fs.promises.writeFile(filePath, contents, 'utf8');
+}
+
+async function fileExists(filePath: string): Promise<boolean> {
+    if (HAS_BUN_FILE_IO) {
+        const file = BunRuntime.file(filePath);
+        if (typeof file?.exists === 'function') {
+            return await file.exists();
+        }
+        const size = typeof file?.size === 'number' ? file.size : 0;
+        if (size > 0) return true;
+        return fs.existsSync(filePath);
+    }
+    return fs.existsSync(filePath);
+}
+
+async function ensureDir(dirPath: string): Promise<void> {
+    await fs.promises.mkdir(dirPath, { recursive: true });
+}
+
+async function copyFileCompat(sourcePath: string, targetPath: string): Promise<void> {
+    if (HAS_BUN_FILE_IO) {
+        const sourceFile = BunRuntime.file(sourcePath);
+        const exists = await fileExists(sourcePath);
+        if (!exists) throw createEnoentError(sourcePath);
+        await BunRuntime.write(targetPath, sourceFile);
+        return;
+    }
+    await fs.promises.copyFile(sourcePath, targetPath);
+}
+
+async function renameFileCompat(sourcePath: string, targetPath: string): Promise<void> {
+    await fs.promises.rename(sourcePath, targetPath);
+}
+
+async function unlinkFileCompat(filePath: string): Promise<void> {
+    await fs.promises.unlink(filePath);
+}
+
 // --- Define or Import Data Structure Interfaces ---
 
 // Represents the runtime data held for a specific model WITHIN a provider entry
@@ -110,6 +181,10 @@ function withTimeout<T>(promise: Promise<T>, ms: number, onTimeoutMessage: strin
             .catch((err) => { clearTimeout(timer); reject(err); });
     });
 }
+
+function sleepMs(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
 const defaultEmptyData: Record<DataType, any> = {
     providers: [],
     keys: {},
@@ -119,10 +194,10 @@ let lastModelsMirrorSignature: string | null = null;
 
 async function backupInvalidKeysJson(filePath: string, error: unknown): Promise<void> {
     try {
-        if (!fs.existsSync(filePath)) return;
+        if (!(await fileExists(filePath))) return;
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
         const backupPath = `${filePath}.invalid-${timestamp}.bak`;
-        await fs.promises.copyFile(filePath, backupPath);
+        await copyFileCompat(filePath, backupPath);
         console.warn(`[DataManager] Backed up invalid keys.json to ${backupPath}.`);
     } catch (backupError) {
         console.error(`[DataManager] Failed to back up invalid keys.json (${filePath}):`, backupError);
@@ -139,7 +214,7 @@ async function ensureTmpDirExists(): Promise<string | null> {
     if (dataTmpDirUnavailable) return null;
     if (dataTmpDirEnsured) return resolvedDataTmpDir;
     try {
-        await fs.promises.mkdir(resolvedDataTmpDir, { recursive: true });
+        await ensureDir(resolvedDataTmpDir);
         dataTmpDirEnsured = true;
         return resolvedDataTmpDir;
     } catch (err) {
@@ -157,20 +232,20 @@ async function writeFileAtomic(filePath: string, contents: string): Promise<void
         ? path.join(tmpDir, `${path.basename(filePath)}.tmp-${process.pid}-${Date.now()}`)
         : `${filePath}.tmp-${process.pid}-${Date.now()}`;
     try {
-        await fs.promises.writeFile(tmpPath, contents, 'utf8');
+        await writeTextFile(tmpPath, contents);
         try {
-            await fs.promises.rename(tmpPath, filePath);
+            await renameFileCompat(tmpPath, filePath);
         } catch (err: any) {
             if (err?.code === 'EXDEV') {
-                await fs.promises.copyFile(tmpPath, filePath);
-                await fs.promises.unlink(tmpPath);
+                await copyFileCompat(tmpPath, filePath);
+                await unlinkFileCompat(tmpPath);
             } else {
                 throw err;
             }
         }
     } catch (err) {
         try {
-            await fs.promises.unlink(tmpPath);
+            await unlinkFileCompat(tmpPath);
         } catch {
             // ignore cleanup errors
         }
@@ -202,11 +277,18 @@ const keysRedisReadTimeoutMs = Math.max(
     Number(process.env.KEYS_REDIS_READ_TIMEOUT_MS ?? redisReadTimeoutMs) || redisReadTimeoutMs
 );
 
+const redisFailureCooldownMs = Math.max(
+    0,
+    Number(process.env.REDIS_FAILURE_COOLDOWN_MS ?? '3000') || 3000
+);
+
 // --- DataManager Class ---
 class DataManager {
     private redisClient: Redis | null;
     private pendingRedisBackfill = new Set<DataType>();
     private redisBackfillPromise: Promise<void> | null = null;
+    private inFlightLoads = new Map<DataType, Promise<ManagedDataStructure>>();
+    private redisReadCooldownUntil = new Map<DataType, number>();
 
     constructor(redisInstance: Redis | null) {
         this.redisClient = redisInstance;
@@ -249,7 +331,7 @@ class DataManager {
 
         const filePath = filePaths[dataType];
         try {
-            const fileData = await fs.promises.readFile(filePath, 'utf8');
+            const fileData = await readTextFile(filePath);
             return JSON.parse(fileData) as T;
         } catch (err: any) {
             if (err?.code !== 'ENOENT') {
@@ -532,7 +614,7 @@ class DataManager {
         let fsKeys: KeysFile = {};
         let fsInvalid = false;
         try {
-            const raw = await fs.promises.readFile(filePath, 'utf8');
+            const raw = await readTextFile(filePath);
             fsKeys = JSON.parse(raw || '{}') as KeysFile;
         } catch (err: any) {
             const isMissing = err?.code === 'ENOENT';
@@ -600,7 +682,7 @@ class DataManager {
 
         let fsProviders: LoadedProviders = [];
         try {
-            const raw = await fs.promises.readFile(filePath, 'utf8');
+            const raw = await readTextFile(filePath);
             fsProviders = JSON.parse(raw || '[]') as LoadedProviders;
         } catch (err: any) {
             if (err?.code !== 'ENOENT') {
@@ -775,159 +857,187 @@ class DataManager {
             return cached.value as T;
         }
 
-        const redisField = redisHashFields[dataType];
-        const legacyRedisKey = legacyRedisKeys[dataType];
-        const filePath = filePaths[dataType];
-        const defaultValue = defaultEmptyData[dataType] as T;
-        
-        const loadFromRedis = async (): Promise<T | null> => {
-            if (!this.isRedisReady()) {
-                if (!filesystemFallbackLogged.has(dataType)) {
-                    console.log(`DataManager: Redis not ready, cannot load ${dataType} from Redis.`);
-                    // No need to add to set here, loadFromFilesystem will log fallback
-                }
-                return null;
-            }
-            try {
-                const redisTimeoutMs = dataType === 'keys' ? keysRedisReadTimeoutMs : redisReadTimeoutMs;
-                const redisData = await withTimeout(
-                    this.redisClient!.hget(redisHashKey, redisField),
-                    redisTimeoutMs,
-                    `[DataManager] Redis HGET timed out for ${dataType}`
-                );
-                if (redisData) {
-                    console.log(`[DataManager] Data loaded successfully from Redis for: ${dataType}`);
-                    return JSON.parse(redisData) as T; 
-                }
-
-                const legacyData = await withTimeout(
-                    this.redisClient!.get(legacyRedisKey),
-                    redisTimeoutMs,
-                    `[DataManager] Redis legacy GET timed out for ${dataType}`
-                );
-                if (legacyData) {
-                    console.log(`[DataManager] Legacy Redis key found for ${dataType}; migrating to hash namespace.`);
-                    await this.redisClient!.hset(redisHashKey, redisField, legacyData);
-                    await this.redisClient!.del(legacyRedisKey);
-                    return JSON.parse(legacyData) as T;
-                }
-
-                 console.log(`[DataManager] No data found in Redis for: ${dataType}`);
-                return null; // Explicitly return null if key doesn't exist in Redis
-            } catch (err) {
-                 console.error(`[DataManager] Error loading/parsing from Redis for ${dataType}. Error:`, err);
-                 return null;
-            }
-        };
-
-        const loadFromFilesystem = async (): Promise<T | null> => {
-            if (!filesystemFallbackLogged.has(dataType)) {
-                // Log fallback only when actually attempting filesystem load *after* Redis potentially wasn't ready/failed
-                if (!this.isRedisReady() || dataSourcePreference === 'filesystem') { 
-                     console.log(`DataManager: Loading ${dataType} from filesystem.`);
-                     filesystemFallbackLogged.add(dataType);
-                }
-            }
-             try {
-                 const fileData = await fs.promises.readFile(filePath, 'utf8');
-                 console.log(`[DataManager] Data loaded successfully from Filesystem for: ${dataType}`);
-                 return JSON.parse(fileData) as T;
-             } catch (err: any) {
-                 if (err?.code === 'ENOENT') {
-                     console.warn(`[DataManager] File not found: ${filePath}. Cannot load ${dataType} from filesystem.`);
-                     return null;
-                 }
-                 if (dataType === 'keys') {
-                     await backupInvalidKeysJson(filePath, err);
-                     return null;
-                 }
-                 console.error(`[DataManager] Error loading/parsing file ${filePath}. Error:`, err);
-                 return null;
-            }
-        };
-
-        let loadedData: T | null = null;
-        let loadedFromFallback = false; // Flag to indicate if data was loaded from a fallback source
-        let loadedSource: 'redis' | 'filesystem' | null = null;
-
-        // Attempt to load based on preference
-        if (dataSourcePreference === 'redis') {
-            loadedData = await loadFromRedis();
-            if (loadedData !== null) loadedSource = 'redis';
-            if (loadedData === null) { // If Redis failed or was empty, try filesystem
-                console.log(`[DataManager] Redis preferred, but failed/empty for ${dataType}. Trying filesystem.`);
-                loadedData = await loadFromFilesystem();
-                if (loadedData !== null) {
-                    loadedFromFallback = true; // Mark that data was loaded from fallback
-                    loadedSource = 'filesystem';
-                }
-            }
-        } else { // Filesystem preference
-            loadedData = await loadFromFilesystem();
-            if (loadedData !== null) loadedSource = 'filesystem';
-            if (loadedData === null) { // If filesystem failed or was empty, try Redis
-                console.log(`[DataManager] Filesystem preferred, but failed/empty for ${dataType}. Trying Redis.`);
-                loadedData = await loadFromRedis();
-                if (loadedData !== null) {
-                    loadedFromFallback = true; // Mark that data was loaded from fallback
-                    loadedSource = 'redis';
-                }
-            }
+        const inFlight = this.inFlightLoads.get(dataType);
+        if (inFlight) {
+            return inFlight as Promise<T>;
         }
 
-        // If data loaded successfully from either source
-        if (loadedData !== null) {
-            if (dataType === 'keys') {
-                const { normalized, changed } = this.normalizeKeysSchema(loadedData as KeysFile);
-                if (changed) {
-                    loadedData = normalized as T;
-                    try {
-                        await this.save<T>('keys', loadedData);
-                    } catch (err) {
-                        console.error('[DataManager] Failed persisting migrated keys schema:', err);
+        const loadPromise = (async (): Promise<T> => {
+
+            const redisField = redisHashFields[dataType];
+            const legacyRedisKey = legacyRedisKeys[dataType];
+            const filePath = filePaths[dataType];
+            const defaultValue = defaultEmptyData[dataType] as T;
+            
+            const loadFromRedis = async (): Promise<T | null> => {
+                if (!this.isRedisReady()) {
+                    if (!filesystemFallbackLogged.has(dataType)) {
+                        console.log(`DataManager: Redis not ready, cannot load ${dataType} from Redis.`);
+                        // No need to add to set here, loadFromFilesystem will log fallback
+                    }
+                    return null;
+                }
+
+                const cooldownUntil = this.redisReadCooldownUntil.get(dataType) || 0;
+                if (cooldownUntil > Date.now()) {
+                    return null;
+                }
+
+                try {
+                    const redisTimeoutMs = dataType === 'keys' ? keysRedisReadTimeoutMs : redisReadTimeoutMs;
+                    const redisData = await withTimeout(
+                        this.redisClient!.hget(redisHashKey, redisField),
+                        redisTimeoutMs,
+                        `[DataManager] Redis HGET timed out for ${dataType}`
+                    );
+                    if (redisData) {
+                        this.redisReadCooldownUntil.delete(dataType);
+                        console.log(`[DataManager] Data loaded successfully from Redis for: ${dataType}`);
+                        return JSON.parse(redisData) as T; 
+                    }
+
+                    const legacyData = await withTimeout(
+                        this.redisClient!.get(legacyRedisKey),
+                        redisTimeoutMs,
+                        `[DataManager] Redis legacy GET timed out for ${dataType}`
+                    );
+                    if (legacyData) {
+                        this.redisReadCooldownUntil.delete(dataType);
+                        console.log(`[DataManager] Legacy Redis key found for ${dataType}; migrating to hash namespace.`);
+                        await this.redisClient!.hset(redisHashKey, redisField, legacyData);
+                        await this.redisClient!.del(legacyRedisKey);
+                        return JSON.parse(legacyData) as T;
+                    }
+
+                     console.log(`[DataManager] No data found in Redis for: ${dataType}`);
+                    return null; // Explicitly return null if key doesn't exist in Redis
+                } catch (err) {
+                    if (redisFailureCooldownMs > 0) {
+                        this.redisReadCooldownUntil.set(dataType, Date.now() + redisFailureCooldownMs);
+                    }
+                     console.error(`[DataManager] Error loading/parsing from Redis for ${dataType}. Error:`, err);
+                     return null;
+                }
+            };
+
+            const loadFromFilesystem = async (): Promise<T | null> => {
+                if (!filesystemFallbackLogged.has(dataType)) {
+                    // Log fallback only when actually attempting filesystem load *after* Redis potentially wasn't ready/failed
+                    if (!this.isRedisReady() || dataSourcePreference === 'filesystem') { 
+                         console.log(`DataManager: Loading ${dataType} from filesystem.`);
+                         filesystemFallbackLogged.add(dataType);
+                    }
+                 }
+                 try {
+                     const fileData = await readTextFile(filePath);
+                     console.log(`[DataManager] Data loaded successfully from Filesystem for: ${dataType}`);
+                     return JSON.parse(fileData) as T;
+                 } catch (err: any) {
+                     if (err?.code === 'ENOENT') {
+                         console.warn(`[DataManager] File not found: ${filePath}. Cannot load ${dataType} from filesystem.`);
+                         return null;
+                     }
+                     if (dataType === 'keys') {
+                         await backupInvalidKeysJson(filePath, err);
+                         return null;
+                     }
+                     console.error(`[DataManager] Error loading/parsing file ${filePath}. Error:`, err);
+                     return null;
+                }
+            };
+
+            let loadedData: T | null = null;
+            let loadedFromFallback = false; // Flag to indicate if data was loaded from a fallback source
+            let loadedSource: 'redis' | 'filesystem' | null = null;
+
+            // Attempt to load based on preference
+            if (dataSourcePreference === 'redis') {
+                loadedData = await loadFromRedis();
+                if (loadedData !== null) loadedSource = 'redis';
+                if (loadedData === null) { // If Redis failed or was empty, try filesystem
+                    console.log(`[DataManager] Redis preferred, but failed/empty for ${dataType}. Trying filesystem.`);
+                    loadedData = await loadFromFilesystem();
+                    if (loadedData !== null) {
+                        loadedFromFallback = true; // Mark that data was loaded from fallback
+                        loadedSource = 'filesystem';
+                    }
+                }
+            } else { // Filesystem preference
+                loadedData = await loadFromFilesystem();
+                if (loadedData !== null) loadedSource = 'filesystem';
+                if (loadedData === null) { // If filesystem failed or was empty, try Redis
+                    console.log(`[DataManager] Filesystem preferred, but failed/empty for ${dataType}. Trying Redis.`);
+                    loadedData = await loadFromRedis();
+                    if (loadedData !== null) {
+                        loadedFromFallback = true; // Mark that data was loaded from fallback
+                        loadedSource = 'redis';
                     }
                 }
             }
 
-            if (dataType === 'models' && loadedSource) {
-                await this.syncModelsMirrorIfNeeded(loadedData as ModelsFileStructure, loadedSource);
+            // If data loaded successfully from either source
+            if (loadedData !== null) {
+                if (dataType === 'keys') {
+                    const { normalized, changed } = this.normalizeKeysSchema(loadedData as KeysFile);
+                    if (changed) {
+                        loadedData = normalized as T;
+                        try {
+                            await this.save<T>('keys', loadedData);
+                        } catch (err) {
+                            console.error('[DataManager] Failed persisting migrated keys schema:', err);
+                        }
+                    }
+                }
+
+                if (dataType === 'models' && loadedSource) {
+                    await this.syncModelsMirrorIfNeeded(loadedData as ModelsFileStructure, loadedSource);
+                }
+
+                // If data was loaded from a fallback, save it back to ensure sync with the preferred source
+                if (loadedFromFallback) {
+                    console.log(`[DataManager] Data for ${dataType} loaded from fallback. Attempting to save back to synchronize sources.`);
+                    if (dataSourcePreference === 'redis' && !this.isRedisReady()) {
+                        this.pendingRedisBackfill.add(dataType);
+                    }
+                    try {
+                        // Intentionally not awaiting this promise to avoid blocking the load operation,
+                        // but logging success/failure.
+                        // The save operation itself handles logging.
+                        this.save(dataType, loadedData).catch(saveErr => {
+                             console.error(`[DataManager] Asynchronous save after fallback for ${dataType} failed:`, saveErr);
+                        });
+                    } catch (saveErr) {
+                        // This catch block might be redundant if `this.save` doesn't throw synchronously
+                        // when the promise is not awaited, but kept for safety.
+                        console.error(`[DataManager] Error initiating save for ${dataType} back after fallback load:`, saveErr);
+                    }
+                }
+                // Update cache on successful load
+                inMemoryCache[dataType] = { value: loadedData, ts: Date.now() };
+                return loadedData;
             }
 
-            // If data was loaded from a fallback, save it back to ensure sync with the preferred source
-            if (loadedFromFallback) {
-                console.log(`[DataManager] Data for ${dataType} loaded from fallback. Attempting to save back to synchronize sources.`);
-                if (dataSourcePreference === 'redis' && !this.isRedisReady()) {
-                    this.pendingRedisBackfill.add(dataType);
-                }
-                try {
-                    // Intentionally not awaiting this promise to avoid blocking the load operation,
-                    // but logging success/failure.
-                    // The save operation itself handles logging.
-                    this.save(dataType, loadedData).catch(saveErr => {
-                         console.error(`[DataManager] Asynchronous save after fallback for ${dataType} failed:`, saveErr);
-                    });
-                } catch (saveErr) {
-                    // This catch block might be redundant if `this.save` doesn't throw synchronously
-                    // when the promise is not awaited, but kept for safety.
-                    console.error(`[DataManager] Error initiating save for ${dataType} back after fallback load:`, saveErr);
-                }
+            // If data is null after trying both sources, handle default case
+            console.warn(`[DataManager] Data for ${dataType} not found in ${dataSourcePreference} or fallback source. Using/creating default.`);
+            // Save the default value to both places to initialize
+            try {
+                 await this.save(dataType, defaultValue); // save handles writing to both
+            } catch (saveErr) {
+                console.error(`[DataManager] CRITICAL: Failed to save default value for ${dataType} during initial load. Error:`, saveErr);
             }
-            // Update cache on successful load
-            inMemoryCache[dataType] = { value: loadedData, ts: Date.now() };
-            return loadedData;
-        }
+            // Cache the default as well to avoid thrashing repeated fallbacks
+            inMemoryCache[dataType] = { value: defaultValue, ts: Date.now() };
+            return defaultValue;
+        })();
 
-        // If data is null after trying both sources, handle default case
-        console.warn(`[DataManager] Data for ${dataType} not found in ${dataSourcePreference} or fallback source. Using/creating default.`);
-        // Save the default value to both places to initialize
+        this.inFlightLoads.set(dataType, loadPromise as Promise<ManagedDataStructure>);
         try {
-             await this.save(dataType, defaultValue); // save handles writing to both
-        } catch (saveErr) {
-            console.error(`[DataManager] CRITICAL: Failed to save default value for ${dataType} during initial load. Error:`, saveErr);
+            return await loadPromise;
+        } finally {
+            if (this.inFlightLoads.get(dataType) === loadPromise) {
+                this.inFlightLoads.delete(dataType);
+            }
         }
-        // Cache the default as well to avoid thrashing repeated fallbacks
-        inMemoryCache[dataType] = { value: defaultValue, ts: Date.now() };
-        return defaultValue;
     }
 
     /**
@@ -941,10 +1051,12 @@ class DataManager {
     ): Promise<T> {
         const redisField = redisHashFields[dataType];
         const legacyRedisKey = legacyRedisKeys[dataType];
+        const effectiveMaxRetries = dataType === 'providers' ? Math.max(maxRetries, 8) : maxRetries;
 
         if (this.isRedisReady()) {
-            for (let attempt = 0; attempt < maxRetries; attempt++) {
+            for (let attempt = 0; attempt < effectiveMaxRetries; attempt++) {
                 const txClient = this.redisClient!.duplicate();
+                let shouldRetry = false;
                 try {
                     await txClient.watch(redisHashKey);
                     let currentRaw = await txClient.hget(redisHashKey, redisField);
@@ -967,11 +1079,23 @@ class DataManager {
                         });
                         return updated;
                     }
+                    shouldRetry = true;
                 } catch (err) {
-                    console.warn(`[DataManager] Redis updateWithLock attempt ${attempt + 1} failed for ${dataType}:`, err);
+                    shouldRetry = true;
+                    if (attempt === effectiveMaxRetries - 1) {
+                        console.warn(`[DataManager] Redis updateWithLock attempt ${attempt + 1} failed for ${dataType}:`, err);
+                    }
                 } finally {
                     try { await txClient.unwatch(); } catch { /* ignore */ }
                     try { await txClient.quit(); } catch { /* ignore */ }
+                }
+
+                if (shouldRetry && attempt < effectiveMaxRetries - 1) {
+                    const baseBackoffMs = dataType === 'providers'
+                        ? Math.min(20 * (2 ** attempt), 250)
+                        : Math.min(10 * (attempt + 1), 50);
+                    const jitterMs = dataType === 'providers' ? Math.floor(Math.random() * 25) : 0;
+                    await sleepMs(baseBackoffMs + jitterMs);
                 }
             }
             console.warn(`[DataManager] Falling back to filesystem update for ${dataType} after Redis contention.`);

@@ -98,6 +98,9 @@ export interface ProviderResponse {
 export interface ChatMessage {
   role: string;
   content: string | ContentPart[];
+  tool_calls?: any[];
+  tool_call_id?: string;
+  name?: string;
 }
 
 export type ContentPart =
@@ -109,6 +112,9 @@ export type ContentPart =
 export interface IMessage {
   role?: string;
   content: string | ContentPart[];
+  tool_calls?: any[];
+  tool_call_id?: string;
+  name?: string;
   model: {
     id: string;
   };
@@ -127,6 +133,7 @@ export interface IMessage {
   audio?: any;
   reasoning?: any;
   instructions?: string;
+  previous_response_id?: string;
   stream_options?: Record<string, any>;
   image_fetch_referer?: string;
   service_tier?: string;

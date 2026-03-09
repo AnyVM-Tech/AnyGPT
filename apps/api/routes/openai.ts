@@ -254,6 +254,9 @@ function extractResponsesRequestBody(requestBody: any): { message: IMessage; mod
     const maxOutputTokens = typeof requestBody.max_output_tokens === 'number' ? requestBody.max_output_tokens : undefined;
     const temperature = typeof requestBody.temperature === 'number' ? requestBody.temperature : undefined;
     const topP = typeof requestBody.top_p === 'number' ? requestBody.top_p : undefined;
+    const previousResponseId = typeof requestBody.previous_response_id === 'string' && requestBody.previous_response_id.trim()
+        ? requestBody.previous_response_id.trim()
+        : undefined;
 
     const message: IMessage = {
         content: normalizedInput,
@@ -272,6 +275,7 @@ function extractResponsesRequestBody(requestBody: any): { message: IMessage; mod
         tool_choice: requestBody.tool_choice,
         reasoning: requestBody.reasoning,
         instructions: requestBody.instructions,
+        previous_response_id: previousResponseId,
         stream_options: (requestBody.stream_options && typeof requestBody.stream_options === 'object')
             ? requestBody.stream_options
             : undefined
@@ -640,9 +644,138 @@ function extractImageUrlFromResponsesInput(input: any): string | null {
     return null;
 }
 
-function filterValidChatMessages(rawMessages: any): { role: string; content: any }[] {
+function filterValidChatMessages(rawMessages: any): { role: string; content: any; tool_calls?: any[]; tool_call_id?: string; name?: string }[] {
     if (!Array.isArray(rawMessages)) return [];
     return rawMessages.filter((msg) => msg && typeof msg.role === 'string');
+}
+
+type StoredResponsesHistoryEntry = {
+    id: string;
+    model: string;
+    input: any[];
+    output: any[];
+    output_text: string;
+    created: number;
+};
+
+const RESPONSES_HISTORY_TTL_SECONDS = Math.max(60, readEnvNumber('RESPONSES_HISTORY_TTL_SECONDS', 60 * 60));
+const RESPONSES_HISTORY_REDIS_PREFIX = 'api:responses_history:';
+const responsesHistoryMemory = new Map<string, { expiresAt: number; entry: StoredResponsesHistoryEntry }>();
+
+function cloneResponsesHistoryValue<T>(value: T): T {
+    if (typeof value === 'undefined') return value;
+    return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function getResponsesHistoryRedisKey(responseId: string): string {
+    return `${RESPONSES_HISTORY_REDIS_PREFIX}${responseId}`;
+}
+
+function pruneExpiredResponsesHistoryMemory(): void {
+    const now = Date.now();
+    for (const [key, cached] of responsesHistoryMemory) {
+        if (cached.expiresAt <= now) responsesHistoryMemory.delete(key);
+    }
+}
+
+async function loadResponsesHistoryEntry(responseId: string): Promise<StoredResponsesHistoryEntry | null> {
+    const normalizedId = typeof responseId === 'string' ? responseId.trim() : '';
+    if (!normalizedId) return null;
+
+    pruneExpiredResponsesHistoryMemory();
+    const cached = responsesHistoryMemory.get(normalizedId);
+    if (cached) {
+        if (cached.expiresAt > Date.now()) return cloneResponsesHistoryValue(cached.entry);
+        responsesHistoryMemory.delete(normalizedId);
+    }
+
+    if (!redis) return null;
+
+    try {
+        const raw = await redis.get(getResponsesHistoryRedisKey(normalizedId));
+        if (!raw) return null;
+        const parsed = JSON.parse(raw) as StoredResponsesHistoryEntry;
+        responsesHistoryMemory.set(normalizedId, {
+            expiresAt: Date.now() + RESPONSES_HISTORY_TTL_SECONDS * 1000,
+            entry: parsed,
+        });
+        return cloneResponsesHistoryValue(parsed);
+    } catch (error: any) {
+        console.warn(`[ResponsesHistory] Failed to load ${normalizedId}: ${error?.message || error}`);
+        return null;
+    }
+}
+
+async function saveResponsesHistoryEntry(entry: StoredResponsesHistoryEntry): Promise<void> {
+    const normalizedId = typeof entry?.id === 'string' ? entry.id.trim() : '';
+    if (!normalizedId) return;
+
+    const stored: StoredResponsesHistoryEntry = {
+        ...cloneResponsesHistoryValue(entry),
+        id: normalizedId,
+    };
+    responsesHistoryMemory.set(normalizedId, {
+        expiresAt: Date.now() + RESPONSES_HISTORY_TTL_SECONDS * 1000,
+        entry: stored,
+    });
+
+    if (!redis) return;
+
+    try {
+        await redis.set(
+            getResponsesHistoryRedisKey(normalizedId),
+            JSON.stringify(stored),
+            'EX',
+            RESPONSES_HISTORY_TTL_SECONDS,
+        );
+    } catch (error: any) {
+        console.warn(`[ResponsesHistory] Failed to persist ${normalizedId}: ${error?.message || error}`);
+    }
+}
+
+function buildStoredResponsesHistoryOutput(outputText: string, toolCalls?: any[]): any[] {
+    if (Array.isArray(toolCalls) && toolCalls.length > 0) {
+        return toolCalls
+            .map((call: any) => {
+                const functionPayload = call?.function && typeof call.function === 'object' ? call.function : call;
+                const name = typeof functionPayload?.name === 'string' && functionPayload.name.trim()
+                    ? functionPayload.name.trim()
+                    : (typeof call?.name === 'string' && call.name.trim() ? call.name.trim() : undefined);
+                if (!name) return null;
+
+                const rawArguments = functionPayload?.arguments ?? call?.arguments ?? {};
+                let serializedArguments = '{}';
+                if (typeof rawArguments === 'string') {
+                    serializedArguments = rawArguments;
+                } else {
+                    try {
+                        serializedArguments = JSON.stringify(rawArguments);
+                    } catch {
+                        serializedArguments = String(rawArguments ?? '{}');
+                    }
+                }
+
+                const normalized: Record<string, any> = {
+                    type: 'function_call',
+                    name,
+                    arguments: serializedArguments,
+                };
+                const callId = call?.id ?? call?.call_id ?? call?.tool_call_id;
+                if (typeof callId === 'string' && callId.trim()) normalized.call_id = callId.trim();
+                return normalized;
+            })
+            .filter(Boolean);
+    }
+
+    return [{ role: 'assistant', content: [{ type: 'output_text', text: outputText || '' }] }];
+}
+
+function mergeResponsesHistoryInput(previousEntry: StoredResponsesHistoryEntry, nextInput: any[]): any[] {
+    return [
+        ...cloneResponsesHistoryValue(previousEntry.input || []),
+        ...cloneResponsesHistoryValue(previousEntry.output || []),
+        ...cloneResponsesHistoryValue(nextInput || []),
+    ];
 }
 
 async function handleImageGenFallbackFromChatOrResponses(params: {
@@ -1859,8 +1992,7 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
     }
 
         const formattedMessages: IMessage[] = rawMessages.map(msg => ({
-            role: msg.role,
-            content: msg.content,
+            ...msg,
             model: { id: modelId },
             ...sharedMessageOptions,
             image_fetch_referer: imageFetchReferer,
@@ -2433,6 +2565,22 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
         }
 
         const { message, modelId, stream } = extractResponsesRequestBody(requestBody);
+        const localPreviousResponseId = typeof message.previous_response_id === 'string' && message.previous_response_id.trim()
+            ? message.previous_response_id.trim()
+            : undefined;
+        if (localPreviousResponseId) {
+            const previousEntry = await loadResponsesHistoryEntry(localPreviousResponseId);
+            if (previousEntry) {
+                const nextInput = Array.isArray(message.content) ? message.content : [message.content];
+                message.content = mergeResponsesHistoryInput(previousEntry, nextInput);
+            } else {
+                console.warn(`[ResponsesHistory] previous_response_id ${localPreviousResponseId} was not found locally; continuing with request input only.`);
+            }
+            delete (message as any).previous_response_id;
+        }
+        const responsesHistoryInput = Array.isArray(message.content)
+            ? cloneResponsesHistoryValue(message.content)
+            : [cloneResponsesHistoryValue(message.content)];
         message.service_tier = getServiceTierForUserTier(request.userTier);
         const imageFetchReferer = normalizeImageFetchReferer(
             getHeaderValue(request.headers, 'x-image-fetch-referer') || getHeaderValue(request.headers, 'x-image-referer')
@@ -2513,7 +2661,13 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
             response.setHeader('Content-Type', 'text/event-stream');
             response.setHeader('Cache-Control', 'no-cache');
             response.setHeader('Connection', 'keep-alive');
-            const streamHandler = messageHandler.handleStreamingMessages([message], modelId, userApiKey, { requestId: request.requestId });
+            const shouldDisableResponsesPassthrough = Boolean(localPreviousResponseId)
+                || Boolean(message.tools)
+                || typeof message.tool_choice !== 'undefined';
+            const streamHandler = messageHandler.handleStreamingMessages([message], modelId, userApiKey, {
+                disablePassthrough: shouldDisableResponsesPassthrough,
+                requestId: request.requestId,
+            });
             let totalTokenUsage = 0;
             let fullText = '';
             let toolCallsFromStream: any[] | undefined;
@@ -2664,6 +2818,14 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
                     totalTokenUsage = promptEstimate + completionEstimate;
                 }
 
+                await saveResponsesHistoryEntry({
+                    id: responseId,
+                    model: modelId,
+                    input: responsesHistoryInput,
+                    output: buildStoredResponsesHistoryOutput(fullText, toolCallsFromStream),
+                    output_text: fullText,
+                    created,
+                });
                 await updateUserTokenUsage(totalTokenUsage, userApiKey, { modelId });
                 if (!response.completed) return response.end();
                 return;
@@ -2701,6 +2863,14 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
                 ...(finishReasonFromStream ? { status: finishReasonFromStream } : {})
             };
 
+            await saveResponsesHistoryEntry({
+                id: responseId,
+                model: modelId,
+                input: responsesHistoryInput,
+                output: buildStoredResponsesHistoryOutput(fullText, toolCallsFromStream),
+                output_text: fullText,
+                created,
+            });
             response.write(`event: response.completed\n`);
             response.write(`data: ${JSON.stringify(finalPayload)}\n\n`);
             response.write(`data: [DONE]\n\n`);
@@ -2734,6 +2904,14 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
             ...((result.finish_reason || effectiveToolCalls?.length) ? { status: effectiveToolCalls?.length ? 'tool_calls' : result.finish_reason } : {})
         };
 
+        await saveResponsesHistoryEntry({
+            id: responseId,
+            model: modelId,
+            input: responsesHistoryInput,
+            output: buildStoredResponsesHistoryOutput(outputText, effectiveToolCalls),
+            output_text: outputText,
+            created,
+        });
         return response.json(responseBody);
     } catch (error: any) {
         await logError(error, request);
@@ -2957,7 +3135,7 @@ openaiRouter.post('/deployments/:deploymentId/chat/completions', authAndUsageMid
         }
 
         // Use deploymentId as model identifier for the handler
-        const formattedMessages: IMessage[] = rawMessages.map(msg => ({ role: msg.role, content: msg.content, model: { id: deploymentId } }));
+        const formattedMessages: IMessage[] = rawMessages.map(msg => ({ ...msg, model: { id: deploymentId } }));
  
         // Call the central message handler
         const result = await messageHandler.handleMessages(formattedMessages, deploymentId, userApiKey, { requestId: request.requestId });
