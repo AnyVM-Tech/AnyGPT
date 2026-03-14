@@ -422,25 +422,32 @@ export async function refreshProviderCountsInModelsFile(): Promise<void> {
 
         const capabilitiesCache = loadCapabilitiesCache();
 
-        // Calculate active provider counts and average TPS for each model ID
+        // Calculate provider counts and average TPS for each model ID.
+        // `activeProviderCounts` only includes currently enabled providers.
+        // `knownProviderCounts` includes providers even when temporarily disabled,
+        // so transient outages do not erase model entries from models.json.
         const activeProviderCounts: { [modelId: string]: number } = {};
+        const knownProviderCounts: { [modelId: string]: number } = {};
         const availableModelIds = new Set<string>();
+        const knownModelIds = new Set<string>();
         const modelTpsSamples: { [modelId: string]: number[] } = {};
 
         for (const provider of providersData) {
-            if (!provider.disabled) { // Consider a provider active if 'disabled' is false or undefined
-                if (provider.models) {
-                    for (const modelId in provider.models) {
-                        activeProviderCounts[modelId] = (activeProviderCounts[modelId] || 0) + 1;
-                        availableModelIds.add(modelId);
+            if (!provider.models) continue;
+            for (const modelId in provider.models) {
+                knownProviderCounts[modelId] = (knownProviderCounts[modelId] || 0) + 1;
+                knownModelIds.add(modelId);
 
-                        // Collect TPS data for throughput calculation
-                        const modelData = provider.models[modelId] as any;
-                        const tps = extractTokenSpeed(modelData);
-                        if (tps !== null && tps > 0.1 && tps < 5000) { // Filter outliers
-                            if (!modelTpsSamples[modelId]) modelTpsSamples[modelId] = [];
-                            modelTpsSamples[modelId].push(tps);
-                        }
+                if (!provider.disabled) { // Consider a provider active if 'disabled' is false or undefined
+                    activeProviderCounts[modelId] = (activeProviderCounts[modelId] || 0) + 1;
+                    availableModelIds.add(modelId);
+
+                    // Collect TPS data for throughput calculation
+                    const modelData = provider.models[modelId] as any;
+                    const tps = extractTokenSpeed(modelData);
+                    if (tps !== null && tps > 0.1 && tps < 5000) { // Filter outliers
+                        if (!modelTpsSamples[modelId]) modelTpsSamples[modelId] = [];
+                        modelTpsSamples[modelId].push(tps);
                     }
                 }
             }
@@ -464,14 +471,20 @@ export async function refreshProviderCountsInModelsFile(): Promise<void> {
         // Process existing models
         for (const model of modelsFile.data) {
             const newProviderCount = activeProviderCounts[model.id] || 0;
+            const knownProviderCount = knownProviderCounts[model.id] || 0;
             
-            if (newProviderCount > 0) {
-                // Keep models that have at least one active provider
+            if (newProviderCount > 0 || knownProviderCount > 0) {
+                // Keep models that still exist on any provider, even if all providers are
+                // temporarily disabled or cooling down. This prevents startup sync from
+                // erasing whole model families like Gemini from models.json.
                 if (model.providers !== newProviderCount) {
                     const oldProviderCount = model.providers;
                     model.providers = newProviderCount;
                     changesMade = true;
                     console.log(`Updated provider count for ${model.id}: ${oldProviderCount} -> ${newProviderCount}`);
+                }
+                if (newProviderCount === 0 && knownProviderCount > 0) {
+                    console.log(`Preserving model ${model.id}: ${knownProviderCount} provider(s) still advertise it, but none are currently active.`);
                 }
                 if (!model.owned_by || model.owned_by === 'unknown') {
                     const guessedOwner = guessOwnedBy(model.id);
@@ -482,7 +495,7 @@ export async function refreshProviderCountsInModelsFile(): Promise<void> {
                     }
                 }
                 // Dynamic pricing based on provider availability
-                const dynamicPrice = calculateDynamicPricing(model.id, newProviderCount);
+                const dynamicPrice = calculateDynamicPricing(model.id, Math.max(newProviderCount, knownProviderCount));
                 if (dynamicPrice && JSON.stringify((model as any).pricing || null) !== JSON.stringify(dynamicPrice)) {
                     (model as any).pricing = dynamicPrice;
                     changesMade = true;
@@ -505,19 +518,21 @@ export async function refreshProviderCountsInModelsFile(): Promise<void> {
                 }
                 updatedModels.push(model);
             } else {
-                // Remove models with no active providers
-                console.log(`Removing model ${model.id}: no active providers found`);
+                // Remove models only when no provider advertises them anymore.
+                console.log(`Removing model ${model.id}: no providers advertise it anymore`);
                 changesMade = true;
             }
         }
 
-        // Add new models that have active providers but aren't in models.json
+        // Add new models that providers advertise even if all supporting providers are
+        // currently disabled. That preserves model ids across restarts and temporary quota events.
         const existingModelIds = new Set(modelsFile.data.map(model => model.id));
         const newModelsWithoutCaps: string[] = [];
-        for (const modelId of availableModelIds) {
+        for (const modelId of knownModelIds) {
             if (!existingModelIds.has(modelId)) {
                 const providerCount = activeProviderCounts[modelId] ?? 0;
-                if (providerCount <= 0) {
+                const knownProviderCount = knownProviderCounts[modelId] ?? 0;
+                if (knownProviderCount <= 0) {
                     continue;
                 }
                 const newModel: any = {
@@ -532,13 +547,13 @@ export async function refreshProviderCountsInModelsFile(): Promise<void> {
                 if (cachedCaps && cachedCaps.length > 0) {
                     newModel.capabilities = [...cachedCaps];
                 }
-                const dynamicPrice = calculateDynamicPricing(modelId, providerCount);
+                const dynamicPrice = calculateDynamicPricing(modelId, Math.max(providerCount, knownProviderCount));
                 if (dynamicPrice) {
                     newModel.pricing = dynamicPrice;
                 }
                 updatedModels.push(newModel);
                 newModelsWithoutCaps.push(modelId);
-                console.log(`Added new model ${modelId} with ${providerCount} provider(s), owned by: ${newModel.owned_by}`);
+                console.log(`Added new model ${modelId} with ${providerCount} active / ${knownProviderCount} known provider(s), owned by: ${newModel.owned_by}`);
                 changesMade = true;
             }
         }

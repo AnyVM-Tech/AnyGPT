@@ -18,12 +18,62 @@ export interface KeyStatus {
   error?: string;
 }
 
+export type KeyHealthState = 'healthy' | 'no-quota' | 'invalid' | 'indeterminate';
+
+export interface KeyHealthStatus extends KeyStatus {
+  health: KeyHealthState;
+}
+
 type ApiErrorInfo = {
   message?: string;
   code?: string;
   type?: string;
   status?: string;
 };
+
+const INVALID_KEY_ERROR_PATTERNS = [
+    'api_key_invalid',
+    'api_key_http_referrer_blocked',
+    'api key not found',
+    'invalid api key',
+    'invalid authentication',
+    'incorrect api key',
+    'requests from referer',
+    'http referrer blocked',
+    'unauthorized',
+    'authentication failed',
+    'access token is invalid',
+    'invalid x-api-key',
+    'invalid key',
+];
+
+const TRANSIENT_KEY_ERROR_PATTERNS = [
+    'timeout',
+    'timed out',
+    'socket hang up',
+    'network error',
+    'temporarily unavailable',
+    'service unavailable',
+    'bad gateway',
+    'gateway timeout',
+    'internal server error',
+    'upstream error',
+    'upstream connect error',
+    'connection reset',
+    'connection aborted',
+    'econnreset',
+    'econnrefused',
+    'etimedout',
+    'enotfound',
+    'eai_again',
+    'server overloaded',
+    'overloaded',
+    'try again later',
+    'status 500',
+    'status 502',
+    'status 503',
+    'status 504',
+];
 
 const OAI_TIERS: Record<string, { tpm: number; rpm: number }> = {
     'Tier 1': { tpm: 500000, rpm: 500 },
@@ -66,14 +116,26 @@ function pickOpenAIProbeModel(models?: string[]): string | null {
 }
 
 function extractErrorInfo(payload: any): ApiErrorInfo {
-    const err = payload?.error || payload;
-    if (!err || typeof err !== 'object') return {};
+  const err = payload?.error || payload;
+  if (!err || typeof err !== 'object') return {};
     return {
         message: typeof err.message === 'string' ? err.message : undefined,
         code: typeof err.code === 'string' ? err.code : undefined,
         type: typeof err.type === 'string' ? err.type : undefined,
         status: typeof err.status === 'string' ? err.status : undefined,
     };
+}
+
+function isInvalidKeyErrorMessage(message: string): boolean {
+    const normalized = String(message || '').toLowerCase();
+    if (!normalized) return false;
+    return INVALID_KEY_ERROR_PATTERNS.some((pattern) => normalized.includes(pattern));
+}
+
+export function isTransientKeyCheckError(error: unknown): boolean {
+    const message = String((error as any)?.message || error || '').toLowerCase();
+    if (!message) return false;
+    return TRANSIENT_KEY_ERROR_PATTERNS.some((pattern) => message.includes(pattern));
 }
 
 function isQuotaExhausted(info: ApiErrorInfo): boolean {
@@ -100,6 +162,20 @@ function isQuotaExhausted(info: ApiErrorInfo): boolean {
     if (message.includes('insufficient credits')) return true;
 
     return false;
+}
+
+export function classifyKeyHealth(status: KeyStatus): KeyHealthState {
+    const message = String(status?.error || '').trim();
+    const normalized = message.toLowerCase();
+
+    if (status.isValid && status.hasQuota !== false) return 'healthy';
+    if (status.isValid && status.hasQuota === false) return 'no-quota';
+    if (!normalized) return 'indeterminate';
+    if (normalized.includes('unsupported provider for check')) return 'indeterminate';
+    if (isTransientKeyCheckError(normalized)) return 'indeterminate';
+    if (isQuotaExhausted({ message: normalized })) return 'no-quota';
+    if (isInvalidKeyErrorMessage(normalized)) return 'invalid';
+    return 'indeterminate';
 }
 
 export async function checkOpenAI(apiKey: string): Promise<KeyStatus> {
@@ -402,4 +478,12 @@ export async function checkKey(provider: string, apiKey: string): Promise<KeySta
         case 'xai': return checkXAI(apiKey);
         default: return { isValid: false, provider, error: 'Unsupported provider for check' };
     }
+}
+
+export async function checkKeyHealth(provider: string, apiKey: string): Promise<KeyHealthStatus> {
+    const status = await checkKey(provider, apiKey);
+    return {
+        ...status,
+        health: classifyKeyHealth(status),
+    };
 }

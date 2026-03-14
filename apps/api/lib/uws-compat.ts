@@ -248,6 +248,7 @@ export class Response {
     private bunStream: ReadableStream<Uint8Array>;
     private bunResponse: globalThis.Response | null = null;
     private bodyChunks: Uint8Array[] = [];
+    private shouldBufferBody = true;
     private startedPromise: Promise<void>;
     private resolveStarted!: () => void;
 
@@ -264,6 +265,8 @@ export class Response {
             },
             cancel: () => {
                 this.completed = true;
+                this.shouldBufferBody = false;
+                this.bodyChunks = [];
                 this.bunController = null;
             },
         });
@@ -303,10 +306,17 @@ export class Response {
         this.resolveStarted();
     }
 
+    private disableBodyBuffering(): void {
+        this.shouldBufferBody = false;
+        this.bodyChunks = [];
+    }
+
     private enqueue(chunk?: string | Buffer | ArrayBufferLike | Uint8Array): void {
         if (chunk === undefined) return;
         const encoded = toUint8Array(chunk);
-        this.bodyChunks.push(encoded);
+        if (this.shouldBufferBody) {
+            this.bodyChunks.push(encoded);
+        }
         if (this.bunController) {
             try {
                 this.bunController.enqueue(encoded);
@@ -319,6 +329,7 @@ export class Response {
 
     private getCompletedBody(): Uint8Array | null {
         if (this.bodyChunks.length === 0) return null;
+        if (this.bodyChunks.length === 1) return this.bodyChunks[0];
         const total = this.bodyChunks.reduce((sum, chunk) => sum + chunk.byteLength, 0);
         const merged = new Uint8Array(total);
         let offset = 0;
@@ -379,14 +390,14 @@ export class Response {
         this.completed = true;
     }
 
-    write(chunk: string | Buffer): this {
+    write(chunk: string | Buffer | ArrayBufferLike | Uint8Array): this {
         if (this.completed) return this;
         this.markStarted();
         this.enqueue(chunk);
         return this;
     }
 
-    end(chunk?: string | Buffer): void {
+    end(chunk?: string | Buffer | ArrayBufferLike | Uint8Array): void {
         if (this.completed) return;
         let output = chunk;
         const shouldAttachErrorId = Boolean(this.errorId) && this.statusCode >= 400 && chunk !== undefined;
@@ -413,12 +424,14 @@ export class Response {
             const headers = new Headers(this.headers);
             if (this.completed) {
                 const body = this.getCompletedBody();
-                const completedBody = body ? Buffer.from(body) : null;
+                const completedBody = body ? Buffer.from(body.buffer, body.byteOffset, body.byteLength) : null;
+                this.bodyChunks = [];
                 this.bunResponse = new globalThis.Response(completedBody as any, {
                     status: this.statusCode,
                     headers,
                 });
             } else {
+                this.disableBodyBuffering();
                 this.bunResponse = new globalThis.Response(this.bunStream, {
                     status: this.statusCode,
                     headers,
@@ -690,16 +703,7 @@ export class Server extends Router {
         const execution = runHandlers(match.route.stack, wrappedRequest, response, handleError);
 
         await Promise.race([response.waitForStart(), execution]);
-        if (response.started && !response.completed) {
-            const contentType = (response.getHeader('Content-Type') || response.getHeader('content-type') || '').toLowerCase();
-            const isStreamingResponse = contentType.includes('text/event-stream');
-            if (!isStreamingResponse) {
-                await execution;
-                if (!response.completed) {
-                    response.end();
-                }
-            }
-        } else if (!response.started && !response.completed) {
+        if (!response.started && !response.completed) {
             await execution;
             if (!response.started && !response.completed) {
                 response.end();

@@ -19,6 +19,8 @@ import {
 import { redactToken } from '../modules/redaction.js';
 import { enforceInMemoryRateLimit, RequestTimestampStore } from '../modules/rateLimit.js';
 import { dataManager, type KeysFile, type LoadedProviders, type ModelsFileStructure } from '../modules/dataManager.js';
+import { refreshProviderCountsInModelsFile } from '../modules/modelUpdater.js';
+import { readTierRateLimitsFromEnv } from '../modules/middlewareFactory.js';
 import tiersData from '../tiers.json' with { type: 'json' };
 
 const adminRouter = new HyperExpress.Router();
@@ -48,6 +50,8 @@ const adminKeysAllowedProviders = (() => {
     return set.size > 0 ? set : null;
 })();
 const adminKeyIngestStore: RequestTimestampStore = {};
+const adminProtectedRouteStore: RequestTimestampStore = {};
+const adminProtectedRouteRateLimits = readTierRateLimitsFromEnv('ADMIN_ROUTE_RATE_LIMIT', { rps: 10, rpm: 300, rpd: 5000 });
 
 const tiers = tiersData as Record<string, { rps: number; rpm: number; rpd: number; max_tokens: number | null }>;
 
@@ -201,6 +205,32 @@ const adminOnlyMiddleware = (request: Request, response: Response, next: () => v
         }
         return;
     }
+
+    const rateKey = request.apiKey || request.userId || getRequestIp(request);
+    const rateDecision = enforceInMemoryRateLimit(adminProtectedRouteStore, rateKey, adminProtectedRouteRateLimits);
+    if (!rateDecision.allowed && rateDecision.window) {
+        const retryAfterSeconds = rateDecision.retryAfterSeconds ?? 1;
+        response.setHeader('Retry-After', String(retryAfterSeconds));
+        logError({
+            message: `Rate limit exceeded for protected admin route (${rateDecision.window.toUpperCase()}).`,
+            attemptedPath: request.url,
+            userId: request.userId,
+            userRole: request.userRole,
+            rateLimitWindow: rateDecision.window,
+            rateLimitLimit: rateDecision.limit ?? adminProtectedRouteRateLimits[rateDecision.window],
+            retryAfterSeconds,
+        }, request).catch(e => console.error('Failed background log:', e));
+        if (!response.completed) {
+            return response.status(429).json({
+                error: 'Rate limit exceeded',
+                message: `Admin route limit exceeded (${rateDecision.limit ?? adminProtectedRouteRateLimits[rateDecision.window]} ${rateDecision.window.toUpperCase()}).`,
+                retry_after_seconds: retryAfterSeconds,
+                timestamp: new Date().toISOString(),
+            });
+        }
+        return;
+    }
+
     next();
 };
 
@@ -745,16 +775,25 @@ adminRouter.post('/api-keys/rotate', adminOnlyMiddleware, async (request: Reques
 // --- Metrics (admin only) ---
 
 async function getErrorLogStats(): Promise<{ totalLines: number; lastTimestamp: string | null; fileBytes: number; truncated: boolean }> {
-    const errorLogPath = path.resolve('logs/api-error.jsonl');
+    const errorLogPaths = [
+        path.resolve('logs/api-errors.jsonl'),
+        path.resolve('logs/api-error.jsonl'),
+    ];
+    const existingPaths: string[] = [];
     let fileBytes = 0;
-    try {
-        const stat = await fs.promises.stat(errorLogPath);
-        fileBytes = stat.size;
-    } catch (err: any) {
-        if (err?.code === 'ENOENT') {
-            return { totalLines: 0, lastTimestamp: null, fileBytes: 0, truncated: false };
+    for (const errorLogPath of errorLogPaths) {
+        try {
+            const stat = await fs.promises.stat(errorLogPath);
+            fileBytes += stat.size;
+            existingPaths.push(errorLogPath);
+        } catch (err: any) {
+            if (err?.code !== 'ENOENT') {
+                throw err;
+            }
         }
-        throw err;
+    }
+    if (existingPaths.length === 0) {
+        return { totalLines: 0, lastTimestamp: null, fileBytes: 0, truncated: false };
     }
 
     const parsedMaxLines = parseInt(process.env.ADMIN_METRICS_MAX_ERROR_LINES || '200000', 10);
@@ -763,21 +802,26 @@ async function getErrorLogStats(): Promise<{ totalLines: number; lastTimestamp: 
     let lastTimestamp: string | null = null;
     let truncated = false;
 
-    const stream = fs.createReadStream(errorLogPath, { encoding: 'utf8' });
-    const rl = createInterface({ input: stream, crlfDelay: Infinity });
-    for await (const line of rl) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        totalLines += 1;
-        if (totalLines > maxLines) {
-            truncated = true;
-            break;
+    for (const errorLogPath of existingPaths) {
+        const stream = fs.createReadStream(errorLogPath, { encoding: 'utf8' });
+        const rl = createInterface({ input: stream, crlfDelay: Infinity });
+        for await (const line of rl) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+            totalLines += 1;
+            if (totalLines > maxLines) {
+                truncated = true;
+                break;
+            }
+            try {
+                const entry = JSON.parse(trimmed);
+                if (entry?.timestamp) lastTimestamp = entry.timestamp;
+            } catch {
+                // ignore parse errors
+            }
         }
-        try {
-            const entry = JSON.parse(trimmed);
-            if (entry?.timestamp) lastTimestamp = entry.timestamp;
-        } catch {
-            // ignore parse errors
+        if (truncated) {
+            break;
         }
     }
 
@@ -900,6 +944,26 @@ adminRouter.get('/metrics/models', adminOnlyMiddleware, async (request: Request,
             response.status(500).json({
                 error: 'Internal Server Error',
                 reference: 'Failed to load model metrics.',
+                timestamp: new Date().toISOString()
+            });
+        }
+    }
+});
+
+adminRouter.post('/models/refresh-provider-counts', adminOnlyMiddleware, async (request: Request, response: Response) => {
+    try {
+        await refreshProviderCountsInModelsFile();
+        response.status(200).json({
+            message: 'Successfully refreshed provider counts in models.json.',
+            timestamp: new Date().toISOString()
+        });
+    } catch (error) {
+        await logError(error, request);
+        console.error('Admin refresh provider counts error:', error);
+        if (!response.completed) {
+            response.status(500).json({
+                error: 'Internal Server Error',
+                reference: 'Failed to refresh provider counts.',
                 timestamp: new Date().toISOString()
             });
         }

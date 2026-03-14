@@ -5,7 +5,7 @@ import { GeminiAI } from '../providers/gemini.js';
 import { ImagenAI } from '../providers/imagen.js';
 import { DeepseekAI } from '../providers/deepseek.js';
 import { OpenRouterAI } from '../providers/openrouter.js';
-import { checkOpenAI, checkAnthropic, checkGemini, checkOpenRouter, checkDeepseek, checkXAI } from '../modules/keyChecker.js';
+import { checkKeyHealth } from '../modules/keyChecker.js';
 import axios from 'axios';
 import fs from 'fs';
 import path from 'path';
@@ -1759,50 +1759,39 @@ async function testLegacyCompletion(
 
 async function validateProviderKey(
   provider: LoadedProviderData
-): Promise<{ ok: boolean; hasQuota: boolean; reason?: string }> {
+): Promise<{ ok: boolean; hasQuota: boolean; reason?: string; indeterminate?: boolean }> {
   const key = provider.apiKey || '';
   if (!key) return { ok: false, hasQuota: false, reason: 'missing api key' };
 
+  const family = resolveProviderFamily(provider.id);
+  if (!['openai', 'anthropic', 'openrouter', 'gemini', 'deepseek', 'xai'].includes(family)) {
+    return { ok: true, hasQuota: true };
+  }
+
   try {
-    if (provider.id.includes('openai')) {
-      const status = await checkOpenAI(key);
-      const ok = Boolean(status.isValid);
-      const hasQuota = status.hasQuota !== false;
-      return { ok, hasQuota, reason: ok ? (hasQuota ? undefined : 'quota exceeded') : status.error };
+    const status = await checkKeyHealth(family, key);
+    if (status.health === 'healthy') {
+      return { ok: true, hasQuota: true };
     }
-    if (provider.id.includes('anthropic')) {
-      const status = await checkAnthropic(key);
-      const ok = Boolean(status.isValid);
-      const hasQuota = status.hasQuota !== false;
-      return { ok, hasQuota, reason: ok ? (hasQuota ? undefined : 'quota exceeded') : status.error };
+    if (status.health === 'no-quota') {
+      return { ok: true, hasQuota: false, reason: status.error || 'quota exceeded' };
     }
-    if (provider.id.includes('openrouter')) {
-      const status = await checkOpenRouter(key);
-      const ok = Boolean(status.isValid);
-      const hasQuota = status.hasQuota !== false;
-      return { ok, hasQuota, reason: ok ? (hasQuota ? undefined : 'quota exceeded') : status.error };
+    if (status.health === 'invalid') {
+      return { ok: false, hasQuota: false, reason: status.error || 'invalid key' };
     }
-    if (provider.id.includes('gemini') || provider.id === 'google' || provider.id.includes('imagen')) {
-      const status = await checkGemini(key);
-      const ok = Boolean(status.isValid);
-      const hasQuota = status.hasQuota !== false;
-      return { ok, hasQuota, reason: ok ? (hasQuota ? undefined : 'quota exceeded') : status.error };
-    }
-    if (provider.id.includes('deepseek')) {
-      const status = await checkDeepseek(key);
-      const ok = Boolean(status.isValid);
-      const hasQuota = status.hasQuota !== false;
-      return { ok, hasQuota, reason: ok ? (hasQuota ? undefined : 'quota exceeded') : status.error };
-    }
-    if (provider.id.includes('xai')) {
-      const status = await checkXAI(key);
-      const ok = Boolean(status.isValid);
-      const hasQuota = status.hasQuota !== false;
-      return { ok, hasQuota, reason: ok ? (hasQuota ? undefined : 'quota exceeded') : status.error };
-    }
+    return {
+      ok: false,
+      hasQuota: true,
+      reason: status.error || 'health check indeterminate',
+      indeterminate: true,
+    };
   } catch (err: any) {
-    appendProbeLog({ type: 'key_check_error', providerId: provider.id, error: err?.message || String(err) });
-    return { ok: false, hasQuota: false, reason: err?.message || String(err) };
+    return {
+      ok: false,
+      hasQuota: true,
+      reason: err?.message || String(err),
+      indeterminate: true,
+    };
   }
 
   return { ok: true, hasQuota: true };
@@ -1992,7 +1981,7 @@ async function main() {
 
   const providerValidity = new Map<string, { ok: boolean; hasQuota: boolean }>();
   const providerBlockedCaps = new Map<string, Set<ModelCapability>>();
-  const keyStatusCache = new Map<string, { ok: boolean; hasQuota: boolean; reason?: string }>();
+  const keyStatusCache = new Map<string, { ok: boolean; hasQuota: boolean; reason?: string; indeterminate?: boolean }>();
   const providerQueue = [...providers];
 
   function disableProvider(provider: LoadedProviderData, reason: string) {
@@ -2082,8 +2071,12 @@ async function main() {
 
       providerValidity.set(provider.id, { ok: status.ok, hasQuota: status.hasQuota });
       if (!status.ok) {
-        disableProvider(provider, status.reason || 'invalid key');
-        appendProbeLog({ type: 'key_invalid', providerId: provider.id, reason: status.reason || 'invalid key' });
+        if (status.indeterminate) {
+          appendProbeLog({ type: 'key_check_indeterminate', providerId: provider.id, reason: status.reason || 'health check indeterminate' });
+        } else {
+          disableProvider(provider, status.reason || 'invalid key');
+          appendProbeLog({ type: 'key_invalid', providerId: provider.id, reason: status.reason || 'invalid key' });
+        }
       } else if (!status.hasQuota) {
         disableProvider(provider, 'quota exceeded');
         appendProbeLog({ type: 'key_no_quota', providerId: provider.id, reason: 'quota exceeded' });

@@ -37,13 +37,14 @@ import {
 import { isExcludedError } from '../modules/errorExclusion.js';
 import redis from '../modules/db.js';
 import { hashToken } from '../modules/redaction.js';
+import { logUniqueProviderError } from '../modules/errorLogger.js';
 import {
     readEnvNumber,
     type TokenBreakdown,
     estimateTokensFromText,
     estimateTokensFromMessagesBreakdown,
 } from '../modules/tokenEstimation.js';
-import { requestQueue } from '../modules/requestQueue.js';
+import { RequestQueue, requestQueue } from '../modules/requestQueue.js';
 import {
     isRateLimitOrQuotaError as isRateLimitOrQuotaErrorShared,
     isInvalidProviderCredentialError as isInvalidProviderCredentialErrorShared,
@@ -70,6 +71,11 @@ const PROVIDER_AUTO_RECOVER_MAX_MS = (() => {
     const parsed = raw !== undefined ? Number(raw) : NaN;
     return Number.isFinite(parsed) && parsed > 0 ? parsed : 60 * 60 * 1000; // default 1 hour
 })();
+const PROVIDER_AUTO_DISABLE_MIN_ACTIVE = (() => {
+    const raw = process.env.PROVIDER_AUTO_DISABLE_MIN_ACTIVE;
+    const parsed = raw !== undefined ? Number(raw) : NaN;
+    return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : 1;
+})();
 const RATE_LIMIT_WAIT_PER_MESSAGE = (() => {
     const raw = process.env.RATE_LIMIT_WAIT_PER_MESSAGE;
     if (raw === undefined) return true;
@@ -82,6 +88,68 @@ const RATE_LIMIT_SKIP_WAIT = (() => {
     const normalized = String(raw).trim().toLowerCase();
     return normalized === '1' || normalized === 'true' || normalized === 'yes';
 })();
+const PROVIDER_STATS_QUEUE_CONCURRENCY = (() => {
+    const raw = process.env.PROVIDER_STATS_QUEUE_CONCURRENCY;
+    const parsed = raw !== undefined ? Number(raw) : NaN;
+    return Number.isFinite(parsed) && parsed > 0 ? Math.max(1, Math.floor(parsed)) : 1;
+})();
+const PROVIDER_STATS_QUEUE_WORKERS = (() => {
+    const raw = process.env.PROVIDER_STATS_QUEUE_WORKERS;
+    const parsed = raw !== undefined ? Number(raw) : NaN;
+    return Number.isFinite(parsed) && parsed > 0 ? Math.max(1, Math.floor(parsed)) : 1;
+})();
+const PROVIDER_STATS_QUEUE_MAX_PENDING = (() => {
+    const raw = process.env.PROVIDER_STATS_QUEUE_MAX_PENDING;
+    const parsed = raw !== undefined ? Number(raw) : NaN;
+    return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : 32;
+})();
+const PROVIDER_STATS_FLUSH_MS = (() => {
+    const raw = process.env.PROVIDER_STATS_FLUSH_MS;
+    const parsed = raw !== undefined ? Number(raw) : NaN;
+    return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : 150;
+})();
+const PROVIDER_STATS_BATCH_SIZE = (() => {
+    const raw = process.env.PROVIDER_STATS_BATCH_SIZE;
+    const parsed = raw !== undefined ? Number(raw) : NaN;
+    return Number.isFinite(parsed) && parsed > 0 ? Math.max(1, Math.floor(parsed)) : 32;
+})();
+const PROVIDER_STATS_BUFFER_MAX_PENDING = (() => {
+    const suggestedDefault = Math.max(
+        128,
+        PROVIDER_STATS_BATCH_SIZE * 8,
+        PROVIDER_STATS_QUEUE_MAX_PENDING * Math.max(1, PROVIDER_STATS_QUEUE_WORKERS)
+    );
+    const raw = process.env.PROVIDER_STATS_BUFFER_MAX_PENDING;
+    const parsed = raw !== undefined ? Number(raw) : NaN;
+    return Number.isFinite(parsed) && parsed >= PROVIDER_STATS_BATCH_SIZE
+        ? Math.floor(parsed)
+        : suggestedDefault;
+})();
+const providerStatsQueues = Array.from({ length: PROVIDER_STATS_QUEUE_WORKERS }, () => new RequestQueue(PROVIDER_STATS_QUEUE_CONCURRENCY, {
+    maxPending: PROVIDER_STATS_QUEUE_MAX_PENDING,
+}));
+
+function getProviderStatsQueueIndex(providerId: string, modelId: string): number {
+    if (providerStatsQueues.length <= 1) return 0;
+    const key = `${providerId}:${modelId}`;
+    let hash = 0;
+    for (let i = 0; i < key.length; i += 1) {
+        hash = ((hash << 5) - hash + key.charCodeAt(i)) | 0;
+    }
+    return Math.abs(hash) % providerStatsQueues.length;
+}
+
+function getProviderStatsQueue(providerId: string, modelId: string): { queue: RequestQueue; index: number } {
+    const index = getProviderStatsQueueIndex(providerId, modelId);
+    return {
+        queue: providerStatsQueues[index] || providerStatsQueues[0],
+        index,
+    };
+}
+
+function getProviderStatsQueueByIndex(index: number): RequestQueue {
+    return providerStatsQueues[index] || providerStatsQueues[0];
+}
 const RATE_LIMIT_WAIT_MAX_MS = (() => {
     const raw = process.env.RATE_LIMIT_WAIT_MAX_MS;
     if (raw === undefined) return 2 * 60 * 1000; // default 2 minutes max wait
@@ -153,10 +221,54 @@ const NON_STREAM_MIN_TTFT_MS = (() => {
 })();
 const PROVIDER_COOLDOWN_MS = Math.max(0, Number(process.env.PROVIDER_COOLDOWN_MS ?? 60_000));
 const PROVIDER_COOLDOWN_REDIS_PREFIX = 'provider:cooldown:';
+const PROVIDER_DISTRIBUTED_SCHEDULER_ENABLED = process.env.PROVIDER_DISTRIBUTED_SCHEDULER !== '0';
+const PROVIDER_DISTRIBUTED_BUCKET_REDIS_PREFIX = 'provider:scheduler:bucket:';
+const PROVIDER_DISTRIBUTED_COOLDOWN_REDIS_PREFIX = 'provider:scheduler:cooldown:';
+const PROVIDER_DISTRIBUTED_LEASE_REDIS_PREFIX = 'provider:scheduler:lease:';
+const PROVIDER_DISTRIBUTED_LEASE_MS = Math.max(100, Number(process.env.PROVIDER_DISTRIBUTED_LEASE_MS ?? 1000));
 const providerCooldowns = new Map<string, number>();
+const providerDistributedCooldowns = new Map<string, number>();
 const providerRateLimitStarts = new Map<string, number>();
 const providerRateLimitWindows = new Map<string, number[]>();
 const COOLDOWN_EVICTION_INTERVAL_MS = 5 * 60 * 1000; // Sweep expired entries every 5 minutes
+const DISTRIBUTED_PROVIDER_BUCKET_LUA = `
+local bucket_key = KEYS[1]
+local now_ms = tonumber(ARGV[1])
+local capacity = tonumber(ARGV[2])
+local refill_ms = tonumber(ARGV[3])
+local ttl_ms = tonumber(ARGV[4])
+
+local tokens = tonumber(redis.call('HGET', bucket_key, 'tokens'))
+local ts = tonumber(redis.call('HGET', bucket_key, 'ts'))
+
+if not tokens then tokens = capacity end
+if not ts then ts = now_ms end
+
+if refill_ms and refill_ms > 0 then
+  local elapsed = math.max(0, now_ms - ts)
+  if elapsed > 0 then
+    local refill = elapsed / refill_ms
+    tokens = math.min(capacity, tokens + refill)
+    ts = now_ms
+  end
+end
+
+if tokens >= 1 then
+  tokens = tokens - 1
+  redis.call('HSET', bucket_key, 'tokens', tostring(tokens), 'ts', tostring(ts))
+  redis.call('PEXPIRE', bucket_key, ttl_ms)
+  return {1, 0}
+end
+
+local wait_ms = ttl_ms
+if refill_ms and refill_ms > 0 then
+  wait_ms = math.ceil((1 - tokens) * refill_ms)
+end
+
+redis.call('HSET', bucket_key, 'tokens', tostring(tokens), 'ts', tostring(ts))
+redis.call('PEXPIRE', bucket_key, ttl_ms)
+return {0, wait_ms}
+`;
 
 // Periodic eviction to prevent unbounded Map growth
 const _cooldownEvictionTimer = setInterval(() => {
@@ -165,6 +277,12 @@ const _cooldownEvictionTimer = setInterval(() => {
     for (const [key, expiresAt] of providerCooldowns) {
         if (expiresAt <= now) {
             providerCooldowns.delete(key);
+            evicted++;
+        }
+    }
+    for (const [key, expiresAt] of providerDistributedCooldowns) {
+        if (expiresAt <= now) {
+            providerDistributedCooldowns.delete(key);
             evicted++;
         }
     }
@@ -188,6 +306,22 @@ function getProviderRateLimitKey(providerId: string, modelId: string): string {
     return `${providerId}::${String(modelId || '').toLowerCase()}`;
 }
 
+function getDistributedProviderIdentity(providerId: string, modelId: string): string {
+    return `${String(providerId || '').toLowerCase()}::${String(modelId || '').toLowerCase()}`;
+}
+
+function getDistributedProviderBucketKey(providerId: string, modelId: string): string {
+    return `${PROVIDER_DISTRIBUTED_BUCKET_REDIS_PREFIX}${hashToken(getDistributedProviderIdentity(providerId, modelId))}`;
+}
+
+function getDistributedProviderCooldownKey(providerId: string, modelId: string): string {
+    return `${PROVIDER_DISTRIBUTED_COOLDOWN_REDIS_PREFIX}${hashToken(getDistributedProviderIdentity(providerId, modelId))}`;
+}
+
+function getDistributedProviderLeaseKey(providerId: string, modelId: string): string {
+    return `${PROVIDER_DISTRIBUTED_LEASE_REDIS_PREFIX}${hashToken(getDistributedProviderIdentity(providerId, modelId))}`;
+}
+
 function isSharedRateLimitProvider(providerId: string): boolean {
     const normalized = String(providerId || '').toLowerCase();
     // Default to treating providers as shared-rate-limit backends unless they are
@@ -206,6 +340,35 @@ function getEffectiveWindowBudget(providerId: string, rateLimitRequests: number)
     const scaledBudget = Math.max(1, Math.floor(rawBudget * SHARED_PROVIDER_WINDOW_SAFETY_RATIO));
     const reservedBudget = Math.max(1, rawBudget - Math.min(SHARED_PROVIDER_WINDOW_REQUEST_RESERVE, Math.max(0, rawBudget - 1)));
     return Math.max(1, Math.min(scaledBudget, reservedBudget));
+}
+
+function resolveDistributedProviderRateDescriptor(
+    providerId: string,
+    modelStats?: any
+): { capacity: number; refillMs: number; ttlMs: number } | null {
+    const rateLimitRps = Number(modelStats?.rate_limit_rps);
+    const rateLimitRequests = Number(modelStats?.rate_limit_requests);
+    const rateLimitWindowMs = Number(modelStats?.rate_limit_window_ms);
+    const hasRps = Number.isFinite(rateLimitRps) && rateLimitRps > 0;
+    const hasWindowBudget = Number.isFinite(rateLimitRequests) && rateLimitRequests > 0 && Number.isFinite(rateLimitWindowMs) && rateLimitWindowMs > 0;
+
+    if (!hasRps && !hasWindowBudget) return null;
+
+    if (hasWindowBudget) {
+        const capacity = getEffectiveWindowBudget(providerId, rateLimitRequests);
+        const refillMs = Math.max(1, Math.ceil(rateLimitWindowMs / Math.max(1, capacity)));
+        const ttlMs = Math.max(60_000, Math.ceil(rateLimitWindowMs * 2));
+        return { capacity, refillMs, ttlMs };
+    }
+
+    const safeRps = Math.max(0.001, rateLimitRps);
+    const sharedCapacity = isSharedRateLimitProvider(providerId)
+        ? Math.max(1, Math.floor(safeRps * SHARED_PROVIDER_WINDOW_SAFETY_RATIO))
+        : Math.max(1, Math.floor(safeRps));
+    const capacity = Math.max(1, sharedCapacity);
+    const refillMs = Math.max(1, Math.ceil(1000 / safeRps));
+    const ttlMs = Math.max(60_000, capacity * refillMs * 8);
+    return { capacity, refillMs, ttlMs };
 }
 
 function pruneProviderRateLimitWindow(
@@ -338,6 +501,90 @@ async function isApiKeyCoolingDownForModel(apiKey: string, modelId: string): Pro
     return false;
 }
 
+async function getDistributedProviderCooldownMs(providerId: string, modelId: string): Promise<number | null> {
+    if (!PROVIDER_DISTRIBUTED_SCHEDULER_ENABLED || !isSharedRateLimitProvider(providerId)) return null;
+    const key = getDistributedProviderIdentity(providerId, modelId);
+    const now = Date.now();
+    const cachedUntil = providerDistributedCooldowns.get(key);
+    if (cachedUntil) {
+        const remaining = cachedUntil - now;
+        if (remaining > 0) return remaining;
+        providerDistributedCooldowns.delete(key);
+    }
+
+    if (!redis || redis.status !== 'ready') return null;
+    try {
+        const ttlMs = await redis.pttl(getDistributedProviderCooldownKey(providerId, modelId));
+        if (ttlMs > 0) {
+            providerDistributedCooldowns.set(key, now + ttlMs);
+            return ttlMs;
+        }
+    } catch {
+        return null;
+    }
+    return null;
+}
+
+async function setDistributedProviderCooldown(providerId: string, modelId: string, overrideMs?: number): Promise<void> {
+    if (!PROVIDER_DISTRIBUTED_SCHEDULER_ENABLED || !isSharedRateLimitProvider(providerId)) return;
+    const cooldownMs = Number.isFinite(overrideMs as number) && (overrideMs as number) > 0
+        ? Math.max(1, Math.ceil(overrideMs as number))
+        : PROVIDER_COOLDOWN_MS;
+    if (cooldownMs <= 0) return;
+    const key = getDistributedProviderIdentity(providerId, modelId);
+    providerDistributedCooldowns.set(key, Date.now() + cooldownMs);
+    if (!redis || redis.status !== 'ready') return;
+    try {
+        await redis.set(getDistributedProviderCooldownKey(providerId, modelId), '1', 'PX', String(cooldownMs));
+    } catch {
+        return;
+    }
+}
+
+async function acquireDistributedProviderPermit(providerId: string, modelId: string, modelStats?: any): Promise<{ allowed: boolean; waitMs: number }> {
+    if (!PROVIDER_DISTRIBUTED_SCHEDULER_ENABLED || !isSharedRateLimitProvider(providerId)) {
+        return { allowed: true, waitMs: 0 };
+    }
+    if (!redis || redis.status !== 'ready') {
+        return { allowed: true, waitMs: 0 };
+    }
+
+    const descriptor = resolveDistributedProviderRateDescriptor(providerId, modelStats);
+    if (!descriptor) {
+        const fallbackLeaseMs = Math.max(100, PROVIDER_DISTRIBUTED_LEASE_MS);
+        try {
+            const leaseKey = getDistributedProviderLeaseKey(providerId, modelId);
+            const leaseToken = `${process.pid}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+            const result = await redis.set(leaseKey, leaseToken, 'PX', String(fallbackLeaseMs), 'NX');
+            if (result === 'OK') {
+                return { allowed: true, waitMs: 0 };
+            }
+            const ttlMs = await redis.pttl(leaseKey);
+            return { allowed: false, waitMs: ttlMs > 0 ? ttlMs : fallbackLeaseMs };
+        } catch {
+            return { allowed: true, waitMs: 0 };
+        }
+    }
+
+    try {
+        const result = await redis.eval(
+            DISTRIBUTED_PROVIDER_BUCKET_LUA,
+            1,
+            getDistributedProviderBucketKey(providerId, modelId),
+            String(Date.now()),
+            String(descriptor.capacity),
+            String(descriptor.refillMs),
+            String(descriptor.ttlMs)
+        );
+        const parts = Array.isArray(result) ? result : [];
+        const allowed = Number(parts[0] ?? 1) === 1;
+        const waitMs = Math.max(0, Number(parts[1] ?? 0));
+        return { allowed, waitMs };
+    } catch {
+        return { allowed: true, waitMs: 0 };
+    }
+}
+
 async function getApiKeyCooldownMsForModel(apiKey: string, modelId: string): Promise<number | null> {
     if (!apiKey || PROVIDER_COOLDOWN_MS <= 0) return null;
     const key = buildCooldownKey(apiKey, modelId);
@@ -441,6 +688,14 @@ const validateModels = ajv.compile(modelsSchema);
 // --- Interfaces ---
 interface ProviderConfig { class: new (...args: any[]) => IAIProvider; args?: any[]; }
 
+interface PendingProviderStatsUpdate {
+    providerId: string;
+    modelId: string;
+    responseEntry: ResponseEntry | null;
+    isError: boolean;
+    attemptError?: any;
+}
+
 interface HandleMessagesOptions extends Partial<IMessage> {
     requestId?: string;
     skipQueue?: boolean;
@@ -518,12 +773,18 @@ export class MessageHandler {
     })();
     private modelCapabilitiesLastUpdated = 0;
     private readonly MODEL_CAPS_REFRESH_MS = Math.max(1000, Number(process.env.MODEL_CAPS_REFRESH_MS ?? 5000));
+    private readonly providerStatsFlushMs = PROVIDER_STATS_FLUSH_MS;
+    private readonly providerStatsBatchSize = PROVIDER_STATS_BATCH_SIZE;
+    private readonly providerStatsBufferMaxPending = PROVIDER_STATS_BUFFER_MAX_PENDING;
+    private readonly pendingProviderStatsUpdates = new Map<number, PendingProviderStatsUpdate[]>();
+    private readonly providerStatsFlushTimers = new Map<number, NodeJS.Timeout>();
+    private readonly providerStatsFlushes = new Map<number, Promise<void>>();
 
     private normalizeModelId(modelId: string): string {
         return String(modelId || '').toLowerCase().replace(/^google\//, '');
     }
 
-    private resolveModelIdForRequest(modelId: string): string {
+    private async resolveModelIdForRequest(modelId: string): Promise<string> {
         const raw = String(modelId || '').trim();
         if (!raw) return raw;
         if (this.modelCapabilitiesMap.size === 0) return raw;
@@ -550,10 +811,26 @@ export class MessageHandler {
         for (const candidate of candidates) {
             if (this.modelCapabilitiesMap.has(candidate)) {
                 if (candidate !== raw) {
-                    console.log(`[ModelNormalize] Resolved requested model '${raw}'  '${candidate}'.`);
+                    console.log(`[ModelNormalize] Resolved requested model '${raw}' -> '${candidate}'.`);
                 }
                 return candidate;
             }
+        }
+
+        try {
+            const providers = await dataManager.load<LoadedProviders>('providers');
+            for (const candidate of candidates) {
+                const supported = providers.some((provider: LoadedProviderData) => provider.models && candidate in provider.models);
+                if (!supported) continue;
+                if (candidate !== raw) {
+                    console.warn(`[ModelNormalize] Capability map miss for '${raw}', but live providers support '${candidate}'. Using provider-backed fallback.`);
+                } else {
+                    console.warn(`[ModelNormalize] Capability map miss for '${raw}', but live providers still advertise it. Using raw model id.`);
+                }
+                return candidate;
+            }
+        } catch (error: any) {
+            console.warn(`[ModelNormalize] Failed live provider fallback lookup for '${raw}': ${error?.message || error}`);
         }
 
         const err = new Error(`Model not found: ${raw}. No provider (active or disabled) supports model ${raw}.`);
@@ -652,6 +929,27 @@ export class MessageHandler {
         const normalized = String(providerId || '').toLowerCase();
         const dashIndex = normalized.indexOf('-');
         return dashIndex > 0 ? normalized.slice(0, dashIndex) : normalized;
+    }
+
+    private shouldPreventProviderAutoDisable(
+        providers: LoadedProviderData[],
+        providerId: string,
+        modelId: string
+    ): boolean {
+        if (PROVIDER_AUTO_DISABLE_MIN_ACTIVE <= 0) return false;
+
+        let remainingActive = 0;
+        for (const provider of providers) {
+            if (!provider || provider.id === providerId || provider.disabled) continue;
+            const modelData = provider.models?.[modelId] as any;
+            if (!modelData || modelData.disabled) continue;
+            remainingActive += 1;
+            if (remainingActive >= PROVIDER_AUTO_DISABLE_MIN_ACTIVE) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private providerSkipsRequiredCaps(
@@ -967,13 +1265,116 @@ export class MessageHandler {
         });
     }
     
+    private enqueueProviderStatsUpdate(update: PendingProviderStatsUpdate): { index: number; pending: number; dropped: boolean } {
+        const index = getProviderStatsQueueIndex(update.providerId, update.modelId);
+        const pending = this.pendingProviderStatsUpdates.get(index) || [];
+        let dropped = false;
+        if (pending.length >= this.providerStatsBufferMaxPending) {
+            pending.shift();
+            dropped = true;
+        }
+        pending.push(update);
+        this.pendingProviderStatsUpdates.set(index, pending);
+        return { index, pending: pending.length, dropped };
+    }
+
+    private scheduleProviderStatsFlush(index: number, immediate = false): void {
+        if (this.providerStatsFlushTimers.has(index)) return;
+        const delay = immediate ? 0 : this.providerStatsFlushMs;
+        const timer = setTimeout(() => {
+            this.providerStatsFlushTimers.delete(index);
+            void this.flushProviderStatsUpdates(index);
+        }, delay);
+        this.providerStatsFlushTimers.set(index, timer);
+    }
+
+    private async recomputeProviderMetricsInProviderList(
+        providers: LoadedProviderData[],
+        providerId: string
+    ): Promise<LoadedProviderData[]> {
+        const providerIndex = providers.findIndex((p) => p.id === providerId);
+        if (providerIndex === -1) return providers;
+        const providerData = providers[providerIndex];
+        providers[providerIndex] = await computeProviderMetricsInWorker(providerData as ProviderStateStructure, this.alpha, 0.7, 0.3);
+        return providers;
+    }
+
+    private async flushProviderStatsUpdates(index: number): Promise<void> {
+        const activeFlush = this.providerStatsFlushes.get(index);
+        if (activeFlush) {
+            await activeFlush;
+            return;
+        }
+
+        const pending = this.pendingProviderStatsUpdates.get(index);
+        if (!pending || pending.length === 0) return;
+
+        const batch = pending.splice(0, this.providerStatsBatchSize);
+        if (pending.length === 0) {
+            this.pendingProviderStatsUpdates.delete(index);
+        }
+
+        const flushPromise = (async () => {
+            const queue = getProviderStatsQueueByIndex(index);
+            let rescheduleImmediate = true;
+            try {
+                await queue.run(async () => {
+                    await dataManager.updateWithLock<LoadedProviders>('providers', async (currentProvidersData) => {
+                        let nextProviders = currentProvidersData;
+                        const touchedProviderIds = new Set<string>();
+
+                        for (const update of batch) {
+                            touchedProviderIds.add(update.providerId);
+                            nextProviders = await this.updateStatsInProviderList(
+                                nextProviders,
+                                update.providerId,
+                                update.modelId,
+                                update.responseEntry,
+                                update.isError,
+                                update.attemptError,
+                                true
+                            );
+                        }
+
+                        for (const providerId of touchedProviderIds) {
+                            nextProviders = await this.recomputeProviderMetricsInProviderList(nextProviders, providerId);
+                        }
+
+                        return nextProviders;
+                    });
+                });
+            } catch (statsError: any) {
+                if (statsError?.code === 'QUEUE_OVERLOADED' || statsError?.statusCode === 503) {
+                    const rest = this.pendingProviderStatsUpdates.get(index) || [];
+                    this.pendingProviderStatsUpdates.set(index, [...batch, ...rest]);
+                    rescheduleImmediate = false;
+                    console.warn(
+                        `[ProviderStats] Delaying ${batch.length} buffered stats update(s) on worker ${index + 1}/${providerStatsQueues.length}: `
+                        + `provider stats queue overloaded (pending=${queue.pending}, inFlight=${queue.inFlight}).`
+                    );
+                    return;
+                }
+                console.error(`[ProviderStats] Error flushing buffered stats updates on worker ${index + 1}/${providerStatsQueues.length}. Error:`, statsError);
+            } finally {
+                this.providerStatsFlushes.delete(index);
+                if ((this.pendingProviderStatsUpdates.get(index)?.length || 0) > 0) {
+                    this.scheduleProviderStatsFlush(index, rescheduleImmediate);
+                }
+            }
+        })();
+
+        this.providerStatsFlushes.set(index, flushPromise);
+        await flushPromise;
+    }
+
     private async updateStatsInProviderList(
         providers: LoadedProviderData[],
         providerId: string,
         modelId: string,
         responseEntry: ResponseEntry | null,
         isError: boolean,
-        attemptError?: any
+        attemptError?: any,
+        skipMetrics = false
     ): Promise<LoadedProviderData[]> {
         const providerIndex = providers.findIndex(p => p.id === providerId);
         if (providerIndex === -1) return providers; 
@@ -1080,8 +1481,12 @@ export class MessageHandler {
                     if (AUTO_DISABLE_PROVIDERS) {
                         const disabledModels = Object.values(providerData.models || {}).filter((m: any) => m?.disabled).length;
                         if (disabledModels >= this.DISABLE_PROVIDER_AFTER_MODELS && !providerData.disabled) {
-                            console.warn(`Disabling provider ${providerId} after ${disabledModels} models were disabled due to consecutive errors.`);
-                            providerData.disabled = true;
+                            if (this.shouldPreventProviderAutoDisable(providers, providerId, modelId)) {
+                                console.warn(`Skipping provider auto-disable for ${providerId} after ${disabledModels} disabled models because it would leave fewer than ${PROVIDER_AUTO_DISABLE_MIN_ACTIVE} active provider(s) for model ${modelId}.`);
+                            } else {
+                                console.warn(`Disabling provider ${providerId} after ${disabledModels} models were disabled due to consecutive errors.`);
+                                providerData.disabled = true;
+                            }
                         }
                     }
                 }
@@ -1106,7 +1511,9 @@ export class MessageHandler {
         }
 
         updateProviderData(providerData as ProviderStateStructure, modelId, responseEntry, isError); 
-        providerData = await computeProviderMetricsInWorker(providerData as ProviderStateStructure, this.alpha, 0.7, 0.3);
+        if (!skipMetrics) {
+            providerData = await computeProviderMetricsInWorker(providerData as ProviderStateStructure, this.alpha, 0.7, 0.3);
+        }
         providers[providerIndex] = providerData;
         return providers; 
     }
@@ -1143,7 +1550,7 @@ export class MessageHandler {
             modelId = this.applyModelReroute(modelId);
 
             await this.refreshModelCapabilities();
-            modelId = this.resolveModelIdForRequest(modelId);
+            modelId = await this.resolveModelIdForRequest(modelId);
             this.validateModelCapabilities(modelId, messages);
             const requiredCaps = this.detectRequiredCapabilities(messages, modelId);
 
@@ -1217,6 +1624,15 @@ export class MessageHandler {
                         }
                         continue;
                     }
+                    const distributedCooldownMs = await getDistributedProviderCooldownMs(providerId, modelId);
+                    if (distributedCooldownMs !== null && distributedCooldownMs > 0) {
+                        skippedByProviderRateLimit++;
+                        if (nextCooldownMs === null || distributedCooldownMs < nextCooldownMs) {
+                            nextCooldownMs = distributedCooldownMs;
+                            nextCooldownEarlyWakeMs = null;
+                        }
+                        continue;
+                    }
                     if (providerApiKey && blockedApiKeys.has(providerApiKey)) {
                         skippedByBlockedKey++;
                         continue;
@@ -1234,6 +1650,15 @@ export class MessageHandler {
                             if (nextCooldownMs === null || waitMs < nextCooldownMs) {
                                 nextCooldownMs = waitMs;
                                 nextCooldownEarlyWakeMs = earlyWakeMs ?? null;
+                            }
+                            continue;
+                        }
+                        const distributedPermit = await acquireDistributedProviderPermit(providerId, modelId, modelStats);
+                        if (!distributedPermit.allowed) {
+                            skippedByProviderRateLimit++;
+                            if (nextCooldownMs === null || distributedPermit.waitMs < nextCooldownMs) {
+                                nextCooldownMs = distributedPermit.waitMs;
+                                nextCooldownEarlyWakeMs = null;
                             }
                             continue;
                         }
@@ -1372,6 +1797,18 @@ export class MessageHandler {
                         sendMessageError = new Error(`Provider ${providerId} returned null result for model ${modelId}.`);
                     }
                 } catch (error: any) {
+                    if (!(error as any)?.__providerUniqueLogged) {
+                        void logUniqueProviderError({
+                            provider: providerId,
+                            operation: 'sendMessage',
+                            modelId,
+                            endpoint: selectedProvider.provider_url || undefined,
+                            error,
+                        });
+                        if (error && typeof error === 'object') {
+                            (error as any).__providerUniqueLogged = true;
+                        }
+                    }
                     console.error(`Error during sendMessage with ${providerId}/${modelId}:`, error);
                     sendMessageError = error;
                 }
@@ -1384,6 +1821,7 @@ export class MessageHandler {
                     if (providerApiKey && shouldRespectCooldowns) {
                         await setApiKeyCooldownForModel(providerApiKey, modelId, retryAfterMs ?? undefined);
                     }
+                    await setDistributedProviderCooldown(providerId, modelId, retryAfterMs ?? undefined);
                     console.warn(`Rate limit/quota hit for ${providerId}; skipping this key for the remainder of the request.`);
                     if (shouldRespectCooldowns && retryAfterMs && retryAfterMs > 0) {
                         nextCooldownMs = nextCooldownMs === null
@@ -1395,22 +1833,13 @@ export class MessageHandler {
                     }
                 }
              // --- Update Stats & Save (Always, regardless of attempt outcome) ---
-                try {
-                    await dataManager.updateWithLock<LoadedProviders>('providers', async (currentProvidersData) => {
-                        return this.updateStatsInProviderList(
-                            currentProvidersData,
-                            providerId,
-                            modelId,
-                            responseEntry,
-                            !!sendMessageError,
-                            sendMessageError
-                        );
-                    });
-                } catch (statsError: any) {
-                    console.error(`Error updating/saving stats for provider ${providerId}/${modelId}. Attempt outcome (sendMessageError): ${sendMessageError || 'Success'}. Stats error:`, statsError);
-                    // Do not let stats error stop the loop or overwrite sendMessageError if API call failed.
-                    // If API call succeeded (sendMessageError is null), but stats failed, the request is still considered successful.
-                }
+                this.updateStatsInBackground(
+                    providerId,
+                    modelId,
+                    responseEntry,
+                    !!sendMessageError,
+                    sendMessageError
+                );
 
              // --- Handle Attempt Outcome ---
                 if (!sendMessageError && result && responseEntry) {
@@ -1497,8 +1926,12 @@ export class MessageHandler {
          }
          console.error(`All attempts failed for model ${modelId}. Attempted: ${attempted}, Cooldown: ${skippedByCooldown}, ProviderRateLimit: ${skippedByProviderRateLimit}, Blocked: ${skippedByBlockedKey}. Detail: ${detail}`);
          const finalError = new Error(`Failed to process request: ${detail}`);
+         const attemptedProviderList = Array.from(triedProviderIds);
          (finalError as any).modelId = modelId;
-         (finalError as any).attemptedProviders = Array.from(triedProviderIds);
+         (finalError as any).attemptedProviders = attemptedProviderList;
+         (finalError as any).lastProviderId = attemptedProviderList.length > 0
+             ? attemptedProviderList[attemptedProviderList.length - 1]
+             : null;
          (finalError as any).lastProviderError = lastError?.message || null;
          (finalError as any).candidateProviders = totalCandidates;
          (finalError as any).skippedByCooldown = skippedByCooldown;
@@ -1535,7 +1968,7 @@ export class MessageHandler {
             modelId = this.applyModelReroute(modelId);
 
             await this.refreshModelCapabilities();
-            modelId = this.resolveModelIdForRequest(modelId);
+            modelId = await this.resolveModelIdForRequest(modelId);
             this.validateModelCapabilities(modelId, messages);
             const requiredCaps = this.detectRequiredCapabilities(messages, modelId);
 
@@ -1609,6 +2042,15 @@ export class MessageHandler {
                         }
                         continue;
                     }
+                    const distributedCooldownMs = await getDistributedProviderCooldownMs(providerId, modelId);
+                    if (distributedCooldownMs !== null && distributedCooldownMs > 0) {
+                        skippedByProviderRateLimit++;
+                        if (nextCooldownMs === null || distributedCooldownMs < nextCooldownMs) {
+                            nextCooldownMs = distributedCooldownMs;
+                            nextCooldownEarlyWakeMs = null;
+                        }
+                        continue;
+                    }
                     if (providerApiKey && blockedApiKeys.has(providerApiKey)) {
                         skippedByBlockedKey++;
                         continue;
@@ -1626,6 +2068,15 @@ export class MessageHandler {
                             if (nextCooldownMs === null || waitMs < nextCooldownMs) {
                                 nextCooldownMs = waitMs;
                                 nextCooldownEarlyWakeMs = earlyWakeMs ?? null;
+                            }
+                            continue;
+                        }
+                        const distributedPermit = await acquireDistributedProviderPermit(providerId, modelId, modelStats);
+                        if (!distributedPermit.allowed) {
+                            skippedByProviderRateLimit++;
+                            if (nextCooldownMs === null || distributedPermit.waitMs < nextCooldownMs) {
+                                nextCooldownMs = distributedPermit.waitMs;
+                                nextCooldownEarlyWakeMs = null;
                             }
                             continue;
                         }
@@ -1812,6 +2263,18 @@ export class MessageHandler {
                     };
                     return;
                 } catch (error: any) {
+                    if (!(error as any)?.__providerUniqueLogged) {
+                        void logUniqueProviderError({
+                            provider: providerId,
+                            operation: 'sendMessageStream',
+                            modelId,
+                            endpoint: selectedProviderData.provider_url || undefined,
+                            error,
+                        });
+                        if (error && typeof error === 'object') {
+                            (error as any).__providerUniqueLogged = true;
+                        }
+                    }
                     this.updateStatsInBackground(providerId, modelId, null, true, error);
                     console.warn(`Stream failed for provider ${providerId}. Error: ${error.message}. Trying next provider if available...`);
                     lastError = error;
@@ -1824,6 +2287,7 @@ export class MessageHandler {
                         if (providerApiKey && shouldRespectCooldowns) {
                             await setApiKeyCooldownForModel(providerApiKey, modelId, retryAfterMs ?? undefined);
                         }
+                        await setDistributedProviderCooldown(providerId, modelId, retryAfterMs ?? undefined);
                         console.warn(`Rate limit/quota hit for ${providerId}; skipping this key for the remainder of the request.`);
                         if (shouldRespectCooldowns && retryAfterMs && retryAfterMs > 0) {
                             nextCooldownMs = nextCooldownMs === null
@@ -1902,14 +2366,18 @@ export class MessageHandler {
             detail = lastError?.message || `No providers could serve model ${modelId}.`;
         }
         console.error(`All streaming attempts failed for model ${modelId}. Attempted: ${attempted}, Cooldown: ${skippedByCooldown}, ProviderRateLimit: ${skippedByProviderRateLimit}, Blocked: ${skippedByBlockedKey}. Detail: ${detail}`);
-        const finalError = new Error(`Failed to process streaming request: ${detail}`);
-        (finalError as any).modelId = modelId;
-        (finalError as any).attemptedProviders = Array.from(triedProviderIds);
-        (finalError as any).lastProviderError = lastError?.message || null;
-        (finalError as any).candidateProviders = totalCandidates;
-        (finalError as any).skippedByCooldown = skippedByCooldown;
-        (finalError as any).skippedByBlockedKey = skippedByBlockedKey;
-        (finalError as any).skippedByProviderRateLimit = skippedByProviderRateLimit;
+         const finalError = new Error(`Failed to process streaming request: ${detail}`);
+         const attemptedProviderList = Array.from(triedProviderIds);
+         (finalError as any).modelId = modelId;
+         (finalError as any).attemptedProviders = attemptedProviderList;
+         (finalError as any).lastProviderId = attemptedProviderList.length > 0
+             ? attemptedProviderList[attemptedProviderList.length - 1]
+             : null;
+         (finalError as any).lastProviderError = lastError?.message || null;
+         (finalError as any).candidateProviders = totalCandidates;
+         (finalError as any).skippedByCooldown = skippedByCooldown;
+         (finalError as any).skippedByBlockedKey = skippedByBlockedKey;
+         (finalError as any).skippedByProviderRateLimit = skippedByProviderRateLimit;
         (finalError as any).allSkippedByRateLimit = allSkipped;
         throw finalError;
     } finally {
@@ -1919,27 +2387,29 @@ export class MessageHandler {
     }
     }
 
-    private async updateStatsInBackground(
+    private updateStatsInBackground(
         providerId: string,
         modelId: string,
         responseEntry: ResponseEntry | null,
         isError: boolean,
         attemptError?: any
     ) {
-        try {
-            await dataManager.updateWithLock<LoadedProviders>('providers', async (currentProvidersData) => {
-                return this.updateStatsInProviderList(
-                    currentProvidersData,
-                    providerId,
-                    modelId,
-                    responseEntry,
-                    isError,
-                    attemptError
-                );
-            });
-        } catch (statsError: any) {
-            console.error(`Error updating/saving stats in background for provider ${providerId}/${modelId}. Error:`, statsError);
+        const { index, pending, dropped } = this.enqueueProviderStatsUpdate({
+            providerId,
+            modelId,
+            responseEntry,
+            isError,
+            attemptError,
+        });
+
+        if (dropped) {
+            console.warn(
+                `[ProviderStats] Dropped oldest buffered stats update on worker ${index + 1}/${providerStatsQueues.length} `
+                + `for ${providerId}/${modelId} because the buffer reached ${this.providerStatsBufferMaxPending} pending update(s).`
+            );
         }
+
+        this.scheduleProviderStatsFlush(index, pending >= this.providerStatsBatchSize);
     }
 }
 

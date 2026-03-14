@@ -10,7 +10,8 @@
 				"BRAVE_API_KEY": "BSAnaws8pXPT_xG8hu0yASDRA53y9i-"
 			},
 			"alwaysAllow": [
-				"brave_web_search"
+				"brave_web_search",
+				"brave_local_search"
 			]
 		},
 		"playwright": {
@@ -30,7 +31,9 @@
 				"browser_take_screenshot",
 				"browser_resize",
 				"browser_network_requests",
-				"browser_run_code"
+				"browser_run_code",
+				"browser_snapshot",
+				"browser_console_messages"
 			]
 		},
 		"browser-devtools": {

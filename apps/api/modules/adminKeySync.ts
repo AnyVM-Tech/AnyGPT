@@ -4,8 +4,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { spawn } from 'child_process';
 import redis from './db.js';
-import { dataManager, LoadedProviders, LoadedProviderData } from './dataManager.js';
-import { checkKey, type KeyStatus } from './keyChecker.js';
+import { dataManager, LoadedProviders, LoadedProviderData, ModelsFileStructure } from './dataManager.js';
+import { checkKeyHealth, type KeyHealthStatus } from './keyChecker.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -225,6 +225,49 @@ function runScript(label: string, script: string, env?: Record<string, string>):
   });
 }
 
+async function runProbeScript(reason: string): Promise<void> {
+  const probeEnv: Record<string, string> = {};
+  if (PROBE_MAX_MODELS) probeEnv.CAP_TEST_MAX_MODELS = PROBE_MAX_MODELS;
+  if (PROBE_ALL_CAPS) probeEnv.CAP_TEST_ALL_CAPS = PROBE_ALL_CAPS;
+  if (PROBE_KEYCHECK_ONLY && reason !== 'new-models') probeEnv.CAP_TEST_KEYCHECK_ONLY = '1';
+  await runScript('testModelLiveProbes', 'dev/testModelLiveProbes.ts', probeEnv);
+}
+
+async function syncActiveProviderCountsInModels(reason: string): Promise<void> {
+  try {
+    const providers = await dataManager.load<LoadedProviders>('providers');
+    const modelsFile = await dataManager.load<ModelsFileStructure>('models');
+    if (!providers || !modelsFile || !Array.isArray(modelsFile.data)) return;
+
+    const activeProviderCounts: Record<string, number> = {};
+    for (const provider of providers) {
+      if (provider.disabled || !provider.models) continue;
+      for (const modelId of Object.keys(provider.models)) {
+        activeProviderCounts[modelId] = (activeProviderCounts[modelId] || 0) + 1;
+      }
+    }
+
+    let changed = 0;
+    for (const model of modelsFile.data as Array<Record<string, any>>) {
+      const modelId = String(model.id || '');
+      if (!modelId) continue;
+      const nextCount = activeProviderCounts[modelId] || 0;
+      const currentCount = typeof model.providers === 'number' ? model.providers : 0;
+      if (currentCount !== nextCount) {
+        model.providers = nextCount;
+        changed += 1;
+      }
+    }
+
+    if (changed > 0) {
+      await dataManager.save<ModelsFileStructure>('models', modelsFile);
+      console.log(`[AdminKeySync] Refreshed provider counts for ${changed} model(s) after ${reason}.`);
+    }
+  } catch (err) {
+    console.warn(`[AdminKeySync] Failed to refresh provider counts after ${reason}:`, err);
+  }
+}
+
 function getProviderFamily(providerId: string): string {
   const lower = String(providerId || '').toLowerCase();
   if (lower.includes('openai')) return 'openai';
@@ -241,15 +284,17 @@ function getProviderFamily(providerId: string): string {
  * Uses keyChecker to validate the key works and has quota, then re-enables
  * providers whose keys are now healthy. Does NOT test full model capabilities.
  */
-async function checkDisabledProviderKeys(): Promise<void> {
+async function checkDisabledProviderKeys(): Promise<boolean> {
   try {
     const providers = await dataManager.load<LoadedProviders>('providers');
     const disabled = providers.filter((p: LoadedProviderData) => p.disabled && p.apiKey);
-    if (disabled.length === 0) return;
+    if (disabled.length === 0) return false;
 
     console.log(`[AdminKeySync] Checking ${disabled.length} disabled provider key(s)...`);
     let reEnabled = 0;
     let stillDisabled = 0;
+    let indeterminate = 0;
+    let changed = false;
 
     // Process in batches to limit concurrency
     for (let i = 0; i < disabled.length; i += DISABLED_KEY_CHECK_CONCURRENCY) {
@@ -257,8 +302,8 @@ async function checkDisabledProviderKeys(): Promise<void> {
       const results = await Promise.allSettled(
         batch.map(async (provider: LoadedProviderData) => {
           const family = getProviderFamily(provider.id);
-          if (!family) return { provider, status: null as KeyStatus | null };
-          const status = await checkKey(family, provider.apiKey!);
+          if (!family) return { provider, status: null as KeyHealthStatus | null };
+          const status = await checkKeyHealth(family, provider.apiKey!);
           return { provider, status };
         })
       );
@@ -268,7 +313,7 @@ async function checkDisabledProviderKeys(): Promise<void> {
         const { provider, status } = result.value;
         if (!status) continue;
 
-        if (status.isValid && status.hasQuota !== false) {
+        if (status.health === 'healthy') {
           // Key is valid and has quota — re-enable the provider
           const idx = providers.findIndex((p: LoadedProviderData) => p.id === provider.id);
           if (idx !== -1) {
@@ -284,24 +329,28 @@ async function checkDisabledProviderKeys(): Promise<void> {
               }
             }
             reEnabled++;
+            changed = true;
             console.log(`[AdminKeySync] Re-enabled provider ${provider.id} — key is valid with quota.`);
           }
+        } else if (status.health === 'indeterminate') {
+          indeterminate++;
+          console.log(`[AdminKeySync] Provider ${provider.id} health check indeterminate (${status.error || 'unknown reason'}). Leaving disabled state unchanged.`);
         } else {
           stillDisabled++;
-          const reason = !status.isValid ? 'invalid key' : 'no quota';
+          const reason = status.health === 'invalid' ? 'invalid key' : 'no quota';
           console.log(`[AdminKeySync] Provider ${provider.id} stays disabled (${reason}).`);
         }
       }
     }
 
-    if (reEnabled > 0) {
+    if (changed) {
       await dataManager.save<LoadedProviders>('providers', providers);
-      console.log(`[AdminKeySync] Disabled key check complete. Re-enabled: ${reEnabled}, still disabled: ${stillDisabled}.`);
-    } else {
-      console.log(`[AdminKeySync] Disabled key check complete. No providers re-enabled (${stillDisabled} still disabled).`);
     }
+    console.log(`[AdminKeySync] Disabled key check complete. Re-enabled: ${reEnabled}, still disabled: ${stillDisabled}, indeterminate: ${indeterminate}.`);
+    return changed;
   } catch (err) {
     console.warn('[AdminKeySync] Disabled key check failed:', err);
+    return false;
   }
 }
 
@@ -328,8 +377,16 @@ async function runSync(reason: string, force = false): Promise<void> {
 
   try {
     if (reason === 'disabled-providers') {
+      let disabledKeyChanges = false;
       if (CHECK_DISABLED_KEYS) {
-        await checkDisabledProviderKeys();
+        disabledKeyChanges = await checkDisabledProviderKeys();
+      }
+      if (disabledKeyChanges) {
+        if (RUN_PROBES) {
+          console.log('[AdminKeySync] Disabled provider state changed. Running immediate probe refresh.');
+          await runProbeScript(reason);
+        }
+        await syncActiveProviderCountsInModels(reason);
       }
       lastRunAt = Date.now();
       return;
@@ -356,16 +413,17 @@ async function runSync(reason: string, force = false): Promise<void> {
     }
 
     if (RUN_PROBES && !skipProbes) {
-      const probeEnv: Record<string, string> = {};
-      if (PROBE_MAX_MODELS) probeEnv.CAP_TEST_MAX_MODELS = PROBE_MAX_MODELS;
-      if (PROBE_ALL_CAPS) probeEnv.CAP_TEST_ALL_CAPS = PROBE_ALL_CAPS;
-      if (PROBE_KEYCHECK_ONLY && reason !== 'new-models') probeEnv.CAP_TEST_KEYCHECK_ONLY = '1';
-      await runScript('testModelLiveProbes', 'dev/testModelLiveProbes.ts', probeEnv);
+      await runProbeScript(reason);
     }
 
     // Lightweight key health check for disabled providers
+    let disabledKeyChanges = false;
     if (CHECK_DISABLED_KEYS) {
-      await checkDisabledProviderKeys();
+      disabledKeyChanges = await checkDisabledProviderKeys();
+    }
+
+    if ((RUN_PROBES && !skipProbes) || disabledKeyChanges) {
+      await syncActiveProviderCountsInModels(reason);
     }
 
     lastRunAt = Date.now();

@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { IAIProvider, IMessage, ProviderResponse, ProviderStreamChunk, ProviderStreamPassthrough } from './interfaces.js';
+import { logUniqueProviderError } from '../modules/errorLogger.js';
 
 /**
  * DeepSeek provider (OpenAI-compatible chat completions).
@@ -127,8 +128,18 @@ export class DeepseekAI implements IAIProvider {
       };
     } catch (error: any) {
       const latency = Date.now() - start;
+      void logUniqueProviderError({
+        provider: 'deepseek',
+        operation: 'sendMessage',
+        modelId: message.model?.id,
+        endpoint: this.endpointUrl,
+        latencyMs: latency,
+        error,
+      });
       const msg = error?.response?.data?.error?.message || error.message || 'Unknown DeepSeek error';
-      throw new Error(`DeepSeek API call failed: ${msg} (latency ${latency}ms)`);
+      const wrappedError = new Error(`DeepSeek API call failed: ${msg} (latency ${latency}ms)`);
+      (wrappedError as any).__providerUniqueLogged = true;
+      throw wrappedError;
     }
   }
 
@@ -192,8 +203,18 @@ export class DeepseekAI implements IAIProvider {
       }
     } catch (error: any) {
       const latency = Date.now() - start;
+      void logUniqueProviderError({
+        provider: 'deepseek',
+        operation: 'sendMessageStream',
+        modelId: message.model?.id,
+        endpoint: this.endpointUrl,
+        latencyMs: latency,
+        error,
+      });
       const msg = error?.response?.data?.error?.message || error.message || 'Unknown DeepSeek stream error';
-      throw new Error(`DeepSeek API stream call failed: ${msg} (latency ${latency}ms)`);
+      const wrappedError = new Error(`DeepSeek API stream call failed: ${msg} (latency ${latency}ms)`);
+      (wrappedError as any).__providerUniqueLogged = true;
+      throw wrappedError;
     }
   }
 }

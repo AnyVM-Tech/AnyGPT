@@ -285,6 +285,11 @@ export class Redis {
         return await this.sendCommand('LTRIM', key, start, stop);
     }
 
+    async sadd(key: string, ...members: RedisCommandArg[]): Promise<number> {
+        const result = await this.sendCommand('SADD', key, ...members);
+        return Number(result ?? 0);
+    }
+
     async pttl(key: string): Promise<number> {
         const result = await this.sendCommand('PTTL', key);
         return Number(result ?? -1);

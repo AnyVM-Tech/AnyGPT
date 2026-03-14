@@ -8,6 +8,7 @@ import {
   ProviderStreamPassthrough
 } from './interfaces.js'; // Only import necessary interfaces
 import { fetchWithTimeout } from '../modules/http.js';
+import { logUniqueProviderError } from '../modules/errorLogger.js';
 // Removed imports related to compute and Provider state
 
 dotenv.config();
@@ -450,13 +451,23 @@ export class GeminiAI implements IAIProvider {
 
       const endTime = Date.now();
       const latency = endTime - startTime;
+      void logUniqueProviderError({
+        provider: 'gemini',
+        operation: 'sendMessage',
+        modelId: message.model?.id,
+        endpoint: GEMINI_API_BASE,
+        latencyMs: latency,
+        error,
+      });
       console.error(`Error during sendMessage with Gemini model ${message.model.id} (Latency: ${latency}ms):`, error);
 
       // Extract a more specific error message if possible
       const errorMessage = error.message || 'Unknown Gemini API error';
       GeminiAI.updateModelTokenLimitsFromError(message.model?.id ?? '', errorMessage);
       // Rethrow the error to be handled by the MessageHandler
-      throw new Error(`Gemini API call failed: ${errorMessage}`);
+      const wrappedError = new Error(`Gemini API call failed: ${errorMessage}`);
+      (wrappedError as any).__providerUniqueLogged = true;
+      throw wrappedError;
     }
   }
 
@@ -570,10 +581,20 @@ export class GeminiAI implements IAIProvider {
       }
     } catch (error: any) {
       const latency = Date.now() - startTime;
+      void logUniqueProviderError({
+        provider: 'gemini',
+        operation: 'sendMessageStream',
+        modelId: message.model?.id,
+        endpoint: GEMINI_API_BASE,
+        latencyMs: latency,
+        error,
+      });
       console.error(`Error during sendMessageStream with Gemini model ${message.model.id} (Latency: ${latency}ms):`, error);
       const errorMessage = error.message || 'Unknown Gemini API error';
       GeminiAI.updateModelTokenLimitsFromError(message.model?.id ?? '', errorMessage);
-      throw new Error(`Gemini API stream call failed: ${errorMessage}`);
+      const wrappedError = new Error(`Gemini API stream call failed: ${errorMessage}`);
+      (wrappedError as any).__providerUniqueLogged = true;
+      throw wrappedError;
     }
   }
 }

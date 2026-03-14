@@ -6,6 +6,56 @@ import crypto from 'node:crypto';
 import { messageHandler } from '../providers/handler.js';
 import { IMessage, type ModelCapability } from '../providers/interfaces.js';
 import {
+    type StoredResponsesHistoryEntry,
+    cloneResponsesHistoryValue,
+    loadResponsesHistoryEntry,
+    saveResponsesHistoryEntry,
+    buildStoredResponsesHistoryOutput,
+    mergeResponsesHistoryInput,
+} from '../modules/responsesHistory.js';
+import {
+    buildResponsesCompletedEvent,
+    buildResponsesContentPartAddedEvent,
+    buildResponsesContentPartDoneEvent,
+    buildResponsesCreatedEvent,
+    buildResponsesFunctionCallArgumentsDoneEvent,
+    buildResponsesOutputItemAddedEvent,
+    buildResponsesOutputItemDoneEvent,
+    buildResponsesOutputTextDeltaEvent,
+    buildResponsesOutputTextDoneEvent,
+    buildResponsesResponseObject,
+    createResponsesItemId,
+    createResponsesMessageItem,
+} from '../modules/openaiResponsesFormat.js';
+import {
+    extractTextFromContent,
+    extractInputAudioFromContent,
+    extractImageUrlFromContent,
+    extractTextFromMessages,
+    extractInputAudioFromMessages,
+    extractImageUrlFromMessages,
+    extractTextFromResponsesInput,
+    extractInputAudioFromResponsesInput,
+    extractImageUrlFromResponsesInput,
+} from '../modules/contentExtraction.js';
+import {
+    normalizeInputAudio,
+    detectMimeTypeFromBuffer,
+    detectMimeTypeFromBase64,
+    isLikelyBase64,
+    parseMultipartBody,
+} from '../modules/mediaParsing.js';
+import { inlineImageUrls as inlineImageUrlsShared } from '../modules/imageFetch.js';
+import {
+    isImageModelId,
+    isNanoBananaModel,
+    ensureNanoBananaModalities,
+    isNonChatModel,
+    formatAssistantContent,
+    inferToolCallsFromJsonText,
+    filterValidChatMessages,
+} from '../modules/openaiRouteUtils.js';
+import {
     generateUserApiKey, // Now async
     extractMessageFromRequestBody,
     updateUserTokenUsage, // Now async
@@ -16,6 +66,7 @@ import { TierData, type KeysFile } from '../modules/userData.js';
 import { logError } from '../modules/errorLogger.js';
 import redis from '../modules/db.js';
 import tiersData from '../tiers.json' with { type: 'json' };
+import { buildKeyDetailsPayload, loadKeysLiveSnapshot } from '../modules/keyUsage.js';
 import { incrementSharedRateLimitCounters } from '../modules/rateLimitRedis.js';
 import { enforceInMemoryRateLimit, evaluateSharedRateLimit, RequestTimestampStore } from '../modules/rateLimit.js';
 import { runAuthMiddleware, runRateLimitMiddleware, extractBearerToken, normalizeApiKey } from '../modules/middlewareFactory.js';
@@ -23,6 +74,30 @@ import { dataManager, LoadedProviders, LoadedProviderData, type ModelsFileStruct
 import { logger } from '../modules/logger.js';
 import { redactAuthorizationHeader, redactToken, hashToken } from '../modules/redaction.js';
 import { fetchWithTimeout } from '../modules/http.js';
+import { RequestQueue } from '../modules/requestQueue.js';
+import {
+    getHeaderValue,
+    normalizeImageFetchReferer,
+    extractUsageTokens,
+    createSseDataParser,
+} from '../modules/openaiRequestSupport.js';
+import {
+    authAndUsageMiddleware,
+    authKeyOnlyMiddleware,
+    createRateLimitMiddleware,
+    formatRateLimitMessage,
+    getServiceTierForUserTier,
+    isGeminiFreeTierZeroQuota,
+} from '../modules/openaiRouteSupport.js';
+import {
+    enforceModelCapabilities,
+    pickOpenAIProviderKey,
+    pickImageGenProviderKey,
+    pickVideoGenProviderKey,
+    pickAnyXaiProviderKey,
+} from '../modules/openaiProviderSelection.js';
+import { AUDIO_CONTENT_TYPES, forwardTtsToOpenAI, forwardSttToOpenAI } from '../modules/openaiAudio.js';
+import { handleImageGenFallbackFromChatOrResponses, handleVideoGenFallbackFromChatOrResponses } from '../modules/openaiFallbacks.js';
 import {
     createInteractionToken,
     executeGeminiInteraction,
@@ -62,162 +137,12 @@ const openaiRouter = new HyperExpress.Router();
  
 // --- Rate Limiting Store --- 
 const requestTimestamps: RequestTimestampStore = {};
-const RATE_LIMIT_KEY_PREFIX = 'api:ratelimit:';
 const INTERACTIONS_TOKEN_TTL_SECONDS = 15 * 60;
+const rateLimitMiddleware = createRateLimitMiddleware(requestTimestamps);
 
-// isRateLimitError and extractRetryAfterSeconds now imported from '../modules/errorClassification.js'
-
-async function incrementSharedCounters(apiKey: string) {
-    try {
-        return await incrementSharedRateLimitCounters(redis, RATE_LIMIT_KEY_PREFIX, apiKey);
-    } catch (err) {
-        console.warn('[RateLimit] Shared counter failure, falling back to in-memory.', err);
-        return null;
-    }
-}
-
-function isGeminiFreeTierZeroQuota(errorText: string): boolean {
-    const lower = String(errorText || '').toLowerCase();
-    if (!lower.includes('free_tier')) return false;
-    return /limit:\s*0/.test(lower);
-}
-
-function formatRateLimitMessage(retryAfterSeconds?: number | null): string {
-    if (retryAfterSeconds && retryAfterSeconds > 0) {
-        return `Rate limit or quota exceeded. Please retry after ${retryAfterSeconds}s.`;
-    }
-    return 'Rate limit or quota exceeded. Please retry later.';
-}
-
-function getServiceTierForUserTier(userTier?: string): string {
-    return String(userTier || '').toLowerCase() === 'free' ? 'standard' : 'priority';
-}
- 
-// --- Request Extension ---
-declare module '../lib/uws-compat.js' {
-  interface Request {
-    apiKey?: string; userId?: string; userRole?: string;
-    userTokenUsage?: number; userTier?: string; 
-    tierLimits?: TierData; 
-  }
-}
- 
-// --- Middleware ---
- 
-// MUST be async because it calls await validateApiKeyAndUsage
-async function authAndUsageMiddleware(request: Request, response: Response, next: () => void) {
-    logger.debug(`[AuthMiddleware] Request received at ${request.path} with method ${request.method}`);
-    logger.debug(`[AuthMiddleware] Authorization header: ${redactAuthorizationHeader(request.headers['authorization'] as string | undefined) || 'None'}`);
-    logger.debug(`[AuthMiddleware] x-api-key header: ${redactToken(request.headers['x-api-key'] as string | undefined) || 'None'}`);
-
-    return runAuthMiddleware(request, response, next, {
-        callNext: true,
-        extractApiKey: (req) => {
-            const authHeader = req.headers['authorization'] || req.headers['Authorization'];
-            const bearer = extractBearerToken(typeof authHeader === 'string' ? authHeader : null);
-            if (bearer) return bearer;
-            const apiKeyHeader = req.headers['api-key'] ?? req.headers['x-api-key'];
-            return (typeof apiKeyHeader === 'string' && apiKeyHeader) ? apiKeyHeader : null;
-        },
-        onMissingApiKey: async (req) => {
-            await logError({ message: 'Unauthorized: Missing API key' }, req);
-            return { status: 401, body: { error: 'Unauthorized: Missing or invalid API key header.', timestamp: new Date().toISOString() } };
-        },
-        onInvalidApiKey: async (req, details) => {
-            const errorMessage = `Unauthorized: ${details.error || 'Invalid key/config.'}`;
-            await logError({ message: errorMessage, statusCode: details.statusCode, apiKey: redactToken(details.apiKey) }, req);
-            return { status: details.statusCode, body: { error: errorMessage, timestamp: new Date().toISOString() } };
-        },
-        onInternalError: async (req, error) => {
-            await logError(error, req);
-            console.error('Error during auth/usage check:', error);
-            return { status: 500, body: { error: 'Internal Server Error', reference: 'Error during authentication processing.', timestamp: new Date().toISOString() } };
-        },
-    });
-}
-
-// Auth that verifies the key exists but does NOT enforce token-usage limits.
-async function authKeyOnlyMiddleware(request: Request, response: Response, next: () => void) {
-    try {
-        const authHeader = request.headers['authorization'] || request.headers['Authorization'];
-        let apiKey: string | null = extractBearerToken(typeof authHeader === 'string' ? authHeader : null);
-        if (!apiKey && typeof request.headers['api-key'] === 'string') {
-            apiKey = request.headers['api-key'];
-        } else if (!apiKey && typeof request.headers['x-api-key'] === 'string') {
-            apiKey = request.headers['x-api-key'];
-        }
-        apiKey = normalizeApiKey(apiKey);
-
-        if (!apiKey) {
-            return response.status(401).json({
-                error: 'Unauthorized: Missing or invalid API key header.',
-                timestamp: new Date().toISOString(),
-            });
-        }
-
-        const keys = await dataManager.load<KeysFile>('keys');
-        const userData = keys[apiKey];
-        if (!userData) {
-            return response.status(401).json({
-                error: 'Unauthorized: Invalid API key.',
-                timestamp: new Date().toISOString(),
-            });
-        }
-
-        const tierLimits = tiersData[userData.tier as keyof typeof tiersData];
-        if (!tierLimits) {
-            return response.status(401).json({
-                error: 'Unauthorized: Invalid API key configuration.',
-                timestamp: new Date().toISOString(),
-            });
-        }
-
-        request.apiKey = apiKey;
-        request.userId = userData.userId;
-        request.userRole = userData.role;
-        request.userTokenUsage = userData.tokenUsage;
-        request.userTier = userData.tier;
-        request.tierLimits = tierLimits;
-
-        next();
-    } catch (error: any) {
-        await logError({ message: 'Error during key-only authentication', errorMessage: error?.message }, request);
-        if (!response.completed) {
-            response.status(500).json({
-                error: 'Internal Server Error',
-                reference: 'Error during authentication processing.',
-                timestamp: new Date().toISOString(),
-            });
-        }
-    }
-}
-
-// Remains synchronous
-async function rateLimitMiddleware(request: Request, response: Response, next: () => void) {
-    return runRateLimitMiddleware(
-        request,
-        response,
-        next,
-        requestTimestamps,
-        {
-            onMissingContext: (req) => {
-                const errMsg = 'Internal Error: API Key or Tier Limits missing after auth (rateLimitMiddleware).';
-                logError({ message: errMsg, requestPath: req.path }, req).catch(e => console.error('Failed background log:', e));
-                console.error(errMsg);
-                return { status: 500, body: { error: 'Internal Server Error', reference: 'Configuration error for rate limiting.', timestamp: new Date().toISOString() } };
-            },
-            onDenied: (req, details) => {
-                const windowLabel = details.window.toUpperCase();
-                logError({ message: `Rate limit exceeded: Max ${details.limit} ${windowLabel}.`, apiKey: redactToken(req.apiKey) }, req).catch(e => console.error('Failed background log:', e));
-                return { status: 429, body: { error: `Rate limit exceeded: Max ${details.limit} ${windowLabel}.`, timestamp: new Date().toISOString() } };
-            },
-            sharedDecisionProvider: async (_req, apiKey, limits) => {
-                const sharedCounts = await incrementSharedCounters(apiKey);
-                if (!sharedCounts) return null;
-                return evaluateSharedRateLimit(sharedCounts, limits);
-            },
-        }
-    );
+function writeResponsesSseEvent(response: Response, payload: Record<string, any>): void {
+    response.write(`event: ${payload.type}\n`);
+    response.write(`data: ${JSON.stringify(payload)}\n\n`);
 }
 
 function extractResponsesRequestBody(requestBody: any): { message: IMessage; modelId: string; stream: boolean } {
@@ -289,7 +214,21 @@ const LOG_SENSITIVE_PAYLOADS = readEnvBool('LOG_SENSITIVE_PAYLOADS', false);
 if (LOG_SENSITIVE_PAYLOADS) {
     console.warn('[Security] LOG_SENSITIVE_PAYLOADS is enabled. Disable in production to avoid logging sensitive data.');
 }
+
+function getBaselineTierRps(): number {
+    const values = Object.values(tiersData as Record<string, any>)
+        .map((tier) => Number(tier?.rps))
+        .filter((value) => Number.isFinite(value) && value > 0);
+    if (values.length === 0) return 20;
+    return Math.floor(Math.min(...values));
+}
+
+const BASELINE_TIER_RPS = getBaselineTierRps();
 const UPSTREAM_TIMEOUT_MS = readEnvNumber('UPSTREAM_TIMEOUT_MS', 120_000);
+const REQUEST_ADMISSION_QUEUE_CONCURRENCY = Math.max(1, readEnvNumber('REQUEST_ADMISSION_QUEUE_CONCURRENCY', Math.max(2, Math.min(8, Number(process.env.REQUEST_QUEUE_CONCURRENCY || 4) || 4))));
+const REQUEST_ADMISSION_QUEUE_MAX_PENDING = Math.max(0, readEnvNumber('REQUEST_ADMISSION_QUEUE_MAX_PENDING', Math.max(8, REQUEST_ADMISSION_QUEUE_CONCURRENCY * 4)));
+const EMBEDDINGS_QUEUE_CONCURRENCY = Math.max(1, readEnvNumber('EMBEDDINGS_QUEUE_CONCURRENCY', Math.max(1, Math.min(8, Math.floor(BASELINE_TIER_RPS / 10)))));
+const EMBEDDINGS_QUEUE_MAX_PENDING = Math.max(0, readEnvNumber('EMBEDDINGS_QUEUE_MAX_PENDING', Math.max(8, Math.min(64, BASELINE_TIER_RPS))));
 const VIDEO_REQUEST_CACHE_TTL_MS = readEnvNumber('VIDEO_REQUEST_CACHE_TTL_MS', 60 * 60 * 1000);
 const IMAGE_FETCH_TIMEOUT_MS = readEnvNumber('IMAGE_FETCH_TIMEOUT_MS', 15_000);
 const IMAGE_FETCH_MAX_BYTES = readEnvNumber('IMAGE_FETCH_MAX_BYTES', 8 * 1024 * 1024);
@@ -300,28 +239,14 @@ const IMAGE_FETCH_USER_AGENT = process.env.IMAGE_FETCH_USER_AGENT || 'Mozilla/5.
 const IMAGE_FETCH_REFERER = process.env.IMAGE_FETCH_REFERER;
 const IMAGE_FETCH_ALLOWED_PROTOCOLS = (readEnvCsv('IMAGE_FETCH_ALLOWED_PROTOCOLS') ?? ['http', 'https']).map((p) => p.toLowerCase());
 const IMAGE_FETCH_ALLOWED_HOSTS = readEnvCsv('IMAGE_FETCH_ALLOWED_HOSTS');
+const requestAdmissionQueue = new RequestQueue(REQUEST_ADMISSION_QUEUE_CONCURRENCY, {
+    maxPending: REQUEST_ADMISSION_QUEUE_MAX_PENDING,
+});
+const embeddingsQueue = new RequestQueue(EMBEDDINGS_QUEUE_CONCURRENCY, {
+    maxPending: EMBEDDINGS_QUEUE_MAX_PENDING,
+});
 
 // readEnvNumber, readEnvBool, readEnvCsv now imported from '../modules/tokenEstimation.js'
-
-function getHeaderValue(headers: Record<string, any>, name: string): string | undefined {
-    if (!headers) return undefined;
-    const direct = headers[name] ?? headers[name.toLowerCase()] ?? headers[name.toUpperCase()];
-    if (Array.isArray(direct)) return typeof direct[0] === 'string' ? direct[0] : undefined;
-    return typeof direct === 'string' ? direct : undefined;
-}
-
-function normalizeImageFetchReferer(raw?: string): string | undefined {
-    if (!raw) return undefined;
-    try {
-        const parsed = new URL(raw);
-        if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
-            return parsed.toString();
-        }
-    } catch {
-        return undefined;
-    }
-    return undefined;
-}
 
 const videoRequestCache = new Map<string, { apiKey: string; baseUrl: string; expiresAt: number }>();
 const VIDEO_CACHE_EVICTION_INTERVAL_MS = 5 * 60 * 1000;
@@ -361,1151 +286,10 @@ function getVideoRequestCache(requestId: string): { apiKey: string; baseUrl: str
 // estimateTokensFromBase64Payload, estimateTokensFromDataUrl, estimateTokensFromText,
 // estimateTokensFromContent now imported from '../modules/tokenEstimation.js'
 
-function extractUsageTokens(usage: any): { promptTokens?: number; completionTokens?: number; totalTokens?: number } {
-    if (!usage || typeof usage !== 'object') return {};
-
-    const promptTokens = typeof usage.prompt_tokens === 'number'
-        ? usage.prompt_tokens
-        : (typeof usage.input_tokens === 'number' ? usage.input_tokens : undefined);
-    const completionTokens = typeof usage.completion_tokens === 'number'
-        ? usage.completion_tokens
-        : (typeof usage.output_tokens === 'number' ? usage.output_tokens : undefined);
-    const totalTokens = typeof usage.total_tokens === 'number' ? usage.total_tokens : undefined;
-
-    return { promptTokens, completionTokens, totalTokens };
-}
-
-function createSseDataParser(onData: (data: string, eventName?: string) => void) {
-    let buffer = '';
-    let currentEvent = '';
-
-    return (chunk: string) => {
-        buffer += chunk;
-
-        while (true) {
-            const lineBreakIndex = buffer.indexOf('\n');
-            if (lineBreakIndex === -1) break;
-
-            let line = buffer.slice(0, lineBreakIndex);
-            buffer = buffer.slice(lineBreakIndex + 1);
-
-            if (line.endsWith('\r')) line = line.slice(0, -1);
-
-            if (!line) {
-                currentEvent = '';
-                continue;
-            }
-            if (line.startsWith('event:')) {
-                currentEvent = line.slice(6).trim();
-                continue;
-            }
-            if (line.startsWith('data:')) {
-                onData(line.slice(5).trimStart(), currentEvent || undefined);
-            }
-        }
-    };
-}
-
-function isImageModelId(modelId: string): boolean {
-    const normalized = String(modelId || '').toLowerCase();
-    if (!normalized) return false;
-    if (normalized.includes('embedding') || normalized.includes('transcribe')) return false;
-    return normalized.includes('imagen') || normalized.includes('image') || normalized.includes('nano-banana');
-}
-
-function isNanoBananaModel(modelId: string): boolean {
-    const normalized = String(modelId || '').toLowerCase();
-    return normalized.includes('nano-banana');
-}
-
-function ensureNanoBananaModalities(modalities: any): string[] {
-    const raw = Array.isArray(modalities) ? modalities : [];
-    const normalized = raw.map((m) => String(m).toLowerCase().trim()).filter(Boolean);
-    const set = new Set<string>(normalized);
-    set.add('image');
-    set.add('text');
-    return Array.from(set);
-}
-
-function isNonChatModel(modelId: string): 'tts' | 'stt' | 'image-gen' | 'video-gen' | 'embedding' | false {
-    const n = String(modelId || '').toLowerCase();
-    if (n.startsWith('tts-') || n.includes('-tts')) return 'tts';
-    if (n.startsWith('whisper') || n.includes('transcribe')) return 'stt';
-    if (n.includes('grok-imagine-video') || n.includes('imagine-video')) return 'video-gen';
-    if (
-        n.startsWith('dall-e') ||
-        n.startsWith('gpt-image') ||
-        n.includes('gpt-image') ||
-        n.includes('chatgpt-image') ||
-        n.includes('image-gen') ||
-        n.includes('imagegen') ||
-        n.startsWith('imagen') ||
-        n.includes('imagen') ||
-        n.includes('nano-banana') ||
-        n.includes('grok-imagine') ||
-        n.includes('grok-2-image')
-    ) return 'image-gen';
-    if (n.includes('embedding')) return 'embedding';
-    return false;
-}
-
-function formatAssistantContent(raw: string): string {
-    if (typeof raw !== 'string') return '';
-    if (raw.startsWith('data:image/')) {
-        return `![generated image](${raw})`;
-    }
-    const trimmed = raw.trim();
-    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
-        try {
-            const parsed = JSON.parse(trimmed);
-            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-                const entries = Object.entries(parsed);
-                if (entries.length === 1) {
-                    const [onlyKey, onlyValue] = entries[0];
-                    if (typeof onlyValue === 'string' && ['result', 'content', 'message', 'text'].includes(onlyKey)) {
-                        return onlyValue;
-                    }
-                    if (onlyValue && typeof onlyValue === 'object' && !Array.isArray(onlyValue)) {
-                        const nestedText = (onlyValue as any).text ?? (onlyValue as any).content ?? (onlyValue as any).message;
-                        if (typeof nestedText === 'string' && ['result', 'content', 'message', 'text'].includes(onlyKey)) {
-                            return nestedText;
-                        }
-                    }
-                }
-            }
-        } catch {
-            // Leave non-JSON or intentionally-JSON output unchanged.
-        }
-    }
-    return raw;
-}
-
-function inferToolCallsFromJsonText(raw: string, tools: any[] | undefined, toolChoice?: any): any[] | undefined {
-    if (typeof raw !== 'string') return undefined;
-    if (!Array.isArray(tools) || tools.length === 0) return undefined;
-
-    const trimmed = raw.trim();
-    if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) return undefined;
-
-    let parsed: any;
-    try {
-        parsed = JSON.parse(trimmed);
-    } catch {
-        return undefined;
-    }
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
-
-    const requestedToolName = typeof toolChoice === 'object' && toolChoice
-        ? (toolChoice?.function?.name || toolChoice?.name)
-        : undefined;
-
-    const keys = Object.keys(parsed);
-    const candidates = tools
-        .map((tool) => {
-            const fn = tool?.function;
-            const name = typeof fn?.name === 'string' ? fn.name : (typeof tool?.name === 'string' ? tool.name : undefined);
-            const params = fn?.parameters || tool?.parameters;
-            if (!name) return null;
-            if (requestedToolName && name !== requestedToolName) return null;
-
-            const properties = params && typeof params === 'object' && params.properties && typeof params.properties === 'object'
-                ? Object.keys(params.properties)
-                : [];
-            const required = params && typeof params === 'object' && Array.isArray(params.required)
-                ? params.required.filter((key: any) => typeof key === 'string')
-                : [];
-
-            const matchedRequired = required.filter((key: string) => keys.includes(key)).length;
-            const missingRequired = required.length - matchedRequired;
-            const matchedProperties = properties.filter((key: string) => keys.includes(key)).length;
-            const unexpectedKeys = properties.length > 0
-                ? keys.filter((key) => !properties.includes(key)).length
-                : 0;
-
-            if (required.length > 0 && missingRequired > 0) return null;
-            if (properties.length > 0 && matchedProperties === 0) return null;
-
-            const score = (matchedRequired * 100) + (matchedProperties * 10) - unexpectedKeys;
-            return { name, score };
-        })
-        .filter((candidate): candidate is { name: string; score: number } => Boolean(candidate))
-        .sort((a, b) => b.score - a.score);
-
-    const best = candidates[0];
-    if (!best) return undefined;
-
-    return [{
-        id: `call_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
-        type: 'function',
-        function: {
-            name: best.name,
-            arguments: JSON.stringify(parsed),
-        },
-    }];
-}
-
-function extractTextFromContent(content: any): string {
-    if (typeof content === 'string') return content;
-    if (Array.isArray(content)) {
-        const textPart = content.find((part: any) =>
-            part && (part.type === 'text' || part.type === 'input_text') && typeof part.text === 'string'
-        );
-        if (textPart?.text) return textPart.text;
-    }
-    return '';
-}
-
-function extractInputAudioFromContent(content: any): { data: string; format: string } | null {
-    if (!Array.isArray(content)) return null;
-    const audioPart = content.find((part: any) =>
-        part && part.type === 'input_audio' && part.input_audio
-        && typeof part.input_audio.data === 'string'
-        && typeof part.input_audio.format === 'string'
-    );
-    if (!audioPart) return null;
-    return { data: audioPart.input_audio.data, format: audioPart.input_audio.format };
-}
-
-function extractImageUrlFromContent(content: any): string | null {
-    if (!Array.isArray(content)) return null;
-    for (const part of content) {
-        if (!part || typeof part !== 'object') continue;
-        const type = String(part.type || '').toLowerCase();
-        if (type === 'image_url') {
-            const url = typeof part.image_url === 'string' ? part.image_url : part.image_url?.url;
-            if (typeof url === 'string' && url.length > 0) return url;
-        }
-        if (type === 'input_image') {
-            const url = typeof (part as any).image_url === 'string' ? (part as any).image_url : (part as any).image_url?.url;
-            if (typeof url === 'string' && url.length > 0) return url;
-        }
-    }
-    return null;
-}
-
-function extractTextFromMessages(rawMessages: any[]): string {
-    if (!Array.isArray(rawMessages)) return '';
-    const lastUser = rawMessages.filter(m => m?.role === 'user').pop();
-    if (!lastUser) return '';
-    return extractTextFromContent(lastUser.content);
-}
-
-function extractInputAudioFromMessages(rawMessages: any[]): { data: string; format: string } | null {
-    if (!Array.isArray(rawMessages)) return null;
-    for (let i = rawMessages.length - 1; i >= 0; i -= 1) {
-        const msg = rawMessages[i];
-        const audio = extractInputAudioFromContent(msg?.content);
-        if (audio) return audio;
-    }
-    return null;
-}
-
-function extractImageUrlFromMessages(rawMessages: any[]): string | null {
-    if (!Array.isArray(rawMessages)) return null;
-    for (let i = rawMessages.length - 1; i >= 0; i -= 1) {
-        const msg = rawMessages[i];
-        const url = extractImageUrlFromContent(msg?.content);
-        if (url) return url;
-    }
-    return null;
-}
-
-function extractTextFromResponsesInput(input: any): string {
-    if (typeof input === 'string') return input;
-    if (Array.isArray(input)) {
-        for (const item of input) {
-            const content = item?.content ?? item;
-            const text = extractTextFromContent(content);
-            if (text) return text;
-        }
-    }
-    return '';
-}
-
-function extractInputAudioFromResponsesInput(input: any): { data: string; format: string } | null {
-    if (Array.isArray(input)) {
-        for (const item of input) {
-            const content = item?.content ?? item;
-            const audio = extractInputAudioFromContent(content);
-            if (audio) return audio;
-        }
-    }
-    return null;
-}
-
-function extractImageUrlFromResponsesInput(input: any): string | null {
-    if (Array.isArray(input)) {
-        for (const item of input) {
-            const content = item?.content ?? item;
-            const url = extractImageUrlFromContent(content);
-            if (url) return url;
-        }
-    }
-    return null;
-}
-
-function filterValidChatMessages(rawMessages: any): { role: string; content: any; tool_calls?: any[]; tool_call_id?: string; name?: string }[] {
-    if (!Array.isArray(rawMessages)) return [];
-    return rawMessages.filter((msg) => msg && typeof msg.role === 'string');
-}
-
-type StoredResponsesHistoryEntry = {
-    id: string;
-    model: string;
-    input: any[];
-    output: any[];
-    output_text: string;
-    created: number;
-};
-
-const RESPONSES_HISTORY_TTL_SECONDS = Math.max(60, readEnvNumber('RESPONSES_HISTORY_TTL_SECONDS', 60 * 60));
-const RESPONSES_HISTORY_REDIS_PREFIX = 'api:responses_history:';
-const responsesHistoryMemory = new Map<string, { expiresAt: number; entry: StoredResponsesHistoryEntry }>();
-
-function cloneResponsesHistoryValue<T>(value: T): T {
-    if (typeof value === 'undefined') return value;
-    return JSON.parse(JSON.stringify(value)) as T;
-}
-
-function getResponsesHistoryRedisKey(responseId: string): string {
-    return `${RESPONSES_HISTORY_REDIS_PREFIX}${responseId}`;
-}
-
-function pruneExpiredResponsesHistoryMemory(): void {
-    const now = Date.now();
-    for (const [key, cached] of responsesHistoryMemory) {
-        if (cached.expiresAt <= now) responsesHistoryMemory.delete(key);
-    }
-}
-
-async function loadResponsesHistoryEntry(responseId: string): Promise<StoredResponsesHistoryEntry | null> {
-    const normalizedId = typeof responseId === 'string' ? responseId.trim() : '';
-    if (!normalizedId) return null;
-
-    pruneExpiredResponsesHistoryMemory();
-    const cached = responsesHistoryMemory.get(normalizedId);
-    if (cached) {
-        if (cached.expiresAt > Date.now()) return cloneResponsesHistoryValue(cached.entry);
-        responsesHistoryMemory.delete(normalizedId);
-    }
-
-    if (!redis) return null;
-
-    try {
-        const raw = await redis.get(getResponsesHistoryRedisKey(normalizedId));
-        if (!raw) return null;
-        const parsed = JSON.parse(raw) as StoredResponsesHistoryEntry;
-        responsesHistoryMemory.set(normalizedId, {
-            expiresAt: Date.now() + RESPONSES_HISTORY_TTL_SECONDS * 1000,
-            entry: parsed,
-        });
-        return cloneResponsesHistoryValue(parsed);
-    } catch (error: any) {
-        console.warn(`[ResponsesHistory] Failed to load ${normalizedId}: ${error?.message || error}`);
-        return null;
-    }
-}
-
-async function saveResponsesHistoryEntry(entry: StoredResponsesHistoryEntry): Promise<void> {
-    const normalizedId = typeof entry?.id === 'string' ? entry.id.trim() : '';
-    if (!normalizedId) return;
-
-    const stored: StoredResponsesHistoryEntry = {
-        ...cloneResponsesHistoryValue(entry),
-        id: normalizedId,
-    };
-    responsesHistoryMemory.set(normalizedId, {
-        expiresAt: Date.now() + RESPONSES_HISTORY_TTL_SECONDS * 1000,
-        entry: stored,
-    });
-
-    if (!redis) return;
-
-    try {
-        await redis.set(
-            getResponsesHistoryRedisKey(normalizedId),
-            JSON.stringify(stored),
-            'EX',
-            RESPONSES_HISTORY_TTL_SECONDS,
-        );
-    } catch (error: any) {
-        console.warn(`[ResponsesHistory] Failed to persist ${normalizedId}: ${error?.message || error}`);
-    }
-}
-
-function buildStoredResponsesHistoryOutput(outputText: string, toolCalls?: any[]): any[] {
-    if (Array.isArray(toolCalls) && toolCalls.length > 0) {
-        return toolCalls
-            .map((call: any) => {
-                const functionPayload = call?.function && typeof call.function === 'object' ? call.function : call;
-                const name = typeof functionPayload?.name === 'string' && functionPayload.name.trim()
-                    ? functionPayload.name.trim()
-                    : (typeof call?.name === 'string' && call.name.trim() ? call.name.trim() : undefined);
-                if (!name) return null;
-
-                const rawArguments = functionPayload?.arguments ?? call?.arguments ?? {};
-                let serializedArguments = '{}';
-                if (typeof rawArguments === 'string') {
-                    serializedArguments = rawArguments;
-                } else {
-                    try {
-                        serializedArguments = JSON.stringify(rawArguments);
-                    } catch {
-                        serializedArguments = String(rawArguments ?? '{}');
-                    }
-                }
-
-                const normalized: Record<string, any> = {
-                    type: 'function_call',
-                    name,
-                    arguments: serializedArguments,
-                };
-                const callId = call?.id ?? call?.call_id ?? call?.tool_call_id;
-                if (typeof callId === 'string' && callId.trim()) normalized.call_id = callId.trim();
-                return normalized;
-            })
-            .filter(Boolean);
-    }
-
-    return [{ role: 'assistant', content: [{ type: 'output_text', text: outputText || '' }] }];
-}
-
-function mergeResponsesHistoryInput(previousEntry: StoredResponsesHistoryEntry, nextInput: any[]): any[] {
-    return [
-        ...cloneResponsesHistoryValue(previousEntry.input || []),
-        ...cloneResponsesHistoryValue(previousEntry.output || []),
-        ...cloneResponsesHistoryValue(nextInput || []),
-    ];
-}
-
-async function handleImageGenFallbackFromChatOrResponses(params: {
-    modelId: string;
-    prompt: string;
-    requestBody: any;
-    request: Request;
-    response: Response;
-    source: 'chat' | 'responses';
-}): Promise<void> {
-    const { modelId, prompt, requestBody, request, response, source } = params;
-
-    if (!prompt) {
-        if (!response.completed) {
-            response.status(400).json({
-                error: {
-                    message: `Bad Request: prompt is required for image generation (fallback from /v1/${source}).`,
-                    type: 'invalid_request_error',
-                    param: 'prompt',
-                    code: 'missing_prompt',
-                },
-                timestamp: new Date().toISOString(),
-            });
-        }
-        return;
-    }
-
-    const capsOk = await enforceModelCapabilities(modelId, ['image_output'], response);
-    if (!capsOk) return;
-
-    const provider = await pickImageGenProviderKey(modelId, ['image_output']);
-    if (!provider) {
-        if (!response.completed) {
-            response.status(503).json({ error: 'No available provider for image generation', timestamp: new Date().toISOString() });
-        }
-        return;
-    }
-
-    const upstreamUrl = `${provider.baseUrl}/v1/images/generations`;
-    const upstreamRes = await fetchWithTimeout(upstreamUrl, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${provider.apiKey}`,
-        },
-        body: JSON.stringify({
-            model: modelId,
-            prompt,
-            n: typeof requestBody?.n === 'number' ? requestBody.n : 1,
-            size: typeof requestBody?.size === 'string' ? requestBody.size : '1024x1024',
-            quality: typeof requestBody?.quality === 'string' ? requestBody.quality : undefined,
-            style: typeof requestBody?.style === 'string' ? requestBody.style : undefined,
-            response_format: typeof requestBody?.response_format === 'string' ? requestBody.response_format : undefined,
-        }),
-    }, UPSTREAM_TIMEOUT_MS);
-
-    if (!upstreamRes.ok) {
-        const errText = await upstreamRes.text().catch(() => '');
-        if (!response.completed) {
-            response.status(upstreamRes.status).json({
-                error: `Image generation upstream error: ${errText || upstreamRes.statusText}`,
-                timestamp: new Date().toISOString(),
-            });
-        }
-        return;
-    }
-
-    const resJson = await upstreamRes.json();
-    const first = Array.isArray(resJson?.data) ? resJson.data[0] : undefined;
-    const imageUrl = typeof first?.url === 'string' ? first.url : undefined;
-    const imageB64 = typeof first?.b64_json === 'string' ? first.b64_json : undefined;
-    const imageDataUrl = imageB64 ? `data:image/png;base64,${imageB64}` : undefined;
-    const imageRef = imageUrl || imageDataUrl;
-    const content = imageRef ? `![generated image](${imageRef})` : 'Image generation completed.';
-
-    const wantsStream = Boolean(requestBody?.stream);
-    if (source === 'chat' && wantsStream) {
-        const created = Math.floor(Date.now() / 1000);
-        const id = `chatcmpl_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-        response.setHeader('Content-Type', 'text/event-stream');
-        response.setHeader('Cache-Control', 'no-cache');
-        response.setHeader('Connection', 'keep-alive');
-        try { (response as any).flushHeaders?.(); } catch {}
-
-        const firstChunk = {
-            id,
-            object: 'chat.completion.chunk',
-            created,
-            model: modelId,
-            choices: [{
-                index: 0,
-                delta: { role: 'assistant', content },
-                finish_reason: null,
-            }],
-        };
-        const finalChunk = {
-            id,
-            object: 'chat.completion.chunk',
-            created,
-            model: modelId,
-            choices: [{
-                index: 0,
-                delta: {},
-                finish_reason: 'stop',
-            }],
-        };
-        response.write(`data: ${JSON.stringify(firstChunk)}\n\n`);
-        response.write(`data: ${JSON.stringify(finalChunk)}\n\n`);
-        response.write('data: [DONE]\n\n');
-        response.end();
-    } else if (source === 'chat') {
-        const created = Math.floor(Date.now() / 1000);
-        const promptTokens = Math.ceil(prompt.length / 4);
-        const totalTokens = promptTokens + 1;
-        response.json({
-            id: `chatcmpl_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
-            object: 'chat.completion',
-            created,
-            model: modelId,
-            choices: [{
-                index: 0,
-                message: { role: 'assistant', content },
-                finish_reason: 'stop',
-            }],
-            usage: { prompt_tokens: promptTokens, completion_tokens: 1, total_tokens: totalTokens },
-        });
-    } else {
-        const created = Math.floor(Date.now() / 1000);
-        const promptTokens = Math.ceil(prompt.length / 4);
-        const totalTokens = promptTokens + 1;
-        response.json({
-            id: `resp_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
-            object: 'response',
-            created,
-            model: modelId,
-            output: [{ content: [{ type: 'output_text', text: content }] }],
-            output_text: content,
-            usage: { prompt_tokens: promptTokens, completion_tokens: 1, total_tokens: totalTokens },
-        });
-    }
-
-    const tokenEstimate = Math.ceil(prompt.length / 4) + 500;
-    await updateUserTokenUsage(tokenEstimate, request.apiKey!);
-}
-
-async function handleVideoGenFallbackFromChatOrResponses(params: {
-    modelId: string;
-    prompt: string;
-    imageUrl?: string | null;
-    requestBody: any;
-    request: Request;
-    response: Response;
-    source: 'chat' | 'responses';
-}): Promise<void> {
-    const { modelId, prompt, imageUrl, requestBody, response, source } = params;
-
-    if (!prompt) {
-        if (!response.completed) {
-            response.status(400).json({
-                error: {
-                    message: `Bad Request: prompt is required for video generation (fallback from /v1/${source}).`,
-                    type: 'invalid_request_error',
-                    param: 'prompt',
-                    code: 'missing_prompt',
-                },
-                timestamp: new Date().toISOString(),
-            });
-        }
-        return;
-    }
-
-    const provider = await pickVideoGenProviderKey(modelId);
-    if (!provider) {
-        if (!response.completed) {
-            response.status(503).json({ error: 'No available provider for video generation', timestamp: new Date().toISOString() });
-        }
-        return;
-    }
-
-    const payload: Record<string, any> = {
-        model: modelId,
-        prompt,
-    };
-
-    if (typeof requestBody?.image_url === 'string') payload.image_url = requestBody.image_url;
-    if (typeof requestBody?.video_url === 'string') payload.video_url = requestBody.video_url;
-    if (imageUrl && !payload.image_url) payload.image_url = imageUrl;
-    if (typeof requestBody?.duration === 'number') payload.duration = requestBody.duration;
-    if (typeof requestBody?.aspect_ratio === 'string') payload.aspect_ratio = requestBody.aspect_ratio;
-    if (typeof requestBody?.resolution === 'string') payload.resolution = requestBody.resolution;
-    if (typeof requestBody?.seed === 'number') payload.seed = requestBody.seed;
-
-    const upstreamUrl = `${provider.baseUrl}/v1/videos/generations`;
-    const upstreamRes = await fetchWithTimeout(upstreamUrl, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${provider.apiKey}`,
-        },
-        body: JSON.stringify(payload),
-    }, UPSTREAM_TIMEOUT_MS);
-
-    if (!upstreamRes.ok) {
-        const errText = await upstreamRes.text().catch(() => '');
-        if (!response.completed) {
-            response.status(upstreamRes.status).json({
-                error: `Video generation upstream error: ${errText || upstreamRes.statusText}`,
-                timestamp: new Date().toISOString(),
-            });
-        }
-        return;
-    }
-
-    const resJson = await upstreamRes.json().catch(() => ({}));
-    const requestId = resJson?.request_id || resJson?.id;
-    if (!requestId) {
-        if (!response.completed) {
-            response.status(502).json({ error: 'Video generation upstream response missing request_id.', timestamp: new Date().toISOString() });
-        }
-        return;
-    }
-
-    setVideoRequestCache(String(requestId), provider);
-
-    const contentText = `Video generation started. Request ID: ${requestId}. Check /v1/videos/${requestId} for status.`;
-    const wantsStream = Boolean(requestBody?.stream);
-
-    if (source === 'chat') {
-        if (wantsStream) {
-            const created = Math.floor(Date.now() / 1000);
-            const id = `chatcmpl_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-            response.setHeader('Content-Type', 'text/event-stream');
-            response.setHeader('Cache-Control', 'no-cache');
-            response.setHeader('Connection', 'keep-alive');
-            try { (response as any).flushHeaders?.(); } catch {}
-
-            const firstChunk = {
-                id,
-                object: 'chat.completion.chunk',
-                created,
-                model: modelId,
-                choices: [{ index: 0, delta: { content: contentText }, finish_reason: null }]
-            };
-            response.write(`data: ${JSON.stringify(firstChunk)}\n\n`);
-
-            const finalChunk = {
-                id,
-                object: 'chat.completion.chunk',
-                created,
-                model: modelId,
-                choices: [{ index: 0, delta: {}, finish_reason: 'stop' }]
-            };
-            response.write(`data: ${JSON.stringify(finalChunk)}\n\n`);
-            response.write(`data: [DONE]\n\n`);
-            return response.end();
-        }
-
-        const openaiResponse = {
-            id: `chatcmpl-${Date.now()}-${Math.random().toString(36).substring(2)}`,
-            object: "chat.completion",
-            created: Math.floor(Date.now() / 1000),
-            model: modelId,
-            choices: [
-                {
-                    index: 0,
-                    message: {
-                        role: "assistant",
-                        content: contentText,
-                    },
-                    logprobs: null,
-                    finish_reason: "stop",
-                }
-            ],
-            usage: {
-                prompt_tokens: 0,
-                completion_tokens: 0,
-                total_tokens: 0
-            }
-        };
-
-        if (!response.completed) response.json(openaiResponse);
-        return;
-    }
-
-    // responses API fallback
-    if (wantsStream) {
-        const responseId = `resp_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-        const created = Math.floor(Date.now() / 1000);
-        response.setHeader('Content-Type', 'text/event-stream');
-        response.setHeader('Cache-Control', 'no-cache');
-        response.setHeader('Connection', 'keep-alive');
-        try { (response as any).flushHeaders?.(); } catch {}
-
-        response.write(`event: response.created\n`);
-        response.write(`data: ${JSON.stringify({ id: responseId, object: 'response', created, model: modelId, output: [], output_text: '' })}\n\n`);
-
-        response.write(`event: response.output_text.delta\n`);
-        response.write(`data: ${JSON.stringify({ id: responseId, object: 'response', created, model: modelId, output_text_delta: contentText, output: [{ content: [{ type: 'output_text', text: contentText }] }] })}\n\n`);
-
-        response.write(`event: response.completed\n`);
-        response.write(`data: ${JSON.stringify({ id: responseId, object: 'response', created, model: modelId, output_text: contentText, output: [{ content: [{ type: 'output_text', text: contentText }] }], usage: { total_tokens: 0 } })}\n\n`);
-        response.write(`data: [DONE]\n\n`);
-        return response.end();
-    }
-
-    const responseBody = {
-        id: `resp_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
-        object: 'response',
-        created: Math.floor(Date.now() / 1000),
-        model: modelId,
-        output: [{ content: [{ type: 'output_text', text: contentText }] }],
-        output_text: contentText,
-        usage: { total_tokens: 0 }
-    };
-    if (!response.completed) response.json(responseBody);
-}
-
-function normalizeInputAudio(audio: { data: string; format: string }): { buffer: Buffer; mimeType: string; extension: string } | null {
-    let { data, format } = audio;
-    let mimeType = format;
-
-    if (typeof data === 'string' && data.startsWith('data:')) {
-        const match = data.match(/^data:([^;]+);base64,(.+)$/);
-        if (match) {
-            mimeType = match[1];
-            data = match[2];
-        }
-    }
-
-    if (!mimeType) mimeType = 'audio/wav';
-    if (!mimeType.includes('/')) mimeType = `audio/${mimeType}`;
-    const extension = mimeType.split('/')[1] || 'wav';
-
-    try {
-        const buffer = Buffer.from(data, 'base64');
-        if (buffer.length === 0) return null;
-        return { buffer, mimeType, extension };
-    } catch {
-        return null;
-    }
-}
-
-function summarizeUrlForLog(rawUrl: string): string {
-    try {
-        const u = new URL(rawUrl);
-        const host = u.host || u.hostname;
-        const path = u.pathname || '/';
-        return `${u.protocol}//${host}${path}`;
-    } catch {
-        return rawUrl.slice(0, 120);
-    }
-}
-
-function hostMatchesAllowlist(host: string): boolean {
-    if (!IMAGE_FETCH_ALLOWED_HOSTS || IMAGE_FETCH_ALLOWED_HOSTS.length === 0) return true;
-    const needle = host.toLowerCase();
-    return IMAGE_FETCH_ALLOWED_HOSTS.some((entry) => {
-        const allowed = entry.toLowerCase();
-        if (!allowed) return false;
-        if (allowed.startsWith('.')) {
-            const suffix = allowed.slice(1);
-            return needle === suffix || needle.endsWith(`.${suffix}`);
-        }
-        return needle === allowed;
-    });
-}
-
-function isLocalHostname(host: string): boolean {
-    const normalized = host.toLowerCase();
-    return normalized === 'localhost' || normalized.endsWith('.localhost') || normalized.endsWith('.local');
-}
-
-function isPrivateIpv4(ip: string): boolean {
-    const parts = ip.split('.').map((n) => Number(n));
-    if (parts.length !== 4 || parts.some((n) => Number.isNaN(n))) return false;
-    const [a, b, c, d] = parts;
-    if (a === 10) return true;
-    if (a === 127) return true;
-    if (a === 169 && b === 254) return true;
-    if (a === 172 && b >= 16 && b <= 31) return true;
-    if (a === 192 && b === 168) return true;
-    if (a === 0) return true;
-    if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
-    if (a === 192 && b === 0 && c === 0) return true; // IETF protocol assignments
-    if (a === 192 && b === 0 && c === 2) return true; // TEST-NET-1
-    if (a === 198 && (b === 18 || b === 19)) return true; // benchmarking
-    if (a === 198 && b === 51 && c === 100) return true; // TEST-NET-2
-    if (a === 203 && b === 0 && c === 113) return true; // TEST-NET-3
-    if (a >= 224) return true; // multicast/reserved
-    return false;
-}
-
-function isPrivateIpv6(ip: string): boolean {
-    const normalized = ip.toLowerCase();
-    if (normalized === '::' || normalized === '::1') return true;
-    if (normalized.startsWith('fe80:') || normalized.startsWith('fe9') || normalized.startsWith('fea') || normalized.startsWith('feb')) return true;
-    if (normalized.startsWith('fc') || normalized.startsWith('fd')) return true; // unique local
-    if (normalized.startsWith('ff')) return true; // multicast
-    if (normalized.startsWith('2001:db8')) return true; // documentation
-    if (normalized.startsWith('::ffff:')) {
-        const ipv4 = normalized.slice('::ffff:'.length);
-        if (ipv4) return isPrivateIpv4(ipv4);
-    }
-    return false;
-}
-
-function isPrivateIp(ip: string): boolean {
-    const family = net.isIP(ip);
-    if (family === 4) return isPrivateIpv4(ip);
-    if (family === 6) return isPrivateIpv6(ip);
-    return false;
-}
-
-async function resolveHostAddresses(host: string): Promise<string[]> {
-    try {
-        const results = await dns.lookup(host, { all: true, verbatim: true });
-        return results.map((entry) => entry.address).filter(Boolean);
-    } catch {
-        return [];
-    }
-}
-
-async function validateImageFetchUrl(rawUrl: string): Promise<{ ok: boolean; reason?: string; parsed?: URL }> {
-    let parsed: URL;
-    try {
-        parsed = new URL(rawUrl);
-    } catch {
-        return { ok: false, reason: 'invalid_url' };
-    }
-
-    const protocol = parsed.protocol.replace(':', '').toLowerCase();
-    if (!IMAGE_FETCH_ALLOWED_PROTOCOLS.includes(protocol)) {
-        return { ok: false, reason: 'protocol_not_allowed' };
-    }
-
-    const hostname = parsed.hostname;
-    if (!hostname) return { ok: false, reason: 'missing_host' };
-    if (!hostMatchesAllowlist(hostname)) return { ok: false, reason: 'host_not_allowed' };
-
-    if (!IMAGE_FETCH_ALLOW_PRIVATE) {
-        if (isLocalHostname(hostname)) return { ok: false, reason: 'local_hostname' };
-        const directIpType = net.isIP(hostname);
-        if (directIpType) {
-            if (isPrivateIp(hostname)) return { ok: false, reason: 'private_ip' };
-        } else {
-            const addresses = await resolveHostAddresses(hostname);
-            if (addresses.length === 0) return { ok: false, reason: 'dns_failed' };
-            if (addresses.some((addr) => isPrivateIp(addr))) return { ok: false, reason: 'private_ip' };
-        }
-    }
-
-    return { ok: true, parsed };
-}
-
-async function readResponseBodyWithLimit(
-    response: globalThis.Response,
-    maxBytes: number,
-    controller?: AbortController
-): Promise<Buffer> {
-    const contentLength = response.headers.get('content-length');
-    if (maxBytes > 0 && contentLength) {
-        const declared = Number(contentLength);
-        if (Number.isFinite(declared) && declared > maxBytes) {
-            controller?.abort(new Error('Image exceeds max size.'));
-            throw new Error('Image exceeds max size.');
-        }
-    }
-
-    if (!response.body) {
-        return Buffer.alloc(0);
-    }
-
-    const reader = response.body.getReader();
-    const chunks: Buffer[] = [];
-    let total = 0;
-
-    while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (!value || value.length === 0) continue;
-        const chunk = Buffer.from(value);
-        total += chunk.length;
-        if (maxBytes > 0 && total > maxBytes) {
-            try { await reader.cancel(); } catch {}
-            controller?.abort(new Error('Image exceeds max size.'));
-            throw new Error('Image exceeds max size.');
-        }
-        chunks.push(chunk);
-    }
-
-    return Buffer.concat(chunks);
-}
-
-async function fetchImageAsDataUrl(
-    imageUrl: string,
-    authHeader?: string,
-    refererOverride?: string
-): Promise<{ dataUrl: string; contentType: string; bytes: number } | null> {
-    const validation = await validateImageFetchUrl(imageUrl);
-    if (!validation.ok || !validation.parsed) {
-        console.warn(`[ImageProxy] Skipping image fetch (${validation.reason || 'blocked'}): ${summarizeUrlForLog(imageUrl)}`);
-        return null;
-    }
-
-    const initialHost = validation.parsed.hostname.toLowerCase();
-    let currentUrl = validation.parsed.toString();
-    const controller = new AbortController();
-    const timeoutId = IMAGE_FETCH_TIMEOUT_MS > 0
-        ? setTimeout(() => controller.abort(new Error('Image fetch timed out.')), IMAGE_FETCH_TIMEOUT_MS)
-        : null;
-
-    try {
-        for (let hop = 0; hop <= IMAGE_FETCH_MAX_REDIRECTS; hop++) {
-            const currentValidation = hop === 0 ? validation : await validateImageFetchUrl(currentUrl);
-            if (!currentValidation.ok || !currentValidation.parsed) {
-                console.warn(`[ImageProxy] Redirect blocked (${currentValidation.reason || 'blocked'}): ${summarizeUrlForLog(currentUrl)}`);
-                return null;
-            }
-
-            const headers: Record<string, string> = {};
-            const currentHost = currentValidation.parsed.hostname.toLowerCase();
-            if (IMAGE_FETCH_USER_AGENT) headers['User-Agent'] = IMAGE_FETCH_USER_AGENT;
-            const effectiveReferer = refererOverride || IMAGE_FETCH_REFERER;
-            if (effectiveReferer) headers['Referer'] = effectiveReferer;
-            if (IMAGE_FETCH_FORWARD_AUTH && authHeader && currentHost === initialHost) {
-                headers['Authorization'] = authHeader;
-            }
-
-            if (LOG_SENSITIVE_PAYLOADS) {
-                console.log(`[ImageProxy] Fetching image from URL: ${currentUrl}`);
-            } else {
-                console.log(`[ImageProxy] Fetching image from host: ${currentHost}`);
-            }
-
-            const res = await fetch(currentUrl, {
-                method: 'GET',
-                headers,
-                redirect: 'manual',
-                signal: controller.signal,
-            });
-
-            if (res.status >= 300 && res.status < 400) {
-                const location = res.headers.get('location');
-                if (!location) {
-                    console.warn(`[ImageProxy] Redirect without location header from ${summarizeUrlForLog(currentUrl)}`);
-                    return null;
-                }
-                currentUrl = new URL(location, currentUrl).toString();
-                continue;
-            }
-
-            if (!res.ok) {
-                console.warn(`[ImageProxy] Failed to fetch image: ${res.status} ${res.statusText}`);
-                return null;
-            }
-
-            const buffer = await readResponseBodyWithLimit(res, IMAGE_FETCH_MAX_BYTES, controller);
-            const contentType = res.headers.get('content-type') || detectMimeTypeFromBuffer(buffer) || 'image/jpeg';
-            const base64 = buffer.toString('base64');
-            return {
-                dataUrl: `data:${contentType};base64,${base64}`,
-                contentType,
-                bytes: buffer.length,
-            };
-        }
-
-        console.warn(`[ImageProxy] Too many redirects for ${summarizeUrlForLog(imageUrl)}`);
-        return null;
-    } catch (err: any) {
-        if (controller.signal.aborted) {
-            console.warn(`[ImageProxy] Aborted fetch for ${summarizeUrlForLog(imageUrl)}: ${err?.message || 'aborted'}`);
-        } else {
-            console.error(`[ImageProxy] Error fetching image:`, err);
-        }
-        return null;
-    } finally {
-        if (timeoutId) clearTimeout(timeoutId);
-    }
-}
-
-async function inlineImageUrls(messages: any[], authHeader?: string, refererOverride?: string) {
-    if (!messages || !Array.isArray(messages)) return;
-
-    // Collect all image parts that need fetching, then fetch in parallel
-    const fetchJobs: Array<{ part: any; url: string }> = [];
-    for (const msg of messages) {
-        if (Array.isArray(msg.content)) {
-            for (const part of msg.content) {
-                if (part && part.type === 'image_url' && typeof part.image_url?.url === 'string' && part.image_url.url.startsWith('http')) {
-                    fetchJobs.push({ part, url: part.image_url.url });
-                }
-            }
-        }
-    }
-    if (fetchJobs.length === 0) return;
-
-    const results = await Promise.allSettled(
-        fetchJobs.map(async (job) => {
-            const result = await fetchImageAsDataUrl(job.url, authHeader, refererOverride);
-            return { part: job.part, result };
-        })
-    );
-
-    for (const outcome of results) {
-        if (outcome.status === 'fulfilled' && outcome.value.result) {
-            const { part, result } = outcome.value;
-            part.image_url.url = result.dataUrl;
-            console.log(`[ImageProxy] Successfully inlined image. Type: ${result.contentType}, Size: ${result.bytes}`);
-        }
-    }
-}
-
-function detectMimeTypeFromBuffer(buffer: Buffer): string | null {
-    if (buffer.length < 2) return null;
-    // JPEG: FF D8 (SOI marker)
-    if (buffer[0] === 0xFF && buffer[1] === 0xD8) return 'image/jpeg';
-    // PNG: 89 50 4E 47
-    if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4E && buffer[3] === 0x47) return 'image/png';
-    // GIF: 47 49 46 38
-    if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x38) return 'image/gif';
-    // WEBP: RIFF ... WEBP (offset 8)
-    if (buffer.length > 12 && buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46) return 'image/webp';
-    
-    return null; // No supported image signature found
-}
-
-function detectMimeTypeFromBase64(base64: string): string | null {
-    if (base64.startsWith('/9j/')) return 'image/jpeg';
-    if (base64.startsWith('iVBORw')) return 'image/png';
-    if (base64.startsWith('R0lGOD')) return 'image/gif';
-    if (base64.startsWith('UklGR')) return 'image/webp';
-    return null; 
-}
-
-function isLikelyBase64(buffer: Buffer): boolean {
-    if (buffer.length === 0) return false;
-    // Check first 100 bytes (optimization)
-    const len = Math.min(buffer.length, 100);
-    for (let i = 0; i < len; i++) {
-        const byte = buffer[i];
-        const isBase64Char = 
-            (byte >= 65 && byte <= 90) || // A-Z
-            (byte >= 97 && byte <= 122) || // a-z
-            (byte >= 48 && byte <= 57) || // 0-9
-            byte === 43 || byte === 47 || byte === 61 || // + / =
-            byte === 10 || byte === 13 || byte === 32; // whitespace
-        if (!isBase64Char) return false;
-    }
-    return true;
-}
-
-// Naive multipart parser to handle clients sending files to chat/completions
-function parseMultipartBody(buffer: Buffer, boundary: string): { fields: Record<string, string>; files: { name: string; type: string; data: Buffer }[] } {
-    const result = { fields: {} as Record<string, string>, files: [] as any[] };
-    const delimiter = Buffer.from(`--${boundary}`);
-    let start = 0;
-    
-    let idx = buffer.indexOf(delimiter, start);
-    if (idx === -1) return result; 
-    
-    while (idx !== -1) {
-        start = idx + delimiter.length;
-        if (buffer[start] === 45 && buffer[start + 1] === 45) break; 
-        
-        const nextIdx = buffer.indexOf(delimiter, start);
-        const end = (nextIdx === -1) ? buffer.length : nextIdx;
-        
-        const partBuffer = buffer.subarray(start, end);
-        let headerStart = 0;
-        // CRLF is 13, 10.
-        // Check for CRLF at start of part (after boundary)
-        if (partBuffer[0] === 13 && partBuffer[1] === 10) headerStart = 2;
-        else if (partBuffer[0] === 10) headerStart = 1; // LF only handling
-        
-        const headerEnd = partBuffer.indexOf('\r\n\r\n', headerStart);
-        if (headerEnd !== -1) {
-            const headers = partBuffer.subarray(headerStart, headerEnd).toString('utf8');
-            // Safely remove trailing CRLF/LF from body only if explicitly present
-            // partBuffer ends exactly at the start of the next boundary sequence
-            let bodyEnd = partBuffer.length;
-            if (partBuffer.length >= 2 && partBuffer[bodyEnd - 2] === 13 && partBuffer[bodyEnd - 1] === 10) {
-                bodyEnd -= 2;
-            } else if (partBuffer.length >= 1 && partBuffer[bodyEnd - 1] === 10) {
-                bodyEnd -= 1;
-            }
-
-            const body = partBuffer.subarray(headerEnd + 4, bodyEnd);
-            
-            const nameMatch = headers.match(/name="([^"]+)"/);
-            const filenameMatch = headers.match(/filename="([^"]+)"/);
-            const contentTypeMatch = headers.match(/Content-Type: (.+)/i);
-            const transferEncodingMatch = headers.match(/Content-Transfer-Encoding: (.+)/i);
-            
-            if (filenameMatch) {
-                let contentType = contentTypeMatch ? contentTypeMatch[1].trim() : 'application/octet-stream';
-                let fileData = body;
-
-                console.log(`[Multipart] File part detected. Name: ${filenameMatch[1]}, Content-Type: ${contentType}, Size: ${body.length}`);
-
-                // Handle base64 transfer encoding (decode to binary storage)
-                if (transferEncodingMatch && transferEncodingMatch[1].trim().toLowerCase() === 'base64') {
-                    console.log('[Multipart] Decoding base64 transfer encoding.');
-                    const text = body.toString('utf8').replace(/\s+/g, '');
-                    fileData = Buffer.from(text, 'base64');
-                }
-
-                if (contentType === 'application/octet-stream') {
-                    contentType = detectMimeTypeFromBuffer(fileData) || 'application/octet-stream';
-                    console.log(`[Multipart] Detected MIME from buffer: ${contentType}`);
-                }
-
-                result.files.push({
-                    name: filenameMatch[1],
-                    type: contentType,
-                    data: fileData
-                });
-            } else if (nameMatch) {
-                result.fields[nameMatch[1]] = body.toString('utf8');
-            }
-        }
-        
-        idx = nextIdx;
-    }
-    return result;
-}
-
 // --- Routes ---
  
 // Generate Key Route - Handler becomes async
-openaiRouter.post('/generate_key', authAndUsageMiddleware, async (request: Request, response: Response) => {
+openaiRouter.post('/generate_key', authAndUsageMiddleware, rateLimitMiddleware, async (request: Request, response: Response) => {
   // Check if middleware failed (e.g., if it didn't attach data)
   if (!request.apiKey || request.userRole === undefined) {
        await logError({ message: 'Authentication failed in /generate_key route after middleware' }, request);
@@ -1592,24 +376,36 @@ openaiRouter.get('/keys/me', authKeyOnlyMiddleware, rateLimitMiddleware, async (
         }
 
         const tierLimits = request.tierLimits || tiersData[userData.tier as keyof typeof tiersData];
-        const maxTokens = tierLimits?.max_tokens ?? null;
-        const tokenUsage = typeof userData.tokenUsage === 'number' ? userData.tokenUsage : 0;
-        const requestCount = typeof userData.requestCount === 'number' ? userData.requestCount : 0;
-        const remainingTokens = maxTokens !== null ? Math.max(0, maxTokens - tokenUsage) : null;
+        return response.json(buildKeyDetailsPayload(apiKey, userData, tierLimits, 'cache'));
+    } catch (error: any) {
+        await logError(error, request);
+        if (!response.completed) {
+            response.status(500).json({ error: 'Internal Server Error', timestamp: new Date().toISOString() });
+        }
+    }
+});
 
-        return response.json({
-            api_key_preview: redactToken(apiKey),
-            api_key_hash: hashToken(apiKey),
-            user: { id: userData.userId, role: userData.role },
-            tier: { id: userData.tier, limits: tierLimits },
-            usage: {
-                token_usage: tokenUsage,
-                request_count: requestCount,
-                remaining_tokens: remainingTokens,
-                max_tokens: maxTokens,
-            },
-            timestamp: new Date().toISOString(),
-        });
+openaiRouter.get('/keys/me/live', authKeyOnlyMiddleware, rateLimitMiddleware, async (request: Request, response: Response) => {
+    try {
+        const apiKey = request.apiKey;
+        if (!apiKey) {
+            if (!response.completed) {
+                return response.status(401).json({ error: 'Unauthorized: Missing API key', timestamp: new Date().toISOString() });
+            }
+            return;
+        }
+
+        const { keys, source } = await loadKeysLiveSnapshot();
+        const userData = keys[apiKey];
+        if (!userData) {
+            if (!response.completed) {
+                return response.status(401).json({ error: 'Unauthorized: Invalid API key', timestamp: new Date().toISOString() });
+            }
+            return;
+        }
+
+        const tierLimits = request.tierLimits || tiersData[userData.tier as keyof typeof tiersData];
+        return response.json(buildKeyDetailsPayload(apiKey, userData, tierLimits, source));
     } catch (error: any) {
         await logError(error, request);
         if (!response.completed) {
@@ -1641,6 +437,7 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
         } else { return; }
    }
   try {
+    return await requestAdmissionQueue.run(async () => {
     const userApiKey = request.apiKey!; 
     const tierLimits = request.tierLimits!; 
     
@@ -1817,7 +614,18 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
     );
 
     // Inline HTTP image URLs to base64 to avoid OpenAI fetching errors on private/local URLs
-    await inlineImageUrls(rawMessages, request.headers['authorization'], imageFetchReferer);
+    await inlineImageUrlsShared(rawMessages, request.headers['authorization'], imageFetchReferer, {
+        allowedHosts: IMAGE_FETCH_ALLOWED_HOSTS,
+        allowedProtocols: IMAGE_FETCH_ALLOWED_PROTOCOLS,
+        allowPrivate: IMAGE_FETCH_ALLOW_PRIVATE,
+        forwardAuth: IMAGE_FETCH_FORWARD_AUTH,
+        userAgent: IMAGE_FETCH_USER_AGENT,
+        referer: IMAGE_FETCH_REFERER,
+        timeoutMs: IMAGE_FETCH_TIMEOUT_MS,
+        maxRedirects: IMAGE_FETCH_MAX_REDIRECTS,
+        maxBytes: IMAGE_FETCH_MAX_BYTES,
+        logSensitivePayloads: LOG_SENSITIVE_PAYLOADS,
+    });
 
     // Sanitize image URLs in messages (strip whitespace and normalize base64 to standard format)
     if (rawMessages && Array.isArray(rawMessages)) {
@@ -1886,7 +694,7 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
         const secret = getInteractionsSigningSecret();
         const interactionId = createInteractionToken(
             interactionRequest,
-            request.apiKey,
+            userApiKey,
             'openai-chat',
             INTERACTIONS_TOKEN_TTL_SECONDS,
             secret,
@@ -1923,6 +731,7 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
                 request,
                 response,
                 source: 'chat',
+                upstreamTimeoutMs: UPSTREAM_TIMEOUT_MS,
             });
             return;
         }
@@ -1936,9 +745,10 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
                 prompt,
                 imageUrl,
                 requestBody,
-                request,
                 response,
                 source: 'chat',
+                upstreamTimeoutMs: UPSTREAM_TIMEOUT_MS,
+                setVideoRequestCache,
             });
             return;
         }
@@ -2409,6 +1219,7 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
 
         response.json(openaiResponse);
     }
+    });
  
   } catch (error: any) { 
     await logError(error, request);
@@ -2425,7 +1236,10 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
     const errorModelId = errorMeta?.modelId;
 
     // All providers rate-limited — return 429 with Retry-After
-    if (isFreeTierZeroQuota) {
+    if (typeof errorMeta?.statusCode === 'number' && errorMeta.statusCode >= 400 && errorMeta.statusCode < 600) {
+        statusCode = errorMeta.statusCode;
+        clientMessage = errorText || clientMessage;
+    } else if (isFreeTierZeroQuota) {
         statusCode = 403;
         clientMessage = errorModelId
             ? `Model ${errorModelId} is not available for Gemini free-tier keys. Use a different model or a paid Gemini key.`
@@ -2509,6 +1323,7 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
     }
 
     try {
+        return await requestAdmissionQueue.run(async () => {
         const userApiKey = request.apiKey!;
         const requestBody = await request.json();
 
@@ -2544,7 +1359,7 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
             const secret = getInteractionsSigningSecret();
             const interactionId = createInteractionToken(
                 interactionRequest,
-                request.apiKey,
+                userApiKey,
                 'openai-responses',
                 INTERACTIONS_TOKEN_TTL_SECONDS,
                 secret,
@@ -2605,6 +1420,7 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
                     request,
                     response,
                     source: 'responses',
+                    upstreamTimeoutMs: UPSTREAM_TIMEOUT_MS,
                 });
                 return;
             }
@@ -2618,9 +1434,10 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
                     prompt,
                     imageUrl,
                     requestBody,
-                    request,
                     response,
                     source: 'responses',
+                    upstreamTimeoutMs: UPSTREAM_TIMEOUT_MS,
+                    setVideoRequestCache,
                 });
                 return;
             }
@@ -2655,6 +1472,7 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
 
         const responseId = `resp_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
         const created = Math.floor(Date.now() / 1000);
+        const responseMessageId = createResponsesItemId('msg');
         const basePayload = { id: responseId, object: 'response', created, model: modelId };
 
         if (effectiveStream) {
@@ -2679,6 +1497,36 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
             let promptTokensFinal: number | undefined;
             let completionTokensFinal: number | undefined;
             let responsesCreatedSent = false;
+            let responsesTextItemStarted = false;
+
+            const ensureResponsesCreated = () => {
+                if (responsesCreatedSent) return;
+                writeResponsesSseEvent(response, buildResponsesCreatedEvent({
+                    ...basePayload,
+                    status: 'in_progress',
+                    output: [],
+                    output_text: '',
+                }));
+                responsesCreatedSent = true;
+            };
+
+            const ensureResponsesTextItemStarted = () => {
+                ensureResponsesCreated();
+                if (responsesTextItemStarted) return;
+                writeResponsesSseEvent(response, buildResponsesOutputItemAddedEvent({
+                    responseId,
+                    outputIndex: 0,
+                    item: createResponsesMessageItem('', { id: responseMessageId, status: 'in_progress' }),
+                }));
+                writeResponsesSseEvent(response, buildResponsesContentPartAddedEvent({
+                    responseId,
+                    itemId: responseMessageId,
+                    outputIndex: 0,
+                    contentIndex: 0,
+                    part: { type: 'output_text', text: '' },
+                }));
+                responsesTextItemStarted = true;
+            };
 
             for await (const result of streamHandler) {
                 if (result.type === 'passthrough') {
@@ -2741,29 +1589,23 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
 
                     break;
                 } else if (result.type === 'chunk') {
-                    if (!responsesCreatedSent) {
-                        response.write(`event: response.created\n`);
-                        response.write(`data: ${JSON.stringify({ ...basePayload, output: [], output_text: '' })}\n\n`);
-                        responsesCreatedSent = true;
-                    }
                     if (Array.isArray(result.tool_calls) && result.tool_calls.length > 0) {
                         toolCallsFromStream = result.tool_calls;
                     }
                     if (result.finish_reason) finishReasonFromStream = result.finish_reason;
-                    fullText += result.chunk;
-                    const chunkPayload = {
-                        ...basePayload,
-                        output_text_delta: result.chunk,
-                        output: [{ content: [{ type: 'output_text', text: result.chunk }] }]
-                    };
-                    response.write(`event: response.output_text.delta\n`);
-                    response.write(`data: ${JSON.stringify(chunkPayload)}\n\n`);
-                } else if (result.type === 'final') {
-                    if (!responsesCreatedSent) {
-                        response.write(`event: response.created\n`);
-                        response.write(`data: ${JSON.stringify({ ...basePayload, output: [], output_text: '' })}\n\n`);
-                        responsesCreatedSent = true;
+                    if (typeof result.chunk === 'string' && result.chunk.length > 0) {
+                        ensureResponsesTextItemStarted();
+                        fullText += result.chunk;
+                        writeResponsesSseEvent(response, buildResponsesOutputTextDeltaEvent({
+                            responseId,
+                            itemId: responseMessageId,
+                            outputIndex: 0,
+                            contentIndex: 0,
+                            delta: result.chunk,
+                        }));
                     }
+                } else if (result.type === 'final') {
+                    ensureResponsesCreated();
                     if (typeof result.tokenUsage === 'number') totalTokenUsage = result.tokenUsage;
                     if (typeof result.promptTokens === 'number') promptTokensFinal = result.promptTokens;
                     if (typeof result.completionTokens === 'number') completionTokensFinal = result.completionTokens;
@@ -2775,11 +1617,7 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
             }
 
             if (fallbackToNormalized) {
-                if (!responsesCreatedSent) {
-                    response.write(`event: response.created\n`);
-                    response.write(`data: ${JSON.stringify({ ...basePayload, output: [], output_text: '' })}\n\n`);
-                    responsesCreatedSent = true;
-                }
+                ensureResponsesCreated();
 
                 const fallbackStreamHandler = messageHandler.handleStreamingMessages([message], modelId, userApiKey, { disablePassthrough: true, requestId: request.requestId });
                 for await (const fallbackResult of fallbackStreamHandler) {
@@ -2791,14 +1629,15 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
                             toolCallsFromStream = fallbackResult.tool_calls;
                         }
                         if (fallbackResult.finish_reason) finishReasonFromStream = fallbackResult.finish_reason;
+                        ensureResponsesTextItemStarted();
                         fullText += fallbackResult.chunk;
-                        const chunkPayload = {
-                            ...basePayload,
-                            output_text_delta: fallbackResult.chunk,
-                            output: [{ content: [{ type: 'output_text', text: fallbackResult.chunk }] }]
-                        };
-                        response.write(`event: response.output_text.delta\n`);
-                        response.write(`data: ${JSON.stringify(chunkPayload)}\n\n`);
+                        writeResponsesSseEvent(response, buildResponsesOutputTextDeltaEvent({
+                            responseId,
+                            itemId: responseMessageId,
+                            outputIndex: 0,
+                            contentIndex: 0,
+                            delta: fallbackResult.chunk,
+                        }));
                     } else if (fallbackResult.type === 'final') {
                         if (typeof fallbackResult.tokenUsage === 'number') totalTokenUsage = fallbackResult.tokenUsage;
                         if (typeof fallbackResult.promptTokens === 'number') promptTokensFinal = fallbackResult.promptTokens;
@@ -2847,21 +1686,22 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
 
             await updateUserTokenUsage(totalTokenUsage, userApiKey, { modelId, promptTokens: finalInputTokens, completionTokens: finalOutputTokens });
 
-            const finalOutputContent: any[] = [{ type: 'output_text', text: fullText }];
-            if (Array.isArray(toolCallsFromStream) && toolCallsFromStream.length > 0) {
-                finalOutputContent.splice(0, finalOutputContent.length, { type: 'tool_calls', tool_calls: toolCallsFromStream });
-            }
-            const finalPayload = {
-                ...basePayload,
-                output: [{ content: finalOutputContent }],
-                output_text: fullText,
+            const finalPayload = buildResponsesResponseObject({
+                id: responseId,
+                created,
+                model: modelId,
+                outputText: fullText,
+                toolCalls: toolCallsFromStream,
+                status: 'completed',
+                messageId: responseMessageId,
+                messageStatus: 'completed',
+                functionCallStatus: 'completed',
                 usage: {
                     input_tokens: finalInputTokens,
                     output_tokens: finalOutputTokens,
                     total_tokens: totalTokenUsage
-                },
-                ...(finishReasonFromStream ? { status: finishReasonFromStream } : {})
-            };
+                }
+            });
 
             await saveResponsesHistoryEntry({
                 id: responseId,
@@ -2871,8 +1711,63 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
                 output_text: fullText,
                 created,
             });
-            response.write(`event: response.completed\n`);
-            response.write(`data: ${JSON.stringify(finalPayload)}\n\n`);
+
+            const finalOutputItems = Array.isArray(finalPayload.output) ? finalPayload.output : [];
+            const assistantOutputIndex = finalOutputItems.findIndex((item: any) => item?.type === 'message' && item?.role === 'assistant');
+            if (assistantOutputIndex >= 0) {
+                const assistantItem = finalOutputItems[assistantOutputIndex];
+                const assistantItemId = typeof assistantItem?.id === 'string' && assistantItem.id.trim()
+                    ? assistantItem.id.trim()
+                    : responseMessageId;
+                const assistantPart = Array.isArray(assistantItem?.content) && assistantItem.content.length > 0
+                    ? assistantItem.content[0]
+                    : { type: 'output_text', text: fullText };
+                ensureResponsesTextItemStarted();
+                writeResponsesSseEvent(response, buildResponsesOutputTextDoneEvent({
+                    responseId,
+                    itemId: assistantItemId,
+                    outputIndex: assistantOutputIndex,
+                    contentIndex: 0,
+                    text: fullText,
+                }));
+                writeResponsesSseEvent(response, buildResponsesContentPartDoneEvent({
+                    responseId,
+                    itemId: assistantItemId,
+                    outputIndex: assistantOutputIndex,
+                    contentIndex: 0,
+                    part: assistantPart,
+                }));
+                writeResponsesSseEvent(response, buildResponsesOutputItemDoneEvent({
+                    responseId,
+                    outputIndex: assistantOutputIndex,
+                    item: assistantItem,
+                }));
+            }
+
+            for (const [index, item] of finalOutputItems.entries()) {
+                if (item?.type !== 'function_call') continue;
+                ensureResponsesCreated();
+                writeResponsesSseEvent(response, buildResponsesOutputItemAddedEvent({
+                    responseId,
+                    outputIndex: index,
+                    item: { ...item, status: 'in_progress' },
+                }));
+                writeResponsesSseEvent(response, buildResponsesFunctionCallArgumentsDoneEvent({
+                    responseId,
+                    itemId: typeof item?.id === 'string' ? item.id : createResponsesItemId('fc'),
+                    outputIndex: index,
+                    callId: typeof item?.call_id === 'string' ? item.call_id : undefined,
+                    name: typeof item?.name === 'string' ? item.name : undefined,
+                    argumentsText: typeof item?.arguments === 'string' ? item.arguments : undefined,
+                }));
+                writeResponsesSseEvent(response, buildResponsesOutputItemDoneEvent({
+                    responseId,
+                    outputIndex: index,
+                    item,
+                }));
+            }
+
+            writeResponsesSseEvent(response, buildResponsesCompletedEvent(finalPayload));
             response.write(`data: [DONE]\n\n`);
             return response.end();
         }
@@ -2890,19 +1785,16 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
         const completionTokensUsed = typeof result.completionTokens === 'number' ? result.completionTokens : undefined;
         await updateUserTokenUsage(totalTokensUsed, userApiKey, { modelId, promptTokens: promptTokensUsed, completionTokens: completionTokensUsed });
 
-        const outputContent: any[] = [{ type: 'output_text', text: assistantContent }];
         const outputText = (effectiveToolCalls && effectiveToolCalls.length > 0) ? '' : assistantContent;
-        if (effectiveToolCalls && effectiveToolCalls.length > 0) {
-            outputContent.splice(0, outputContent.length, { type: 'tool_calls', tool_calls: effectiveToolCalls });
-        }
-
-        const responseBody = {
-            ...basePayload,
-            output: [{ content: outputContent }],
-            output_text: outputText,
-            usage: { input_tokens: promptTokensUsed, output_tokens: completionTokensUsed, total_tokens: totalTokensUsed },
-            ...((result.finish_reason || effectiveToolCalls?.length) ? { status: effectiveToolCalls?.length ? 'tool_calls' : result.finish_reason } : {})
-        };
+        const responseBody = buildResponsesResponseObject({
+            id: responseId,
+            created,
+            model: modelId,
+            outputText,
+            toolCalls: effectiveToolCalls,
+            status: 'completed',
+            usage: { input_tokens: promptTokensUsed, output_tokens: completionTokensUsed, total_tokens: totalTokensUsed }
+        });
 
         await saveResponsesHistoryEntry({
             id: responseId,
@@ -2913,6 +1805,7 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
             created,
         });
         return response.json(responseBody);
+        });
     } catch (error: any) {
         await logError(error, request);
         const errorText = String(error?.message || '');
@@ -2928,7 +1821,10 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
         const errorModelId = errorMeta?.modelId;
 
         // All providers rate-limited — return 429 with Retry-After
-        if (isFreeTierZeroQuota) {
+        if (typeof errorMeta?.statusCode === 'number' && errorMeta.statusCode >= 400 && errorMeta.statusCode < 600) {
+            statusCode = errorMeta.statusCode;
+            clientMessage = errorText || clientMessage;
+        } else if (isFreeTierZeroQuota) {
             statusCode = 403;
             clientMessage = errorModelId
                 ? `Model ${errorModelId} is not available for Gemini free-tier keys. Use a different model or a paid Gemini key.`
@@ -3180,8 +2076,12 @@ openaiRouter.post('/deployments/:deploymentId/chat/completions', authAndUsageMid
         let statusCode = 500;
         let clientMessage = 'Internal Server Error';
         let clientReference = 'An unexpected error occurred while processing your Azure chat request.';
+        const explicitStatusCode = typeof (error as any)?.statusCode === 'number' ? (error as any).statusCode : null;
 
-        if (error.message.startsWith('Invalid request') || error.message.startsWith('Failed to parse')) {
+        if (explicitStatusCode && explicitStatusCode >= 400 && explicitStatusCode < 600) {
+            statusCode = explicitStatusCode;
+            clientMessage = error.message || clientMessage;
+        } else if (error.message.startsWith('Invalid request') || error.message.startsWith('Failed to parse')) {
             statusCode = 400;
             clientMessage = `Bad Request: ${error.message}`;
         } else if (error instanceof SyntaxError) {
@@ -3210,300 +2110,6 @@ openaiRouter.post('/deployments/:deploymentId/chat/completions', authAndUsageMid
         } else { return; }
     }
 });
-
-// --- Helper: pick an OpenAI provider key that supports the requested model ---
-function extractOrigin(urlStr: string): string {
-    try {
-        const u = new URL(urlStr);
-        return u.origin; // e.g. "https://api.openai.com"
-    } catch {
-        return 'https://api.openai.com';
-    }
-}
-
-const MODEL_CAPS_CACHE_MS = Math.max(1000, Number(process.env.MODEL_CAPS_CACHE_MS ?? 5000));
-let modelCapsCache: { expiresAt: number; map: Map<string, ModelCapability[]> } | null = null;
-
-function normalizeModelIdVariants(modelId: string): string[] {
-    const raw = String(modelId || '').trim();
-    if (!raw) return [];
-    const variants = new Set<string>([raw]);
-    const slashIndex = raw.indexOf('/');
-    if (slashIndex > 0 && slashIndex + 1 < raw.length) {
-        variants.add(raw.slice(slashIndex + 1));
-    }
-    return Array.from(variants);
-}
-
-async function getModelCapabilities(modelId: string): Promise<ModelCapability[] | null> {
-    const now = Date.now();
-    if (!modelCapsCache || now > modelCapsCache.expiresAt) {
-        const modelsFile = await dataManager.load<ModelsFileStructure>('models');
-        const map = new Map<string, ModelCapability[]>();
-        for (const model of modelsFile.data || []) {
-            const caps = Array.isArray(model.capabilities) ? model.capabilities as ModelCapability[] : [];
-            if (caps.length > 0 && model.id) {
-                map.set(model.id, caps);
-            }
-        }
-        modelCapsCache = { map, expiresAt: now + MODEL_CAPS_CACHE_MS };
-    }
-
-    for (const variant of normalizeModelIdVariants(modelId)) {
-        const caps = modelCapsCache.map.get(variant);
-        if (caps) return caps;
-    }
-    return null;
-}
-
-async function enforceModelCapabilities(
-    modelId: string,
-    requiredCaps: ModelCapability[],
-    response: Response
-): Promise<boolean> {
-    if (!requiredCaps || requiredCaps.length === 0) return true;
-    const caps = await getModelCapabilities(modelId);
-    if (!caps || caps.length === 0) return true;
-    const missing = requiredCaps.filter((cap) => !caps.includes(cap));
-    if (missing.length === 0) return true;
-    if (!response.completed) {
-        response.status(400).json({
-            error: `Model ${modelId} missing required capabilities: ${missing.join(', ')}`,
-            timestamp: new Date().toISOString()
-        });
-    }
-    return false;
-}
-
-async function pickOpenAIProviderKey(
-    modelId: string,
-    requiredCaps: ModelCapability[] = []
-): Promise<{ apiKey: string; baseUrl: string } | null> {
-    const providers = await dataManager.load<LoadedProviders>('providers');
-    const requiresCaps = Array.isArray(requiredCaps) && requiredCaps.length > 0;
-    const matches = providers.filter((p: LoadedProviderData) =>
-        !p.disabled &&
-        p.id.includes('openai') &&
-        p.apiKey &&
-        p.models &&
-        modelId in p.models
-    );
-    const candidates = requiresCaps
-        ? matches.filter((p: LoadedProviderData) => {
-            const modelData = p.models?.[modelId];
-            const skips = (modelData as any)?.capability_skips as Partial<Record<ModelCapability, string>> | undefined;
-            if (!skips) return true;
-            return !requiredCaps.some((cap) => Boolean(skips[cap]));
-        })
-        : matches;
-
-    if (candidates.length === 0) {
-        if (matches.length > 0) return null;
-        // Fallback: any non-disabled openai provider with an API key
-        const fallback = providers.find((p: LoadedProviderData) =>
-            !p.disabled && p.id.includes('openai') && p.apiKey
-        );
-        if (!fallback) return null;
-        return { apiKey: fallback.apiKey!, baseUrl: extractOrigin(fallback.provider_url || 'https://api.openai.com') };
-    }
-    const pick = candidates[crypto.randomInt(candidates.length)];
-    return { apiKey: pick.apiKey!, baseUrl: extractOrigin(pick.provider_url || 'https://api.openai.com') };
-}
-
-async function pickImageGenProviderKey(
-    modelId: string,
-    requiredCaps: ModelCapability[] = []
-): Promise<{ apiKey: string; baseUrl: string } | null> {
-    const providers = await dataManager.load<LoadedProviders>('providers');
-    const requiresCaps = Array.isArray(requiredCaps) && requiredCaps.length > 0;
-    const matches = providers.filter((p: LoadedProviderData) =>
-        !p.disabled &&
-        (p.id.includes('openai') || p.id.includes('xai')) &&
-        p.apiKey &&
-        p.models &&
-        modelId in p.models
-    );
-    const candidates = requiresCaps
-        ? matches.filter((p: LoadedProviderData) => {
-            const modelData = p.models?.[modelId];
-            const skips = (modelData as any)?.capability_skips as Partial<Record<ModelCapability, string>> | undefined;
-            if (!skips) return true;
-            return !requiredCaps.some((cap) => Boolean(skips[cap]));
-        })
-        : matches;
-
-    const pickFrom = candidates.length > 0 ? candidates : matches;
-    if (pickFrom.length === 0) return null;
-    const pick = pickFrom[crypto.randomInt(pickFrom.length)];
-    const defaultBase = pick.id.includes('xai') ? 'https://api.x.ai' : 'https://api.openai.com';
-    return { apiKey: pick.apiKey!, baseUrl: extractOrigin(pick.provider_url || defaultBase) };
-}
-
-async function pickVideoGenProviderKey(
-    modelId: string
-): Promise<{ apiKey: string; baseUrl: string } | null> {
-    const providers = await dataManager.load<LoadedProviders>('providers');
-    const matches = providers.filter((p: LoadedProviderData) =>
-        !p.disabled &&
-        p.id.includes('xai') &&
-        p.apiKey &&
-        p.models &&
-        modelId in p.models
-    );
-    if (matches.length === 0) return null;
-    const pick = matches[crypto.randomInt(matches.length)];
-    return { apiKey: pick.apiKey!, baseUrl: extractOrigin(pick.provider_url || 'https://api.x.ai') };
-}
-
-async function pickAnyXaiProviderKey(): Promise<{ apiKey: string; baseUrl: string } | null> {
-    const providers = await dataManager.load<LoadedProviders>('providers');
-    const pick = providers.find((p: LoadedProviderData) => !p.disabled && p.id.includes('xai') && p.apiKey);
-    if (!pick) return null;
-    return { apiKey: pick.apiKey!, baseUrl: extractOrigin(pick.provider_url || 'https://api.x.ai') };
-}
-// --- Audio format content-type map ---
-const AUDIO_CONTENT_TYPES: Record<string, string> = {
-    mp3: 'audio/mpeg',
-    opus: 'audio/opus',
-    aac: 'audio/aac',
-    flac: 'audio/flac',
-    wav: 'audio/wav',
-    pcm: 'audio/pcm',
-};
-
-async function forwardTtsToOpenAI(options: {
-    modelId: string;
-    input: string;
-    voice?: string;
-    responseFormat?: string;
-    speed?: number;
-    stream?: boolean;
-    userApiKey: string;
-    response: Response;
-}) {
-    const { modelId, input, voice, responseFormat, speed, stream, userApiKey, response } = options;
-
-    if (!input) {
-        if (!response.completed) response.status(400).json({ error: 'Bad Request: input is required for TTS', timestamp: new Date().toISOString() });
-        return;
-    }
-
-    const capsOk = await enforceModelCapabilities(modelId, ['audio_output'], response);
-    if (!capsOk) return;
-
-    const provider = await pickOpenAIProviderKey(modelId, ['audio_output']);
-    if (!provider) {
-        if (!response.completed) response.status(503).json({ error: 'No available provider for TTS', timestamp: new Date().toISOString() });
-        return;
-    }
-
-    const upstreamUrl = `${provider.baseUrl}/v1/audio/speech`;
-    const upstreamRes = await fetchWithTimeout(upstreamUrl, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${provider.apiKey}`,
-        },
-        body: JSON.stringify({
-            model: modelId,
-            input,
-            voice: voice || 'alloy',
-            response_format: responseFormat || 'mp3',
-            speed,
-            stream: Boolean(stream),
-        }),
-    }, UPSTREAM_TIMEOUT_MS);
-
-    if (!upstreamRes.ok) {
-        const errText = await upstreamRes.text().catch(() => '');
-        if (!response.completed) response.status(upstreamRes.status).json({ error: `TTS upstream error: ${errText || upstreamRes.statusText}`, timestamp: new Date().toISOString() });
-        return;
-    }
-
-    const upstreamContentType = upstreamRes.headers.get('content-type');
-    const contentType = upstreamContentType || AUDIO_CONTENT_TYPES[(responseFormat || 'mp3').toLowerCase()] || 'audio/mpeg';
-    response.setHeader('Content-Type', contentType);
-
-    if (stream && upstreamRes.body) {
-        const reader = upstreamRes.body.getReader();
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            if (value && value.length > 0) response.write(Buffer.from(value));
-        }
-        response.end();
-    } else {
-        const arrayBuffer = await upstreamRes.arrayBuffer();
-        response.end(Buffer.from(arrayBuffer));
-    }
-
-    await updateUserTokenUsage(Math.ceil(input.length / 4), userApiKey);
-}
-
-async function forwardSttToOpenAI(options: {
-    modelId: string;
-    audio: { data: string; format: string };
-    language?: string;
-    prompt?: string;
-    temperature?: number;
-    responseFormat?: string;
-    userApiKey: string;
-    response: Response;
-}) {
-    const { modelId, audio, language, prompt, temperature, responseFormat, userApiKey, response } = options;
-
-    const normalized = normalizeInputAudio(audio);
-    if (!normalized) {
-        if (!response.completed) response.status(400).json({ error: 'Bad Request: invalid input audio', timestamp: new Date().toISOString() });
-        return;
-    }
-
-    const capsOk = await enforceModelCapabilities(modelId, ['audio_input'], response);
-    if (!capsOk) return;
-
-    const provider = await pickOpenAIProviderKey(modelId, ['audio_input']);
-    if (!provider) {
-        if (!response.completed) response.status(503).json({ error: 'No available provider for STT', timestamp: new Date().toISOString() });
-        return;
-    }
-
-
-    const FormDataCtor = (globalThis as any).FormData;
-    const BlobCtor = (globalThis as any).Blob;
-    if (!FormDataCtor || !BlobCtor) {
-        throw new Error('FormData/Blob not available in this Node runtime.');
-    }
-    const form = new FormDataCtor();
-    form.append('model', modelId);
-    form.append('file', new BlobCtor([normalized.buffer], { type: normalized.mimeType }), `audio.${normalized.extension}`);
-    if (typeof language === 'string') form.append('language', language);
-    if (typeof prompt === 'string') form.append('prompt', prompt);
-    if (typeof temperature === 'number') form.append('temperature', temperature.toString());
-    if (typeof responseFormat === 'string') form.append('response_format', responseFormat);
-
-    const upstreamUrl = `${provider.baseUrl}/v1/audio/transcriptions`;
-    const upstreamRes = await fetchWithTimeout(upstreamUrl, {
-        method: 'POST',
-        headers: {
-            'Authorization': `Bearer ${provider.apiKey}`,
-        },
-        body: form,
-    }, UPSTREAM_TIMEOUT_MS);
-
-    const resContentType = upstreamRes.headers.get('content-type') || 'application/json';
-    response.setHeader('Content-Type', resContentType);
-
-    if (!upstreamRes.ok) {
-        const errText = await upstreamRes.text().catch(() => '');
-        if (!response.completed) response.status(upstreamRes.status).end(errText || upstreamRes.statusText);
-        return;
-    }
-
-    const resBody = await upstreamRes.text();
-    response.end(resBody);
-
-    await updateUserTokenUsage(100, userApiKey);
-}
 
 // --- TTS: /v1/audio/speech ---
 openaiRouter.post('/audio/speech', async (request: Request, response: Response) => {
@@ -3577,14 +2183,13 @@ openaiRouter.post('/audio/speech', async (request: Request, response: Response) 
                 const { done, value } = await reader.read();
                 if (done) break;
                 if (value && value.length > 0) {
-                    response.write(Buffer.from(value));
+                    response.write(value);
                 }
             }
             response.end();
         } else {
             const arrayBuffer = await upstreamRes.arrayBuffer();
-            const buffer = Buffer.from(arrayBuffer);
-            response.end(buffer);
+            response.end(new Uint8Array(arrayBuffer));
         }
 
         await updateUserTokenUsage(Math.ceil(input.length / 4), request.apiKey!);
@@ -3844,62 +2449,90 @@ openaiRouter.get('/videos/:requestId', async (request: Request, response: Respon
 openaiRouter.post('/embeddings', async (request: Request, response: Response) => {
     if (!(await authAndUsageMiddleware(request, response, () => {})) && !request.apiKey) return;
     try {
-        let body: any;
-        try {
-            body = await request.json();
-        } catch (e) {
-            if (!response.completed) return response.status(400).json({ error: 'Bad Request: invalid JSON', timestamp: new Date().toISOString() });
-            return;
-        }
+        return await embeddingsQueue.run(async () => {
+            let body: any;
+            try {
+                body = await request.json();
+            } catch (e) {
+                if (!response.completed) return response.status(400).json({ error: 'Bad Request: invalid JSON', timestamp: new Date().toISOString() });
+                return;
+            }
 
-        const model = typeof body?.model === 'string' ? body.model : '';
-        const input = body?.input;
+            const model = typeof body?.model === 'string' ? body.model : '';
+            let input: any = body?.input;
 
-        if (!model) {
-            if (!response.completed) return response.status(400).json({ error: 'Bad Request: model is required', timestamp: new Date().toISOString() });
-            return;
-        }
+            if (!model) {
+                if (!response.completed) return response.status(400).json({ error: 'Bad Request: model is required', timestamp: new Date().toISOString() });
+                return;
+            }
 
-        if (!input) {
-            if (!response.completed) return response.status(400).json({ error: 'Bad Request: input is required', timestamp: new Date().toISOString() });
-            return;
-        }
+            if (!input) {
+                if (!response.completed) return response.status(400).json({ error: 'Bad Request: input is required', timestamp: new Date().toISOString() });
+                return;
+            }
 
-        const provider = await pickOpenAIProviderKey(model);
-        if (!provider) {
-            if (!response.completed) return response.status(503).json({ error: 'No available provider for embeddings', timestamp: new Date().toISOString() });
-            return;
-        }
+            const tokensUsed = Array.isArray(input)
+                ? input.reduce((acc: number, s: string) => acc + estimateTokensFromText(String(s), 'input'), 0)
+                : estimateTokensFromText(String(input), 'input');
 
-        const upstreamUrl = `${provider.baseUrl}/v1/embeddings`;
-        const upstreamRes = await fetchWithTimeout(upstreamUrl, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${provider.apiKey}`,
-            },
-            body: JSON.stringify({ model, input, encoding_format: body.encoding_format, dimensions: body.dimensions, user: body.user }),
-        }, UPSTREAM_TIMEOUT_MS);
+            const provider = await pickOpenAIProviderKey(model);
+            if (!provider) {
+                if (!response.completed) return response.status(503).json({ error: 'No available provider for embeddings', timestamp: new Date().toISOString() });
+                return;
+            }
 
-        if (!upstreamRes.ok) {
-            const errText = await upstreamRes.text().catch(() => '');
-            if (!response.completed) return response.status(upstreamRes.status).json({ error: `Embeddings upstream error: ${errText || upstreamRes.statusText}`, timestamp: new Date().toISOString() });
-            return;
-        }
+            const upstreamPayload = JSON.stringify({
+                model,
+                input,
+                encoding_format: body.encoding_format,
+                dimensions: body.dimensions,
+                user: body.user,
+            });
+            body = undefined;
 
-        const resJson = await upstreamRes.json();
-        response.json(resJson);
+            const upstreamUrl = `${provider.baseUrl}/v1/embeddings`;
+            const upstreamRes = await fetchWithTimeout(upstreamUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${provider.apiKey}`,
+                },
+                body: upstreamPayload,
+            }, UPSTREAM_TIMEOUT_MS);
+            input = undefined;
 
-        // Estimate usage if upstream didn't provide it, otherwise use upstream
-        const tokensUsed = resJson.usage?.total_tokens || (Array.isArray(input)
-            ? input.reduce((acc: number, s: string) => acc + estimateTokensFromText(String(s), 'input'), 0)
-            : estimateTokensFromText(String(input), 'input'));
-        await updateUserTokenUsage(tokensUsed, request.apiKey!);
+            if (!upstreamRes.ok) {
+                const errText = await upstreamRes.text().catch(() => '');
+                if (!response.completed) return response.status(upstreamRes.status).json({ error: `Embeddings upstream error: ${errText || upstreamRes.statusText}`, timestamp: new Date().toISOString() });
+                return;
+            }
+
+            response.status(upstreamRes.status);
+            response.setHeader('Content-Type', upstreamRes.headers.get('content-type') || 'application/json');
+
+            if (upstreamRes.body) {
+                const reader = upstreamRes.body.getReader();
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    if (value && value.length > 0) response.write(value);
+                }
+                response.end();
+            } else {
+                response.end(await upstreamRes.text());
+            }
+
+            await updateUserTokenUsage(tokensUsed, request.apiKey!);
+        });
 
     } catch (error: any) {
         await logError(error, request);
         console.error('Embeddings route error:', error.message);
-        if (!response.completed) response.status(500).json({ error: 'Internal Server Error', timestamp: new Date().toISOString() });
+        const statusCode = typeof error?.statusCode === 'number' && error.statusCode >= 400 && error.statusCode < 600
+            ? error.statusCode
+            : 500;
+        const message = statusCode === 500 ? 'Internal Server Error' : (String(error?.message || '') || 'Request failed');
+        if (!response.completed) response.status(statusCode).json({ error: message, timestamp: new Date().toISOString() });
     }
 });
  

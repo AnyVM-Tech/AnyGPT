@@ -8,7 +8,7 @@ import type { Provider, Model } from '../providers/interfaces.js';
 import { dataManager, LoadedProviders } from '../modules/dataManager.js';
 import { refreshProviderCountsInModelsFile } from '../modules/modelUpdater.js';
 import { upsertProviderById } from '../modules/providerUpsert.js';
-import { checkKey } from '../modules/keyChecker.js';
+import { checkKeyHealth } from '../modules/keyChecker.js';
 import { redisReadyPromise } from '../modules/db.js';
 
 interface AdminKeyLogEntry {
@@ -39,6 +39,17 @@ interface PricingFile {
 }
 
 const NO_QUOTA_ERROR = 'NO_QUOTA';
+type ValidationFailureCode = 'NO_QUOTA' | 'INVALID_KEY' | 'INDETERMINATE_HEALTH';
+
+type ValidationFailure = Error & {
+  code?: ValidationFailureCode;
+};
+
+function createValidationFailure(code: ValidationFailureCode, message: string): ValidationFailure {
+  const error = new Error(message) as ValidationFailure;
+  error.code = code;
+  return error;
+}
 
 const DEFAULT_SPEED = 50;
 const ADMIN_KEYS_PATH = path.resolve('logs/admin-keys.jsonl');
@@ -449,12 +460,15 @@ async function validateKey(entry: AdminKeyLogEntry): Promise<ValidationResult> {
   }
 
   // 1. Run enhanced validation (Quota, Tier, Balance check)
-  const status = await checkKey(provider, apiKey);
-  if (!status.isValid) {
-      throw new Error(`Key check failed: ${status.error || 'Invalid key'}`);
+  const status = await checkKeyHealth(provider, apiKey);
+  if (status.health === 'indeterminate') {
+    throw createValidationFailure('INDETERMINATE_HEALTH', status.error || 'Key health check was indeterminate');
   }
-  if (status.hasQuota === false) {
-      throw new Error(NO_QUOTA_ERROR);
+  if (status.health === 'invalid') {
+    throw createValidationFailure('INVALID_KEY', `Key check failed: ${status.error || 'Invalid key'}`);
+  }
+  if (status.health === 'no-quota') {
+    throw createValidationFailure(NO_QUOTA_ERROR, NO_QUOTA_ERROR);
   }
 
   // 2. Fetch models if not returned by checker
@@ -644,9 +658,7 @@ async function main() {
               providerEntry.provider_url = validation.providerUrl;
               providerEntry.streamingCompatible = validation.streamingCompatible;
               providerEntry.models = mergeModelMaps(providerEntry.models, modelsMap);
-              if (probeProviderStatus.quota.has(providerEntry.id) || probeProviderStatus.noAccess.has(providerEntry.id)) {
-                providerEntry.disabled = true;
-              }
+              providerEntry.disabled = probeProviderStatus.quota.has(providerEntry.id) || probeProviderStatus.noAccess.has(providerEntry.id);
               console.log(`♻️  refreshed ${providerEntry.id} (${Object.keys(modelsMap).length} models)`);
             });
             refreshedCount += existing.length;
@@ -676,9 +688,17 @@ async function main() {
           console.log(`✅ ${entry.provider} key ok -> ${providerId} (${Object.keys(modelsMap).length} models)`);
         } catch (error: any) {
           const message = error?.message || 'Unknown error';
-          const isNoQuota = message.includes(NO_QUOTA_ERROR);
-          failures.push({ provider: entry.provider, key: entry.key, reason: isNoQuota ? 'no quota' : message });
-          console.warn(`❌ ${entry.provider} key failed: ${isNoQuota ? 'no quota' : message}`);
+          const failureCode = String(error?.code || '');
+          const isNoQuota = failureCode === NO_QUOTA_ERROR || message.includes(NO_QUOTA_ERROR);
+          const isInvalidKey = failureCode === 'INVALID_KEY';
+          const isIndeterminate = failureCode === 'INDETERMINATE_HEALTH' || (!isNoQuota && !isInvalidKey);
+          const failureReason = isNoQuota
+            ? 'no quota'
+            : isInvalidKey
+            ? message
+            : `indeterminate health check: ${message}`;
+          failures.push({ provider: entry.provider, key: entry.key, reason: failureReason });
+          console.warn(`❌ ${entry.provider} key failed: ${failureReason}`);
 
           const existing = existingKeyToProviders.get(entry.key);
           if (existing) {
@@ -688,9 +708,11 @@ async function main() {
               if (isNoQuota) {
                 providers[idx].disabled = true;
                 console.log(`⏸️  Disabled no-quota provider ${p.id}.`);
-              } else {
-                providers.splice(idx, 1);
-                console.log(`🗑️  Removed invalid/dead provider ${p.id} from list.`);
+              } else if (isInvalidKey) {
+                providers[idx].disabled = true;
+                console.log(`⏸️  Disabled invalid provider ${p.id}.`);
+              } else if (isIndeterminate) {
+                console.log(`⚠️  Retained existing provider ${p.id}; validation was indeterminate.`);
               }
             });
           }

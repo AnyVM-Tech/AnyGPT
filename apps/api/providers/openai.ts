@@ -7,6 +7,7 @@ import {
   ProviderStreamPassthrough,
   ProviderUsage
 } from './interfaces.js'; // Only import necessary interfaces
+import { logUniqueProviderError } from '../modules/errorLogger.js';
 
 const OPENAI_CHAT_ENDPOINT = 'https://api.openai.com/v1/chat/completions';
 const OPENAI_RESPONSES_ENDPOINT = 'https://api.openai.com/v1/responses';
@@ -661,6 +662,83 @@ export class OpenAI implements IAIProvider {
     return null;
   }
 
+  private hasMeaningfulResponsesContent(content: any): boolean {
+    if (typeof content === 'string') return content.length > 0;
+    if (typeof content === 'number' || typeof content === 'boolean') return true;
+    if (Array.isArray(content)) {
+      return content.some((part: any) => {
+        if (typeof part === 'string') return part.length > 0;
+        if (typeof part === 'number' || typeof part === 'boolean') return true;
+        if (!part || typeof part !== 'object') return false;
+
+        const type = String(part.type || '').toLowerCase();
+        if ((type === 'text' || type === 'input_text' || type === 'output_text') && typeof part.text === 'string') {
+          return part.text.length > 0;
+        }
+
+        if (type === 'image_url') {
+          const url = part?.image_url?.url ?? part?.image_url;
+          return typeof url === 'string' && url.length > 0;
+        }
+
+        if (type === 'input_image') {
+          return typeof part.image_url === 'string' && part.image_url.length > 0;
+        }
+
+        if (type === 'input_audio') {
+          return typeof part?.input_audio?.data === 'string' && part.input_audio.data.length > 0;
+        }
+
+        return true;
+      });
+    }
+
+    return content !== null && typeof content !== 'undefined';
+  }
+
+  private normalizeResponsesToolCallInputItem(raw: any): any | null {
+    if (!raw || typeof raw !== 'object') return null;
+
+    const name = typeof raw?.function?.name === 'string' && raw.function.name.trim()
+      ? raw.function.name.trim()
+      : (typeof raw?.name === 'string' && raw.name.trim() ? raw.name.trim() : undefined);
+    if (!name) return null;
+
+    const callIdRaw = raw?.call_id ?? raw?.id ?? raw?.tool_call_id ?? raw?.tool_call?.id;
+    const callId = typeof callIdRaw === 'string' && callIdRaw.trim() ? callIdRaw.trim() : undefined;
+
+    const normalized: Record<string, any> = {
+      type: 'function_call',
+      name,
+      arguments: this.stringifyResponsesValue(
+        raw?.function?.arguments ?? raw?.arguments ?? raw?.tool?.arguments ?? raw?.tool_call?.arguments ?? raw?.args ?? raw?.parameters,
+        '{}',
+      ),
+    };
+
+    if (callId) normalized.call_id = callId;
+    return normalized;
+  }
+
+  private normalizeResponsesToolOutputInputItem(raw: any): any | null {
+    if (!raw || typeof raw !== 'object') return null;
+
+    const callId = typeof raw?.tool_call_id === 'string' && raw.tool_call_id.trim()
+      ? raw.tool_call_id.trim()
+      : (typeof raw?.call_id === 'string' && raw.call_id.trim() ? raw.call_id.trim() : undefined);
+    if (!callId) return null;
+
+    const outputValue = typeof raw?.output !== 'undefined'
+      ? raw.output
+      : this.normalizeContent(raw.content);
+
+    return {
+      type: 'function_call_output',
+      call_id: callId,
+      output: this.stringifyResponsesValue(outputValue, ''),
+    };
+  }
+
   private hasStatefulResponsesInputEntry(entry: any): boolean {
     if (!entry || typeof entry !== 'object') return false;
 
@@ -668,9 +746,10 @@ export class OpenAI implements IAIProvider {
     if (type === 'function_call' || type === 'function_call_output') return true;
 
     const role = typeof entry.role === 'string' ? entry.role.trim().toLowerCase() : '';
-    if (role === 'assistant' || role === 'tool') return true;
+    if (role === 'assistant' || role === 'tool' || role === 'function') return true;
 
     if (Array.isArray(entry.tool_calls) && entry.tool_calls.length > 0) return true;
+    if (typeof entry.tool_call_id === 'string' && entry.tool_call_id.trim()) return true;
 
     const content = Array.isArray(entry.content) ? entry.content : [];
     return content.some((part: any) => {
@@ -699,11 +778,36 @@ export class OpenAI implements IAIProvider {
           : '';
         if (role) {
           flushBufferedUserContent();
-          normalizedItems.push({
-            ...entry,
-            role,
-            content: this.normalizeResponsesContentParts(entry.content),
-          });
+
+          const normalizedRole = role.toLowerCase();
+          if (normalizedRole === 'tool' || normalizedRole === 'function') {
+            const toolOutputItem = this.normalizeResponsesToolOutputInputItem(entry);
+            if (toolOutputItem) {
+              normalizedItems.push(toolOutputItem);
+            } else if (this.hasMeaningfulResponsesContent(entry.content)) {
+              normalizedItems.push({
+                role: 'assistant',
+                content: this.normalizeResponsesContentParts(entry.content),
+                ...(typeof entry.name === 'string' && entry.name.trim() ? { name: entry.name.trim() } : {}),
+              });
+            }
+            continue;
+          }
+
+          if (this.hasMeaningfulResponsesContent(entry.content)) {
+            normalizedItems.push({
+              role,
+              content: this.normalizeResponsesContentParts(entry.content),
+              ...(typeof entry.name === 'string' && entry.name.trim() ? { name: entry.name.trim() } : {}),
+            });
+          }
+
+          if (normalizedRole === 'assistant' && Array.isArray(entry.tool_calls) && entry.tool_calls.length > 0) {
+            for (const toolCall of entry.tool_calls) {
+              const functionCallItem = this.normalizeResponsesToolCallInputItem(toolCall);
+              if (functionCallItem) normalizedItems.push(functionCallItem);
+            }
+          }
           continue;
         }
 
@@ -1357,6 +1461,14 @@ export class OpenAI implements IAIProvider {
 
       const endTime = Date.now(); // Still useful to know when the error occurred
       const latency = endTime - startTime;
+      void logUniqueProviderError({
+        provider: 'openai',
+        operation: 'sendMessage',
+        modelId: message.model?.id,
+        endpoint: url,
+        latencyMs: latency,
+        error,
+      });
       console.error(`Error during sendMessage to ${url} (Latency: ${latency}ms):`, {
         message: error?.message,
         status: error?.response?.status,
@@ -1366,7 +1478,9 @@ export class OpenAI implements IAIProvider {
       // Extract a more specific error message if possible
       const errorMessage = this.extractApiErrorMessage(error);
       // Rethrow the error to be handled by the MessageHandler
-      throw new Error(`API call failed: ${errorMessage}`);
+      const wrappedError = new Error(`API call failed: ${errorMessage}`);
+      (wrappedError as any).__providerUniqueLogged = true;
+      throw wrappedError;
     }
   }
 
@@ -1574,6 +1688,14 @@ export class OpenAI implements IAIProvider {
         }
       }
       const latency = Date.now() - startTime;
+      void logUniqueProviderError({
+        provider: 'openai',
+        operation: 'sendMessageStream',
+        modelId: message.model?.id,
+        endpoint: url,
+        latencyMs: latency,
+        error,
+      });
       console.error(`Error during sendMessageStream to ${url} (Latency: ${latency}ms):`, {
         message: error?.message,
         status: error?.response?.status,
@@ -1581,9 +1703,13 @@ export class OpenAI implements IAIProvider {
       });
       const errorMessage = String(error?.message || this.extractApiErrorMessage(error));
       if (errorMessage.startsWith('API stream call failed:')) {
-        throw new Error(errorMessage);
+        const wrappedError = new Error(errorMessage);
+        (wrappedError as any).__providerUniqueLogged = true;
+        throw wrappedError;
       }
-      throw new Error(`API stream call failed: ${errorMessage}`);
+      const wrappedError = new Error(`API stream call failed: ${errorMessage}`);
+      (wrappedError as any).__providerUniqueLogged = true;
+      throw wrappedError;
     }
   }
 }

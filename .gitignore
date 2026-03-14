@@ -75,3 +75,5 @@ apps/api/keys.json.backup
 apps/api/logs/nano-banana-sweep.log
 apps/api/providers.json.backup
 apps/api/providers.json.bak
+apps/api/modules/keyChecker.ts
+apps/api/providers.json.bak.invalid-gemini-removed

@@ -2,6 +2,7 @@ import axios from 'axios';
 import dns from 'node:dns/promises';
 import net from 'node:net';
 import { IAIProvider, IMessage, ProviderResponse, ProviderStreamChunk, ProviderStreamPassthrough } from './interfaces.js';
+import { logUniqueProviderError } from '../modules/errorLogger.js';
 
 interface OpenRouterOptions {
   referer?: string;
@@ -540,8 +541,18 @@ export class OpenRouterAI implements IAIProvider {
       };
     } catch (error: any) {
       const latency = Date.now() - start;
+      void logUniqueProviderError({
+        provider: 'openrouter',
+        operation: 'sendMessage',
+        modelId: message.model?.id,
+        endpoint: this.endpointUrl,
+        latencyMs: latency,
+        error,
+      });
       const msg = this.extractErrorMessage(error, 'Unknown OpenRouter error');
-      throw new Error(`OpenRouter API call failed: ${msg} (latency ${latency}ms)`);
+      const wrappedError = new Error(`OpenRouter API call failed: ${msg} (latency ${latency}ms)`);
+      (wrappedError as any).__providerUniqueLogged = true;
+      throw wrappedError;
     }
   }
 
@@ -600,8 +611,18 @@ export class OpenRouterAI implements IAIProvider {
       }
     } catch (error: any) {
       const latency = Date.now() - start;
+      void logUniqueProviderError({
+        provider: 'openrouter',
+        operation: 'sendMessageStream',
+        modelId: message.model?.id,
+        endpoint: this.endpointUrl,
+        latencyMs: latency,
+        error,
+      });
       const msg = this.extractErrorMessage(error, 'Unknown OpenRouter stream error');
-      throw new Error(`OpenRouter API stream call failed: ${msg} (latency ${latency}ms)`);
+      const wrappedError = new Error(`OpenRouter API stream call failed: ${msg} (latency ${latency}ms)`);
+      (wrappedError as any).__providerUniqueLogged = true;
+      throw wrappedError;
     }
   }
 }

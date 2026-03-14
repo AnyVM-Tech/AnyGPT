@@ -135,6 +135,14 @@
                         "max_tokens"
                       ]
                     },
+                    "source": {
+                      "type": "string",
+                      "enum": [
+                        "cache",
+                        "redis",
+                        "filesystem-fallback"
+                      ]
+                    },
                     "timestamp": {
                       "type": "string",
                       "format": "date-time"
@@ -146,6 +154,123 @@
                     "user",
                     "tier",
                     "usage",
+                    "source",
+                    "timestamp"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/v1/keys/me/live": {
+      "get": {
+        "summary": "Get current API key details from the live data source",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyHeader": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Key details and usage from the live source",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "api_key_preview": {
+                      "type": "string"
+                    },
+                    "api_key_hash": {
+                      "type": "string"
+                    },
+                    "user": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "role": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "role"
+                      ]
+                    },
+                    "tier": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "limits": {
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "limits"
+                      ]
+                    },
+                    "usage": {
+                      "type": "object",
+                      "properties": {
+                        "token_usage": {
+                          "type": "integer"
+                        },
+                        "request_count": {
+                          "type": "integer"
+                        },
+                        "remaining_tokens": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ]
+                        },
+                        "max_tokens": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "token_usage",
+                        "request_count",
+                        "remaining_tokens",
+                        "max_tokens"
+                      ]
+                    },
+                    "source": {
+                      "type": "string",
+                      "enum": [
+                        "cache",
+                        "redis",
+                        "filesystem-fallback"
+                      ]
+                    },
+                    "timestamp": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "api_key_preview",
+                    "api_key_hash",
+                    "user",
+                    "tier",
+                    "usage",
+                    "source",
                     "timestamp"
                   ]
                 }

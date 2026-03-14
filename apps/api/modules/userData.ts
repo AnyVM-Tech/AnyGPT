@@ -7,6 +7,7 @@ import { dataManager, ModelsFileStructure } from './dataManager.js';
 import tiersData from '../tiers.json' with { type: 'json' };
 import { logger } from './logger.js';
 import { hashToken } from './redaction.js';
+import { BASE64_DATA_URL_GLOBAL } from './tokenEstimation.js';
 
 // --- Per-model pricing cache for estimatedCost ---
 interface ModelPricing { input: number; output: number; }
@@ -65,6 +66,115 @@ function ensureLength(value: string, max: number, label: string): void {
 
 function isDataUrl(value: string): boolean {
   return /^data:/i.test(value.trim());
+}
+
+function normalizeStringContentWithInlineMedia(
+  content: string,
+  textPartType: 'text' | 'input_text' = 'text'
+): string | any[] {
+  if (typeof content !== 'string' || !content.includes('data:')) {
+    return content;
+  }
+
+  const regex = new RegExp(BASE64_DATA_URL_GLOBAL.source, BASE64_DATA_URL_GLOBAL.flags);
+  const parts: any[] = [];
+  let recognizedMediaParts = 0;
+  let textLength = 0;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = regex.exec(content)) !== null) {
+    const fullMatch = match[0] || '';
+    const mimeType = String(match[1] || '').toLowerCase();
+    const payload = String(match[2] || '');
+    const matchIndex = typeof match.index === 'number' ? match.index : lastIndex;
+    const isImage = mimeType.startsWith('image/');
+    const isAudio = mimeType.startsWith('audio/');
+
+    if (!isImage && !isAudio) {
+      continue;
+    }
+
+    const precedingText = content.slice(lastIndex, matchIndex);
+    if (precedingText) {
+      textLength += precedingText.length;
+      parts.push({ type: textPartType, text: precedingText });
+    }
+
+    if (isImage) {
+      if (MAX_IMAGE_BASE64_CHARS > 0) {
+        ensureLength(payload, MAX_IMAGE_BASE64_CHARS, 'image_url data');
+      }
+      parts.push({
+        type: 'image_url',
+        image_url: { url: fullMatch },
+      });
+    } else {
+      if (MAX_AUDIO_BASE64_CHARS > 0) {
+        ensureLength(payload, MAX_AUDIO_BASE64_CHARS, 'input_audio.data');
+      }
+      parts.push({
+        type: 'input_audio',
+        input_audio: { data: payload, format: mimeType },
+      });
+    }
+
+    recognizedMediaParts += 1;
+    lastIndex = matchIndex + fullMatch.length;
+  }
+
+  if (recognizedMediaParts === 0) {
+    return content;
+  }
+
+  const trailingText = content.slice(lastIndex);
+  if (trailingText) {
+    textLength += trailingText.length;
+    parts.push({ type: textPartType, text: trailingText });
+  }
+
+  if (MAX_MESSAGE_CONTENT_CHARS > 0 && textLength > MAX_MESSAGE_CONTENT_CHARS) {
+    throw new Error(`message content exceeds maximum length (${MAX_MESSAGE_CONTENT_CHARS}).`);
+  }
+
+  const compactParts = parts.filter((part) => {
+    if (!part || typeof part !== 'object') return false;
+    if ((part.type === 'text' || part.type === 'input_text') && typeof part.text === 'string') {
+      return part.text.length > 0;
+    }
+    return true;
+  });
+
+  if (compactParts.length === 0) return '';
+  if (compactParts.length === 1 && typeof compactParts[0]?.text === 'string') {
+    return compactParts[0].text;
+  }
+
+  return compactParts;
+}
+
+function normalizeStructuredContentParts(content: any[]): any[] {
+  const normalized: any[] = [];
+  for (const part of content) {
+    if (!part || typeof part !== 'object') {
+      normalized.push(part);
+      continue;
+    }
+
+    const type = String(part.type || '').toLowerCase();
+    if ((type === 'text' || type === 'input_text') && typeof part.text === 'string') {
+      const next = normalizeStringContentWithInlineMedia(part.text, type === 'input_text' ? 'input_text' : 'text');
+      if (Array.isArray(next)) {
+        normalized.push(...next);
+      } else {
+        normalized.push({ ...part, text: next });
+      }
+      continue;
+    }
+
+    normalized.push(part);
+  }
+  return normalized;
 }
 
 function isResponsesSingleTurnModel(normalizedModelId: string): boolean {
@@ -290,7 +400,9 @@ export function extractMessageFromRequestBody(requestBody: any): {
       const toolCalls = Array.isArray(m.tool_calls) ? m.tool_calls : undefined;
       const toolCallId = typeof m.tool_call_id === 'string' && m.tool_call_id.trim() ? m.tool_call_id.trim() : undefined;
       const name = typeof m.name === 'string' && m.name.trim() ? m.name.trim() : undefined;
-      const content = m.content;
+      const content = typeof m.content === 'string'
+        ? normalizeStringContentWithInlineMedia(m.content, 'text')
+        : (Array.isArray(m.content) ? normalizeStructuredContentParts(m.content) : m.content);
       const isStringContent = typeof content === 'string';
       const isArrayContent = Array.isArray(content);
       const allowEmptyAssistantToolContent =
@@ -324,11 +436,16 @@ export function extractMessageFromRequestBody(requestBody: any): {
               throw new Error('image_url parts require image_url.url.');
             }
             const url = part.image_url.url;
-            if (MAX_IMAGE_URL_LENGTH > 0) {
+            if (!isDataUrl(url) && MAX_IMAGE_URL_LENGTH > 0) {
               ensureLength(url, MAX_IMAGE_URL_LENGTH, 'image_url.url');
             }
-            if (isDataUrl(url) && MAX_IMAGE_BASE64_CHARS > 0 && url.length > MAX_IMAGE_BASE64_CHARS) {
-              throw new Error(`image_url data is too large. Limit is ${MAX_IMAGE_BASE64_CHARS} characters.`);
+            if (isDataUrl(url)) {
+              const match = url.match(/^data:([^;\s]+);base64,([A-Za-z0-9+/=_-]+)$/i);
+              const mimeType = (match?.[1] || '').toLowerCase();
+              const payload = match?.[2] || '';
+              if (mimeType.startsWith('image/') && MAX_IMAGE_BASE64_CHARS > 0) {
+                ensureLength(payload, MAX_IMAGE_BASE64_CHARS, 'image_url data');
+              }
             }
           }
           if (part.type === 'input_audio') {

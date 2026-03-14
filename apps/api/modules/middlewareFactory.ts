@@ -66,11 +66,51 @@ interface RateLimitHandlers {
   sharedDecisionProvider?: (request: any, apiKey: string, limits: TierRateLimits) => Promise<RateLimitDecision | null>;
 }
 
+interface IpRateLimitHandlers {
+  onDenied: (request: any, details: { window: 'rps' | 'rpm' | 'rpd'; limit: number; retryAfterSeconds: number; ip: string }) => ResponsePayload | Promise<ResponsePayload>;
+}
+
 async function sendJsonIfOpen(response: any, payload: ResponsePayload) {
   if (!response.completed) {
     return response.status(payload.status).json(payload.body);
   }
   return;
+}
+
+function readNonNegativeLimitFromEnv(name: string, fallback: number): number {
+  const raw = Number(process.env[name]);
+  if (Number.isFinite(raw) && raw >= 0) return Math.floor(raw);
+  return fallback;
+}
+
+export function readTierRateLimitsFromEnv(prefix: string, defaults: TierRateLimits): TierRateLimits {
+  return {
+    rps: readNonNegativeLimitFromEnv(`${prefix}_RPS`, defaults.rps),
+    rpm: readNonNegativeLimitFromEnv(`${prefix}_RPM`, defaults.rpm),
+    rpd: readNonNegativeLimitFromEnv(`${prefix}_RPD`, defaults.rpd),
+  };
+}
+
+export function extractClientIp(request: any): string {
+  const forwarded = request?.headers?.['x-forwarded-for'];
+  if (typeof forwarded === 'string' && forwarded.trim()) {
+    return forwarded.split(',')[0].trim();
+  }
+  if (Array.isArray(forwarded) && forwarded.length > 0) {
+    return String(forwarded[0]).trim();
+  }
+
+  const realIp = request?.headers?.['x-real-ip'];
+  if (typeof realIp === 'string' && realIp.trim()) {
+    return realIp.trim();
+  }
+
+  const cfIp = request?.headers?.['cf-connecting-ip'];
+  if (typeof cfIp === 'string' && cfIp.trim()) {
+    return cfIp.trim();
+  }
+
+  return request?.ip || 'unknown';
 }
 
 export async function runAuthMiddleware(request: any, response: any, next: () => void, handlers: AuthHandlers) {
@@ -143,6 +183,30 @@ export async function runRateLimitMiddleware(
       window: decision.window,
       limit: decision.limit ?? tierLimits[decision.window],
       retryAfterSeconds,
+    }));
+  }
+
+  next();
+}
+
+export async function runIpRateLimitMiddleware(
+  request: any,
+  response: any,
+  next: () => void,
+  store: RequestTimestampStore,
+  limits: TierRateLimits,
+  handlers: IpRateLimitHandlers
+) {
+  const ip = extractClientIp(request);
+  const decision = enforceInMemoryRateLimit(store, ip, limits);
+  if (!decision.allowed && decision.window) {
+    const retryAfterSeconds = decision.retryAfterSeconds ?? 1;
+    response.setHeader('Retry-After', String(retryAfterSeconds));
+    return sendJsonIfOpen(response, await handlers.onDenied(request, {
+      window: decision.window,
+      limit: decision.limit ?? limits[decision.window],
+      retryAfterSeconds,
+      ip,
     }));
   }
 

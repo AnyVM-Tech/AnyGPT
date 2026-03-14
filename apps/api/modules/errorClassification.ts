@@ -164,10 +164,13 @@ export function isInvalidProviderCredentialError(error: any): boolean {
     if (!message) return false;
     return (
         message.includes('api_key_invalid') ||
+        message.includes('api_key_http_referrer_blocked') ||
         message.includes('api key not found') ||
         message.includes('invalid api key') ||
         message.includes('invalid authentication') ||
         message.includes('incorrect api key') ||
+        message.includes('requests from referer') ||
+        message.includes('http referrer blocked') ||
         message.includes('unauthorized')
     );
 }
@@ -184,7 +187,6 @@ export function isModelAccessError(error: any): boolean {
         message.includes('not found for api version') ||
         message.includes('model not found') ||
         message.includes('the model') && message.includes('does not exist') ||
-        message.includes('is not available') && message.includes('model') ||
         message.includes('not supported for this model') ||
         message.includes('model is not accessible') ||
         message.includes('you do not have access') ||
