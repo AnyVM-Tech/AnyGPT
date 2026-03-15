@@ -143,10 +143,18 @@ type DataType = 'providers' | 'keys' | 'models';
 type ManagedDataStructure = LoadedProviders | KeysFile | ModelsFileStructure;
 
 // --- Configuration ---
+function resolveManagedDataFilePath(envVarName: string, defaultFileName: string): string {
+    const override = process.env[envVarName];
+    if (typeof override === 'string' && override.trim().length > 0) {
+        return path.resolve(override.trim());
+    }
+    return path.resolve(defaultFileName);
+}
+
 const filePaths: Record<DataType, string> = {
-    providers: path.resolve('providers.json'),
-    keys: path.resolve('keys.json'),
-    models: path.resolve('models.json'),
+    providers: resolveManagedDataFilePath('API_PROVIDERS_FILE', 'providers.json'),
+    keys: resolveManagedDataFilePath('API_KEYS_FILE', 'keys.json'),
+    models: resolveManagedDataFilePath('API_MODELS_FILE', 'models.json'),
 };
 const legacyRedisKeys: Record<DataType, string> = {
     providers: 'api:providers_data',

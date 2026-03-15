@@ -1842,7 +1842,15 @@ export class MessageHandler {
                 );
 
              // --- Handle Attempt Outcome ---
-                if (!sendMessageError && result && responseEntry) {
+                const hasMeaningfulResult = Boolean(
+                    result
+                    && (
+                        (typeof result.response === 'string' && result.response.trim().length > 0)
+                        || (Array.isArray(result.tool_calls) && result.tool_calls.length > 0)
+                        || (typeof result.reasoning === 'string' && result.reasoning.trim().length > 0)
+                    )
+                );
+                if (!sendMessageError && result && responseEntry && hasMeaningfulResult) {
                     return {
                         response: result.response,
                         latency: result.latency,
@@ -1852,6 +1860,7 @@ export class MessageHandler {
                         providerId: providerId,
                         tool_calls: result.tool_calls,
                         finish_reason: result.finish_reason,
+                        reasoning: result.reasoning,
                     };
                 } else {
                     lastError = sendMessageError || new Error(`Provider ${providerId} for model ${modelId} finished in invalid state or stats update failed after success.`);
@@ -2176,8 +2185,9 @@ export class MessageHandler {
                         let firstChunkLatency: number | null = null;
                         let toolCalls: any[] | undefined;
                         let finishReason: string | undefined;
+                        let sawReasoning = false;
 
-                        for await (const { chunk, latency, response, tool_calls, finish_reason } of stream as any) {
+                        for await (const { chunk, latency, response, tool_calls, finish_reason, reasoning } of stream as any) {
                             fullResponse = response;
                             totalLatency += latency || 0;
                             chunkCount++;
@@ -2186,7 +2196,12 @@ export class MessageHandler {
                             }
                             if (Array.isArray(tool_calls) && tool_calls.length > 0) toolCalls = tool_calls;
                             if (finish_reason) finishReason = finish_reason;
-                            yield { type: 'chunk', chunk, latency };
+                            if (typeof reasoning === 'string' && reasoning.trim().length > 0) sawReasoning = true;
+                            yield { type: 'chunk', chunk, latency, tool_calls, finish_reason, reasoning };
+                        }
+
+                        if (fullResponse.trim().length === 0 && (!toolCalls || toolCalls.length === 0) && !sawReasoning) {
+                            throw new Error(`Provider ${providerId} returned an empty streaming response for model ${modelId}.`);
                         }
 
                         const totalResponseTime = Date.now() - streamStart;

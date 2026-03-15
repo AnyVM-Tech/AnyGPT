@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AnyGPT — Multi-Model AI Gateway</title>
   <meta name="description" content="AnyGPT provides unified access to GPT-4o, Claude, Gemini, DeepSeek, and more through a single OpenAI-compatible API.">
-  <link rel="icon" type="image/svg+xml" href="/AnyGPT.svg">
+  <link rel="icon" type="image/png" href="/AnyGPT.png">
 
   <!-- Tailwind CSS (same as LibreChat) -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -55,7 +55,7 @@
       <div class="max-w-7xl mx-auto px-6 h-18 min-h-[4.5rem] flex items-center justify-between gap-4">
         <a href="/" class="flex items-center gap-3 no-underline text-gray-100">
           <span class="logo-mark logo-mark--asset">
-            <img src="/AnyGPT.svg" alt="AnyGPT logo" class="logo-mark-image">
+            <img src="/AnyGPT.png" alt="AnyGPT logo" class="logo-mark-image">
           </span>
           <span class="text-lg font-bold tracking-tight">AnyGPT</span>
         </a>
@@ -90,6 +90,13 @@
                 AnyGPT gives your team one OpenAI-compatible entry point for GPT-4o, Claude, Gemini, DeepSeek,
                 and more—with SSO, smart routing, spend controls, and a built-in LibreChat workspace already wired in.
               </p>
+
+              <div class="hero-audience" aria-label="Common AnyGPT use cases">
+                <span>Internal copilots</span>
+                <span>Team workspaces</span>
+                <span>Product APIs</span>
+                <span>Secure AI rollouts</span>
+              </div>
 
               <div class="hero-points" role="list" aria-label="AnyGPT highlights">
                 <div class="hero-point" role="listitem">
@@ -132,19 +139,20 @@
             <div class="hero-visual">
               <div class="glass-panel hero-window hero-brand-panel">
                 <div class="brand-panel-grid">
+                  <div class="floating-badge badge-top">✦ Unified API + workspace</div>
                   <div class="hero-logo-stage">
                     <div class="hero-logo-frame hero-logo-frame--asset">
-                      <img src="/AnyGPT.svg" alt="AnyGPT logo" class="hero-logo-image hero-logo-image--svg">
+                      <img src="/AnyGPT.png" alt="AnyGPT logo" class="hero-logo-image hero-logo-image--svg">
                     </div>
                     <div class="hero-stage-pulse">
                       <span class="pulse-dot" aria-hidden="true"></span>
-                      5+ provider routes online
+                      <span data-live-pulse>Live catalog sync</span>
                     </div>
                   </div>
 
                   <div class="brand-copy-stack">
                     <div class="brand-heading-row">
-                      <div class="preview-label preview-label--brand">Live product signal</div>
+                      <div class="preview-label preview-label--brand">Live API snapshot</div>
                       <div class="status-chip">Multi-model ready</div>
                     </div>
                     <h3 class="text-2xl font-semibold tracking-tight">One branded surface for routing, chat, and access control.</h3>
@@ -152,39 +160,38 @@
                       Keep the front door clean while AnyGPT handles identity, provider selection, and a polished
                       LibreChat workspace behind the scenes.
                     </p>
-
-                    <div class="brand-rail">
-                      <span>Unified entry point</span>
-                      <span>SSO + API keys</span>
-                      <span>Workspace included</span>
-                    </div>
-
-                    <div class="brand-signal-grid">
-                      <div class="signal-card">
-                        <span>Base URL</span>
-                        <strong>gpt.anyvm.tech/v1</strong>
-                      </div>
-                      <div class="signal-card">
-                        <span>Authentication</span>
-                        <strong>Keycloak + team login</strong>
-                      </div>
-                      <div class="signal-card">
-                        <span>Routing</span>
-                        <strong>OpenAI • Claude • Gemini</strong>
-                      </div>
-                      <div class="signal-card">
-                        <span>Workspace</span>
-                        <strong>LibreChat + API access</strong>
-                      </div>
-                    </div>
-
-                    <div class="brand-footnote">A focused AnyGPT surface powered by the same AnyVM multi-model platform.</div>
                   </div>
+
+                  <dl class="brand-metric-list" aria-label="Live AnyGPT API metrics">
+                    <div class="metric-row">
+                      <dt>Live models</dt>
+                      <dd data-live-metric="modelCount">Loading…</dd>
+                    </div>
+                    <div class="metric-row">
+                      <dt>Total providers</dt>
+                      <dd data-live-metric="providerTotal">Loading…</dd>
+                    </div>
+                    <div class="metric-row">
+                      <dt>Multimodal ready</dt>
+                      <dd data-live-metric="multimodalCount">Loading…</dd>
+                    </div>
+                    <div class="metric-row">
+                      <dt>Tool calling</dt>
+                      <dd data-live-metric="toolCallingCount">Loading…</dd>
+                    </div>
+                    <div class="metric-row">
+                      <dt>Requests served</dt>
+                      <dd data-live-metric="requestCount">Loading…</dd>
+                    </div>
+                    <div class="metric-row">
+                      <dt>Tokens processed</dt>
+                      <dd data-live-metric="tokenUsage">Loading…</dd>
+                    </div>
+                  </dl>
+
+                  <div class="brand-footnote" data-live-footnote>Live model and usage counters refresh automatically.</div>
                 </div>
               </div>
-
-              <div class="floating-badge badge-top">✦ Unified API + workspace</div>
-              <div class="floating-badge badge-bottom">Built by AnyVM</div>
             </div>
           </div>
 
@@ -195,6 +202,40 @@
               <span>LibreChat included</span>
               <span>Provider failover</span>
               <span>Keycloak SSO</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="pb-16 md:pb-20">
+        <div class="max-w-7xl mx-auto px-6">
+          <div class="workflow-shell glass-panel">
+            <div class="workflow-intro">
+              <div class="section-kicker">How it lands</div>
+              <h2 class="text-2xl md:text-3xl font-bold tracking-tight mb-4">A simpler operating model for multi-provider AI.</h2>
+              <p class="text-gray-400 text-base md:text-lg leading-relaxed">
+                Centralize identity and routing once, then serve both developers and end users from the same polished surface.
+              </p>
+            </div>
+
+            <div class="workflow-grid">
+              <article class="workflow-card">
+                <span class="workflow-step">01</span>
+                <h3>Connect your apps once</h3>
+                <p>Keep standard OpenAI-compatible clients and change only the base URL.</p>
+              </article>
+
+              <article class="workflow-card">
+                <span class="workflow-step">02</span>
+                <h3>Apply guardrails centrally</h3>
+                <p>Handle SSO, model access, quotas, and provider policy from one controlled layer.</p>
+              </article>
+
+              <article class="workflow-card">
+                <span class="workflow-step">03</span>
+                <h3>Deliver a better front door</h3>
+                <p>Support builders through the API and daily users through LibreChat without extra glue code.</p>
+              </article>
             </div>
           </div>
         </div>
@@ -417,7 +458,7 @@ response = client.chat.completions.create(
       <div class="max-w-7xl mx-auto px-6 flex items-center justify-between flex-wrap gap-4">
         <div class="flex items-center gap-3 text-gray-500 text-sm">
           <span class="logo-mark logo-mark--asset !w-9 !h-9">
-            <img src="/AnyGPT.svg" alt="AnyGPT logo" class="logo-mark-image">
+            <img src="/AnyGPT.png" alt="AnyGPT logo" class="logo-mark-image">
           </span>
           <span>AnyGPT by AnyVM</span>
         </div>

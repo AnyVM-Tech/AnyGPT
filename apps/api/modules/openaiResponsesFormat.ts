@@ -60,32 +60,73 @@ export function createResponsesItemId(prefix: 'msg' | 'resp' | 'evt' | 'fc' = 'm
   return createRandomId(prefix);
 }
 
-export function createResponsesMessageItem(text: string, options: { id?: string; status?: string } = {}): Record<string, any> {
+export function createResponsesMessageItem(
+  text: string,
+  options: { id?: string; status?: string; extraContentParts?: Record<string, any>[] } = {}
+): Record<string, any> {
   return {
     id: options.id || createRandomId('msg'),
     type: 'message',
     role: 'assistant',
     status: options.status || 'completed',
-    content: [{ type: 'output_text', text: text || '' }],
+    content: [{
+      type: 'output_text',
+      text: text || '',
+    }, ...(Array.isArray(options.extraContentParts) ? options.extraContentParts : [])],
+  };
+}
+
+export function createResponsesReasoningItem(
+  text: string,
+  options: { id?: string; status?: string } = {}
+): Record<string, any> {
+  const summaryText = typeof text === 'string' ? text : '';
+  return {
+    id: options.id || createRandomId('msg'),
+    type: 'reasoning',
+    status: options.status || 'completed',
+    summary: summaryText
+      ? [{ type: 'summary_text', text: summaryText }]
+      : [],
   };
 }
 
 export function buildResponsesOutputItems(
   outputText: string,
   toolCalls?: any[],
-  options: { messageId?: string; messageStatus?: string; functionCallStatus?: string } = {},
+  options: {
+    messageId?: string;
+    messageStatus?: string;
+    functionCallStatus?: string;
+    reasoningText?: string;
+    reasoningId?: string;
+    reasoningStatus?: string;
+  } = {},
 ): any[] {
   const items: any[] = [];
   const normalizedText = typeof outputText === 'string' ? outputText : '';
+  const normalizedReasoningText = typeof options.reasoningText === 'string' ? options.reasoningText : '';
   const normalizedToolCalls = Array.isArray(toolCalls)
     ? toolCalls
       .map((call: any) => buildResponsesFunctionCallItem(call, options.functionCallStatus || 'completed'))
       .filter(Boolean)
     : [];
 
+  const assistantExtraContentParts = normalizedToolCalls.length > 0
+    ? [{ type: 'tool_calls', tool_calls: normalizedToolCalls }]
+    : [];
+
+  if (normalizedReasoningText.length > 0) {
+    items.push(createResponsesReasoningItem(normalizedReasoningText, {
+      id: options.reasoningId,
+      status: options.reasoningStatus || 'completed',
+    }));
+  }
+
   items.push(createResponsesMessageItem(normalizedText, {
     id: options.messageId,
     status: options.messageStatus || 'completed',
+    extraContentParts: assistantExtraContentParts,
   }));
 
   if (normalizedToolCalls.length > 0) items.push(...normalizedToolCalls);
@@ -122,6 +163,9 @@ export function buildResponsesResponseObject(params: {
   messageId?: string;
   messageStatus?: string;
   functionCallStatus?: string;
+  reasoningText?: string;
+  reasoningId?: string;
+  reasoningStatus?: string;
   usage?: ResponsesUsage;
 }): Record<string, any> {
   const usage = buildResponsesUsage(params.usage);
@@ -135,6 +179,9 @@ export function buildResponsesResponseObject(params: {
       messageId: params.messageId,
       messageStatus: params.messageStatus,
       functionCallStatus: params.functionCallStatus,
+      reasoningText: params.reasoningText,
+      reasoningId: params.reasoningId,
+      reasoningStatus: params.reasoningStatus,
     }),
     output_text: params.outputText,
     ...(Object.keys(usage).length > 0 ? { usage } : {}),

@@ -79,6 +79,7 @@ export interface ProviderStreamChunk {
   passthrough?: ProviderStreamPassthrough;
   tool_calls?: any[];
   finish_reason?: string;
+  reasoning?: string;
 }
 
 export interface ProviderUsage {
@@ -93,6 +94,7 @@ export interface ProviderResponse {
   usage?: ProviderUsage;
   tool_calls?: any[];
   finish_reason?: string;
+  reasoning?: string;
 }
 
 export interface ChatMessage {

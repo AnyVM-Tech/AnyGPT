@@ -53,8 +53,8 @@ const defaultModels = {
 
 const defaultKeys: Record<string, any> = {}; // Using Record<string, any>
 
-const modelsJsonPath = path.resolve('models.json'); // Adjusted path
-const keysJsonPath = path.resolve('keys.json'); // Adjusted path
+const modelsJsonPath = path.resolve(process.env.API_MODELS_FILE || 'models.json');
+const keysJsonPath = path.resolve(process.env.API_KEYS_FILE || 'keys.json');
 
 function isKeysJsonPath(filePath: string): boolean {
   return path.basename(filePath) === 'keys.json';
@@ -335,7 +335,9 @@ async function startServer() {
 
     if (isRouterEnabled('OPENAI')) {
         app.use('/v1', openaiRouter);
+        app.use('/v1/v1', openaiRouter);
         console.log('  ✓ OpenAI compatible routes enabled: /v1');
+        console.log('  ✓ OpenAI compatibility alias enabled: /v1/v1');
     } else {
         console.log('  𐄂 OpenAI compatible routes disabled.');
     }

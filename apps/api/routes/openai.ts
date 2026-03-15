@@ -26,6 +26,7 @@ import {
     buildResponsesResponseObject,
     createResponsesItemId,
     createResponsesMessageItem,
+    createResponsesReasoningItem,
 } from '../modules/openaiResponsesFormat.js';
 import {
     extractTextFromContent,
@@ -51,7 +52,7 @@ import {
     isNanoBananaModel,
     ensureNanoBananaModalities,
     isNonChatModel,
-    formatAssistantContent,
+    composeAssistantContent,
     inferToolCallsFromJsonText,
     filterValidChatMessages,
 } from '../modules/openaiRouteUtils.js';
@@ -145,6 +146,23 @@ function writeResponsesSseEvent(response: Response, payload: Record<string, any>
     response.write(`data: ${JSON.stringify(payload)}\n\n`);
 }
 
+function normalizeToolCallsForStream(toolCalls: any[] | undefined): any[] | undefined {
+    if (!Array.isArray(toolCalls) || toolCalls.length === 0) return undefined;
+    return toolCalls.map((call: any, index: number) => {
+        const normalizedCall = call && typeof call === 'object' ? { ...call } : { type: 'function' };
+        normalizedCall.index = typeof normalizedCall.index === 'number' ? normalizedCall.index : index;
+        if (normalizedCall.function && typeof normalizedCall.function === 'object') {
+            normalizedCall.function = {
+                ...normalizedCall.function,
+                arguments: typeof normalizedCall.function.arguments === 'string'
+                    ? normalizedCall.function.arguments
+                    : JSON.stringify(normalizedCall.function.arguments ?? {}),
+            };
+        }
+        return normalizedCall;
+    });
+}
+
 function extractResponsesRequestBody(requestBody: any): { message: IMessage; modelId: string; stream: boolean } {
     if (!requestBody || typeof requestBody !== 'object') {
         throw new Error('Invalid request body.');
@@ -225,8 +243,10 @@ function getBaselineTierRps(): number {
 
 const BASELINE_TIER_RPS = getBaselineTierRps();
 const UPSTREAM_TIMEOUT_MS = readEnvNumber('UPSTREAM_TIMEOUT_MS', 120_000);
-const REQUEST_ADMISSION_QUEUE_CONCURRENCY = Math.max(1, readEnvNumber('REQUEST_ADMISSION_QUEUE_CONCURRENCY', Math.max(2, Math.min(8, Number(process.env.REQUEST_QUEUE_CONCURRENCY || 4) || 4))));
-const REQUEST_ADMISSION_QUEUE_MAX_PENDING = Math.max(0, readEnvNumber('REQUEST_ADMISSION_QUEUE_MAX_PENDING', Math.max(8, REQUEST_ADMISSION_QUEUE_CONCURRENCY * 4)));
+const REQUEST_ADMISSION_QUEUE_CONCURRENCY = Math.max(1, readEnvNumber('REQUEST_ADMISSION_QUEUE_CONCURRENCY', Math.max(4, Math.min(16, Number(process.env.REQUEST_QUEUE_CONCURRENCY || 8) || 8))));
+const REQUEST_ADMISSION_QUEUE_MAX_PENDING = Math.max(0, readEnvNumber('REQUEST_ADMISSION_QUEUE_MAX_PENDING', Math.max(64, REQUEST_ADMISSION_QUEUE_CONCURRENCY * 16)));
+const RESPONSES_ADMISSION_QUEUE_CONCURRENCY = Math.max(1, readEnvNumber('RESPONSES_ADMISSION_QUEUE_CONCURRENCY', Math.max(4, REQUEST_ADMISSION_QUEUE_CONCURRENCY)));
+const RESPONSES_ADMISSION_QUEUE_MAX_PENDING = Math.max(0, readEnvNumber('RESPONSES_ADMISSION_QUEUE_MAX_PENDING', Math.max(64, RESPONSES_ADMISSION_QUEUE_CONCURRENCY * 16)));
 const EMBEDDINGS_QUEUE_CONCURRENCY = Math.max(1, readEnvNumber('EMBEDDINGS_QUEUE_CONCURRENCY', Math.max(1, Math.min(8, Math.floor(BASELINE_TIER_RPS / 10)))));
 const EMBEDDINGS_QUEUE_MAX_PENDING = Math.max(0, readEnvNumber('EMBEDDINGS_QUEUE_MAX_PENDING', Math.max(8, Math.min(64, BASELINE_TIER_RPS))));
 const VIDEO_REQUEST_CACHE_TTL_MS = readEnvNumber('VIDEO_REQUEST_CACHE_TTL_MS', 60 * 60 * 1000);
@@ -242,6 +262,61 @@ const IMAGE_FETCH_ALLOWED_HOSTS = readEnvCsv('IMAGE_FETCH_ALLOWED_HOSTS');
 const requestAdmissionQueue = new RequestQueue(REQUEST_ADMISSION_QUEUE_CONCURRENCY, {
     maxPending: REQUEST_ADMISSION_QUEUE_MAX_PENDING,
 });
+type ResponsesAdmissionQueueFamily = 'openai' | 'gemini' | 'deepseek' | 'xai' | 'default';
+
+function inferResponsesAdmissionQueueFamily(rawModelId: unknown): ResponsesAdmissionQueueFamily {
+    const lower = String(rawModelId || '').trim().toLowerCase();
+    if (!lower) return 'default';
+    if (
+        lower.startsWith('openai/')
+        || lower.startsWith('gpt')
+        || lower.startsWith('o1')
+        || lower.startsWith('o3')
+        || lower.startsWith('o4')
+        || lower.startsWith('dall-e')
+        || lower.startsWith('whisper')
+        || lower.startsWith('tts-')
+        || lower.includes('chatgpt')
+    ) {
+        return 'openai';
+    }
+    if (
+        lower.startsWith('google/')
+        || lower.includes('gemini')
+        || lower.includes('gemma')
+        || lower.startsWith('imagen')
+        || lower.startsWith('veo-')
+        || lower.includes('nano-banana')
+        || lower === 'aqa'
+    ) {
+        return 'gemini';
+    }
+    if (lower.includes('deepseek')) return 'deepseek';
+    if (lower.includes('grok') || lower.includes('xai') || lower.includes('x-ai')) return 'xai';
+    return 'default';
+}
+
+const responsesAdmissionQueues: Record<ResponsesAdmissionQueueFamily, RequestQueue> = {
+    openai: new RequestQueue(RESPONSES_ADMISSION_QUEUE_CONCURRENCY, {
+        maxPending: RESPONSES_ADMISSION_QUEUE_MAX_PENDING,
+    }),
+    gemini: new RequestQueue(RESPONSES_ADMISSION_QUEUE_CONCURRENCY, {
+        maxPending: RESPONSES_ADMISSION_QUEUE_MAX_PENDING,
+    }),
+    deepseek: new RequestQueue(RESPONSES_ADMISSION_QUEUE_CONCURRENCY, {
+        maxPending: RESPONSES_ADMISSION_QUEUE_MAX_PENDING,
+    }),
+    xai: new RequestQueue(RESPONSES_ADMISSION_QUEUE_CONCURRENCY, {
+        maxPending: RESPONSES_ADMISSION_QUEUE_MAX_PENDING,
+    }),
+    default: new RequestQueue(RESPONSES_ADMISSION_QUEUE_CONCURRENCY, {
+        maxPending: RESPONSES_ADMISSION_QUEUE_MAX_PENDING,
+    }),
+};
+
+function getResponsesAdmissionQueue(rawModelId: unknown): RequestQueue {
+    return responsesAdmissionQueues[inferResponsesAdmissionQueueFamily(rawModelId)];
+}
 const embeddingsQueue = new RequestQueue(EMBEDDINGS_QUEUE_CONCURRENCY, {
     maxPending: EMBEDDINGS_QUEUE_MAX_PENDING,
 });
@@ -823,7 +898,11 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
             const effectiveToolCalls = (result.tool_calls && result.tool_calls.length > 0)
                 ? result.tool_calls
                 : inferredToolCalls;
-            const assistantContent = effectiveToolCalls?.length ? '' : formatAssistantContent(result.response);
+            const assistantContent = effectiveToolCalls?.length ? null : composeAssistantContent(result.response, result.reasoning);
+            if ((!effectiveToolCalls || effectiveToolCalls.length === 0) && (!assistantContent || assistantContent.trim().length === 0)) {
+                throw new Error('Empty chat completion output from provider.');
+            }
+            const streamingToolCalls = normalizeToolCallsForStream(effectiveToolCalls);
 
             const totalTokensUsed = typeof result.tokenUsage === 'number' ? result.tokenUsage : 0;
             const promptTokensUsed = typeof result.promptTokens === 'number' ? result.promptTokens : undefined;
@@ -843,7 +922,7 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
             };
             response.write(`data: ${JSON.stringify(roleChunk)}\n\n`);
 
-            if (effectiveToolCalls?.length) {
+            if (streamingToolCalls?.length) {
                 const toolChunk = {
                     id: requestId,
                     object: 'chat.completion.chunk',
@@ -851,7 +930,7 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
                     model: modelId,
                     choices: [{
                         index: 0,
-                        delta: { tool_calls: effectiveToolCalls },
+                        delta: { tool_calls: streamingToolCalls },
                         finish_reason: null
                     }]
                 };
@@ -894,7 +973,14 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
             return response.end();
         }
         
-        const streamHandler = messageHandler.handleStreamingMessages(formattedMessages, modelId, userApiKey, { requestId: request.requestId });
+        const shouldDisableChatPassthrough =
+            (Array.isArray(requestBody.tools) && requestBody.tools.length > 0)
+            || typeof requestBody.tool_choice !== 'undefined'
+            || typeof requestBody.reasoning !== 'undefined';
+        const streamHandler = messageHandler.handleStreamingMessages(formattedMessages, modelId, userApiKey, {
+            disablePassthrough: shouldDisableChatPassthrough,
+            requestId: request.requestId,
+        });
         const started = Date.now();
         const requestId = `chatcmpl-${Date.now()}`;
         
@@ -911,6 +997,7 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
         let sentAssistantRoleChunk = false;
         const canInferToolCallsFromText = Array.isArray(requestBody.tools) && requestBody.tools.length > 0;
         let bufferingStructuredJson = false;
+        let pendingReasoningText = '';
 
         for await (const result of streamHandler) {
             if (result.type === 'passthrough') {
@@ -956,12 +1043,23 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
                         break;
                     }
                     throw passthroughPipeError;
-                }
+            }
                 break;
             } else if (result.type === 'chunk') {
-                if (Array.isArray(result.tool_calls) && result.tool_calls.length > 0) toolCallsFromStream = result.tool_calls;
+                if (typeof result.reasoning === 'string' && result.reasoning) {
+                    pendingReasoningText += result.reasoning;
+                }
+                const hasToolCallChunk = Array.isArray(result.tool_calls) && result.tool_calls.length > 0;
+                let chunkContent = hasToolCallChunk
+                    ? ''
+                    : (typeof result.chunk === 'string' ? result.chunk : '');
+                if (chunkContent && pendingReasoningText) {
+                    chunkContent = composeAssistantContent(chunkContent, pendingReasoningText);
+                    pendingReasoningText = '';
+                }
+                if (hasToolCallChunk) toolCallsFromStream = result.tool_calls;
                 if (result.finish_reason) finishReasonFromStream = result.finish_reason;
-                if (typeof result.chunk === 'string' && result.chunk) streamOutputText += result.chunk;
+                if (chunkContent) streamOutputText += chunkContent;
                 if (!toolCallsFromStream && canInferToolCallsFromText) {
                     const trimmedSoFar = streamOutputText.trimStart();
                     if (bufferingStructuredJson || trimmedSoFar.startsWith('{') || trimmedSoFar.startsWith('[')) {
@@ -986,8 +1084,8 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
                 if (bufferingStructuredJson && !toolCallsFromStream) {
                     continue;
                 }
-                const hasContentChunk = typeof result.chunk === 'string' && result.chunk.length > 0;
-                const hasToolCallChunk = Array.isArray(result.tool_calls) && result.tool_calls.length > 0;
+                const hasContentChunk = chunkContent.length > 0;
+                const streamedToolCalls = hasToolCallChunk ? normalizeToolCallsForStream(result.tool_calls) : undefined;
                 if (!hasContentChunk && !hasToolCallChunk) {
                     continue;
                 }
@@ -999,9 +1097,9 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
                     choices: [{
                         index: 0,
                         delta: {
-                            content: result.chunk,
-                            ...(result.tool_calls && result.tool_calls.length > 0
-                                ? { tool_calls: result.tool_calls }
+                            ...(hasContentChunk ? { content: chunkContent } : {}),
+                            ...(streamedToolCalls && streamedToolCalls.length > 0
+                                ? { tool_calls: streamedToolCalls }
                                 : {}),
                         },
                         finish_reason: result.finish_reason || null
@@ -1023,9 +1121,20 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
                 const fallbackStreamHandler = messageHandler.handleStreamingMessages(formattedMessages, modelId, userApiKey, { disablePassthrough: true, requestId: request.requestId });
             for await (const fallbackResult of fallbackStreamHandler) {
                 if (fallbackResult.type === 'chunk') {
-                    if (Array.isArray(fallbackResult.tool_calls) && fallbackResult.tool_calls.length > 0) toolCallsFromStream = fallbackResult.tool_calls;
+                    if (typeof fallbackResult.reasoning === 'string' && fallbackResult.reasoning) {
+                        pendingReasoningText += fallbackResult.reasoning;
+                    }
+                    const hasFallbackToolCallChunk = Array.isArray(fallbackResult.tool_calls) && fallbackResult.tool_calls.length > 0;
+                    let fallbackChunkContent = hasFallbackToolCallChunk
+                        ? ''
+                        : (typeof fallbackResult.chunk === 'string' ? fallbackResult.chunk : '');
+                    if (fallbackChunkContent && pendingReasoningText) {
+                        fallbackChunkContent = composeAssistantContent(fallbackChunkContent, pendingReasoningText);
+                        pendingReasoningText = '';
+                    }
+                    if (hasFallbackToolCallChunk) toolCallsFromStream = fallbackResult.tool_calls;
                     if (fallbackResult.finish_reason) finishReasonFromStream = fallbackResult.finish_reason;
-                    if (typeof fallbackResult.chunk === 'string' && fallbackResult.chunk) streamOutputText += fallbackResult.chunk;
+                    if (fallbackChunkContent) streamOutputText += fallbackChunkContent;
                     if (!toolCallsFromStream && canInferToolCallsFromText) {
                         const trimmedSoFar = streamOutputText.trimStart();
                         if (bufferingStructuredJson || trimmedSoFar.startsWith('{') || trimmedSoFar.startsWith('[')) {
@@ -1050,8 +1159,8 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
                     if (bufferingStructuredJson && !toolCallsFromStream) {
                         continue;
                     }
-                    const hasFallbackContentChunk = typeof fallbackResult.chunk === 'string' && fallbackResult.chunk.length > 0;
-                    const hasFallbackToolCallChunk = Array.isArray(fallbackResult.tool_calls) && fallbackResult.tool_calls.length > 0;
+                    const hasFallbackContentChunk = fallbackChunkContent.length > 0;
+                    const streamedFallbackToolCalls = hasFallbackToolCallChunk ? normalizeToolCallsForStream(fallbackResult.tool_calls) : undefined;
                     if (!hasFallbackContentChunk && !hasFallbackToolCallChunk) {
                         continue;
                     }
@@ -1063,9 +1172,9 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
                         choices: [{
                             index: 0,
                             delta: {
-                                content: fallbackResult.chunk,
-                                ...(fallbackResult.tool_calls && fallbackResult.tool_calls.length > 0
-                                    ? { tool_calls: fallbackResult.tool_calls }
+                                ...(hasFallbackContentChunk ? { content: fallbackChunkContent } : {}),
+                                ...(streamedFallbackToolCalls && streamedFallbackToolCalls.length > 0
+                                    ? { tool_calls: streamedFallbackToolCalls }
                                     : {}),
                             },
                             finish_reason: fallbackResult.finish_reason || null
@@ -1081,6 +1190,38 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
                     if (fallbackResult.finish_reason) finishReasonFromStream = fallbackResult.finish_reason;
                 }
             }
+        }
+
+        if (pendingReasoningText && (!toolCallsFromStream || toolCallsFromStream.length === 0)) {
+            if (!sentAssistantRoleChunk) {
+                const roleChunk = {
+                    id: requestId,
+                    object: 'chat.completion.chunk',
+                    created: Math.floor(started / 1000),
+                    model: modelId,
+                    choices: [{
+                        index: 0,
+                        delta: { role: 'assistant' },
+                        finish_reason: null
+                    }]
+                };
+                response.write(`data: ${JSON.stringify(roleChunk)}\n\n`);
+                sentAssistantRoleChunk = true;
+            }
+            const bufferedReasoningContent = composeAssistantContent('', pendingReasoningText);
+            streamOutputText += bufferedReasoningContent;
+            response.write(`data: ${JSON.stringify({
+                id: requestId,
+                object: 'chat.completion.chunk',
+                created: Math.floor(started / 1000),
+                model: modelId,
+                choices: [{
+                    index: 0,
+                    delta: { content: bufferedReasoningContent },
+                    finish_reason: null
+                }]
+            })}\n\n`);
+            pendingReasoningText = '';
         }
 
         if (passthroughHandled) {
@@ -1126,7 +1267,7 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
                     choices: [{
                         index: 0,
                         delta: {
-                            tool_calls: inferredToolCalls,
+                            tool_calls: normalizeToolCallsForStream(inferredToolCalls),
                         },
                         finish_reason: null
                     }]
@@ -1181,7 +1322,10 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
         const effectiveToolCalls = (result.tool_calls && result.tool_calls.length > 0)
             ? result.tool_calls
             : inferredToolCalls;
-        const assistantContent = effectiveToolCalls?.length ? '' : formatAssistantContent(result.response);
+        const assistantContent = effectiveToolCalls?.length ? null : composeAssistantContent(result.response, result.reasoning);
+        if ((!effectiveToolCalls || effectiveToolCalls.length === 0) && (!assistantContent || assistantContent.trim().length === 0)) {
+            throw new Error('Empty chat completion output from provider.');
+        }
     
         const totalTokensUsed = typeof result.tokenUsage === 'number' ? result.tokenUsage : 0;
         const promptTokensUsed = typeof result.promptTokens === 'number' ? result.promptTokens : undefined;
@@ -1323,9 +1467,10 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
     }
 
     try {
-        return await requestAdmissionQueue.run(async () => {
-        const userApiKey = request.apiKey!;
         const requestBody = await request.json();
+        const responsesAdmissionQueue = getResponsesAdmissionQueue(requestBody?.model);
+        return await responsesAdmissionQueue.run(async () => {
+        const userApiKey = request.apiKey!;
 
     if (requestBody?.reasoning === undefined && requestBody?.reasoning_effort !== undefined) {
         requestBody.reasoning = requestBody.reasoning_effort;
@@ -1479,9 +1624,10 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
             response.setHeader('Content-Type', 'text/event-stream');
             response.setHeader('Cache-Control', 'no-cache');
             response.setHeader('Connection', 'keep-alive');
-            const shouldDisableResponsesPassthrough = Boolean(localPreviousResponseId)
-                || Boolean(message.tools)
-                || typeof message.tool_choice !== 'undefined';
+            const shouldDisableResponsesPassthrough =
+                (Array.isArray(message.tools) && message.tools.length > 0)
+                || typeof message.tool_choice !== 'undefined'
+                || typeof message.reasoning !== 'undefined';
             const streamHandler = messageHandler.handleStreamingMessages([message], modelId, userApiKey, {
                 disablePassthrough: shouldDisableResponsesPassthrough,
                 requestId: request.requestId,
@@ -1498,6 +1644,53 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
             let completionTokensFinal: number | undefined;
             let responsesCreatedSent = false;
             let responsesTextItemStarted = false;
+            let pendingReasoningText = '';
+            let streamedReasoningText = '';
+            const canInferResponsesToolCallsFromText = Array.isArray(message.tools) && message.tools.length > 0;
+            let bufferingStructuredJson = false;
+            const reasoningItemId = createResponsesItemId('msg');
+            let reasoningItemStarted = false;
+
+            const persistResponsesStreamSideEffects = (
+                outputText: string,
+                totalTokens: number,
+                promptTokens: number | undefined,
+                completionTokens: number | undefined,
+                toolCalls: any[] | undefined,
+            ) => {
+                void (async () => {
+                    try {
+                        await saveResponsesHistoryEntry({
+                            id: responseId,
+                            model: modelId,
+                            input: responsesHistoryInput,
+                            output: buildStoredResponsesHistoryOutput(outputText, toolCalls),
+                            output_text: outputText,
+                            created,
+                        });
+                    } catch (historyError: any) {
+                        await logError({
+                            message: 'Failed to persist responses history entry after stream completion',
+                            errorMessage: historyError?.message,
+                            errorStack: historyError?.stack,
+                            context: { modelId, responseId, requestId: request.requestId }
+                        }, request);
+                    }
+
+                    try {
+                        await updateUserTokenUsage(totalTokens, userApiKey, { modelId, promptTokens, completionTokens });
+                    } catch (usageError: any) {
+                        await logError({
+                            message: 'Failed to update token usage after responses stream completion',
+                            errorMessage: usageError?.message,
+                            errorStack: usageError?.stack,
+                            context: { modelId, responseId, requestId: request.requestId, totalTokens }
+                        }, request);
+                    }
+                })();
+            };
+
+            const getAssistantOutputIndex = () => (reasoningItemStarted ? 1 : 0);
 
             const ensureResponsesCreated = () => {
                 if (responsesCreatedSent) return;
@@ -1515,17 +1708,36 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
                 if (responsesTextItemStarted) return;
                 writeResponsesSseEvent(response, buildResponsesOutputItemAddedEvent({
                     responseId,
-                    outputIndex: 0,
+                    outputIndex: getAssistantOutputIndex(),
                     item: createResponsesMessageItem('', { id: responseMessageId, status: 'in_progress' }),
                 }));
                 writeResponsesSseEvent(response, buildResponsesContentPartAddedEvent({
                     responseId,
                     itemId: responseMessageId,
-                    outputIndex: 0,
+                    outputIndex: getAssistantOutputIndex(),
                     contentIndex: 0,
                     part: { type: 'output_text', text: '' },
                 }));
                 responsesTextItemStarted = true;
+            };
+
+            const ensureResponsesReasoningItemStarted = () => {
+                ensureResponsesCreated();
+                if (reasoningItemStarted) return;
+                writeResponsesSseEvent(response, buildResponsesOutputItemAddedEvent({
+                    responseId,
+                    outputIndex: 0,
+                    item: createResponsesReasoningItem('', { id: reasoningItemId, status: 'in_progress' }),
+                }));
+                writeResponsesSseEvent(response, {
+                    type: 'response.reasoning_summary_part.added',
+                    response_id: responseId,
+                    item_id: reasoningItemId,
+                    output_index: 0,
+                    summary_index: 0,
+                    part: { type: 'summary_text', text: '' },
+                });
+                reasoningItemStarted = true;
             };
 
             for await (const result of streamHandler) {
@@ -1589,19 +1801,46 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
 
                     break;
                 } else if (result.type === 'chunk') {
+                    if (typeof result.reasoning === 'string' && result.reasoning) {
+                        ensureResponsesReasoningItemStarted();
+                        streamedReasoningText += result.reasoning;
+                        writeResponsesSseEvent(response, {
+                            type: 'response.reasoning_summary_text.delta',
+                            response_id: responseId,
+                            item_id: reasoningItemId,
+                            output_index: 0,
+                            summary_index: 0,
+                            delta: result.reasoning,
+                        });
+                    }
                     if (Array.isArray(result.tool_calls) && result.tool_calls.length > 0) {
                         toolCallsFromStream = result.tool_calls;
                     }
                     if (result.finish_reason) finishReasonFromStream = result.finish_reason;
                     if (typeof result.chunk === 'string' && result.chunk.length > 0) {
+                        let deltaText = result.chunk;
+                        fullText += deltaText;
+                        if (!toolCallsFromStream && canInferResponsesToolCallsFromText) {
+                            const inferred = inferToolCallsFromJsonText(fullText, message.tools, message.tool_choice);
+                            const trimmedSoFar = fullText.trimStart();
+                            if (inferred && inferred.length > 0) {
+                                toolCallsFromStream = inferred;
+                                finishReasonFromStream = 'tool_calls';
+                                bufferingStructuredJson = true;
+                                continue;
+                            }
+                            if (bufferingStructuredJson || trimmedSoFar.startsWith('{') || trimmedSoFar.startsWith('[')) {
+                                bufferingStructuredJson = true;
+                                continue;
+                            }
+                        }
                         ensureResponsesTextItemStarted();
-                        fullText += result.chunk;
                         writeResponsesSseEvent(response, buildResponsesOutputTextDeltaEvent({
                             responseId,
                             itemId: responseMessageId,
                             outputIndex: 0,
                             contentIndex: 0,
-                            delta: result.chunk,
+                            delta: deltaText,
                         }));
                     }
                 } else if (result.type === 'final') {
@@ -1622,6 +1861,18 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
                 const fallbackStreamHandler = messageHandler.handleStreamingMessages([message], modelId, userApiKey, { disablePassthrough: true, requestId: request.requestId });
                 for await (const fallbackResult of fallbackStreamHandler) {
                     if (fallbackResult.type === 'chunk') {
+                        if (typeof fallbackResult.reasoning === 'string' && fallbackResult.reasoning) {
+                            ensureResponsesReasoningItemStarted();
+                            streamedReasoningText += fallbackResult.reasoning;
+                            writeResponsesSseEvent(response, {
+                                type: 'response.reasoning_summary_text.delta',
+                                response_id: responseId,
+                                item_id: reasoningItemId,
+                                output_index: 0,
+                                summary_index: 0,
+                                delta: fallbackResult.reasoning,
+                            });
+                        }
                         if (typeof fallbackResult.chunk !== 'string' || fallbackResult.chunk.length === 0) {
                             continue;
                         }
@@ -1629,14 +1880,29 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
                             toolCallsFromStream = fallbackResult.tool_calls;
                         }
                         if (fallbackResult.finish_reason) finishReasonFromStream = fallbackResult.finish_reason;
+                        let fallbackDeltaText = fallbackResult.chunk;
+                        fullText += fallbackDeltaText;
+                        if (!toolCallsFromStream && canInferResponsesToolCallsFromText) {
+                            const inferred = inferToolCallsFromJsonText(fullText, message.tools, message.tool_choice);
+                            const trimmedSoFar = fullText.trimStart();
+                            if (inferred && inferred.length > 0) {
+                                toolCallsFromStream = inferred;
+                                finishReasonFromStream = 'tool_calls';
+                                bufferingStructuredJson = true;
+                                continue;
+                            }
+                            if (bufferingStructuredJson || trimmedSoFar.startsWith('{') || trimmedSoFar.startsWith('[')) {
+                                bufferingStructuredJson = true;
+                                continue;
+                            }
+                        }
                         ensureResponsesTextItemStarted();
-                        fullText += fallbackResult.chunk;
                         writeResponsesSseEvent(response, buildResponsesOutputTextDeltaEvent({
                             responseId,
                             itemId: responseMessageId,
                             outputIndex: 0,
                             contentIndex: 0,
-                            delta: fallbackResult.chunk,
+                            delta: fallbackDeltaText,
                         }));
                     } else if (fallbackResult.type === 'final') {
                         if (typeof fallbackResult.tokenUsage === 'number') totalTokenUsage = fallbackResult.tokenUsage;
@@ -1650,23 +1916,45 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
                 }
             }
 
+            if ((!toolCallsFromStream || toolCallsFromStream.length === 0) && fullText && canInferResponsesToolCallsFromText) {
+                const inferred = inferToolCallsFromJsonText(fullText, message.tools, message.tool_choice);
+                if (inferred && inferred.length > 0) {
+                    toolCallsFromStream = inferred;
+                    finishReasonFromStream = 'tool_calls';
+                    bufferingStructuredJson = true;
+                }
+            }
+
+            if (bufferingStructuredJson && (!toolCallsFromStream || toolCallsFromStream.length === 0) && fullText) {
+                ensureResponsesTextItemStarted();
+                writeResponsesSseEvent(response, buildResponsesOutputTextDeltaEvent({
+                    responseId,
+                    itemId: responseMessageId,
+                    outputIndex: getAssistantOutputIndex(),
+                    contentIndex: 0,
+                    delta: fullText,
+                }));
+            }
+
             if (passthroughHandled) {
+                const finalPromptTokensForPassthrough = typeof promptTokensFromUsage === 'number'
+                    ? promptTokensFromUsage
+                    : estimateTokensFromContent(message.content);
+                const finalCompletionTokensForPassthrough = typeof completionTokensFromUsage === 'number'
+                    ? completionTokensFromUsage
+                    : estimateTokensFromText(fullText);
                 if (totalTokenUsage <= 0) {
-                    const promptEstimate = typeof promptTokensFromUsage === 'number' ? promptTokensFromUsage : estimateTokensFromContent(message.content);
-                    const completionEstimate = typeof completionTokensFromUsage === 'number' ? completionTokensFromUsage : estimateTokensFromText(fullText);
-                    totalTokenUsage = promptEstimate + completionEstimate;
+                    totalTokenUsage = finalPromptTokensForPassthrough + finalCompletionTokensForPassthrough;
                 }
 
-                await saveResponsesHistoryEntry({
-                    id: responseId,
-                    model: modelId,
-                    input: responsesHistoryInput,
-                    output: buildStoredResponsesHistoryOutput(fullText, toolCallsFromStream),
-                    output_text: fullText,
-                    created,
-                });
-                await updateUserTokenUsage(totalTokenUsage, userApiKey, { modelId });
-                if (!response.completed) return response.end();
+                persistResponsesStreamSideEffects(
+                    fullText,
+                    totalTokenUsage,
+                    finalPromptTokensForPassthrough,
+                    finalCompletionTokensForPassthrough,
+                    toolCallsFromStream,
+                );
+                if (!response.completed) response.end();
                 return;
             }
 
@@ -1684,14 +1972,15 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
                 totalTokenUsage = finalInputTokens + finalOutputTokens;
             }
 
-            await updateUserTokenUsage(totalTokenUsage, userApiKey, { modelId, promptTokens: finalInputTokens, completionTokens: finalOutputTokens });
-
             const finalPayload = buildResponsesResponseObject({
                 id: responseId,
                 created,
                 model: modelId,
-                outputText: fullText,
+                outputText: toolCallsFromStream && toolCallsFromStream.length > 0 ? '' : fullText,
                 toolCalls: toolCallsFromStream,
+                reasoningText: streamedReasoningText,
+                reasoningId: streamedReasoningText ? reasoningItemId : undefined,
+                reasoningStatus: streamedReasoningText ? 'completed' : undefined,
                 status: 'completed',
                 messageId: responseMessageId,
                 messageStatus: 'completed',
@@ -1703,16 +1992,30 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
                 }
             });
 
-            await saveResponsesHistoryEntry({
-                id: responseId,
-                model: modelId,
-                input: responsesHistoryInput,
-                output: buildStoredResponsesHistoryOutput(fullText, toolCallsFromStream),
-                output_text: fullText,
-                created,
-            });
-
             const finalOutputItems = Array.isArray(finalPayload.output) ? finalPayload.output : [];
+            if (reasoningItemStarted && streamedReasoningText) {
+                writeResponsesSseEvent(response, {
+                    type: 'response.reasoning_summary_text.done',
+                    response_id: responseId,
+                    item_id: reasoningItemId,
+                    output_index: 0,
+                    summary_index: 0,
+                    text: streamedReasoningText,
+                });
+                writeResponsesSseEvent(response, {
+                    type: 'response.reasoning_summary_part.done',
+                    response_id: responseId,
+                    item_id: reasoningItemId,
+                    output_index: 0,
+                    summary_index: 0,
+                    part: { type: 'summary_text', text: streamedReasoningText },
+                });
+                writeResponsesSseEvent(response, buildResponsesOutputItemDoneEvent({
+                    responseId,
+                    outputIndex: 0,
+                    item: createResponsesReasoningItem(streamedReasoningText, { id: reasoningItemId, status: 'completed' }),
+                }));
+            }
             const assistantOutputIndex = finalOutputItems.findIndex((item: any) => item?.type === 'message' && item?.role === 'assistant');
             if (assistantOutputIndex >= 0) {
                 const assistantItem = finalOutputItems[assistantOutputIndex];
@@ -1769,7 +2072,15 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
 
             writeResponsesSseEvent(response, buildResponsesCompletedEvent(finalPayload));
             response.write(`data: [DONE]\n\n`);
-            return response.end();
+            if (!response.completed) response.end();
+            persistResponsesStreamSideEffects(
+                fullText,
+                totalTokenUsage,
+                finalInputTokens,
+                finalOutputTokens,
+                toolCallsFromStream,
+            );
+            return;
         }
 
         const result = await messageHandler.handleMessages([message], modelId, userApiKey, { requestId: request.requestId });
@@ -1779,19 +2090,23 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
         const effectiveToolCalls = (result.tool_calls && result.tool_calls.length > 0)
             ? result.tool_calls
             : inferredToolCalls;
-        const assistantContent = effectiveToolCalls?.length ? '' : formatAssistantContent(result.response);
+        const assistantContent = effectiveToolCalls?.length ? '' : result.response;
         const totalTokensUsed = typeof result.tokenUsage === 'number' ? result.tokenUsage : 0;
         const promptTokensUsed = typeof result.promptTokens === 'number' ? result.promptTokens : undefined;
         const completionTokensUsed = typeof result.completionTokens === 'number' ? result.completionTokens : undefined;
         await updateUserTokenUsage(totalTokensUsed, userApiKey, { modelId, promptTokens: promptTokensUsed, completionTokens: completionTokensUsed });
 
         const outputText = (effectiveToolCalls && effectiveToolCalls.length > 0) ? '' : assistantContent;
+        if ((!effectiveToolCalls || effectiveToolCalls.length === 0) && (!outputText || outputText.trim().length === 0)) {
+            throw new Error('Empty responses output from provider.');
+        }
         const responseBody = buildResponsesResponseObject({
             id: responseId,
             created,
             model: modelId,
             outputText,
             toolCalls: effectiveToolCalls,
+            reasoningText: typeof result.reasoning === 'string' ? result.reasoning : undefined,
             status: 'completed',
             usage: { input_tokens: promptTokensUsed, output_tokens: completionTokensUsed, total_tokens: totalTokensUsed }
         });

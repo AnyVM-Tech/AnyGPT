@@ -278,6 +278,90 @@ export class GeminiAI implements IAIProvider {
     return textParts.join('\n');
   }
 
+  private normalizeGeminiTools(message: IMessage): Array<Record<string, any>> | undefined {
+    const tools = Array.isArray(message.tools) ? message.tools : [];
+    const functionDeclarations = tools
+      .map((tool: any) => {
+        if (!tool || typeof tool !== 'object') return null;
+        const functionPayload = tool.function && typeof tool.function === 'object'
+          ? tool.function
+          : tool;
+        const name = typeof functionPayload?.name === 'string' ? functionPayload.name.trim() : '';
+        if (!name) return null;
+        return {
+          name,
+          ...(typeof functionPayload?.description === 'string' && functionPayload.description.trim()
+            ? { description: functionPayload.description.trim() }
+            : {}),
+          ...(functionPayload?.parameters && typeof functionPayload.parameters === 'object'
+            ? { parameters: functionPayload.parameters }
+            : {}),
+        };
+      })
+      .filter((entry): entry is { name: string; description?: string; parameters?: any } => Boolean(entry));
+
+    if (functionDeclarations.length === 0) return undefined;
+    return [{ functionDeclarations }];
+  }
+
+  private normalizeGeminiToolConfig(message: IMessage): Record<string, any> | undefined {
+    const toolChoice = message.tool_choice;
+    if (toolChoice === 'none') {
+      return { functionCallingConfig: { mode: 'NONE' } };
+    }
+    if (toolChoice === 'required') {
+      return { functionCallingConfig: { mode: 'ANY' } };
+    }
+    if (toolChoice && typeof toolChoice === 'object') {
+      const functionName = typeof toolChoice?.function?.name === 'string'
+        ? toolChoice.function.name.trim()
+        : '';
+      if (functionName) {
+        return {
+          functionCallingConfig: {
+            mode: 'ANY',
+            allowedFunctionNames: [functionName],
+          },
+        };
+      }
+    }
+    if (toolChoice === 'auto') {
+      return { functionCallingConfig: { mode: 'AUTO' } };
+    }
+    return undefined;
+  }
+
+  private extractGeminiToolCalls(result: any): any[] | undefined {
+    const collected: any[] = [];
+    const pushToolCall = (call: any) => {
+      const name = typeof call?.name === 'string' ? call.name.trim() : '';
+      if (!name) return;
+      const args = call?.args && typeof call.args === 'object' ? call.args : {};
+      collected.push({
+        id: typeof call?.id === 'string' && call.id.trim() ? call.id.trim() : undefined,
+        type: 'function',
+        function: {
+          name,
+          arguments: JSON.stringify(args),
+        },
+      });
+    };
+
+    const topLevelFunctionCalls = Array.isArray(result?.functionCalls) ? result.functionCalls : [];
+    topLevelFunctionCalls.forEach(pushToolCall);
+
+    const parts = Array.isArray(result?.candidates?.[0]?.content?.parts)
+      ? result.candidates[0].content.parts
+      : [];
+    for (const part of parts) {
+      if (part?.functionCall && typeof part.functionCall === 'object') {
+        pushToolCall(part.functionCall);
+      }
+    }
+
+    return collected.length > 0 ? collected : undefined;
+  }
+
   private buildContentsFromMessages(message: IMessage): { contents: any[]; systemText: string } {
     const sourceMessages = Array.isArray(message.messages) && message.messages.length > 0
       ? message.messages
@@ -322,6 +406,13 @@ export class GeminiAI implements IAIProvider {
       };
     }
 
+    const tools = this.normalizeGeminiTools(message);
+    if (tools) {
+      body.tools = tools;
+      const toolConfig = this.normalizeGeminiToolConfig(message);
+      if (toolConfig) body.toolConfig = toolConfig;
+    }
+
     return body;
   }
 
@@ -342,20 +433,40 @@ export class GeminiAI implements IAIProvider {
   }
 
   private extractOutputFromParts(parts: any[]): string {
-    if (!Array.isArray(parts) || parts.length === 0) return '';
+    return this.extractOutputAndReasoningFromParts(parts).content;
+  }
+
+  private extractOutputAndReasoningFromParts(parts: any[]): { content: string; reasoning: string } {
+    if (!Array.isArray(parts) || parts.length === 0) return { content: '', reasoning: '' };
 
     const inlineDataPart = parts.find((part) => part?.inlineData?.data);
     if (inlineDataPart?.inlineData?.data) {
       const mimeType = typeof inlineDataPart.inlineData.mimeType === 'string'
         ? inlineDataPart.inlineData.mimeType
         : 'application/octet-stream';
-      return `data:${mimeType};base64,${inlineDataPart.inlineData.data}`;
+      return {
+        content: `data:${mimeType};base64,${inlineDataPart.inlineData.data}`,
+        reasoning: '',
+      };
     }
 
-    const textParts = parts
-      .map((part) => (typeof part?.text === 'string' ? part.text : ''))
-      .filter((text) => text.length > 0);
-    return textParts.join('');
+    const contentParts: string[] = [];
+    const reasoningParts: string[] = [];
+
+    for (const part of parts) {
+      const text = typeof part?.text === 'string' ? part.text : '';
+      if (!text) continue;
+      if (part?.thought === true) {
+        reasoningParts.push(text);
+      } else {
+        contentParts.push(text);
+      }
+    }
+
+    return {
+      content: contentParts.join(''),
+      reasoning: reasoningParts.join(''),
+    };
   }
 
   private extractUsage(usageMetadata: any): { promptTokens?: number; completionTokens?: number; totalTokens?: number } {
@@ -420,8 +531,11 @@ export class GeminiAI implements IAIProvider {
 
       const result = await response.json();
       const parts = result?.candidates?.[0]?.content?.parts || [];
-      const responseText = this.extractOutputFromParts(parts);
-      if (!responseText) {
+      const extracted = this.extractOutputAndReasoningFromParts(parts);
+      const toolCalls = this.extractGeminiToolCalls(result);
+      const responseText = extracted.content;
+      const reasoningText = extracted.reasoning;
+      if (!responseText && !reasoningText && (!toolCalls || toolCalls.length === 0)) {
         throw new Error('Invalid response structure received from Gemini API');
       }
 
@@ -438,6 +552,8 @@ export class GeminiAI implements IAIProvider {
       return {
         response: responseText,
         latency: latency,
+        reasoning: reasoningText || undefined,
+        tool_calls: toolCalls,
         usage: {
           prompt_tokens: usage.promptTokens,
           completion_tokens: usage.completionTokens,
@@ -489,10 +605,18 @@ export class GeminiAI implements IAIProvider {
         }
         const nonStreamJson = await nonStreamResponse.json();
         const parts = nonStreamJson?.candidates?.[0]?.content?.parts || [];
-        const chunkOutput = this.extractOutputFromParts(parts);
-        if (chunkOutput) {
+        const extracted = this.extractOutputAndReasoningFromParts(parts);
+        const toolCalls = this.extractGeminiToolCalls(nonStreamJson);
+        if (extracted.content || extracted.reasoning || (toolCalls && toolCalls.length > 0)) {
           const latency = Date.now() - startTime;
-          yield { chunk: chunkOutput, latency, response: chunkOutput, anystream: null };
+          yield {
+            chunk: extracted.content,
+            latency,
+            response: extracted.content,
+            reasoning: extracted.reasoning || undefined,
+            anystream: null,
+            tool_calls: toolCalls,
+          };
         }
         return;
       }
@@ -571,12 +695,22 @@ export class GeminiAI implements IAIProvider {
           }
 
           const parts = parsed?.candidates?.[0]?.content?.parts;
-          const chunkOutput = this.extractOutputFromParts(parts || []);
-          if (!chunkOutput) continue;
+          const extracted = this.extractOutputAndReasoningFromParts(parts || []);
+          const toolCalls = this.extractGeminiToolCalls(parsed);
+          const chunkOutput = extracted.content;
+          const reasoningOutput = extracted.reasoning;
+          if (!chunkOutput && !reasoningOutput && (!toolCalls || toolCalls.length === 0)) continue;
 
           fullResponse += chunkOutput;
           const latency = Date.now() - startTime;
-          yield { chunk: chunkOutput, latency, response: fullResponse, anystream: null };
+          yield {
+            chunk: chunkOutput,
+            latency,
+            response: fullResponse,
+            reasoning: reasoningOutput || undefined,
+            anystream: null,
+            tool_calls: toolCalls,
+          };
         }
       }
     } catch (error: any) {

@@ -379,6 +379,25 @@ export class OpenRouterAI implements IAIProvider {
     return val == null ? '' : String(val);
   }
 
+  private extractReasoning(val: any): string | undefined {
+    if (typeof val === 'string') {
+      return val.trim() || undefined;
+    }
+    if (Array.isArray(val)) {
+      const joined = val
+        .map((entry) => this.extractReasoning(entry) || '')
+        .filter(Boolean)
+        .join('');
+      return joined || undefined;
+    }
+    if (val && typeof val === 'object') {
+      if (typeof val.text === 'string') return val.text.trim() || undefined;
+      if (typeof val.reasoning === 'string') return val.reasoning.trim() || undefined;
+      if (typeof val.reasoning_content === 'string') return val.reasoning_content.trim() || undefined;
+    }
+    return undefined;
+  }
+
   private extractErrorMessage(error: any, fallback: string): string {
     const status = error?.response?.status;
     const data = error?.response?.data;
@@ -531,6 +550,11 @@ export class OpenRouterAI implements IAIProvider {
       return {
         response: text,
         latency,
+        reasoning: this.extractReasoning(
+          messagePayload?.reasoning
+          ?? messagePayload?.reasoning_content
+          ?? messagePayload?.reasoning_details
+        ),
         usage: {
           prompt_tokens: typeof res.data?.usage?.prompt_tokens === 'number' ? res.data.usage.prompt_tokens : undefined,
           completion_tokens: typeof res.data?.usage?.completion_tokens === 'number' ? res.data.usage.completion_tokens : undefined,
@@ -592,6 +616,14 @@ export class OpenRouterAI implements IAIProvider {
             const delta = parsed?.choices?.[0]?.delta;
             const message = parsed?.choices?.[0]?.message;
             const media = this.extractMediaFromMessage(delta) || this.extractMediaFromMessage(message);
+            const reasoning = this.extractReasoning(
+              delta?.reasoning
+              ?? delta?.reasoning_content
+              ?? delta?.reasoning_details
+              ?? message?.reasoning
+              ?? message?.reasoning_content
+              ?? message?.reasoning_details
+            );
             const chunk = media
               || this.normalizeContent(delta?.content ?? delta?.text ?? delta?.transcript ?? delta?.audio?.transcript);
             full += chunk;
@@ -600,6 +632,7 @@ export class OpenRouterAI implements IAIProvider {
               chunk,
               latency,
               response: full,
+              reasoning,
               anystream: res.data,
               tool_calls: Array.isArray(delta?.tool_calls) ? delta.tool_calls : undefined,
               finish_reason: parsed?.choices?.[0]?.finish_reason,

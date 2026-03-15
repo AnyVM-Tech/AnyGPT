@@ -552,6 +552,13 @@ function getKnownCapabilities(modelId: string): { caps: ModelCapability[]; reaso
     return { caps: ['text', 'tool_calling'], reason: 'tool-use model' };
   }
 
+  // Gemini 3.1 Pro preview variants support function/tool calling, but shared
+  // probes can miss it because unrelated image/quota failures may short-circuit
+  // the run before the tool probe completes.
+  if (id.includes('gemini-3.1-pro-preview')) {
+    return { caps: ['text', 'image_input', 'audio_input', 'tool_calling'], reason: 'known Gemini 3.1 Pro preview tool-use model' };
+  }
+
   // Native audio models (Gemini)
   if (id.includes('native-audio')) {
     return { caps: ['text', 'audio_input', 'audio_output'], reason: 'native audio model' };

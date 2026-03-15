@@ -76,11 +76,13 @@ apps/api/
 
 *   **Multi-Provider Support**: Integrates with OpenAI, Anthropic, Gemini, Groq, OpenRouter, Ollama, DeepSeek, xAI, Imagen, and more via provider configs.
 *   **OpenAI-Compatible API**: `/v1` supports chat completions, responses, embeddings, images, videos, audio (speech/transcriptions), and key introspection.
+*   **OpenAI-Native Responses Support**: `/v1/responses` is tuned for native OpenAI clients such as Roo Code, with reasoning/tool-call normalization when needed and passthrough fast-paths for simpler text streams.
 *   **Provider-Compatible Routers**: Native-style endpoints for Anthropic (`/v3`), Gemini (`/v2`), Groq (`/v4`), Ollama (`/v5`), and OpenRouter (`/v6`).
 *   **Dual Data Storage**: Redis primary with filesystem fallback and a short in-memory cache.
 *   **Dynamic Model Management**: Updates `models.json` with provider counts and model capabilities (OpenWebUI compatible).
 *   **Tier-Based Rate Limiting**: RPS/RPM/RPD limits and provider-score gating per tier (`tiers.json`).
 *   **Provider Routing & Health**: Provider scoring, retries/fallback, auto-disable on repeated failures, and error-exclusion patterns.
+*   **Admission Queue Isolation**: OpenAI-compatible traffic uses separate queue lanes for `/v1/responses` and provider-family-specific native routing to reduce cross-provider contention.
 *   **Image URL Inlining Proxy**: Optional HTTP image fetch with SSRF protections, size/time limits, and per-request referer override.
 *   **WebSocket & Realtime**: `/ws` for chat and `/v1/realtime` for realtime-compatible sessions.
 *   **OpenAPI Spec**: Served at `/openapi.json` and `/api/openapi.json`.
@@ -170,9 +172,17 @@ apps/api/
     *   `DISABLE_PROVIDER_AFTER_MODELS`: Disable a provider after this many models are disabled (default: 2).
     *   `MODEL_CAPS_REFRESH_MS`: Model capability refresh interval in ms (default: 5000).
 
-    ### Upstream Timeouts & Caches
-    *   `UPSTREAM_TIMEOUT_MS`: Upstream HTTP timeout in ms (default: 120000).
-    *   `VIDEO_REQUEST_CACHE_TTL_MS`: TTL for cached video request IDs in ms (default: 3600000).
+     ### Upstream Timeouts & Caches
+     *   `UPSTREAM_TIMEOUT_MS`: Upstream HTTP timeout in ms (default: 120000).
+     *   `DATA_CACHE_TTL_MS`: In-memory metadata cache TTL in ms (default: `5000`, test default: `0`).
+     *   `VIDEO_REQUEST_CACHE_TTL_MS`: TTL for cached video request IDs in ms (default: 3600000).
+
+     ### Admission Queues
+     *   `REQUEST_QUEUE_CONCURRENCY`: Base shared request queue concurrency hint (used by `/v1` admission defaults).
+     *   `REQUEST_ADMISSION_QUEUE_CONCURRENCY`: Explicit concurrency for the general `/v1/chat/completions` admission queue.
+     *   `REQUEST_ADMISSION_QUEUE_MAX_PENDING`: Explicit pending limit for the general `/v1/chat/completions` admission queue.
+     *   `RESPONSES_ADMISSION_QUEUE_CONCURRENCY`: Explicit concurrency for `/v1/responses` admission queues.
+     *   `RESPONSES_ADMISSION_QUEUE_MAX_PENDING`: Explicit pending limit for `/v1/responses` admission queues.
 
     ### Image URL Fetch Proxy
     *   `IMAGE_FETCH_TIMEOUT_MS`: Image fetch timeout in ms (default: 15000).
@@ -232,7 +242,7 @@ The project includes a comprehensive testing suite with both unit tests and inte
     ```bash
     bun run test
     ```
-    This runs the mock provider, API server, and test runner concurrently, then cleans up automatically.
+    This runs the mock provider, API server, REST/integration checks, and the OpenAI Node SDK compatibility checks concurrently, then cleans up automatically.
 
 *   **Individual Test Components**:
     ```bash
@@ -244,6 +254,9 @@ The project includes a comprehensive testing suite with both unit tests and inte
     
     # Run only the test scripts (requires servers to be running)
     bun run test:run
+
+    # Run only the OpenAI Node SDK compatibility checks
+    bun run test:sdk
     ```
 
 ### Mock Provider Testing
@@ -280,6 +293,13 @@ Common endpoints:
 *   `GET /v1/keys/me` (key usage/metrics)
 *   `POST /v1/generate_key` (admin)
 *   `POST /v1/interactions` and `GET /v1/interactions/{interactionId}`
+
+Notes:
+*   [`/v1/responses`](apps/api/routes/openai.ts) is the preferred path for native OpenAI clients such as Roo Code.
+*   Plain text Responses streams can use a passthrough fast path for lower latency; reasoning/tool-call cases may be normalized server-side to preserve OpenAI-native semantics.
+*   Text-capable Gemini, DeepSeek, xAI/Grok, and similar models can be served through `/v1/responses` when they behave like chat/text models.
+*   Media-only or dedicated non-chat models such as embeddings, TTS, STT, image generation, and video generation are redirected to their dedicated endpoints instead of `/v1/responses`.
+*   Gemini tool-calling support is normalized in the provider adapter and capability probes, so models like Gemini 3.1 preview variants can now surface `tool_calling` in `models.json` when supported.
 
 ### Provider-Compatible Routers
 *   Gemini: `/v2`

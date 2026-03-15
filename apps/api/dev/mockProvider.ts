@@ -25,6 +25,39 @@ interface MockConfig {
   enableLogs: boolean;      // Enable/disable detailed logging
 }
 
+function extractResponsesInputText(input: any): string {
+  if (typeof input === 'string') return input;
+  if (!input) return '';
+  if (Array.isArray(input)) {
+    return input.map((entry) => extractResponsesInputText(entry)).filter(Boolean).join('\n');
+  }
+  if (typeof input === 'object') {
+    if (typeof input.text === 'string') return input.text;
+    if (typeof input.content === 'string') return input.content;
+    if (Array.isArray(input.content)) {
+      return input.content.map((part: any) => extractResponsesInputText(part)).filter(Boolean).join('\n');
+    }
+  }
+  return '';
+}
+
+function writeSseEvent(response: any, payload: Record<string, any>) {
+  response.write(`event: ${payload.type}\n`);
+  response.write(`data: ${JSON.stringify(payload)}\n\n`);
+}
+
+function splitTextIntoChunks(text: string, chunkSize: number): string[] {
+  if (typeof text !== 'string' || text.length === 0) return [];
+  const normalizedChunkSize = Number.isFinite(chunkSize) && chunkSize > 0
+    ? Math.floor(chunkSize)
+    : text.length;
+  const chunks: string[] = [];
+  for (let index = 0; index < text.length; index += normalizedChunkSize) {
+    chunks.push(text.slice(index, index + normalizedChunkSize));
+  }
+  return chunks;
+}
+
 // Default configuration (can be overridden via environment variables or API)
 let mockConfig: MockConfig = {
   baseDelay: parseInt(process.env.MOCK_BASE_DELAY || '100'),
@@ -109,7 +142,8 @@ app.post('/v1/chat/completions', async (request, response) => {
     console.log('[MOCK] Received chat completion request:', JSON.stringify(body, null, 2));
   }
   
-  const { model, messages, max_tokens = 150, temperature = 0.7, stream = true } = body;
+  const { model, messages, max_tokens = 150, temperature = 0.7, stream = false } = body;
+  const tools = Array.isArray(body?.tools) ? body.tools : [];
   
   if (!messages || !Array.isArray(messages) || messages.length === 0) {
     return response.status(400).json({
@@ -197,6 +231,19 @@ Code connects all worlds.`;
   const inputTokens = Math.ceil(userMessage.length / 4); // Rough estimate: 4 chars per token
   const outputTokens = Math.ceil(mockContent.length / 4);
   const totalTokens = inputTokens + outputTokens;
+  const requestedToolName = typeof tools[0]?.function?.name === 'string'
+    ? tools[0].function.name
+    : (typeof tools[0]?.name === 'string' ? tools[0].name : 'mock_tool');
+  const mockToolCall = tools.length > 0
+    ? {
+        id: `call_${randomUUID().replace(/-/g, '').slice(0, 24)}`,
+        type: 'function',
+        function: {
+          name: requestedToolName,
+          arguments: JSON.stringify({ city: 'NYC' })
+        }
+      }
+    : null;
 
   // Calculate realistic response delay
   const processingDelay = calculateResponseDelay(outputTokens);
@@ -221,89 +268,406 @@ Code connects all worlds.`;
     for (let i = 0; i < mockContent.length; i += chunkSize) {
       chunks.push(mockContent.substring(i, i + chunkSize));
     }
-    
-    setTimeout(async () => {
-      try {
-        // Send chunks
-        for (let i = 0; i < chunks.length; i++) {
-          const chunk = chunks[i];
-          const streamChunk = {
-            id: requestId,
-            object: 'chat.completion.chunk',
-            created: created,
-            model: modelName,
-            choices: [{
-              index: 0,
-              delta: { content: chunk },
-              finish_reason: null
-            }]
-          };
-          
-          response.write(`data: ${JSON.stringify(streamChunk)}\n\n`);
-          
-          // Small delay between chunks to simulate real streaming
-          await new Promise(resolve => setTimeout(resolve, 50));
-        }
-        
-        // Send final chunk
-        const finalChunk = {
+
+    await new Promise(resolve => setTimeout(resolve, processingDelay));
+
+    try {
+      // Send chunks
+      for (let i = 0; i < chunks.length; i++) {
+        const chunk = chunks[i];
+        const streamChunk = {
           id: requestId,
           object: 'chat.completion.chunk',
           created: created,
           model: modelName,
           choices: [{
             index: 0,
-            delta: {},
-            finish_reason: 'stop'
+            delta: { content: chunk },
+            finish_reason: null
           }]
         };
-        
-        response.write(`data: ${JSON.stringify(finalChunk)}\n\n`);
-        response.write(`data: [DONE]\n\n`);
-        response.end();
-        
-        if (mockConfig.enableLogs) {
-          console.log(`[MOCK] Streaming response completed for request ${requestId}`);
-        }
-      } catch (error) {
-        console.error('[MOCK] Error during streaming:', error);
-        response.end();
+
+        response.write(`data: ${JSON.stringify(streamChunk)}\n\n`);
+
+        // Small delay between chunks to simulate real streaming
+        await new Promise(resolve => setTimeout(resolve, 50));
       }
-    }, processingDelay);
+
+      // Send final chunk
+      const finalChunk = {
+        id: requestId,
+        object: 'chat.completion.chunk',
+        created: created,
+        model: modelName,
+        choices: [{
+          index: 0,
+          delta: {},
+          finish_reason: 'stop'
+        }]
+      };
+
+      response.write(`data: ${JSON.stringify(finalChunk)}\n\n`);
+      response.write(`data: [DONE]\n\n`);
+      response.end();
+
+      if (mockConfig.enableLogs) {
+        console.log(`[MOCK] Streaming response completed for request ${requestId}`);
+      }
+    } catch (error) {
+      console.error('[MOCK] Error during streaming:', error);
+      response.end();
+    }
     
     return;
   }
   
   // Handle non-streaming requests
-  setTimeout(() => {
-    const responseData = {
-      id: `chatcmpl-${randomUUID()}`,
-      object: 'chat.completion',
-      created: Math.floor(Date.now() / 1000),
-      model: model || 'mock-gpt-3.5-turbo',
-      choices: [
+  await new Promise(resolve => setTimeout(resolve, processingDelay));
+
+  const responseData = {
+    id: `chatcmpl-${randomUUID()}`,
+    object: 'chat.completion',
+    created: Math.floor(Date.now() / 1000),
+    model: model || 'mock-gpt-3.5-turbo',
+    choices: [
         {
           index: 0,
           message: {
             role: 'assistant',
-            content: mockContent
+            content: mockToolCall ? null : mockContent,
+            ...(mockToolCall ? { tool_calls: [mockToolCall] } : {})
           },
-          finish_reason: 'stop'
+          finish_reason: mockToolCall ? 'tool_calls' : 'stop'
         }
       ],
-      usage: {
-        prompt_tokens: inputTokens,
-        completion_tokens: outputTokens,
-        total_tokens: totalTokens
-      },
-      system_fingerprint: 'mock_provider_fp_123'
-    };
+    usage: {
+      prompt_tokens: inputTokens,
+      completion_tokens: outputTokens,
+      total_tokens: totalTokens
+    },
+    system_fingerprint: 'mock_provider_fp_123'
+  };
 
-    if (mockConfig.enableLogs) {
-      console.log('[MOCK] Sending response:', JSON.stringify(responseData, null, 2));
+  if (mockConfig.enableLogs) {
+    console.log('[MOCK] Sending response:', JSON.stringify(responseData, null, 2));
+  }
+  response.json(responseData);
+});
+
+app.post('/v1/responses', async (request, response) => {
+  const body = await request.json();
+
+  if (mockConfig.enableLogs) {
+    console.log('[MOCK] Received responses request:', JSON.stringify(body, null, 2));
+  }
+
+  const model = typeof body?.model === 'string' ? body.model : 'mock-gpt-5.4';
+  const stream = body?.stream === true;
+  const tools = Array.isArray(body?.tools) ? body.tools : [];
+  const userMessage = extractResponsesInputText(body?.input);
+
+  let mockContent = '';
+  if (userMessage.toLowerCase().includes('haiku')) {
+    mockContent = `APIs connect bright,\nRequests flow through one clear gateway,\nSDKs rest easy.`;
+  } else if (userMessage.toLowerCase().includes('hello')) {
+    mockContent = 'Hello from the mock Responses API.';
+  } else {
+    mockContent = `This is a mock responses reply to: "${userMessage}".`;
+  }
+
+  const inputTokens = Math.ceil(userMessage.length / 4);
+  const outputTokens = Math.ceil(mockContent.length / 4);
+  const totalTokens = inputTokens + outputTokens;
+  const processingDelay = calculateResponseDelay(outputTokens);
+  const requestedToolName = typeof tools[0]?.function?.name === 'string'
+    ? tools[0].function.name
+    : (typeof tools[0]?.name === 'string' ? tools[0].name : 'mock_tool');
+  const responseId = `resp_${randomUUID().replace(/-/g, '').slice(0, 24)}`;
+  const messageId = `msg_${randomUUID().replace(/-/g, '').slice(0, 24)}`;
+  const reasoningId = `rs_${randomUUID().replace(/-/g, '').slice(0, 24)}`;
+  const functionCallId = `fc_${randomUUID().replace(/-/g, '').slice(0, 24)}`;
+  const created = Math.floor(Date.now() / 1000);
+  const mockReasoning = tools.length > 0
+    ? 'Selecting the best tool and preparing its arguments.'
+    : 'Planning the response before generating the final answer.';
+  const reasoningChunks = splitTextIntoChunks(mockReasoning, 14);
+  const mockFunctionCall = tools.length > 0
+    ? {
+        id: functionCallId,
+        type: 'function_call',
+        call_id: `call_${randomUUID().replace(/-/g, '').slice(0, 24)}`,
+        name: requestedToolName,
+        arguments: JSON.stringify({ city: 'NYC' }),
+        status: 'completed',
+      }
+    : null;
+
+  const finalResponse = {
+    id: responseId,
+    object: 'response',
+    created,
+    model,
+    status: 'completed',
+    output: mockFunctionCall
+      ? [{
+          id: reasoningId,
+          type: 'reasoning',
+          status: 'completed',
+          summary: [{ type: 'summary_text', text: mockReasoning }],
+        }, {
+          id: messageId,
+          type: 'message',
+          role: 'assistant',
+          status: 'completed',
+          content: [
+            { type: 'output_text', text: '' },
+            { type: 'tool_calls', tool_calls: [mockFunctionCall] }
+          ],
+        }, mockFunctionCall]
+      : [{
+          id: reasoningId,
+          type: 'reasoning',
+          status: 'completed',
+          summary: [{ type: 'summary_text', text: mockReasoning }],
+        }, {
+          id: messageId,
+          type: 'message',
+          role: 'assistant',
+          status: 'completed',
+          content: [{ type: 'output_text', text: mockContent }],
+        }],
+    output_text: mockFunctionCall ? '' : mockContent,
+    usage: {
+      input_tokens: inputTokens,
+      output_tokens: outputTokens,
+      total_tokens: totalTokens,
+    },
+  };
+
+  if (!stream) {
+    await new Promise((resolve) => setTimeout(resolve, processingDelay));
+    response.json(finalResponse);
+    return;
+  }
+
+  response.setHeader('Content-Type', 'text/event-stream');
+  response.setHeader('Cache-Control', 'no-cache');
+  response.setHeader('Connection', 'keep-alive');
+
+  await new Promise((resolve) => setTimeout(resolve, processingDelay));
+
+  writeSseEvent(response, {
+    type: 'response.created',
+    event_id: `evt_${randomUUID().replace(/-/g, '').slice(0, 24)}`,
+    response: {
+      id: responseId,
+      object: 'response',
+      created,
+      model,
+      status: 'in_progress',
+      output: [],
+      output_text: '',
+    },
+  });
+
+  writeSseEvent(response, {
+    type: 'response.output_item.added',
+    event_id: `evt_${randomUUID().replace(/-/g, '').slice(0, 24)}`,
+    response_id: responseId,
+    output_index: 0,
+    item: {
+      id: reasoningId,
+      type: 'reasoning',
+      status: 'in_progress',
+      summary: [],
+    },
+  });
+  writeSseEvent(response, {
+    type: 'response.reasoning_summary_part.added',
+    event_id: `evt_${randomUUID().replace(/-/g, '').slice(0, 24)}`,
+    response_id: responseId,
+    item_id: reasoningId,
+    output_index: 0,
+    summary_index: 0,
+    part: { type: 'summary_text', text: '' },
+  });
+  for (const delta of reasoningChunks) {
+    writeSseEvent(response, {
+      type: 'response.reasoning_summary_text.delta',
+      event_id: `evt_${randomUUID().replace(/-/g, '').slice(0, 24)}`,
+      response_id: responseId,
+      item_id: reasoningId,
+      output_index: 0,
+      summary_index: 0,
+      delta,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  writeSseEvent(response, {
+    type: 'response.reasoning_summary_text.done',
+    event_id: `evt_${randomUUID().replace(/-/g, '').slice(0, 24)}`,
+    response_id: responseId,
+    item_id: reasoningId,
+    output_index: 0,
+    summary_index: 0,
+    text: mockReasoning,
+  });
+  writeSseEvent(response, {
+    type: 'response.reasoning_summary_part.done',
+    event_id: `evt_${randomUUID().replace(/-/g, '').slice(0, 24)}`,
+    response_id: responseId,
+    item_id: reasoningId,
+    output_index: 0,
+    summary_index: 0,
+    part: { type: 'summary_text', text: mockReasoning },
+  });
+  writeSseEvent(response, {
+    type: 'response.output_item.done',
+    event_id: `evt_${randomUUID().replace(/-/g, '').slice(0, 24)}`,
+    response_id: responseId,
+    output_index: 0,
+    item: {
+      id: reasoningId,
+      type: 'reasoning',
+      status: 'completed',
+      summary: [{ type: 'summary_text', text: mockReasoning }],
+    },
+  });
+
+  if (mockFunctionCall) {
+    writeSseEvent(response, {
+      type: 'response.output_item.added',
+      event_id: `evt_${randomUUID().replace(/-/g, '').slice(0, 24)}`,
+      response_id: responseId,
+      output_index: 1,
+      item: {
+        id: messageId,
+        type: 'message',
+        role: 'assistant',
+        status: 'in_progress',
+        content: [
+          { type: 'output_text', text: '' },
+          { type: 'tool_calls', tool_calls: [mockFunctionCall] }
+        ],
+      },
+    });
+    writeSseEvent(response, {
+      type: 'response.output_item.done',
+      event_id: `evt_${randomUUID().replace(/-/g, '').slice(0, 24)}`,
+      response_id: responseId,
+      output_index: 1,
+      item: {
+        id: messageId,
+        type: 'message',
+        role: 'assistant',
+        status: 'completed',
+        content: [
+          { type: 'output_text', text: '' },
+          { type: 'tool_calls', tool_calls: [mockFunctionCall] }
+        ],
+      },
+    });
+    writeSseEvent(response, {
+      type: 'response.output_item.added',
+      event_id: `evt_${randomUUID().replace(/-/g, '').slice(0, 24)}`,
+      response_id: responseId,
+      output_index: 2,
+      item: { ...mockFunctionCall, status: 'in_progress' },
+    });
+    writeSseEvent(response, {
+      type: 'response.function_call_arguments.done',
+      event_id: `evt_${randomUUID().replace(/-/g, '').slice(0, 24)}`,
+      response_id: responseId,
+      output_index: 2,
+      item_id: mockFunctionCall.id,
+      call_id: mockFunctionCall.call_id,
+      name: mockFunctionCall.name,
+      arguments: mockFunctionCall.arguments,
+    });
+    writeSseEvent(response, {
+      type: 'response.output_item.done',
+      event_id: `evt_${randomUUID().replace(/-/g, '').slice(0, 24)}`,
+      response_id: responseId,
+      output_index: 2,
+      item: mockFunctionCall,
+    });
+  } else {
+    writeSseEvent(response, {
+      type: 'response.output_item.added',
+      event_id: `evt_${randomUUID().replace(/-/g, '').slice(0, 24)}`,
+      response_id: responseId,
+      output_index: 1,
+      item: {
+        id: messageId,
+        type: 'message',
+        role: 'assistant',
+        status: 'in_progress',
+        content: [],
+      },
+    });
+    writeSseEvent(response, {
+      type: 'response.content_part.added',
+      event_id: `evt_${randomUUID().replace(/-/g, '').slice(0, 24)}`,
+      response_id: responseId,
+      output_index: 1,
+      item_id: messageId,
+      content_index: 0,
+      part: { type: 'output_text', text: '' },
+    });
+
+    for (const delta of splitTextIntoChunks(mockContent, 4)) {
+      writeSseEvent(response, {
+        type: 'response.output_text.delta',
+        event_id: `evt_${randomUUID().replace(/-/g, '').slice(0, 24)}`,
+        response_id: responseId,
+        output_index: 1,
+        item_id: messageId,
+        content_index: 0,
+        delta,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 25));
     }
-    response.json(responseData);
-  }, processingDelay);
+
+    writeSseEvent(response, {
+      type: 'response.output_text.done',
+      event_id: `evt_${randomUUID().replace(/-/g, '').slice(0, 24)}`,
+      response_id: responseId,
+      output_index: 1,
+      item_id: messageId,
+      content_index: 0,
+      text: mockContent,
+    });
+    writeSseEvent(response, {
+      type: 'response.content_part.done',
+      event_id: `evt_${randomUUID().replace(/-/g, '').slice(0, 24)}`,
+      response_id: responseId,
+      output_index: 1,
+      item_id: messageId,
+      content_index: 0,
+      part: { type: 'output_text', text: mockContent },
+    });
+    writeSseEvent(response, {
+      type: 'response.output_item.done',
+      event_id: `evt_${randomUUID().replace(/-/g, '').slice(0, 24)}`,
+      response_id: responseId,
+      output_index: 1,
+      item: {
+        id: messageId,
+        type: 'message',
+        role: 'assistant',
+        status: 'completed',
+        content: [{ type: 'output_text', text: mockContent }],
+      },
+    });
+  }
+
+  writeSseEvent(response, {
+    type: 'response.completed',
+    event_id: `evt_${randomUUID().replace(/-/g, '').slice(0, 24)}`,
+    response: finalResponse,
+  });
+  response.write('data: [DONE]\n\n');
+  response.end();
 });
 
 // Mock models endpoint
@@ -320,6 +684,15 @@ app.get('/v1/models', async (request, response) => {
         owned_by: 'mock-provider',
         permission: [],
         root: 'mock-gpt-3.5-turbo',
+        parent: null
+      },
+      {
+        id: 'gpt-5.4',
+        object: 'model',
+        created: Math.floor(Date.now() / 1000),
+        owned_by: 'mock-provider',
+        permission: [],
+        root: 'gpt-5.4',
         parent: null
       },
       {

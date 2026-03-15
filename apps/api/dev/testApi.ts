@@ -239,8 +239,10 @@ async function testApiWithMockProvider() {
     console.error('[TEST] -----------------------');
     process.exit(1);
   } finally {
-    // Restore original configuration
-    restoreProviderConfig();
+    if (manageSetup) {
+      // Restore original configuration
+      restoreProviderConfig();
+    }
   }
 }
 

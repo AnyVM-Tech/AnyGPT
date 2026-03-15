@@ -9,6 +9,24 @@ export class DeepseekAI implements IAIProvider {
   private apiKey: string;
   private endpointUrl: string;
 
+  private extractReasoning(raw: any): string | undefined {
+    if (typeof raw === 'string') {
+      return raw.trim() || undefined;
+    }
+    if (Array.isArray(raw)) {
+      const joined = raw
+        .map((entry) => this.extractReasoning(entry) || '')
+        .filter(Boolean)
+        .join('');
+      return joined || undefined;
+    }
+    if (!raw || typeof raw !== 'object') return undefined;
+    if (typeof raw.text === 'string') return raw.text.trim() || undefined;
+    if (typeof raw.reasoning === 'string') return raw.reasoning.trim() || undefined;
+    if (typeof raw.reasoning_content === 'string') return raw.reasoning_content.trim() || undefined;
+    return undefined;
+  }
+
   constructor(apiKey: string, endpointUrl?: string) {
     if (!apiKey) throw new Error('DeepSeek API key is required');
     this.apiKey = apiKey;
@@ -116,6 +134,11 @@ export class DeepseekAI implements IAIProvider {
       return {
         response: text,
         latency,
+        reasoning: this.extractReasoning(
+          res.data?.choices?.[0]?.message?.reasoning
+          ?? res.data?.choices?.[0]?.message?.reasoning_content
+          ?? res.data?.choices?.[0]?.message?.reasoning_details
+        ),
         usage: {
           prompt_tokens: typeof res.data?.usage?.prompt_tokens === 'number' ? res.data.usage.prompt_tokens : undefined,
           completion_tokens: typeof res.data?.usage?.completion_tokens === 'number' ? res.data.usage.completion_tokens : undefined,
@@ -186,12 +209,20 @@ export class DeepseekAI implements IAIProvider {
             const parsed = JSON.parse(payloadLine);
             const delta = parsed.choices?.[0]?.delta;
             const chunk = delta?.content || '';
+            const reasoning = this.extractReasoning(
+              delta?.reasoning
+              ?? delta?.reasoning_content
+              ?? delta?.reasoning_details
+              ?? parsed?.choices?.[0]?.message?.reasoning
+              ?? parsed?.choices?.[0]?.message?.reasoning_content
+            );
             full += chunk;
             const latency = Date.now() - start;
             yield {
               chunk,
               latency,
               response: full,
+              reasoning,
               anystream: res.data,
               tool_calls: Array.isArray(delta?.tool_calls) ? delta.tool_calls : undefined,
               finish_reason: parsed?.choices?.[0]?.finish_reason,

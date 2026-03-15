@@ -11,6 +11,112 @@ const KEYCLOAK_CLIENT_ID = 'AnyGPT';
 const DASHBOARD_URL = '/c/new';   // LibreChat new-chat page
 const LOGIN_URL = '/login';        // LibreChat login (has Keycloak button)
 const DOCS_URL = '/openapi.json';
+const LIVE_METRICS_URL = '/api/live-metrics';
+const LIVE_METRICS_REFRESH_MS = 30_000;
+let liveMetricsRequestInFlight = false;
+let liveMetricsPollHandle = null;
+
+function formatMetricCount(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return '—';
+  return new Intl.NumberFormat('en-US', {
+    maximumFractionDigits: 0,
+  }).format(num);
+}
+
+function formatCompactMetric(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return '—';
+
+  if (Math.abs(num) < 1000) {
+    return formatMetricCount(num);
+  }
+
+  return new Intl.NumberFormat('en-US', {
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  }).format(num);
+}
+
+function setLiveMetric(name, text, title = '') {
+  const el = document.querySelector(`[data-live-metric="${name}"]`);
+  if (!el) return;
+
+  el.textContent = text;
+  if (title) {
+    el.title = title;
+  }
+}
+
+function renderLiveMetrics(metrics) {
+  const modelCount = Number(metrics?.modelCount) || 0;
+  const providerTotal = Number(metrics?.providerTotal) || 0;
+  const multimodalCount = Number(metrics?.multimodalCount) || 0;
+  const toolCallingCount = Number(metrics?.toolCallingCount) || 0;
+  const requestCount = Number(metrics?.requestCount) || 0;
+  const tokenUsage = Number(metrics?.tokenUsage) || 0;
+  const maxProviders = Number(metrics?.maxProviders) || 0;
+
+  setLiveMetric('modelCount', formatMetricCount(modelCount), `${formatMetricCount(modelCount)} live models`);
+  setLiveMetric('providerTotal', formatMetricCount(providerTotal), `${formatMetricCount(providerTotal)} total providers`);
+  setLiveMetric('multimodalCount', formatMetricCount(multimodalCount), `${formatMetricCount(multimodalCount)} multimodal-ready models`);
+  setLiveMetric('toolCallingCount', formatMetricCount(toolCallingCount), `${formatMetricCount(toolCallingCount)} tool-calling models`);
+  setLiveMetric('requestCount', formatCompactMetric(requestCount), `${formatMetricCount(requestCount)} total requests served`);
+  setLiveMetric('tokenUsage', formatCompactMetric(tokenUsage), `${formatMetricCount(tokenUsage)} tokens processed`);
+
+  const pulseEl = document.querySelector('[data-live-pulse]');
+  if (pulseEl) {
+    pulseEl.textContent = maxProviders
+      ? `${formatMetricCount(maxProviders)} routes/model`
+      : 'Live catalog sync';
+  }
+
+  const footnoteEl = document.querySelector('[data-live-footnote]');
+  if (footnoteEl) {
+    const refreshedAt = metrics?.refreshedAt ? new Date(metrics.refreshedAt) : null;
+    const refreshedLabel = refreshedAt && !Number.isNaN(refreshedAt.getTime())
+      ? ` Updated ${refreshedAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.`
+      : '';
+    footnoteEl.textContent = `Live model and usage counters refresh every 30s.${refreshedLabel}`;
+  }
+}
+
+async function initLiveMetrics() {
+  if (liveMetricsRequestInFlight) return;
+  liveMetricsRequestInFlight = true;
+
+  try {
+    const response = await fetch(LIVE_METRICS_URL, {
+      cache: 'no-store',
+      headers: {
+        accept: 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Live metrics request failed with status ${response.status}`);
+    }
+
+    const metrics = await response.json();
+    renderLiveMetrics(metrics);
+  } catch (err) {
+    console.warn('[AnyGPT Homepage] Live metrics fetch failed:', err);
+  } finally {
+    liveMetricsRequestInFlight = false;
+  }
+}
+
+function startLiveMetricsPolling() {
+  initLiveMetrics();
+
+  if (liveMetricsPollHandle !== null) {
+    return;
+  }
+
+  liveMetricsPollHandle = window.setInterval(() => {
+    initLiveMetrics();
+  }, LIVE_METRICS_REFRESH_MS);
+}
 
 // Button templates
 function loginButtons() {
@@ -92,6 +198,7 @@ function render(authenticated, name) {
 async function init() {
   // Show login buttons as default (fast render, no flash)
   render(false, null);
+  startLiveMetricsPolling();
 
   try {
     const keycloak = new Keycloak({

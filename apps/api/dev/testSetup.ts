@@ -4,7 +4,15 @@ import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const projectRoot = path.resolve(__dirname, '..');
+const apiRoot = path.resolve(__dirname, '..');
+
+function resolveTestDataPath(envVarName: string, defaultPath: string): string {
+  const override = process.env[envVarName];
+  if (typeof override === 'string' && override.trim().length > 0) {
+    return path.resolve(apiRoot, override.trim());
+  }
+  return defaultPath;
+}
 
 // Create a test configuration that sets up providers.json to use the mock provider
 export function setupMockProviderConfig() {
@@ -14,10 +22,12 @@ export function setupMockProviderConfig() {
   const hashIterations = Number(process.env.API_KEY_HASH_ITERATIONS || '20000');
   const hashKeylen = Number(process.env.API_KEY_HASH_KEYLEN || '32');
   const hashDigest = 'sha256';
-  const providersFilePath = path.join(projectRoot, 'providers.json');
-  const keysFilePath = path.join(projectRoot, 'keys.json');
-  const backupProvidersPath = path.join(projectRoot, 'providers.json.backup');
-  const backupKeysPath = path.join(projectRoot, 'keys.json.backup');
+  const providersFilePath = resolveTestDataPath('API_PROVIDERS_FILE', path.join(apiRoot, 'providers.json'));
+  const keysFilePath = resolveTestDataPath('API_KEYS_FILE', path.join(apiRoot, 'keys.json'));
+  const modelsFilePath = resolveTestDataPath('API_MODELS_FILE', path.join(apiRoot, 'models.json'));
+  const backupProvidersPath = `${providersFilePath}.backup`;
+  const backupKeysPath = `${keysFilePath}.backup`;
+  const backupModelsPath = `${modelsFilePath}.backup`;
   
   // Try to preserve existing response times and stats
   let existingProvider = null;
@@ -45,6 +55,16 @@ export function setupMockProviderConfig() {
         avg_response_time: existingProvider?.models?.['gpt-3.5-turbo']?.avg_response_time || null,
         avg_provider_latency: existingProvider?.models?.['gpt-3.5-turbo']?.avg_provider_latency || null,
         avg_token_speed: existingProvider?.models?.['gpt-3.5-turbo']?.avg_token_speed || null
+      },
+      'gpt-5.4': {
+        id: 'gpt-5.4',
+        token_generation_speed: existingProvider?.models?.['gpt-5.4']?.token_generation_speed || 50,
+        response_times: existingProvider?.models?.['gpt-5.4']?.response_times || [],
+        errors: existingProvider?.models?.['gpt-5.4']?.errors || 0,
+        consecutive_errors: existingProvider?.models?.['gpt-5.4']?.consecutive_errors || 0,
+        avg_response_time: existingProvider?.models?.['gpt-5.4']?.avg_response_time || null,
+        avg_provider_latency: existingProvider?.models?.['gpt-5.4']?.avg_provider_latency || null,
+        avg_token_speed: existingProvider?.models?.['gpt-5.4']?.avg_token_speed || null
       }
     },
     avg_response_time: existingProvider?.avg_response_time || null,
@@ -62,6 +82,35 @@ export function setupMockProviderConfig() {
     tier: 'enterprise'
   };
 
+  const created = Math.floor(Date.now() / 1000);
+  const testModels = {
+    object: 'list',
+    data: [
+      {
+        id: 'gpt-3.5-turbo',
+        object: 'model',
+        created,
+        owned_by: 'openai-mock',
+        providers: 1,
+        throughput: 50,
+        capabilities: ['text', 'tool_calling'],
+      },
+      {
+        id: 'gpt-5.4',
+        object: 'model',
+        created,
+        owned_by: 'openai-mock',
+        providers: 1,
+        throughput: 50,
+        capabilities: ['text', 'tool_calling'],
+      },
+    ],
+  };
+
+  fs.mkdirSync(path.dirname(providersFilePath), { recursive: true });
+  fs.mkdirSync(path.dirname(keysFilePath), { recursive: true });
+  fs.mkdirSync(path.dirname(modelsFilePath), { recursive: true });
+
   // Backup existing files if they exist
   if (fs.existsSync(providersFilePath)) {
     fs.copyFileSync(providersFilePath, backupProvidersPath);
@@ -73,9 +122,17 @@ export function setupMockProviderConfig() {
     console.log('[TEST-SETUP] Backed up existing keys.json');
   }
 
+  if (fs.existsSync(modelsFilePath)) {
+    fs.copyFileSync(modelsFilePath, backupModelsPath);
+    console.log('[TEST-SETUP] Backed up existing models.json');
+  }
+
   // Write mock provider configuration
   fs.writeFileSync(providersFilePath, JSON.stringify([mockProvider], null, 2));
   console.log('[TEST-SETUP] Created mock provider configuration');
+
+  fs.writeFileSync(modelsFilePath, JSON.stringify(testModels, null, 2));
+  console.log('[TEST-SETUP] Created isolated test models.json');
 
   // Add test API key to keys.json
   let existingKeys: Record<string, typeof testUserKey> = {};
@@ -122,10 +179,12 @@ export function setupMockProviderConfig() {
 }
 
 export function restoreProviderConfig() {
-  const providersFilePath = path.join(projectRoot, 'providers.json');
-  const keysFilePath = path.join(projectRoot, 'keys.json');
-  const backupProvidersPath = path.join(projectRoot, 'providers.json.backup');
-  const backupKeysPath = path.join(projectRoot, 'keys.json.backup');
+  const providersFilePath = resolveTestDataPath('API_PROVIDERS_FILE', path.join(apiRoot, 'providers.json'));
+  const keysFilePath = resolveTestDataPath('API_KEYS_FILE', path.join(apiRoot, 'keys.json'));
+  const modelsFilePath = resolveTestDataPath('API_MODELS_FILE', path.join(apiRoot, 'models.json'));
+  const backupProvidersPath = `${providersFilePath}.backup`;
+  const backupKeysPath = `${keysFilePath}.backup`;
+  const backupModelsPath = `${modelsFilePath}.backup`;
 
   // Preserve response times and stats from the test run
   let updatedProviderData = null;
@@ -189,5 +248,11 @@ export function restoreProviderConfig() {
     fs.copyFileSync(backupKeysPath, keysFilePath);
     fs.unlinkSync(backupKeysPath);
     console.log('[TEST-CLEANUP] Restored original keys.json');
+  }
+
+  if (fs.existsSync(backupModelsPath)) {
+    fs.copyFileSync(backupModelsPath, modelsFilePath);
+    fs.unlinkSync(backupModelsPath);
+    console.log('[TEST-CLEANUP] Restored original models.json');
   }
 }

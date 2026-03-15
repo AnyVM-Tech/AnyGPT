@@ -33,7 +33,8 @@
 				"browser_network_requests",
 				"browser_run_code",
 				"browser_snapshot",
-				"browser_console_messages"
+				"browser_console_messages",
+				"browser_wait_for"
 			]
 		},
 		"browser-devtools": {

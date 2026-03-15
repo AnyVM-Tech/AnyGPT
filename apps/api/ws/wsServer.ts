@@ -7,6 +7,7 @@ import { logError } from '../modules/errorLogger.js';
 import redis from '../modules/db.js';
 import { incrementSharedRateLimitCounters } from '../modules/rateLimitRedis.js';
 import { estimateTokensFromText } from '../modules/tokenEstimation.js';
+import { composeAssistantContent } from '../modules/openaiRouteUtils.js';
 
 // Lightweight structures for WebSocket JSON protocol
 // Incoming message shapes
@@ -115,6 +116,7 @@ type StreamChunkResult = {
   chunk?: string;
   tool_calls?: ToolCall[];
   finish_reason?: string;
+  reasoning?: string;
 };
 
 type StreamFinalResult = {
@@ -300,6 +302,7 @@ interface MessageResult {
   providerId?: string;
   tool_calls?: ToolCall[];
   finish_reason?: string;
+  reasoning?: string;
 }
 
 function estimateTokens(text: string): number { return estimateTokensFromText(text); }
@@ -514,18 +517,28 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
               let accumulatedToolCalls: ToolCall[] | undefined;
               let finishReason: string | undefined;
               let fullContent = '';
+              let pendingReasoningText = '';
 
               for await (const result of streamHandler) {
                 if (result.type === 'chunk') {
                   // Accumulate any tool calls observed in streaming chunks so complex
                   // tool_call sequences are preserved for the final summary.
-                  if (Array.isArray(result.tool_calls) && result.tool_calls.length > 0) {
+                  if (typeof result.reasoning === 'string' && result.reasoning) {
+                    pendingReasoningText += result.reasoning;
+                  }
+                  const hasToolCallChunk = Array.isArray(result.tool_calls) && result.tool_calls.length > 0;
+                  let visibleChunk = hasToolCallChunk ? '' : (result.chunk || '');
+                  if (visibleChunk && pendingReasoningText) {
+                    visibleChunk = composeAssistantContent(visibleChunk, pendingReasoningText);
+                    pendingReasoningText = '';
+                  }
+                  if (hasToolCallChunk) {
                     accumulatedToolCalls = mergeToolCalls(accumulatedToolCalls, result.tool_calls);
                   }
-                  fullContent += result.chunk || '';
-                  // Track latest finish_reason observed during streaming.
-                  if (result.finish_reason) {
-                    finishReason = result.finish_reason;
+                    fullContent += visibleChunk;
+                    // Track latest finish_reason observed during streaming.
+                    if (result.finish_reason) {
+                      finishReason = result.finish_reason;
                   }
 
                   const openaiStreamChunk: OpenAIStreamChunk = {
@@ -536,7 +549,7 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
                     choices: [{
                       index: 0,
                       delta: {
-                        content: result.chunk,
+                        ...(visibleChunk ? { content: visibleChunk } : {}),
                         ...(result.tool_calls && result.tool_calls.length > 0 ? { tool_calls: result.tool_calls } : {}),
                       },
                       finish_reason: result.finish_reason || null,
@@ -553,6 +566,10 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
                   }
                   if (result.finish_reason) finishReason = result.finish_reason;
                 }
+              }
+
+              if (pendingReasoningText && (!accumulatedToolCalls || accumulatedToolCalls.length === 0)) {
+                fullContent = composeAssistantContent(fullContent, pendingReasoningText);
               }
 
               totalTokenUsage = computeTokenUsage(explicitTokenUsage, fullContent);
@@ -584,7 +601,7 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
                     index: 0,
                     message: {
                       role: 'assistant',
-                      content: fullContent,
+                      content: accumulatedToolCalls && accumulatedToolCalls.length > 0 ? '' : fullContent,
                       ...(accumulatedToolCalls && accumulatedToolCalls.length > 0 ? { tool_calls: accumulatedToolCalls } : {}),
                     },
                     finish_reason: computeFinishReason(finishReason, accumulatedToolCalls),
@@ -636,7 +653,7 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
                 index: 0,
                 message: {
                   role: 'assistant',
-                  content: result.response,
+                  content: result.tool_calls && result.tool_calls.length > 0 ? '' : composeAssistantContent(result.response, result.reasoning),
                   ...(result.tool_calls && result.tool_calls.length > 0 ? { tool_calls: result.tool_calls } : {}),
                 },
                 finish_reason: result.finish_reason || (result.tool_calls?.length ? 'tool_calls' : 'stop'),

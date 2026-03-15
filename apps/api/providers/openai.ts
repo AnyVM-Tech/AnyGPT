@@ -1239,22 +1239,99 @@ export class OpenAI implements IAIProvider {
     return data?.choices?.[0]?.finish_reason;
   }
 
+  private extractResponsesReasoningText(data: any): string | undefined {
+    if (!data || typeof data !== 'object') return undefined;
+
+    if (data?.type === 'response.reasoning_summary_text.delta' && typeof data?.delta === 'string') {
+      return data.delta;
+    }
+    if (data?.type === 'response.reasoning_summary_text.done' && typeof data?.text === 'string') {
+      return data.text;
+    }
+    if (data?.type === 'response.reasoning.delta' && typeof data?.delta === 'string') {
+      return data.delta;
+    }
+    if (data?.type === 'response.reasoning.done' && typeof data?.text === 'string') {
+      return data.text;
+    }
+
+    const collectFromOutput = (output: any): string | undefined => {
+      const list = Array.isArray(output) ? output : (output ? [output] : []);
+      const parts: string[] = [];
+      for (const entry of list) {
+        if (!entry || typeof entry !== 'object') continue;
+        if (entry?.type !== 'reasoning') continue;
+        const summary = Array.isArray(entry?.summary) ? entry.summary : [];
+        for (const part of summary) {
+          if (typeof part?.text === 'string' && part.text.trim().length > 0) {
+            parts.push(part.text);
+          }
+        }
+      }
+      return parts.length > 0 ? parts.join('') : undefined;
+    };
+
+    return collectFromOutput(data?.output) || collectFromOutput(data?.response?.output);
+  }
+
+  private extractResponsesReasoningDelta(data: any): string | undefined {
+    if (!data || typeof data !== 'object') return undefined;
+    if (data?.type === 'response.reasoning_summary_text.delta' && typeof data?.delta === 'string') {
+      return data.delta;
+    }
+    if (data?.type === 'response.reasoning.delta' && typeof data?.delta === 'string') {
+      return data.delta;
+    }
+    return undefined;
+  }
+
+  private extractReasoningText(raw: any): string | undefined {
+    if (typeof raw === 'string') {
+      return raw.trim() || undefined;
+    }
+    if (Array.isArray(raw)) {
+      const joined = raw
+        .map((entry) => this.extractReasoningText(entry) || '')
+        .filter(Boolean)
+        .join('');
+      return joined || undefined;
+    }
+    if (!raw || typeof raw !== 'object') return undefined;
+    if (typeof raw.text === 'string') return raw.text.trim() || undefined;
+    if (typeof raw.reasoning === 'string') return raw.reasoning.trim() || undefined;
+    if (typeof raw.reasoning_content === 'string') return raw.reasoning_content.trim() || undefined;
+    return undefined;
+  }
+
+  private extractChatReasoning(data: any): string | undefined {
+    const delta = data?.choices?.[0]?.delta;
+    const message = data?.choices?.[0]?.message;
+    return this.extractReasoningText(
+      delta?.reasoning
+      ?? delta?.reasoning_content
+      ?? delta?.reasoning_details
+      ?? message?.reasoning
+      ?? message?.reasoning_content
+      ?? message?.reasoning_details
+    );
+  }
+
   private extractResponseText(data: any, useResponsesApi: boolean): string | null {
     if (useResponsesApi) {
       const media = this.extractMediaFromResponsesOutput(data?.output)
         || this.extractMediaFromResponsesOutput(data?.response?.output);
       if (media) return media;
 
-      if (typeof data?.output_text === 'string') return data.output_text;
-      if (typeof data?.response?.output_text === 'string') return data.response.output_text;
+      if (typeof data?.output_text === 'string' && data.output_text.length > 0) return data.output_text;
+      if (typeof data?.response?.output_text === 'string' && data.response.output_text.length > 0) return data.response.output_text;
       const output = data?.output;
       if (Array.isArray(output) && output.length > 0) {
         for (const entry of output) {
           const content = entry?.content;
           if (Array.isArray(content)) {
             for (const part of content) {
-              if (typeof part?.text === 'string') return part.text;
-              if (typeof part?.delta === 'string') return part.delta;
+              if (typeof part?.text === 'string' && part.text.length > 0) return part.text;
+              if (typeof part?.delta === 'string' && part.delta.length > 0) return part.delta;
             }
           }
         }
@@ -1296,6 +1373,32 @@ export class OpenAI implements IAIProvider {
   }
 
   private extractResponsesStreamChunk(parsed: any): string {
+    const eventType = typeof parsed?.type === 'string' ? parsed.type : '';
+    if (eventType) {
+      if (eventType === 'response.output_text.delta') {
+        return typeof parsed?.delta === 'string' ? parsed.delta : '';
+      }
+      if (eventType === 'response.output_text.done') {
+        return '';
+      }
+      if (eventType === 'response.refusal.delta') {
+        return typeof parsed?.delta === 'string' ? parsed.delta : '';
+      }
+      if (
+        eventType.startsWith('response.function_call_arguments')
+        || eventType.startsWith('response.reasoning')
+        || eventType.startsWith('response.reasoning_summary')
+        || eventType.startsWith('response.reasoning_summary_part')
+        || eventType.startsWith('response.reasoning_summary_text')
+        || eventType === 'response.output_item.added'
+        || eventType === 'response.output_item.done'
+        || eventType === 'response.content_part.added'
+        || eventType === 'response.content_part.done'
+      ) {
+        return '';
+      }
+    }
+
     const media = this.extractMediaFromResponsesOutput(parsed?.output)
       || this.extractMediaFromResponsesOutput(parsed?.response?.output)
       || this.extractMediaFromParts(Array.isArray(parsed?.content) ? parsed.content : []);
@@ -1377,6 +1480,7 @@ export class OpenAI implements IAIProvider {
         usage: this.extractUsage(response.data, useResponsesApi),
         tool_calls: this.extractToolCalls(response.data, useResponsesApi),
         finish_reason: this.extractFinishReason(response.data, useResponsesApi),
+        reasoning: useResponsesApi ? this.extractResponsesReasoningText(response.data) : this.extractChatReasoning(response.data),
       };
     } catch (error: any) {
       const missingInput = useResponsesApi && this.isMissingInputError(error);
@@ -1403,6 +1507,7 @@ export class OpenAI implements IAIProvider {
                 usage: this.extractUsage(retryResp.data, useResponsesApi),
                 tool_calls: this.extractToolCalls(retryResp.data, useResponsesApi),
                 finish_reason: this.extractFinishReason(retryResp.data, useResponsesApi),
+                reasoning: useResponsesApi ? this.extractResponsesReasoningText(retryResp.data) : this.extractChatReasoning(retryResp.data),
               };
             }
           } catch (retryError: any) {
@@ -1428,6 +1533,7 @@ export class OpenAI implements IAIProvider {
               usage: this.extractUsage(chatResp.data, false),
               tool_calls: this.extractToolCalls(chatResp.data, false),
               finish_reason: this.extractFinishReason(chatResp.data, false),
+              reasoning: this.extractChatReasoning(chatResp.data),
             };
           }
         } catch (fallbackError: any) {
@@ -1538,11 +1644,12 @@ export class OpenAI implements IAIProvider {
             let chunk = '';
             const toolCalls = this.extractToolCalls(parsed, useResponsesApi);
             const finishReason = this.extractFinishReason(parsed, useResponsesApi);
+            const reasoning = useResponsesApi ? this.extractResponsesReasoningDelta(parsed) : this.extractChatReasoning(parsed);
             if (useResponsesApi) {
               // Handle Responses API SSE events
               if (parsed?.type === 'response.completed') {
                 const latency = Date.now() - startTime;
-                yield { chunk: '', latency, response: fullResponse, anystream: response.data, tool_calls: toolCalls, finish_reason: finishReason };
+                yield { chunk: '', latency, response: fullResponse, reasoning, anystream: response.data, tool_calls: toolCalls, finish_reason: finishReason };
                 return;
               }
               chunk = this.extractResponsesStreamChunk(parsed);
@@ -1551,7 +1658,7 @@ export class OpenAI implements IAIProvider {
             }
             fullResponse += chunk;
             const latency = Date.now() - startTime;
-            yield { chunk, latency, response: fullResponse, anystream: response.data, tool_calls: toolCalls, finish_reason: finishReason };
+            yield { chunk, latency, response: fullResponse, reasoning, anystream: response.data, tool_calls: toolCalls, finish_reason: finishReason };
           } catch (error) {
             console.error('Error parsing stream chunk:', error);
           }
@@ -1588,10 +1695,11 @@ export class OpenAI implements IAIProvider {
                   let chunk = '';
                   const toolCalls = this.extractToolCalls(parsed, useResponsesApi);
                   const finishReason = this.extractFinishReason(parsed, useResponsesApi);
+                  const reasoning = useResponsesApi ? this.extractResponsesReasoningDelta(parsed) : this.extractChatReasoning(parsed);
                   if (useResponsesApi) {
                     if (parsed?.type === 'response.completed') {
                       const latency = Date.now() - startTime;
-                      yield { chunk: '', latency, response: fullResponse, anystream: retryResp.data, tool_calls: toolCalls, finish_reason: finishReason };
+                      yield { chunk: '', latency, response: fullResponse, reasoning, anystream: retryResp.data, tool_calls: toolCalls, finish_reason: finishReason };
                       return;
                     }
                     chunk = this.extractResponsesStreamChunk(parsed);
@@ -1600,7 +1708,7 @@ export class OpenAI implements IAIProvider {
                   }
                   fullResponse += chunk;
                   const latency = Date.now() - startTime;
-                  yield { chunk, latency, response: fullResponse, anystream: retryResp.data, tool_calls: toolCalls, finish_reason: finishReason };
+                  yield { chunk, latency, response: fullResponse, reasoning, anystream: retryResp.data, tool_calls: toolCalls, finish_reason: finishReason };
                 } catch (retryParseError) {
                   console.error('Error parsing retry stream chunk:', retryParseError);
                 }
@@ -1636,9 +1744,10 @@ export class OpenAI implements IAIProvider {
                 const chunk = this.extractChatStreamChunk(parsed);
                 const toolCalls = this.extractToolCalls(parsed, false);
                 const finishReason = this.extractFinishReason(parsed, false);
+                const reasoning = this.extractChatReasoning(parsed);
                 fullResponse += chunk;
                 const latency = Date.now() - startTime;
-                yield { chunk, latency, response: fullResponse, anystream: chatResp.data, tool_calls: toolCalls, finish_reason: finishReason };
+                yield { chunk, latency, response: fullResponse, reasoning, anystream: chatResp.data, tool_calls: toolCalls, finish_reason: finishReason };
               } catch (parseErr) {
                 console.error('Error parsing chat fallback stream chunk:', parseErr);
               }
