@@ -726,7 +726,10 @@ export class GeminiAI implements IAIProvider {
       console.error(`Error during sendMessageStream with Gemini model ${message.model.id} (Latency: ${latency}ms):`, error);
       const errorMessage = error.message || 'Unknown Gemini API error';
       GeminiAI.updateModelTokenLimitsFromError(message.model?.id ?? '', errorMessage);
-      const wrappedError = new Error(`Gemini API stream call failed: ${errorMessage}`);
+      const normalizedMessage = /cannot fetch content from the provided url/i.test(errorMessage)
+        ? 'unsupported_remote_media_url'
+        : errorMessage;
+      const wrappedError = new Error(`Gemini API stream call failed: ${normalizedMessage}`);
       (wrappedError as any).__providerUniqueLogged = true;
       throw wrappedError;
     }

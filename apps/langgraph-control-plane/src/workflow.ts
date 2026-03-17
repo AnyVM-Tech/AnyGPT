@@ -1,0 +1,3686 @@
+import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { END, MemorySaver, START, StateGraph, interrupt } from '@langchain/langgraph';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { commandOptions, createClient } from 'redis';
+import { z } from 'zod';
+
+import {
+  AppliedAutonomousEditSchema,
+  AutonomousEditActionSchema,
+  AutonomousEditPlanSchema,
+  AutonomousEditSessionManifestSchema,
+  applyAutonomousEditsWithManifest,
+  buildAutonomousEditCandidatePaths,
+  readAutonomousEditContext,
+  rollbackAutonomousEditSession,
+} from './autonomousEdits.js';
+import { FileMemorySaver } from './fileCheckpointer.js';
+import {
+  collectLangSmithClientSnapshot,
+  collectLangSmithGovernanceSnapshot,
+  createControlPlaneRunDatasetFromProject,
+  ensureLangSmithExamplesDataset,
+  ensureLangSmithPrompt,
+  pullLangSmithPromptCommit,
+  runLangSmithDatasetEvaluation,
+  resolveLangSmithRuntimeConfig,
+  summarizeLangSmithGovernanceSnapshot,
+  summarizeLangSmithQueueFeedbackSnapshot,
+  syncLangSmithProjectGovernance,
+} from './langsmithClient.js';
+
+export const PlannedJobSchema = z.object({
+  id: z.string(),
+  target: z.string(),
+  kind: z.enum(['build', 'test', 'deploy', 'note']),
+  title: z.string(),
+  command: z.string(),
+});
+
+export const ExecutedJobSchema = PlannedJobSchema.extend({
+  status: z.enum(['planned', 'success', 'failed', 'skipped']),
+  exitCode: z.number().nullable().optional(),
+  output: z.string().optional(),
+});
+
+export const McpServerSchema = z.object({
+  name: z.string(),
+  command: z.string(),
+  args: z.array(z.string()).default([]),
+  type: z.string().default('stdio'),
+  disabled: z.boolean().default(false),
+  alwaysAllow: z.array(z.string()).default([]),
+  disabledTools: z.array(z.string()).default([]),
+  envKeys: z.array(z.string()).default([]),
+});
+
+export const McpToolSchema = z.object({
+  server: z.string(),
+  name: z.string(),
+  description: z.string().default(''),
+  inputSchema: z.unknown().optional(),
+});
+
+export const McpInspectionSchema = z.object({
+  server: z.string(),
+  status: z.enum(['connected', 'failed', 'skipped']),
+  message: z.string(),
+  tools: z.array(McpToolSchema).default([]),
+});
+
+export const ApprovalRequestSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  reason: z.string(),
+});
+
+export const AiNodeAdviceSchema = z.object({
+  notes: z.array(z.string()).default([]),
+});
+
+export const LangSmithWorkspaceSummarySchema = z.object({
+  id: z.string(),
+  displayName: z.string(),
+  roleName: z.string().optional(),
+});
+
+export const LangSmithProjectSummarySchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string().optional(),
+  visibility: z.string().optional(),
+  metadata: z.record(z.unknown()).optional(),
+  createdAt: z.string().optional(),
+  updatedAt: z.string().optional(),
+});
+
+export const LangSmithRunSummarySchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  status: z.string().optional(),
+  error: z.string().nullable().optional(),
+  runType: z.string().optional(),
+});
+
+export const LangSmithDatasetSummarySchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string().optional(),
+});
+
+export const LangSmithPromptSummarySchema = z.object({
+  identifier: z.string(),
+  description: z.string().optional(),
+  updatedAt: z.string().optional(),
+});
+
+export const LangSmithAnnotationQueueSummarySchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string().optional(),
+  createdAt: z.string().optional(),
+  updatedAt: z.string().optional(),
+  itemCount: z.number().int().nonnegative().optional(),
+  feedbackCount: z.number().int().nonnegative().optional(),
+});
+
+export const LangSmithAnnotationQueueItemSummarySchema = z.object({
+  id: z.string(),
+  queueId: z.string().optional(),
+  queueName: z.string().optional(),
+  runId: z.string().optional(),
+  traceId: z.string().optional(),
+  exampleId: z.string().optional(),
+  runName: z.string().optional(),
+  status: z.string().optional(),
+  createdAt: z.string().optional(),
+  updatedAt: z.string().optional(),
+  feedbackCount: z.number().int().nonnegative().optional(),
+});
+
+export const LangSmithFeedbackSummarySchema = z.object({
+  id: z.string(),
+  key: z.string(),
+  runId: z.string().optional(),
+  traceId: z.string().optional(),
+  exampleId: z.string().optional(),
+  score: z.union([z.number(), z.boolean()]).nullable().optional(),
+  valueSummary: z.string().optional(),
+  correctionSummary: z.string().optional(),
+  comment: z.string().optional(),
+  feedbackSourceType: z.string().optional(),
+  createdAt: z.string().optional(),
+  modifiedAt: z.string().optional(),
+});
+
+export const LangSmithEvaluationMetricSummarySchema = z.object({
+  key: z.string(),
+  count: z.number().int().nonnegative().default(0),
+  averageScore: z.number().nullable().default(null),
+  minScore: z.number().nullable().default(null),
+  maxScore: z.number().nullable().default(null),
+  lastComment: z.string().optional(),
+});
+
+export const LangSmithEvaluationSummarySchema = z.object({
+  datasetName: z.string(),
+  experimentName: z.string().optional(),
+  resultCount: z.number().int().default(0),
+  averageScore: z.number().nullable().default(null),
+  metrics: z.array(LangSmithEvaluationMetricSummarySchema).default([]),
+});
+
+export const LangSmithFeedbackKeyCountSummarySchema = z.object({
+  key: z.string(),
+  count: z.number().int().nonnegative().default(0),
+});
+
+export const LangSmithGovernanceFlagSchema = z.object({
+  key: z.string(),
+  status: z.enum(['pass', 'warn', 'fail']),
+  summary: z.string(),
+});
+
+export const LangSmithGovernanceMutationSchema = z.object({
+  key: z.string(),
+  target: z.string(),
+  status: z.enum(['applied', 'skipped', 'failed']),
+  summary: z.string(),
+});
+
+export const LangSmithGovernanceCountsSchema = z.object({
+  workspaces: z.number().int().nonnegative().default(0),
+  projects: z.number().int().nonnegative().default(0),
+  runs: z.number().int().nonnegative().default(0),
+  runFailures: z.number().int().nonnegative().default(0),
+  runPending: z.number().int().nonnegative().default(0),
+  datasets: z.number().int().nonnegative().default(0),
+  prompts: z.number().int().nonnegative().default(0),
+  annotationQueues: z.number().int().nonnegative().default(0),
+  annotationQueueItems: z.number().int().nonnegative().default(0),
+  annotationQueueBacklog: z.number().int().nonnegative().default(0),
+  feedback: z.number().int().nonnegative().default(0),
+  feedbackKeys: z.number().int().nonnegative().default(0),
+});
+
+export const LangSmithGovernanceSummarySchema = z.object({
+  counts: LangSmithGovernanceCountsSchema,
+  feedbackKeyCounts: z.array(LangSmithFeedbackKeyCountSummarySchema).default([]),
+  flags: z.array(LangSmithGovernanceFlagSchema).default([]),
+  mutations: z.array(LangSmithGovernanceMutationSchema).default([]),
+});
+
+export const ControlPlanePromptBundleSchema = z.object({
+  planner: z.string(),
+  build: z.string(),
+  quality: z.string(),
+  deploy: z.string(),
+  autonomousEdit: z.string(),
+});
+
+export const ControlPlanePromptSelectionSourceSchema = z.enum(['explicit', 'channel', 'latest', 'local']);
+
+export const EvaluationGateModeSchema = z.enum(['off', 'advisory', 'enforce']);
+export const EvaluationGateTargetSchema = z.enum(['execution', 'autonomous-edits', 'both']);
+export const EvaluationGatePolicySchema = z.object({
+  mode: EvaluationGateModeSchema.default('advisory'),
+  target: EvaluationGateTargetSchema.default('both'),
+  requireEvaluation: z.boolean().default(false),
+  minResultCount: z.number().int().min(1).default(1),
+  metricKey: z.string().default('contains_goal_context'),
+  minMetricAverageScore: z.number().min(0).max(1).default(1),
+});
+export const EvaluationGateResultSchema = z.object({
+  status: z.enum(['disabled', 'passed', 'failed', 'not-evaluated']).default('disabled'),
+  mode: EvaluationGateModeSchema.default('advisory'),
+  target: EvaluationGateTargetSchema.default('both'),
+  enforced: z.boolean().default(false),
+  blocksExecution: z.boolean().default(false),
+  blocksAutonomousEdits: z.boolean().default(false),
+  evaluationCount: z.number().int().nonnegative().default(0),
+  resultCount: z.number().int().nonnegative().default(0),
+  metricKey: z.string().default('contains_goal_context'),
+  metricCount: z.number().int().nonnegative().default(0),
+  metricAverageScore: z.number().nullable().default(null),
+  failingChecks: z.array(z.string()).default([]),
+  reason: z.string().default('Evaluation gate disabled.'),
+});
+
+export type ControlPlaneEvaluationGatePolicy = z.infer<typeof EvaluationGatePolicySchema>;
+export type ControlPlaneEvaluationGateResult = z.infer<typeof EvaluationGateResultSchema>;
+
+const DEFAULT_EVALUATION_GATE_POLICY = EvaluationGatePolicySchema.parse({
+  mode: 'advisory',
+  target: 'both',
+  requireEvaluation: false,
+  minResultCount: 1,
+  metricKey: 'contains_goal_context',
+  minMetricAverageScore: 1,
+});
+
+function buildDefaultEvaluationGateResult(policy: ControlPlaneEvaluationGatePolicy): ControlPlaneEvaluationGateResult {
+  return EvaluationGateResultSchema.parse({
+    status: policy.mode === 'off' ? 'disabled' : 'not-evaluated',
+    mode: policy.mode,
+    target: policy.target,
+    enforced: policy.mode === 'enforce',
+    blocksExecution: false,
+    blocksAutonomousEdits: false,
+    evaluationCount: 0,
+    resultCount: 0,
+    metricKey: policy.metricKey,
+    metricCount: 0,
+    metricAverageScore: null,
+    failingChecks: [],
+    reason: policy.mode === 'off'
+      ? 'Evaluation gate disabled.'
+      : 'Evaluation gate has not been evaluated yet.',
+  });
+}
+
+const DEFAULT_CONTROL_PLANE_PROMPT_IDENTIFIER = 'anygpt-control-plane-agent';
+const DEFAULT_CONTROL_PLANE_PROMPT_CHANNEL = 'live';
+const DEFAULT_CONTROL_PLANE_PROMPT_SYNC_CHANNEL = 'default';
+const CONTROL_PLANE_PROMPT_DESCRIPTION = 'AnyGPT control-plane AI prompt bundle';
+const CONTROL_PLANE_PROMPT_README = 'Managed by the AnyGPT LangGraph control plane. Contains the planner, build, quality, deploy, and autonomous-edit system prompts.';
+const CONTROL_PLANE_PROMPT_TAGS = ['control-plane', 'autonomous', 'anygpt', 'prompt-bundle'];
+const CONTROL_PLANE_LANGSMITH_PROJECT_DESCRIPTION = 'AnyGPT LangGraph control plane runtime project with bounded workspace/project governance automation';
+
+const DEFAULT_CONTROL_PLANE_PROMPT_BUNDLE = ControlPlanePromptBundleSchema.parse({
+  planner: 'You are the planner agent for the AnyGPT LangGraph control plane. Produce concise, actionable planning notes based on logs, MCP findings, and requested scopes. Focus on priorities, risks, and safe next steps.',
+  build: 'You are the build agent for the AnyGPT LangGraph control plane. Review the planned build jobs and provide concise notes about build order, likely breakpoints, and preflight checks. Do not invent new shell commands.',
+  quality: 'You are the quality agent for the AnyGPT LangGraph control plane. Review the requested test jobs and provide concise notes about the highest-value validations, likely regressions, and smoke checks.',
+  deploy: 'You are the deploy agent for the AnyGPT LangGraph control plane. Review the deploy intent and provide concise notes about rollout risk, approval considerations, and rollback readiness. Keep the deployment experimental-safe.',
+  autonomousEdit: 'You are the autonomous code edit agent for the AnyGPT LangGraph control plane. Produce only safe, bounded code changes within the allowlist and prefer the smallest viable edit.',
+});
+
+type ControlPlanePromptSelectionSource = z.infer<typeof ControlPlanePromptSelectionSourceSchema>;
+
+function buildControlPlaneLangSmithProjectMetadata(
+  promptIdentifier: string,
+  promptSyncChannel: string,
+  evaluationGatePolicy: ControlPlaneEvaluationGatePolicy,
+): Record<string, unknown> {
+  return {
+    source: 'anygpt-langgraph-control-plane',
+    managed_by: 'anygpt-control-plane',
+    automation_scope: 'bounded-workspace-project-admin',
+    governance_scope: 'workspace-project-admin',
+    prompt_identifier: promptIdentifier,
+    prompt_sync_channel: promptSyncChannel,
+    evaluation_gate_mode: evaluationGatePolicy.mode,
+    evaluation_gate_target: evaluationGatePolicy.target,
+  };
+}
+
+export const LogInsightSchema = z.object({
+  file: z.string(),
+  lines: z.array(z.string()).default([]),
+});
+
+export const AutonomousOperationModeSchema = z.enum(['idle', 'repair', 'improvement']);
+export const RepairStatusSchema = z.enum(['idle', 'not-needed', 'planned', 'promoted', 'rolled-back', 'failed']);
+export const PostRepairValidationStatusSchema = z.enum(['not-needed', 'planned', 'passed', 'failed']);
+export const ExperimentalRestartStatusSchema = z.enum(['not-needed', 'pending', 'success', 'failed', 'skipped']);
+
+export const ControlPlaneStateSchema = z.object({
+  repoRoot: z.string(),
+  goal: z.string(),
+  scopes: z.array(z.string()).default(['repo']),
+  threadId: z.string().default(''),
+  continuous: z.boolean().default(false),
+  autonomous: z.boolean().default(false),
+  approvalMode: z.enum(['manual', 'auto']).default('manual'),
+  approvalGranted: z.boolean().nullable().default(null),
+  approvalMessage: z.string().default(''),
+  pendingApprovals: z.array(ApprovalRequestSchema).default([]),
+  aiAgentEnabled: z.boolean().default(false),
+  aiAgentBackend: z.string().default(''),
+  aiAgentModel: z.string().default(''),
+  promptIdentifier: z.string().default(DEFAULT_CONTROL_PLANE_PROMPT_IDENTIFIER),
+  promptRef: z.string().default(''),
+  promptChannel: z.string().default(DEFAULT_CONTROL_PLANE_PROMPT_CHANNEL),
+  promptSyncEnabled: z.boolean().default(true),
+  promptSyncChannel: z.string().default(DEFAULT_CONTROL_PLANE_PROMPT_SYNC_CHANNEL),
+  promptPromoteChannel: z.string().default(''),
+  controlPlanePrompts: ControlPlanePromptBundleSchema.default(DEFAULT_CONTROL_PLANE_PROMPT_BUNDLE),
+  selectedPromptReference: z.string().default(''),
+  selectedPromptSource: ControlPlanePromptSelectionSourceSchema.default('local'),
+  selectedPromptCommitHash: z.string().default(''),
+  promptSyncUrl: z.string().default(''),
+  promptPromotionUrl: z.string().default(''),
+  promptSelectionNotes: z.array(z.string()).default([]),
+  plannerAgentInsights: z.array(z.string()).default([]),
+  buildAgentInsights: z.array(z.string()).default([]),
+  qualityAgentInsights: z.array(z.string()).default([]),
+  deployAgentInsights: z.array(z.string()).default([]),
+  langSmithEnabled: z.boolean().default(false),
+  langSmithProjectName: z.string().default(''),
+  langSmithWorkspace: LangSmithWorkspaceSummarySchema.nullable().default(null),
+  langSmithAccessibleWorkspaces: z.array(LangSmithWorkspaceSummarySchema).default([]),
+  langSmithProject: LangSmithProjectSummarySchema.nullable().default(null),
+  langSmithProjects: z.array(LangSmithProjectSummarySchema).default([]),
+  langSmithRuns: z.array(LangSmithRunSummarySchema).default([]),
+  langSmithDatasets: z.array(LangSmithDatasetSummarySchema).default([]),
+  langSmithPrompts: z.array(LangSmithPromptSummarySchema).default([]),
+  langSmithAnnotationQueues: z.array(LangSmithAnnotationQueueSummarySchema).default([]),
+  langSmithAnnotationQueueItems: z.array(LangSmithAnnotationQueueItemSummarySchema).default([]),
+  langSmithFeedback: z.array(LangSmithFeedbackSummarySchema).default([]),
+  langSmithEvaluations: z.array(LangSmithEvaluationSummarySchema).default([]),
+  langSmithGovernance: LangSmithGovernanceSummarySchema.nullable().default(null),
+  langSmithNotes: z.array(z.string()).default([]),
+  evaluationGatePolicy: EvaluationGatePolicySchema.default(DEFAULT_EVALUATION_GATE_POLICY),
+  evaluationGateResult: EvaluationGateResultSchema.default(buildDefaultEvaluationGateResult(DEFAULT_EVALUATION_GATE_POLICY)),
+  autonomousEditEnabled: z.boolean().default(false),
+  editAllowlist: z.array(z.string()).default([]),
+  editDenylist: z.array(z.string()).default([]),
+  maxEditActions: z.number().int().default(3),
+  proposedEdits: z.array(AutonomousEditActionSchema).default([]),
+  appliedEdits: z.array(AppliedAutonomousEditSchema).default([]),
+  autonomousEditNotes: z.array(z.string()).default([]),
+  autonomousOperationMode: AutonomousOperationModeSchema.default('idle'),
+  repairIntentSummary: z.string().default(''),
+  repairSignals: z.array(z.string()).default([]),
+  improvementIntentSummary: z.string().default(''),
+  improvementSignals: z.array(z.string()).default([]),
+  repairStatus: RepairStatusSchema.default('idle'),
+  repairDecisionReason: z.string().default(''),
+  repairSmokeJobs: z.array(PlannedJobSchema).default([]),
+  repairSmokeResults: z.array(ExecutedJobSchema).default([]),
+  postRepairValidationJobs: z.array(PlannedJobSchema).default([]),
+  postRepairValidationResults: z.array(ExecutedJobSchema).default([]),
+  postRepairValidationStatus: PostRepairValidationStatusSchema.default('not-needed'),
+  repairPromotedPaths: z.array(z.string()).default([]),
+  repairRollbackPaths: z.array(z.string()).default([]),
+  experimentalRestartStatus: ExperimentalRestartStatusSchema.default('not-needed'),
+  experimentalRestartReason: z.string().default(''),
+  repairNotes: z.array(z.string()).default([]),
+  repairSessionManifest: AutonomousEditSessionManifestSchema.nullable().default(null),
+  executePlan: z.boolean().default(false),
+  allowDeploy: z.boolean().default(false),
+  deployCommand: z.string().default(''),
+  mcpConfigPath: z.string().default(''),
+  mcpServers: z.array(McpServerSchema).default([]),
+  mcpInspections: z.array(McpInspectionSchema).default([]),
+  logInsights: z.array(LogInsightSchema).default([]),
+  plannerNotes: z.array(z.string()).default([]),
+  buildJobs: z.array(PlannedJobSchema).default([]),
+  testJobs: z.array(PlannedJobSchema).default([]),
+  deployJobs: z.array(PlannedJobSchema).default([]),
+  jobs: z.array(PlannedJobSchema).default([]),
+  executedJobs: z.array(ExecutedJobSchema).default([]),
+  summary: z.string().default(''),
+});
+
+export type PlannedJob = z.infer<typeof PlannedJobSchema>;
+export type ExecutedJob = z.infer<typeof ExecutedJobSchema>;
+export type McpServer = z.infer<typeof McpServerSchema>;
+export type McpTool = z.infer<typeof McpToolSchema>;
+export type McpInspection = z.infer<typeof McpInspectionSchema>;
+export type ApprovalRequest = z.infer<typeof ApprovalRequestSchema>;
+export type AiNodeAdvice = z.infer<typeof AiNodeAdviceSchema>;
+export type LogInsight = z.infer<typeof LogInsightSchema>;
+export type ControlPlaneState = z.infer<typeof ControlPlaneStateSchema>;
+export type AutonomousEditAction = z.infer<typeof AutonomousEditActionSchema>;
+export type AppliedAutonomousEdit = z.infer<typeof AppliedAutonomousEditSchema>;
+export type ControlPlanePromptBundle = z.infer<typeof ControlPlanePromptBundleSchema>;
+export type AutonomousOperationMode = z.infer<typeof AutonomousOperationModeSchema>;
+export type RepairStatus = z.infer<typeof RepairStatusSchema>;
+export type PostRepairValidationStatus = z.infer<typeof PostRepairValidationStatusSchema>;
+export type ExperimentalRestartStatus = z.infer<typeof ExperimentalRestartStatusSchema>;
+
+function roundGateScore(value: number): number {
+  return Math.round(value * 1000) / 1000;
+}
+
+function resolveStateEvaluationGatePolicy(state: Partial<ControlPlaneState>): ControlPlaneEvaluationGatePolicy {
+  return EvaluationGatePolicySchema.parse((state as any)?.evaluationGatePolicy || DEFAULT_EVALUATION_GATE_POLICY);
+}
+
+function resolveStateEvaluationGateResult(state: Partial<ControlPlaneState>): ControlPlaneEvaluationGateResult {
+  const policy = resolveStateEvaluationGatePolicy(state);
+  return EvaluationGateResultSchema.parse({
+    ...buildDefaultEvaluationGateResult(policy),
+    ...((state as any)?.evaluationGateResult || {}),
+    mode: policy.mode,
+    target: policy.target,
+    enforced: policy.mode === 'enforce',
+    metricKey: policy.metricKey,
+  });
+}
+
+function describeEvaluationGateBlockedActions(result: ControlPlaneEvaluationGateResult): string[] {
+  const blocked: string[] = [];
+  if (result.blocksAutonomousEdits) blocked.push('autonomous-edits');
+  if (result.blocksExecution) blocked.push('execution');
+  return blocked;
+}
+
+function resolveEvaluationGateResult(
+  policyInput: ControlPlaneEvaluationGatePolicy,
+  evaluations: Array<z.infer<typeof LangSmithEvaluationSummarySchema>>,
+  langSmithEnabled: boolean,
+): ControlPlaneEvaluationGateResult {
+  const policy = EvaluationGatePolicySchema.parse(policyInput || DEFAULT_EVALUATION_GATE_POLICY);
+  const normalizedEvaluations = evaluations.map((evaluation) => LangSmithEvaluationSummarySchema.parse(evaluation));
+  const evaluationCount = normalizedEvaluations.length;
+  const resultCount = normalizedEvaluations.reduce((total, evaluation) => total + Math.max(0, evaluation.resultCount || 0), 0);
+  const metricMatches = normalizedEvaluations.flatMap((evaluation) => evaluation.metrics.filter((metric) => metric.key === policy.metricKey));
+  const metricCount = metricMatches.reduce((total, metric) => total + Math.max(0, metric.count || 0), 0);
+  const metricWeightedTotal = metricMatches.reduce((total, metric) => {
+    if (typeof metric.averageScore !== 'number' || !Number.isFinite(metric.averageScore)) return total;
+    return total + (metric.averageScore * Math.max(0, metric.count || 0));
+  }, 0);
+  const metricAverageScore = metricCount > 0 ? roundGateScore(metricWeightedTotal / metricCount) : null;
+  const enforced = policy.mode === 'enforce';
+
+  if (policy.mode === 'off') {
+    return EvaluationGateResultSchema.parse({
+      ...buildDefaultEvaluationGateResult(policy),
+      status: 'disabled',
+      evaluationCount,
+      resultCount,
+      metricCount,
+      metricAverageScore,
+      reason: 'Evaluation gate disabled.',
+    });
+  }
+
+  const failingChecks: string[] = [];
+  let status: z.infer<typeof EvaluationGateResultSchema>['status'] = 'passed';
+  let reason = '';
+
+  if (evaluationCount === 0 || resultCount === 0) {
+    if (policy.requireEvaluation) {
+      failingChecks.push(`No LangSmith evaluation results were recorded for required metric ${policy.metricKey}.`);
+      status = 'failed';
+      reason = `Evaluation gate failed: ${failingChecks[0]}`;
+    } else {
+      status = 'not-evaluated';
+      reason = langSmithEnabled
+        ? `No LangSmith evaluation results were recorded for metric ${policy.metricKey}; gate left open.`
+        : `LangSmith runtime integration is disabled or unavailable; gate left open for metric ${policy.metricKey}.`;
+    }
+  } else {
+    if (resultCount < policy.minResultCount) {
+      failingChecks.push(`LangSmith evaluation produced ${resultCount} result(s); policy requires at least ${policy.minResultCount}.`);
+    }
+    if (metricCount === 0) {
+      failingChecks.push(`LangSmith evaluators did not report metric ${policy.metricKey}.`);
+    } else if (metricAverageScore === null || metricAverageScore < policy.minMetricAverageScore) {
+      failingChecks.push(`Metric ${policy.metricKey} averaged ${metricAverageScore ?? 'n/a'}; policy requires at least ${policy.minMetricAverageScore}.`);
+    }
+
+    if (failingChecks.length > 0) {
+      status = 'failed';
+      reason = `Evaluation gate failed: ${failingChecks[0]}`;
+    } else {
+      status = 'passed';
+      reason = `Evaluation gate passed: metric ${policy.metricKey} averaged ${metricAverageScore ?? 'n/a'} across ${metricCount} scored result(s).`;
+    }
+  }
+
+  return EvaluationGateResultSchema.parse({
+    status,
+    mode: policy.mode,
+    target: policy.target,
+    enforced,
+    blocksExecution: enforced && status === 'failed' && (policy.target === 'execution' || policy.target === 'both'),
+    blocksAutonomousEdits: enforced && status === 'failed' && (policy.target === 'autonomous-edits' || policy.target === 'both'),
+    evaluationCount,
+    resultCount,
+    metricKey: policy.metricKey,
+    metricCount,
+    metricAverageScore,
+    failingChecks,
+    reason,
+  });
+}
+
+function shouldApplyAutonomousEditsForState(state: ControlPlaneState): boolean {
+  const evaluationGateResult = resolveStateEvaluationGateResult(state);
+  return state.executePlan
+    && state.autonomousEditEnabled
+    && state.proposedEdits.length > 0
+    && !evaluationGateResult.blocksAutonomousEdits;
+}
+
+function shouldRunJobsForState(state: ControlPlaneState): boolean {
+  const evaluationGateResult = resolveStateEvaluationGateResult(state);
+  return state.executePlan && !evaluationGateResult.blocksExecution;
+}
+
+function isLangSmithRunFailure(run: z.infer<typeof LangSmithRunSummarySchema>): boolean {
+  const normalizedStatus = String(run.status || '').trim().toLowerCase();
+  return Boolean(String(run.error || '').trim())
+    || normalizedStatus.includes('fail')
+    || normalizedStatus.includes('error');
+}
+
+function getAppliedRepairPaths(state: Pick<ControlPlaneState, 'appliedEdits'>): string[] {
+  return Array.from(new Set(
+    state.appliedEdits
+      .filter((edit) => edit.status === 'applied')
+      .map((edit) => String(edit.path || '').trim())
+      .filter(Boolean),
+  ));
+}
+
+function getRepairTouchedPaths(state: Pick<ControlPlaneState, 'appliedEdits' | 'repairSessionManifest'>): string[] {
+  const manifestPaths = state.repairSessionManifest?.touchedFiles.map((file) => String(file.path || '').trim()).filter(Boolean) || [];
+  return Array.from(new Set([...manifestPaths, ...getAppliedRepairPaths(state)]));
+}
+
+function hasFailedExecutedJobs(jobs: ExecutedJob[]): boolean {
+  return jobs.some((job) => job.status === 'failed');
+}
+
+function isLikelyRepairLogLine(line: string): boolean {
+  const normalized = String(line || '').trim();
+  if (!normalized) return false;
+
+  if (/\b(error|failed|failure|timeout|timed out|unauthorized|invalid|exception|refused|denied|backlog|overloaded|degraded|unavailable|unhealthy|panic)\b/i.test(normalized)) {
+    return true;
+  }
+
+  const removedMatch = normalized.match(/\bremoved\s+(\d+)\b/i);
+  if (removedMatch && Number(removedMatch[1]) > 0) {
+    return true;
+  }
+
+  return /\b(?:429|500|502|503|504)\b/.test(normalized);
+}
+
+function hasActionableRepairSignals(signals: string[]): boolean {
+  return signals.map((signal) => String(signal || '').trim()).filter(Boolean).length > 0;
+}
+
+function deriveRepairIntent(state: ControlPlaneState): { summary: string; signals: string[] } {
+  const signals: string[] = [];
+
+  for (const insight of state.logInsights.slice(0, 6)) {
+    for (const line of insight.lines.slice(-2)) {
+      if (line && isLikelyRepairLogLine(line)) {
+        signals.push(`Log ${insight.file}: ${line}`);
+      }
+    }
+  }
+
+  if (
+    state.selectedPromptSource === 'local'
+    && state.promptSelectionNotes.some((note) => /fallback|unavailable|disabled|no url returned/i.test(note))
+  ) {
+    const fallbackReason = state.promptSelectionNotes.find((note) => /fallback|unavailable|disabled|no url returned/i.test(note))
+      || `Using local fallback prompt bundle for ${state.promptIdentifier || DEFAULT_CONTROL_PLANE_PROMPT_IDENTIFIER}.`;
+    signals.push(`Prompt fallback: ${fallbackReason}`);
+  }
+
+  for (const run of state.langSmithRuns.filter((candidate) => isLangSmithRunFailure(candidate)).slice(0, 4)) {
+    signals.push(`LangSmith run ${run.name || run.id} signaled ${run.status || run.error || 'failure'}`);
+  }
+
+  for (const flag of (state.langSmithGovernance?.flags || []).filter((candidate) => candidate.status !== 'pass').slice(0, 4)) {
+    signals.push(`LangSmith governance ${flag.key}: ${flag.summary}`);
+  }
+
+  const queueBacklog = Math.max(
+    state.langSmithGovernance?.counts.annotationQueueBacklog || 0,
+    state.langSmithAnnotationQueues.reduce((total, queue) => total + Math.max(0, queue.itemCount || 0), 0),
+  );
+  if (queueBacklog > 0) {
+    signals.push(`LangSmith annotation backlog: ${queueBacklog} queued review item(s) need attention.`);
+  }
+
+  const queuedReviewItems = state.langSmithAnnotationQueueItems
+    .filter((item) => {
+      const normalizedStatus = String(item.status || '').trim().toLowerCase();
+      return !normalizedStatus || ['queued', 'pending', 'waiting', 'open', 'unreviewed'].some((token) => normalizedStatus.includes(token));
+    })
+    .slice(0, 3);
+  if (queuedReviewItems.length > 0) {
+    signals.push(`LangSmith queue pressure: ${queuedReviewItems.map((item) => item.runName || item.runId || item.id).join(', ')}`);
+  }
+
+  if (state.langSmithFeedback.length > 0) {
+    const feedbackPreview = state.langSmithFeedback
+      .slice(0, 3)
+      .map((item) => `${item.key}${typeof item.score !== 'undefined' && item.score !== null ? `=${item.score}` : ''}`)
+      .join(', ');
+    signals.push(`LangSmith feedback signal: ${state.langSmithFeedback.length} feedback item(s) sampled${feedbackPreview ? ` (${feedbackPreview})` : ''}.`);
+  }
+
+  if ((state.langSmithGovernance?.counts.runPending || 0) > 0) {
+    signals.push(`LangSmith run queue pressure: ${state.langSmithGovernance?.counts.runPending || 0} pending run(s) sampled.`);
+  }
+
+  const evaluationGateResult = resolveStateEvaluationGateResult(state);
+  if (
+    evaluationGateResult.status === 'failed'
+    || evaluationGateResult.status === 'not-evaluated'
+    || evaluationGateResult.blocksAutonomousEdits
+    || evaluationGateResult.blocksExecution
+  ) {
+    signals.push(`Evaluation gate: ${evaluationGateResult.reason}`);
+  }
+
+  for (const job of state.executedJobs.filter((candidate) => candidate.status === 'failed').slice(-3)) {
+    signals.push(`Failed job ${job.title}: exit ${job.exitCode ?? 'n/a'}`);
+  }
+
+  const dedupedSignals = Array.from(new Set(signals.map((signal) => String(signal || '').trim()).filter(Boolean))).slice(0, 12);
+  const summary = dedupedSignals.length > 0
+    ? `Bounded repair focus: ${dedupedSignals.slice(0, 3).join(' | ')}`
+    : 'No concrete failure signals were detected; only propose a bounded repair when logs, LangSmith signals, prompt fallback, or the evaluation gate identify a clear issue.';
+
+  return {
+    summary,
+    signals: dedupedSignals,
+  };
+}
+
+function deriveImprovementIntent(state: ControlPlaneState): { summary: string; signals: string[] } {
+  const signals: string[] = [];
+  const uniqueScopeSet = new Set(uniqueScopes(state.scopes));
+
+  if (uniqueScopeSet.has('api') || uniqueScopeSet.has('api-experimental') || uniqueScopeSet.has('repo')) {
+    signals.push('Experimental API loop is healthy enough to pursue bounded throughput, routing, and model-availability improvements.');
+  }
+
+  const syncInsight = state.logInsights.find((insight) => insight.file.endsWith('fast-image-sync.log'));
+  const latestSyncLine = syncInsight?.lines[syncInsight.lines.length - 1];
+  if (latestSyncLine) {
+    signals.push(`Provider/model sync churn insight: ${latestSyncLine}`);
+  }
+
+  if (state.langSmithRuns.length > 0 && state.langSmithRuns.every((run) => !isLangSmithRunFailure(run))) {
+    signals.push('Recent LangSmith runs did not surface active failures; prefer a small experimental improvement with bounded validation.');
+  }
+
+  if (state.langSmithFeedback.length === 0) {
+    signals.push('No sampled LangSmith feedback regressions were present; safe feature or performance improvements can be considered.');
+  }
+
+  if (state.langSmithGovernance && state.langSmithGovernance.flags.every((flag) => flag.status === 'pass')) {
+    signals.push('Governance checks are currently quiet; use the window for small experimental improvements rather than risky broad edits.');
+  }
+
+  const dedupedSignals = Array.from(new Set(signals.map((signal) => String(signal || '').trim()).filter(Boolean))).slice(0, 8);
+  const summary = dedupedSignals.length > 0
+    ? `Bounded improvement focus: ${dedupedSignals.slice(0, 3).join(' | ')}`
+    : 'No active repair signals were detected; only propose a bounded experimental improvement when a clear, safe opportunity exists.';
+
+  return {
+    summary,
+    signals: dedupedSignals,
+  };
+}
+
+function buildRepairSmokeJobs(state: ControlPlaneState): PlannedJob[] {
+  const touchedPaths = getRepairTouchedPaths(state);
+  if (touchedPaths.length === 0) return [];
+
+  const jobs: PlannedJob[] = [];
+  const touchesControlPlaneWorkspace = touchedPaths.some((candidatePath) => candidatePath.startsWith('apps/langgraph-control-plane/'));
+  const touchesApiCode = touchedPaths.some((candidatePath) => candidatePath.startsWith('apps/api/'));
+
+  if (touchesControlPlaneWorkspace) {
+    jobs.push({
+      id: 'repair-smoke-control-plane-typecheck',
+      target: 'control-plane',
+      kind: 'test',
+      title: 'Smoke validate control-plane repair',
+      command: CONTROL_PLANE_TYPECHECK_COMMAND,
+    });
+  }
+
+  if (touchesApiCode) {
+    const apiSmokeSource = [...state.testJobs, ...state.buildJobs].find((job) => (
+      (job.target === 'api' || job.target === 'api-experimental')
+      && (job.kind === 'test' || job.kind === 'build')
+    ));
+
+    if (apiSmokeSource) {
+      jobs.push({
+        ...apiSmokeSource,
+        id: `${apiSmokeSource.id}-repair-smoke`,
+        title: `${apiSmokeSource.title} (repair smoke)`,
+      });
+    } else {
+      jobs.push({
+        id: 'repair-smoke-api-build',
+        target: 'api-experimental',
+        kind: 'build',
+        title: 'Smoke build experimental API repair',
+        command: API_EXPERIMENTAL_BUILD_COMMAND,
+      });
+    }
+  }
+
+  if (jobs.length === 0) {
+    jobs.push(buildNoteJob(
+      'repair-smoke-none',
+      'Repair smoke validation',
+      `No executable smoke validation was required for touched files: ${touchedPaths.join(', ')}`,
+    ));
+  }
+
+  return jobs.slice(0, REPAIR_SMOKE_JOB_LIMIT);
+}
+
+function shouldRunPostRepairValidation(state: ControlPlaneState): boolean {
+  return state.repairStatus === 'promoted'
+    && getRepairTouchedPaths(state).some((candidatePath) => candidatePath.startsWith('apps/api/'));
+}
+
+function buildPostRepairValidationJobs(state: ControlPlaneState): PlannedJob[] {
+  if (!shouldRunPostRepairValidation(state)) return [];
+
+  const jobs: PlannedJob[] = [
+    {
+      id: 'post-repair-api-build',
+      target: 'api-experimental',
+      kind: 'build',
+      title: 'Build experimental API after autonomous promotion',
+      command: API_EXPERIMENTAL_BUILD_COMMAND,
+    },
+    {
+      id: 'post-repair-api-backtest',
+      target: 'api-experimental',
+      kind: 'test',
+      title: 'Backtest experimental API after autonomous promotion',
+      command: API_EXPERIMENTAL_TEST_COMMAND,
+    },
+  ];
+
+  return jobs.slice(0, POST_REPAIR_VALIDATION_JOB_LIMIT);
+}
+
+type ControlPlaneAiConfig = {
+  enabled: boolean;
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  temperature: number;
+  reasoningEffort?: string;
+  source: string;
+};
+
+type AiNodeRunResult = {
+  enabled: boolean;
+  model: string;
+  backend: string;
+  notes: string[];
+  error?: string;
+};
+
+type AiCodeEditResult = {
+  enabled: boolean;
+  model: string;
+  backend: string;
+  summary: string;
+  edits: AutonomousEditAction[];
+  error?: string;
+};
+
+type LoadedMcpServerConfig = {
+  name: string;
+  command: string;
+  args: string[];
+  type: string;
+  disabled: boolean;
+  alwaysAllow: string[];
+  disabledTools: string[];
+  env: Record<string, string>;
+  cwd?: string;
+};
+
+const CONTROL_PLANE_DATA_DIR = './apps/api/.control-plane';
+const CONTROL_PLANE_PACKAGE_DATA_DIR = '.control-plane';
+const CONTROL_PLANE_PROVIDERS_FILE = `${CONTROL_PLANE_DATA_DIR}/providers.json`;
+const CONTROL_PLANE_KEYS_FILE = `${CONTROL_PLANE_DATA_DIR}/keys.json`;
+const CONTROL_PLANE_MODELS_FILE = `${CONTROL_PLANE_DATA_DIR}/models.json`;
+const CONTROL_PLANE_PACKAGE_PROVIDERS_FILE = `${CONTROL_PLANE_PACKAGE_DATA_DIR}/providers.json`;
+const CONTROL_PLANE_PACKAGE_KEYS_FILE = `${CONTROL_PLANE_PACKAGE_DATA_DIR}/keys.json`;
+const CONTROL_PLANE_PACKAGE_MODELS_FILE = `${CONTROL_PLANE_PACKAGE_DATA_DIR}/models.json`;
+const CONTROL_PLANE_TEST_PORT = '3310';
+const CONTROL_PLANE_SOURCE_REDIS_DB = '0';
+const CONTROL_PLANE_TARGET_REDIS_DB = '1';
+const CONTROL_PLANE_CHECKPOINTS_FILE = './apps/langgraph-control-plane/.control-plane/checkpoints.json';
+const CONTROL_PLANE_ISOLATION_PREFIX = [
+  'mkdir -p ./apps/api/.control-plane',
+  `cp -f ./apps/api/providers.json ${CONTROL_PLANE_PROVIDERS_FILE} 2>/dev/null || true`,
+  `cp -f ./apps/api/keys.json ${CONTROL_PLANE_KEYS_FILE} 2>/dev/null || true`,
+  `cp -f ./apps/api/models.json ${CONTROL_PLANE_MODELS_FILE} 2>/dev/null || true`,
+].join(' && ');
+
+const API_EXPERIMENTAL_BUILD_COMMAND = 'bash ./bun.sh run -F anygpt-api build:experimental';
+const API_EXPERIMENTAL_TEST_COMMAND = [
+  CONTROL_PLANE_ISOLATION_PREFIX,
+  'CONTROL_PLANE_DATA_SOURCE_PREFERENCE=${CONTROL_PLANE_DATA_SOURCE_PREFERENCE:-redis}',
+  `API_PROVIDERS_FILE=${CONTROL_PLANE_PACKAGE_PROVIDERS_FILE}`,
+  `API_KEYS_FILE=${CONTROL_PLANE_PACKAGE_KEYS_FILE}`,
+  `API_MODELS_FILE=${CONTROL_PLANE_PACKAGE_MODELS_FILE}`,
+  `TEST_API_BASE_URL=http://localhost:${CONTROL_PLANE_TEST_PORT}`,
+  'DATA_SOURCE_PREFERENCE=${CONTROL_PLANE_DATA_SOURCE_PREFERENCE:-redis}',
+  'REDIS_URL=${CONTROL_PLANE_REDIS_URL:-${REDIS_URL:-127.0.0.1:6380}}',
+  'REDIS_USERNAME=${CONTROL_PLANE_REDIS_USERNAME:-${REDIS_USERNAME:-default}}',
+  'REDIS_PASSWORD=${CONTROL_PLANE_REDIS_PASSWORD:-${REDIS_PASSWORD:-}}',
+  'REDIS_TLS=${CONTROL_PLANE_REDIS_TLS:-${REDIS_TLS:-false}}',
+  `REDIS_DB={CONTROL_PLANE_TARGET_REDIS_DB:-${CONTROL_PLANE_TARGET_REDIS_DB}}`,
+  'bash ./bun.sh run -F anygpt-api test',
+].join(' ').replace('\u007f', '$');
+
+function parsePositiveIntegerEnv(name: string, fallback: number, minimum: number): number {
+  const raw = String(process.env[name] || '').trim();
+  if (!raw) return fallback;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(minimum, Math.floor(parsed));
+}
+
+function parseBooleanEnv(name: string, fallback: boolean): boolean {
+  const normalized = String(process.env[name] || '').trim().toLowerCase();
+  if (!normalized) return fallback;
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  return fallback;
+}
+
+const SAFE_EXPERIMENTAL_DEPLOY_COMMAND = 'sudo systemctl restart anygpt-experimental';
+const REDACTED_SECRET_PLACEHOLDER = '[redacted]';
+const REDACTED_IP_PLACEHOLDER = '[redacted-ip]';
+const MCP_CLIENT_NAME = 'anygpt-langgraph-control-plane';
+const MCP_CLIENT_VERSION = '0.1.0';
+const DEFAULT_LOG_TAIL_LINE_COUNT = parsePositiveIntegerEnv('CONTROL_PLANE_LOG_TAIL_LINES', 16, 4);
+const MCP_INSPECTION_TIMEOUT_MS = parsePositiveIntegerEnv('CONTROL_PLANE_MCP_INSPECTION_TIMEOUT_MS', 8_000, 1_000);
+const MCP_MAX_TOOL_PAGES = 20;
+const AI_AGENT_REQUEST_TIMEOUT_MS = parsePositiveIntegerEnv('CONTROL_PLANE_AI_AGENT_TIMEOUT_MS', 25_000, 5_000);
+const AI_AGENT_NOTE_LIMIT = 6;
+const AI_AGENT_PAYLOAD_STRING_MAX_CHARS = parsePositiveIntegerEnv('CONTROL_PLANE_AI_MAX_STRING_CHARS', 1_200, 200);
+const AI_AGENT_LOG_LINE_MAX_CHARS = parsePositiveIntegerEnv('CONTROL_PLANE_AI_LOG_LINE_MAX_CHARS', 1_600, 200);
+const AI_AGENT_PAYLOAD_ARRAY_LIMIT = parsePositiveIntegerEnv('CONTROL_PLANE_AI_ARRAY_LIMIT', 8, 2);
+const AI_AGENT_PAYLOAD_OBJECT_KEY_LIMIT = parsePositiveIntegerEnv('CONTROL_PLANE_AI_OBJECT_KEY_LIMIT', 12, 4);
+const AI_AGENT_CONTEXT_NOTE_LIMIT = parsePositiveIntegerEnv('CONTROL_PLANE_AI_CONTEXT_NOTE_LIMIT', 10, 2);
+const AI_AGENT_SIGNAL_PAYLOAD_LIMIT = parsePositiveIntegerEnv('CONTROL_PLANE_AI_SIGNAL_PAYLOAD_LIMIT', 8, 2);
+const AI_CODE_EDIT_CANDIDATE_FILE_LIMIT = parsePositiveIntegerEnv('CONTROL_PLANE_AI_CANDIDATE_FILE_LIMIT', 10, 2);
+const AI_CODE_EDIT_CANDIDATE_PATH_LIMIT = parsePositiveIntegerEnv('CONTROL_PLANE_AI_CANDIDATE_PATH_LIMIT', 16, 4);
+const AI_CODE_EDIT_CANDIDATE_FILE_MAX_CHARS = parsePositiveIntegerEnv('CONTROL_PLANE_AI_CANDIDATE_FILE_MAX_CHARS', 2_500, 400);
+const AI_CODE_EDIT_PAYLOAD_STRING_MAX_CHARS = parsePositiveIntegerEnv('CONTROL_PLANE_AI_CODE_EDIT_MAX_STRING_CHARS', 2_500, 400);
+const CONTROL_PLANE_TYPECHECK_COMMAND = 'bash ./bun.sh run -F anygpt-langgraph-control-plane typecheck';
+const REPAIR_SMOKE_JOB_LIMIT = 2;
+const REPAIR_SMOKE_TIMEOUT_MS = parsePositiveIntegerEnv('CONTROL_PLANE_REPAIR_SMOKE_TIMEOUT_MS', 120_000, 5_000);
+const POST_REPAIR_VALIDATION_JOB_LIMIT = 2;
+const POST_REPAIR_VALIDATION_TIMEOUT_MS = parsePositiveIntegerEnv('CONTROL_PLANE_POST_REPAIR_VALIDATION_TIMEOUT_MS', 600_000, 10_000);
+const AUTO_RESTART_EXPERIMENTAL_AFTER_REPAIR = parseBooleanEnv('CONTROL_PLANE_AUTO_RESTART_EXPERIMENTAL', true);
+
+const EXPLICIT_SENSITIVE_KEYS = new Set([
+  'apikey',
+  'authorization',
+  'cookie',
+  'key',
+  'password',
+  'redispassword',
+  'secret',
+  'sourceip',
+  'token',
+  'xapikey',
+]);
+
+const SCOPE_COMMANDS: Record<string, { build?: string; test?: string }> = {
+  repo: {
+    build: 'bash ./bun.sh run build',
+    test: 'bash ./bun.sh run test',
+  },
+  api: {
+    build: API_EXPERIMENTAL_BUILD_COMMAND,
+    test: API_EXPERIMENTAL_TEST_COMMAND,
+  },
+  'api-experimental': {
+    build: API_EXPERIMENTAL_BUILD_COMMAND,
+    test: API_EXPERIMENTAL_TEST_COMMAND,
+  },
+  'control-plane': {
+    build: 'bash -lc "echo control-plane review mode: no build actions planned"',
+    test: 'bash -lc "echo control-plane review mode: inspect LangSmith traces, provider health, provider sync churn, and admin key intake without deploy or service restart"',
+  },
+};
+
+function normalizeKeyName(key: string): string {
+  return String(key || '').replace(/[^a-z0-9]/gi, '').toLowerCase();
+}
+
+function isSensitiveKey(key: string): boolean {
+  const normalized = normalizeKeyName(key);
+  if (!normalized) return false;
+  if (EXPLICIT_SENSITIVE_KEYS.has(normalized)) return true;
+  return normalized.endsWith('token')
+    || normalized.endsWith('secret')
+    || normalized.endsWith('password')
+    || normalized.endsWith('apikey')
+    || normalized.endsWith('cookie')
+    || normalized.endsWith('sourceip')
+    || normalized.endsWith('clientip')
+    || normalized.endsWith('remoteip');
+}
+
+function getRedactionPlaceholder(keyHint: string = ''): string {
+  const normalized = normalizeKeyName(keyHint);
+  if (normalized.endsWith('ip') || normalized.includes('ipaddress')) {
+    return REDACTED_IP_PLACEHOLDER;
+  }
+  return REDACTED_SECRET_PLACEHOLDER;
+}
+
+function redactSensitiveText(text: string): string {
+  return String(text)
+    .replace(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g, REDACTED_IP_PLACEHOLDER)
+    .replace(/\bAIza[0-9A-Za-z\-_]{20,}\b/g, REDACTED_SECRET_PLACEHOLDER)
+    .replace(/\bsk-[A-Za-z0-9\-_]{12,}\b/g, REDACTED_SECRET_PLACEHOLDER)
+    .replace(/([a-z]+:\/\/[^@\s:]+:)[^@\s]+@/gi, `$1${REDACTED_SECRET_PLACEHOLDER}@`)
+    .replace(/(Bearer\s+)[A-Za-z0-9._\-+/=]+/gi, `$1${REDACTED_SECRET_PLACEHOLDER}`)
+    .replace(/([?&](?:api[_-]?key|token|password|secret)=)[^&\s]+/gi, `$1${REDACTED_SECRET_PLACEHOLDER}`)
+    .replace(/((?:api[_-]?key|token|password|secret|authorization|cookie)\s*[:=]\s*)(["']?)([^"',\s]+)(\2)/gi, (_match, prefix: string, quote: string) => {
+      const wrappedPlaceholder = quote
+        ? `${quote}${REDACTED_SECRET_PLACEHOLDER}${quote}`
+        : REDACTED_SECRET_PLACEHOLDER;
+      return `${prefix}${wrappedPlaceholder}`;
+    });
+}
+
+function redactSensitiveValue(value: unknown, keyHint: string = ''): unknown {
+  if (Array.isArray(value)) {
+    return value.map((entry) => redactSensitiveValue(entry, keyHint));
+  }
+
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, nestedValue]) => {
+        if (isSensitiveKey(key)) {
+          return [key, getRedactionPlaceholder(key)];
+        }
+
+        return [key, redactSensitiveValue(nestedValue, key)];
+      }),
+    );
+  }
+
+  if (typeof value === 'string') {
+    if (isSensitiveKey(keyHint)) {
+      return getRedactionPlaceholder(keyHint);
+    }
+    return redactSensitiveText(value);
+  }
+
+  return value;
+}
+
+function sanitizeLogLine(line: string): string {
+  const trimmed = String(line || '').trim();
+  if (!trimmed) return '';
+
+  try {
+    const parsed = JSON.parse(trimmed);
+    return truncateTextMiddle(
+      JSON.stringify(redactSensitiveValue(parsed)),
+      AI_AGENT_LOG_LINE_MAX_CHARS,
+    );
+  } catch {
+    return truncateTextMiddle(redactSensitiveText(trimmed), AI_AGENT_LOG_LINE_MAX_CHARS);
+  }
+}
+
+function truncateTextMiddle(text: string, maxChars: number): string {
+  const normalized = String(text || '').trim();
+  if (normalized.length <= maxChars) return normalized;
+
+  const marker = ` …[truncated ${normalized.length - maxChars} chars]… `;
+  const availableChars = maxChars - marker.length;
+  if (availableChars <= 32) {
+    return `${normalized.slice(0, Math.max(0, maxChars - 1))}…`;
+  }
+
+  const headChars = Math.ceil(availableChars / 2);
+  const tailChars = Math.floor(availableChars / 2);
+  return `${normalized.slice(0, headChars)}${marker}${normalized.slice(normalized.length - tailChars)}`;
+}
+
+function compactStringArrayForAi(
+  values: string[],
+  maxItems: number,
+  maxChars: number = AI_AGENT_PAYLOAD_STRING_MAX_CHARS,
+): string[] {
+  return values
+    .slice(-maxItems)
+    .map((value) => truncateTextMiddle(redactSensitiveText(value), maxChars))
+    .filter(Boolean);
+}
+
+function compactUnknownForAi(
+  value: unknown,
+  options: {
+    maxStringChars?: number;
+    maxArrayItems?: number;
+    maxObjectKeys?: number;
+    maxDepth?: number;
+  } = {},
+  depth: number = 0,
+): unknown {
+  const maxStringChars = options.maxStringChars ?? AI_AGENT_PAYLOAD_STRING_MAX_CHARS;
+  const maxArrayItems = options.maxArrayItems ?? AI_AGENT_PAYLOAD_ARRAY_LIMIT;
+  const maxObjectKeys = options.maxObjectKeys ?? AI_AGENT_PAYLOAD_OBJECT_KEY_LIMIT;
+  const maxDepth = options.maxDepth ?? 4;
+
+  if (value == null || typeof value === 'number' || typeof value === 'boolean') {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    return truncateTextMiddle(redactSensitiveText(value), maxStringChars);
+  }
+
+  if (Array.isArray(value)) {
+    const sliced = value.slice(0, maxArrayItems);
+    if (depth >= maxDepth) {
+      return sliced.map((entry) => truncateTextMiddle(
+        JSON.stringify(redactSensitiveValue(entry)),
+        maxStringChars,
+      ));
+    }
+    return sliced.map((entry) => compactUnknownForAi(entry, options, depth + 1));
+  }
+
+  if (typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>).slice(0, maxObjectKeys);
+    if (depth >= maxDepth) {
+      return Object.fromEntries(
+        entries.map(([key, entryValue]) => [
+          key,
+          truncateTextMiddle(JSON.stringify(redactSensitiveValue(entryValue)), maxStringChars),
+        ]),
+      );
+    }
+    return Object.fromEntries(
+      entries.map(([key, entryValue]) => [key, compactUnknownForAi(entryValue, options, depth + 1)]),
+    );
+  }
+
+  return truncateTextMiddle(String(value), maxStringChars);
+}
+
+function uniqueScopes(scopes: string[]): string[] {
+  const normalized = scopes
+    .map((scope) => String(scope || '').trim().toLowerCase())
+    .filter(Boolean);
+  return Array.from(new Set(normalized.length > 0 ? normalized : ['repo']));
+}
+
+function coerceStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.map((entry) => String(entry)).filter((entry) => entry.trim().length > 0)
+    : [];
+}
+
+function coerceStringRecord(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object') return {};
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .map(([key, entry]) => [String(key), String(entry ?? '')])
+      .filter(([key]) => key.trim().length > 0),
+  );
+}
+
+function sanitizeMcpServer(config: LoadedMcpServerConfig): McpServer {
+  return McpServerSchema.parse({
+    name: config.name,
+    command: config.command,
+    args: config.args,
+    type: config.type,
+    disabled: config.disabled,
+    alwaysAllow: config.alwaysAllow,
+    disabledTools: config.disabledTools,
+    envKeys: Object.keys(config.env).sort(),
+  });
+}
+
+function appendUniqueNotes(existingNotes: string[], additionalNotes: string[]): string[] {
+  const merged = [...existingNotes];
+  const seen = new Set(existingNotes.map((note) => note.trim()).filter(Boolean));
+
+  for (const note of additionalNotes) {
+    const trimmed = String(note || '').trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    merged.push(trimmed);
+  }
+
+  return merged;
+}
+
+function resolveApprovalDecision(decision: unknown): { approved: boolean; message: string } {
+  if (typeof decision === 'boolean') {
+    return {
+      approved: decision,
+      message: decision ? 'Manual approval granted.' : 'Manual approval denied.',
+    };
+  }
+
+  if (decision && typeof decision === 'object') {
+    const objectDecision = decision as Record<string, unknown>;
+    if (typeof objectDecision.approved === 'boolean') {
+      return {
+        approved: objectDecision.approved,
+        message: objectDecision.approved ? 'Manual approval granted.' : 'Manual approval denied.',
+      };
+    }
+
+    const stringAction = typeof objectDecision.action === 'string'
+      ? objectDecision.action
+      : typeof objectDecision.resume === 'string'
+        ? objectDecision.resume
+        : '';
+    if (stringAction) {
+      return resolveApprovalDecision(stringAction);
+    }
+  }
+
+  const normalized = typeof decision === 'string' ? decision.trim().toLowerCase() : '';
+  if (['approve', 'approved', 'yes', 'y', 'true', 'continue', 'resume', 'run'].includes(normalized)) {
+    return { approved: true, message: 'Manual approval granted.' };
+  }
+  if (['deny', 'denied', 'no', 'n', 'false', 'stop', 'abort', 'cancel', 'reject'].includes(normalized)) {
+    return { approved: false, message: 'Manual approval denied.' };
+  }
+
+  return {
+    approved: false,
+    message: `Manual approval denied because the resume value was not recognized: ${JSON.stringify(decision)}`,
+  };
+}
+
+function buildApprovalRequests(state: ControlPlaneState): ApprovalRequest[] {
+  const approvals: ApprovalRequest[] = [];
+  const seen = new Set<string>();
+  const evaluationGateResult = resolveStateEvaluationGateResult(state);
+
+  if (!evaluationGateResult.blocksExecution) {
+    for (const job of state.jobs) {
+      if (job.kind === 'test' && (job.target === 'api' || job.target === 'api-experimental')) {
+        const approvalId = `redis-clone-${job.target}`;
+        if (!seen.has(approvalId)) {
+          seen.add(approvalId);
+          approvals.push(ApprovalRequestSchema.parse({
+            id: approvalId,
+            title: `Approve Redis/Dragonfly clone for ${job.target}`,
+            reason: `Running ${job.title} clones Redis/Dragonfly DB ${CONTROL_PLANE_SOURCE_REDIS_DB} into experimental DB ${CONTROL_PLANE_TARGET_REDIS_DB} before execution.`,
+          }));
+        }
+      }
+
+      if (job.kind === 'deploy') {
+        const approvalId = `deploy-${job.id}`;
+        if (!seen.has(approvalId)) {
+          seen.add(approvalId);
+          approvals.push(ApprovalRequestSchema.parse({
+            id: approvalId,
+            title: `Approve deploy command for ${job.target}`,
+            reason: `Execute deploy command: ${job.command}`,
+          }));
+        }
+      }
+    }
+  }
+
+  if (!evaluationGateResult.blocksAutonomousEdits && state.autonomousEditEnabled && state.proposedEdits.length > 0) {
+    approvals.push(ApprovalRequestSchema.parse({
+      id: 'autonomous-code-edits',
+      title: `Approve ${state.proposedEdits.length} autonomous code edit(s)`,
+      reason: state.proposedEdits
+        .map((edit) => `${edit.type} ${edit.path}: ${edit.reason}`)
+        .join(' | '),
+    }));
+  }
+
+  return approvals;
+}
+
+export function resolveControlPlaneCheckpointPath(repoRoot: string, override?: string): string {
+  const configuredPath = String(override || process.env.CONTROL_PLANE_CHECKPOINT_PATH || CONTROL_PLANE_CHECKPOINTS_FILE).trim();
+  return path.resolve(repoRoot, configuredPath || CONTROL_PLANE_CHECKPOINTS_FILE);
+}
+
+function normalizeOpenAiCompatibleBaseUrl(rawBaseUrl: string): string {
+  const trimmed = String(rawBaseUrl || '').trim().replace(/\/+$/, '');
+  if (!trimmed) return '';
+  return /\/v1$/i.test(trimmed) ? trimmed : `${trimmed}/v1`;
+}
+
+function uniqueNormalizedStrings(values: Array<string | undefined | null>): string[] {
+  const items = new Set<string>();
+  for (const value of values) {
+    const normalized = String(value || '').trim();
+    if (normalized) items.add(normalized);
+  }
+  return [...items.values()];
+}
+
+function normalizePromptChannel(value: unknown): string {
+  return String(value || '')
+    .trim()
+    .replace(/[^A-Za-z0-9._/-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+function buildLangSmithPromptReference(promptIdentifier: string, commitOrTag?: string): string {
+  const normalizedPromptIdentifier = String(promptIdentifier || '').trim();
+  const normalizedCommitOrTag = String(commitOrTag || '').trim();
+  if (!normalizedPromptIdentifier) return '';
+  return normalizedCommitOrTag ? `${normalizedPromptIdentifier}:${normalizedCommitOrTag}` : normalizedPromptIdentifier;
+}
+
+function getDefaultControlPlanePromptBundle(): ControlPlanePromptBundle {
+  return ControlPlanePromptBundleSchema.parse(DEFAULT_CONTROL_PLANE_PROMPT_BUNDLE);
+}
+
+function buildControlPlanePromptManifest(bundle: ControlPlanePromptBundle): Record<string, unknown> {
+  return {
+    _type: 'anygpt_control_plane_prompt_bundle',
+    version: 1,
+    prompts: {
+      planner: { role: 'system', content: bundle.planner },
+      build: { role: 'system', content: bundle.build },
+      quality: { role: 'system', content: bundle.quality },
+      deploy: { role: 'system', content: bundle.deploy },
+      autonomousEdit: { role: 'system', content: bundle.autonomousEdit },
+    },
+    metadata: {
+      source: 'anygpt-langgraph-control-plane',
+    },
+  };
+}
+
+function extractPromptText(value: unknown): string | undefined {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed || undefined;
+  }
+
+  if (!value || typeof value !== 'object') return undefined;
+
+  const candidate = value as Record<string, unknown>;
+  if (typeof candidate.content === 'string' && candidate.content.trim()) {
+    return candidate.content.trim();
+  }
+  if (typeof candidate.prompt === 'string' && candidate.prompt.trim()) {
+    return candidate.prompt.trim();
+  }
+  if (typeof candidate.template === 'string' && candidate.template.trim()) {
+    return candidate.template.trim();
+  }
+  return undefined;
+}
+
+function buildLegacyControlPlanePromptBundle(sharedPrompt: string): ControlPlanePromptBundle {
+  const defaultBundle = getDefaultControlPlanePromptBundle();
+  const prefix = sharedPrompt.trim();
+  return ControlPlanePromptBundleSchema.parse({
+    planner: `${prefix}\n\n${defaultBundle.planner}`,
+    build: `${prefix}\n\n${defaultBundle.build}`,
+    quality: `${prefix}\n\n${defaultBundle.quality}`,
+    deploy: `${prefix}\n\n${defaultBundle.deploy}`,
+    autonomousEdit: `${prefix}\n\n${defaultBundle.autonomousEdit}`,
+  });
+}
+
+function extractControlPlanePromptBundle(source: unknown): ControlPlanePromptBundle | null {
+  if (!source || typeof source !== 'object') return null;
+
+  const candidate = source as Record<string, unknown>;
+  const promptContainer = candidate.prompts && typeof candidate.prompts === 'object'
+    ? candidate.prompts as Record<string, unknown>
+    : candidate;
+
+  const bundleCandidate = {
+    planner: extractPromptText(promptContainer.planner),
+    build: extractPromptText(promptContainer.build),
+    quality: extractPromptText(promptContainer.quality),
+    deploy: extractPromptText(promptContainer.deploy),
+    autonomousEdit: extractPromptText(promptContainer.autonomousEdit),
+  };
+
+  if (Object.values(bundleCandidate).every((value) => typeof value === 'string' && value.trim().length > 0)) {
+    return ControlPlanePromptBundleSchema.parse(bundleCandidate);
+  }
+
+  const sharedPrompt = extractPromptText(candidate);
+  if (sharedPrompt) {
+    return buildLegacyControlPlanePromptBundle(sharedPrompt);
+  }
+
+  return null;
+}
+
+function extractControlPlanePromptBundleFromCommit(commit: any): ControlPlanePromptBundle | null {
+  if (!commit || typeof commit !== 'object') return null;
+
+  const manifest = typeof commit?.manifest === 'object' && commit.manifest
+    ? (typeof (commit.manifest as any).object === 'object' && (commit.manifest as any).object
+        ? (commit.manifest as any).object
+        : commit.manifest)
+    : (typeof commit?.object === 'object' && commit.object ? commit.object : null);
+
+  return extractControlPlanePromptBundle(manifest);
+}
+
+function extractPromptCommitHash(commit: any): string {
+  return String(commit?.commit_hash || commit?.commitHash || '').trim();
+}
+
+function resolveControlPlaneAiConfig(): ControlPlaneAiConfig {
+  const explicitBaseUrl = normalizeOpenAiCompatibleBaseUrl(String(process.env.CONTROL_PLANE_AI_BASE_URL || '').trim());
+  const explicitApiKey = String(process.env.CONTROL_PLANE_AI_API_KEY || '').trim();
+  const explicitModel = String(process.env.CONTROL_PLANE_AI_MODEL || '').trim();
+  const configuredReasoningEffort = String(
+    process.env.CONTROL_PLANE_AI_REASONING_EFFORT
+    || process.env.ANYGPT_REASONING_EFFORT
+    || process.env.OPENAI_REASONING_EFFORT
+    || '',
+  ).trim();
+
+  if (explicitBaseUrl && explicitApiKey && explicitModel) {
+    const parsedTemperature = Number(process.env.CONTROL_PLANE_AI_TEMPERATURE || '0.2');
+    const temperature = Number.isFinite(parsedTemperature) ? parsedTemperature : 0.2;
+    return {
+      enabled: true,
+      baseUrl: explicitBaseUrl,
+      apiKey: explicitApiKey,
+      model: explicitModel,
+      temperature,
+      reasoningEffort: configuredReasoningEffort || undefined,
+      source: 'CONTROL_PLANE_AI_*',
+    };
+  }
+
+  const anygptApiKey = String(process.env.ANYGPT_API_KEY || '').trim();
+  const anygptBaseUrl = normalizeOpenAiCompatibleBaseUrl(
+    String(process.env.ANYGPT_API_BASE_URL || process.env.OPENAI_BASE_URL || 'http://127.0.0.1:3000').trim(),
+  );
+  const anygptModel = String(process.env.ANYGPT_MODEL || process.env.OPENAI_MODEL || 'gpt-5.4').trim();
+  const parsedTemperature = Number(process.env.CONTROL_PLANE_AI_TEMPERATURE || '0.2');
+  const temperature = Number.isFinite(parsedTemperature) ? parsedTemperature : 0.2;
+
+  if (anygptApiKey && anygptBaseUrl && anygptModel) {
+    return {
+      enabled: true,
+      baseUrl: anygptBaseUrl,
+      apiKey: anygptApiKey,
+      model: anygptModel,
+      temperature,
+      reasoningEffort: configuredReasoningEffort || undefined,
+      source: 'ANYGPT_API_* / OPENAI_*',
+    };
+  }
+
+  const fallbackKeyPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'apps', 'api', 'keys.json');
+  let fileBackedApiKey = '';
+  if (fs.existsSync(fallbackKeyPath)) {
+    try {
+      const parsedKeys = JSON.parse(fs.readFileSync(fallbackKeyPath, 'utf8')) as Record<string, any>;
+      for (const [candidateKey, entry] of Object.entries(parsedKeys)) {
+        if (
+          typeof candidateKey === 'string'
+          && candidateKey.startsWith('test-key-for-automated-testing-')
+          && entry
+          && typeof entry === 'object'
+          && entry.role !== 'disabled'
+        ) {
+          fileBackedApiKey = candidateKey;
+          break;
+        }
+      }
+    } catch {
+      fileBackedApiKey = '';
+    }
+  }
+
+  if (fileBackedApiKey) {
+    return {
+      enabled: true,
+      baseUrl: anygptBaseUrl,
+      apiKey: fileBackedApiKey,
+      model: anygptModel,
+      temperature,
+      reasoningEffort: configuredReasoningEffort || undefined,
+      source: 'apps/api/keys.json fallback',
+    };
+  }
+
+  return {
+    enabled: false,
+    baseUrl: anygptBaseUrl,
+    apiKey: '',
+    model: anygptModel,
+    temperature,
+    reasoningEffort: configuredReasoningEffort || undefined,
+    source: '',
+  };
+}
+
+function extractAssistantTextFromChatCompletionPayload(payload: any): string {
+  const content = payload?.choices?.[0]?.message?.content;
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((item: any) => {
+        if (typeof item === 'string') return item;
+        if (typeof item?.text === 'string') return item.text;
+        return '';
+      })
+      .filter(Boolean)
+      .join('\n');
+  }
+  return '';
+}
+
+function extractJsonObjectFromText(text: string): string | undefined {
+  const raw = String(text || '').trim();
+  if (!raw) return undefined;
+
+  const fencedMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidate = fencedMatch ? fencedMatch[1].trim() : raw;
+  if (candidate.startsWith('{') && candidate.endsWith('}')) {
+    return candidate;
+  }
+
+  const firstBrace = candidate.indexOf('{');
+  const lastBrace = candidate.lastIndexOf('}');
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    return candidate.slice(firstBrace, lastBrace + 1);
+  }
+
+  return undefined;
+}
+
+function loadRuntimeAutonomousEditPlanOverride(
+  state: ControlPlaneState,
+): { plan: z.infer<typeof AutonomousEditPlanSchema> | null; source: string; error?: string } {
+  const overrideFile = String(process.env.CONTROL_PLANE_AUTONOMOUS_EDIT_PLAN_FILE || '').trim();
+  const inlineOverride = String(process.env.CONTROL_PLANE_AUTONOMOUS_EDIT_PLAN || '').trim();
+
+  if (!overrideFile && !inlineOverride) {
+    return { plan: null, source: '' };
+  }
+
+  let raw = '';
+  let source = '';
+  try {
+    if (overrideFile) {
+      const resolvedPath = path.resolve(state.repoRoot, overrideFile);
+      raw = fs.readFileSync(resolvedPath, 'utf8');
+      source = path.relative(state.repoRoot, resolvedPath) || overrideFile;
+    } else {
+      raw = inlineOverride;
+      source = 'CONTROL_PLANE_AUTONOMOUS_EDIT_PLAN';
+    }
+
+    const parsed = AutonomousEditPlanSchema.parse(JSON.parse(raw));
+    return {
+      plan: AutonomousEditPlanSchema.parse({
+        summary: parsed.summary || `Runtime autonomous edit plan loaded from ${source}`,
+        edits: parsed.edits.slice(0, state.maxEditActions),
+      }),
+      source,
+    };
+  } catch (error: any) {
+    return {
+      plan: null,
+      source,
+      error: redactSensitiveText(error?.message || String(error)),
+    };
+  }
+}
+
+function buildSharedAiAgentPayload(state: ControlPlaneState): Record<string, unknown> {
+  const evaluationGatePolicy = resolveStateEvaluationGatePolicy(state);
+  const evaluationGateResult = resolveStateEvaluationGateResult(state);
+  const payload = {
+    goal: state.goal,
+    scopes: uniqueScopes(state.scopes),
+    langSmith: {
+      enabled: state.langSmithEnabled,
+      workspace: state.langSmithWorkspace,
+      accessibleWorkspaces: state.langSmithAccessibleWorkspaces.map((workspace) => ({
+        id: workspace.id,
+        displayName: workspace.displayName,
+        roleName: workspace.roleName,
+      })),
+      currentProject: state.langSmithProject
+        ? {
+            id: state.langSmithProject.id,
+            name: state.langSmithProject.name,
+            description: state.langSmithProject.description,
+            metadata: state.langSmithProject.metadata,
+          }
+        : null,
+      projectName: state.langSmithProjectName,
+      recentProjects: state.langSmithProjects.map((project) => project.name),
+      recentRuns: state.langSmithRuns.map((run) => ({ name: run.name, status: run.status, runType: run.runType })),
+      datasets: state.langSmithDatasets.map((dataset) => dataset.name),
+      prompts: state.langSmithPrompts.map((prompt) => prompt.identifier),
+      annotationQueues: state.langSmithAnnotationQueues.map((queue) => ({
+        name: queue.name,
+        itemCount: queue.itemCount,
+        feedbackCount: queue.feedbackCount,
+      })),
+      annotationQueueItems: state.langSmithAnnotationQueueItems.slice(0, 5).map((item) => ({
+        queue: item.queueName,
+        runName: item.runName,
+        runId: item.runId,
+        status: item.status,
+      })),
+      feedback: state.langSmithFeedback.slice(0, 5).map((item) => ({
+        key: item.key,
+        runId: item.runId,
+        exampleId: item.exampleId,
+        score: item.score,
+      })),
+      evaluations: state.langSmithEvaluations.map((evaluation) => ({
+        datasetName: evaluation.datasetName,
+        experimentName: evaluation.experimentName,
+        resultCount: evaluation.resultCount,
+        averageScore: evaluation.averageScore,
+        metrics: evaluation.metrics.map((metric) => ({
+          key: metric.key,
+          count: metric.count,
+            averageScore: metric.averageScore,
+          })),
+      })),
+      governance: state.langSmithGovernance
+        ? {
+            counts: state.langSmithGovernance.counts,
+            feedbackKeyCounts: state.langSmithGovernance.feedbackKeyCounts,
+            flags: state.langSmithGovernance.flags,
+            mutations: state.langSmithGovernance.mutations,
+          }
+        : null,
+      evaluationGatePolicy,
+      evaluationGate: evaluationGateResult,
+      selectedPrompt: {
+        identifier: state.promptIdentifier,
+        requestedRef: state.promptRef || undefined,
+        requestedChannel: state.promptChannel || undefined,
+        selectedReference: state.selectedPromptReference || undefined,
+        source: state.selectedPromptSource,
+        commitHash: state.selectedPromptCommitHash || undefined,
+        syncEnabled: state.promptSyncEnabled,
+        syncChannel: state.promptSyncChannel || undefined,
+        promoteChannel: state.promptPromoteChannel || undefined,
+      },
+      notes: compactStringArrayForAi(state.langSmithNotes, AI_AGENT_CONTEXT_NOTE_LIMIT),
+    },
+    mcpServers: state.mcpInspections.map((inspection) => ({
+      server: inspection.server,
+      status: inspection.status,
+      tools: inspection.tools.map((tool) => tool.name),
+    })),
+    logInsights: state.logInsights.map((insight) => ({
+      file: insight.file,
+      latest: insight.lines.slice(-2),
+    })),
+    plannerNotes: compactStringArrayForAi(state.plannerNotes, AI_AGENT_CONTEXT_NOTE_LIMIT),
+    allowDeploy: state.allowDeploy,
+    deployCommand: state.deployCommand,
+    repair: {
+      mode: state.autonomousOperationMode,
+      intentSummary: state.repairIntentSummary,
+      signals: state.repairSignals,
+      improvementIntentSummary: state.improvementIntentSummary,
+      improvementSignals: state.improvementSignals,
+      status: state.repairStatus,
+      decisionReason: state.repairDecisionReason,
+      smokeResults: state.repairSmokeResults.map((job) => ({
+        title: job.title,
+        status: job.status,
+        exitCode: job.exitCode,
+      })),
+      postRepairValidationStatus: state.postRepairValidationStatus,
+      postRepairValidationResults: state.postRepairValidationResults.map((job) => ({
+        title: job.title,
+        status: job.status,
+        exitCode: job.exitCode,
+      })),
+      experimentalRestartStatus: state.experimentalRestartStatus,
+      experimentalRestartReason: state.experimentalRestartReason,
+    },
+  };
+
+  return compactUnknownForAi(payload, {
+    maxStringChars: AI_AGENT_PAYLOAD_STRING_MAX_CHARS,
+    maxArrayItems: AI_AGENT_PAYLOAD_ARRAY_LIMIT,
+    maxObjectKeys: AI_AGENT_PAYLOAD_OBJECT_KEY_LIMIT,
+    maxDepth: 4,
+  }) as Record<string, unknown>;
+}
+
+async function callAiNotesAgent(
+  role: 'planner' | 'build' | 'quality' | 'deploy',
+  state: ControlPlaneState,
+  payload: Record<string, unknown>,
+  systemPrompt: string,
+): Promise<AiNodeRunResult> {
+  const config = resolveControlPlaneAiConfig();
+  if (!config.enabled) {
+    return {
+      enabled: false,
+      model: config.model,
+      backend: config.baseUrl,
+      notes: [],
+    };
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), AI_AGENT_REQUEST_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(`${config.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${config.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: config.model,
+        temperature: config.temperature,
+        ...(config.reasoningEffort ? { reasoning_effort: config.reasoningEffort } : {}),
+        response_format: { type: 'json_object' },
+        messages: [
+          {
+            role: 'system',
+            content: [
+              systemPrompt,
+              'Return JSON only in the form {"notes": string[]}.',
+              'Do not output markdown fences.',
+              'Never invent credentials, API keys, or shell commands.',
+              'Respect the rule that production anygpt.service must not be restarted.',
+            ].join('\n'),
+          },
+          {
+            role: 'user',
+            content: JSON.stringify(compactUnknownForAi({
+              threadId: state.threadId,
+              role,
+              payload,
+            })),
+          },
+        ],
+      }),
+      signal: controller.signal,
+    });
+
+    const rawText = await response.text();
+    if (!response.ok) {
+      throw new Error(`AI ${role} agent request failed (${response.status}): ${rawText.slice(0, 400)}`);
+    }
+
+    const payloadJson = JSON.parse(rawText);
+    const assistantText = extractAssistantTextFromChatCompletionPayload(payloadJson);
+    const jsonObjectText = extractJsonObjectFromText(assistantText);
+    if (!jsonObjectText) {
+      throw new Error(`AI ${role} agent returned unparsable content.`);
+    }
+
+    const parsed = AiNodeAdviceSchema.parse(JSON.parse(jsonObjectText));
+    const notes = parsed.notes
+      .map((note) => String(note || '').trim())
+      .filter(Boolean)
+      .slice(0, AI_AGENT_NOTE_LIMIT);
+
+    return {
+      enabled: true,
+      model: config.model,
+      backend: config.baseUrl,
+      notes,
+    };
+  } catch (error: any) {
+    return {
+      enabled: true,
+      model: config.model,
+      backend: config.baseUrl,
+      notes: [],
+      error: redactSensitiveText(error?.message || String(error)),
+    };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function callAiCodeEditAgent(
+  state: ControlPlaneState,
+  payload: Record<string, unknown>,
+): Promise<AiCodeEditResult> {
+  const requestedOperationMode = String((payload as any).operationMode || '').trim().toLowerCase() === 'repair'
+    ? 'repair'
+    : 'improvement';
+  const repairSignalCount = Array.isArray((payload as any).repairIntent?.signals)
+    ? (payload as any).repairIntent.signals.length
+    : 0;
+  const improvementSignalCount = Array.isArray((payload as any).improvementIntent?.signals)
+    ? (payload as any).improvementIntent.signals.length
+    : 0;
+  const config = resolveControlPlaneAiConfig();
+  if (!config.enabled) {
+    return {
+      enabled: false,
+      model: config.model,
+      backend: config.baseUrl,
+      summary: '',
+      edits: [],
+    };
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), AI_AGENT_REQUEST_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(`${config.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${config.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: config.model,
+        temperature: config.temperature,
+        ...(config.reasoningEffort ? { reasoning_effort: config.reasoningEffort } : {}),
+        response_format: { type: 'json_object' },
+        messages: [
+          {
+            role: 'system',
+            content: [
+              String(state.controlPlanePrompts.autonomousEdit || DEFAULT_CONTROL_PLANE_PROMPT_BUNDLE.autonomousEdit).trim()
+                || DEFAULT_CONTROL_PLANE_PROMPT_BUNDLE.autonomousEdit,
+              'Return JSON only in the form {"summary": string, "edits": [{"type": "replace" | "write", "path": string, "reason": string, "find"?: string, "replace"?: string, "content"?: string}]}.',
+              requestedOperationMode === 'repair'
+                ? `You are operating in repair mode with ${repairSignalCount} actionable repair signal(s). Prefer a minimal bounded replace edit whenever a safe fix is possible. Empty edits are only acceptable when no safe bounded fix exists, and then the summary must explain why.`
+                : `You are operating in improvement mode with ${improvementSignalCount} improvement signal(s). Prefer one minimal bounded experimental improvement that can be validated quickly. If no safe improvement is justified, explain that in the summary.`,
+              'Prefer the smallest safe replace edit over rewriting entire files.',
+              'When the provided signals mention a file family or subsystem, bias the proposal toward the most relevant candidate file instead of returning a no-op.',
+              'Only modify explicitly allowed paths and never modify denied paths, secrets, key files, environment files, lockfiles, node_modules, or generated outputs.',
+              'If you return an empty edits array, the summary must name the blocking constraint, missing context, or safety reason.',
+              `Never return more than ${state.maxEditActions} edits.`,
+              'Do not emit markdown fences or prose outside the JSON object.',
+            ].join('\n'),
+          },
+          {
+            role: 'user',
+            content: JSON.stringify(compactUnknownForAi(payload, {
+              maxStringChars: AI_CODE_EDIT_PAYLOAD_STRING_MAX_CHARS,
+              maxArrayItems: Math.max(AI_CODE_EDIT_CANDIDATE_FILE_LIMIT, AI_AGENT_PAYLOAD_ARRAY_LIMIT),
+              maxObjectKeys: AI_AGENT_PAYLOAD_OBJECT_KEY_LIMIT,
+              maxDepth: 4,
+            })),
+          },
+        ],
+      }),
+      signal: controller.signal,
+    });
+
+    const rawText = await response.text();
+    if (!response.ok) {
+      throw new Error(`AI code edit agent request failed (${response.status}): ${rawText.slice(0, 400)}`);
+    }
+
+    const payloadJson = JSON.parse(rawText);
+    const assistantText = extractAssistantTextFromChatCompletionPayload(payloadJson);
+    const jsonObjectText = extractJsonObjectFromText(assistantText);
+    if (!jsonObjectText) {
+      throw new Error('AI code edit agent returned unparsable content.');
+    }
+
+    const parsed = AutonomousEditPlanSchema.parse(JSON.parse(jsonObjectText));
+    const normalizedSummary = String(parsed.summary || '').trim()
+      || (parsed.edits.length > 0
+        ? `${parsed.edits.length} bounded ${requestedOperationMode} edit(s) proposed.`
+        : requestedOperationMode === 'repair' && repairSignalCount > 0
+          ? `No bounded repair edit was identified despite ${repairSignalCount} actionable repair signal(s); the current candidate context may still be too narrow for a safe minimal fix.`
+          : requestedOperationMode === 'improvement' && improvementSignalCount > 0
+            ? `No safe bounded improvement edit was identified for ${improvementSignalCount} improvement signal(s).`
+            : `No safe bounded ${requestedOperationMode} edit was identified for this iteration.`);
+    return {
+      enabled: true,
+      model: config.model,
+      backend: config.baseUrl,
+      summary: normalizedSummary,
+      edits: parsed.edits.slice(0, state.maxEditActions),
+    };
+  } catch (error: any) {
+    return {
+      enabled: true,
+      model: config.model,
+      backend: config.baseUrl,
+      summary: requestedOperationMode === 'repair' && repairSignalCount > 0
+        ? 'AI repair agent request failed before a bounded edit plan was produced.'
+        : requestedOperationMode === 'improvement' && improvementSignalCount > 0
+          ? 'AI improvement agent request failed before a bounded edit plan was produced.'
+          : '',
+      edits: [],
+      error: redactSensitiveText(error?.message || String(error)),
+    };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let timeoutId: NodeJS.Timeout | undefined;
+
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+}
+
+async function listAllMcpTools(client: Client): Promise<McpTool[]> {
+  const tools: McpTool[] = [];
+  let cursor: string | undefined;
+  let pageCount = 0;
+
+  do {
+    const result = cursor
+      ? await client.listTools({ cursor })
+      : await client.listTools();
+
+    const pageTools = Array.isArray(result?.tools) ? result.tools : [];
+    for (const tool of pageTools) {
+      tools.push(McpToolSchema.parse({
+        server: '',
+        name: String(tool?.name || ''),
+        description: typeof tool?.description === 'string' ? tool.description : '',
+        inputSchema: tool?.inputSchema,
+      }));
+    }
+
+    cursor = typeof result?.nextCursor === 'string' && result.nextCursor.trim().length > 0
+      ? result.nextCursor
+      : undefined;
+    pageCount += 1;
+  } while (cursor && pageCount < MCP_MAX_TOOL_PAGES);
+
+  return tools;
+}
+
+async function inspectMcpServer(config: LoadedMcpServerConfig, repoRoot: string): Promise<McpInspection> {
+  if (config.disabled) {
+    return McpInspectionSchema.parse({
+      server: config.name,
+      status: 'skipped',
+      message: 'Disabled in MCP config.',
+      tools: [],
+    });
+  }
+
+  if (config.type !== 'stdio') {
+    return McpInspectionSchema.parse({
+      server: config.name,
+      status: 'skipped',
+      message: `Unsupported MCP transport type: ${config.type}`,
+      tools: [],
+    });
+  }
+
+  const client = new Client({ name: MCP_CLIENT_NAME, version: MCP_CLIENT_VERSION });
+
+  try {
+    const transport = new StdioClientTransport({
+      command: config.command,
+      args: config.args,
+      env: {
+        ...process.env,
+        ...config.env,
+      },
+      cwd: config.cwd ? path.resolve(repoRoot, config.cwd) : repoRoot,
+    } as any);
+
+    await withTimeout(client.connect(transport), MCP_INSPECTION_TIMEOUT_MS, `MCP server ${config.name} connect`);
+    const discoveredTools = await withTimeout(listAllMcpTools(client), MCP_INSPECTION_TIMEOUT_MS, `MCP server ${config.name} listTools`);
+    const filteredTools = discoveredTools
+      .filter((tool) => tool.name.trim().length > 0)
+      .filter((tool) => !config.disabledTools.includes(tool.name))
+      .map((tool) => McpToolSchema.parse({
+        ...tool,
+        server: config.name,
+      }));
+
+    const allowedTools = config.alwaysAllow.filter((toolName) => filteredTools.some((tool) => tool.name === toolName));
+    const messageParts = [`Discovered ${filteredTools.length} tool(s).`];
+    if (allowedTools.length > 0) {
+      messageParts.push(`alwaysAllow=${allowedTools.join(', ')}`);
+    }
+    if (config.disabledTools.length > 0) {
+      messageParts.push(`disabledTools=${config.disabledTools.join(', ')}`);
+    }
+
+    return McpInspectionSchema.parse({
+      server: config.name,
+      status: 'connected',
+      message: messageParts.join(' '),
+      tools: filteredTools,
+    });
+  } catch (error: any) {
+    return McpInspectionSchema.parse({
+      server: config.name,
+      status: 'failed',
+      message: redactSensitiveText(error?.stack || error?.message || String(error)),
+      tools: [],
+    });
+  } finally {
+    await client.close().catch(() => undefined);
+  }
+}
+
+function buildNoteJob(id: string, title: string, command: string): PlannedJob {
+  return {
+    id,
+    target: 'meta',
+    kind: 'note',
+    title,
+    command,
+  };
+}
+
+function buildScopeJobs(
+  scopes: string[],
+  kind: 'build' | 'test',
+): PlannedJob[] {
+  const jobs: PlannedJob[] = [];
+
+  for (const scope of scopes) {
+    const commands = SCOPE_COMMANDS[scope];
+    if (!commands) {
+      continue;
+    }
+
+    const command = kind === 'build' ? commands.build : commands.test;
+    if (command) {
+      jobs.push({
+        id: `${scope}-${kind}`,
+        target: scope,
+        kind,
+        title: `${kind === 'build' ? 'Build' : 'Test'} ${scope}`,
+        command,
+      });
+    }
+  }
+
+  return jobs;
+}
+
+function resolveMcpConfigPath(state: ControlPlaneState): string {
+  const provided = String(state.mcpConfigPath || '').trim();
+  if (provided) return path.resolve(state.repoRoot, provided);
+  return path.resolve(state.repoRoot, '.roo', 'mcp.json');
+}
+
+function readTailLines(filePath: string, maxLines: number = 20): string[] {
+  if (!fs.existsSync(filePath)) return [];
+  try {
+    const raw = fs.readFileSync(filePath, 'utf8');
+    return raw
+      .split(/\r?\n/)
+      .map((line) => sanitizeLogLine(line))
+      .filter(Boolean)
+      .slice(-maxLines);
+  } catch {
+    return [];
+  }
+}
+
+function getFileModifiedTimeMs(filePath: string): number {
+  try {
+    return fs.statSync(filePath).mtimeMs || 0;
+  } catch {
+    return 0;
+  }
+}
+
+function listRecentLogCandidatePaths(state: ControlPlaneState): string[] {
+  const logDir = path.resolve(state.repoRoot, 'apps', 'api', 'logs');
+  const seededCandidates = [
+    path.resolve(state.repoRoot, 'apps', 'api', 'logs', 'probe-errors.jsonl'),
+    path.resolve(state.repoRoot, 'apps', 'api', 'logs', 'fast-image-sync.log'),
+    path.resolve(state.repoRoot, 'apps', 'api', 'logs', 'admin-keys.jsonl'),
+    path.resolve(state.repoRoot, 'apps', 'api', 'logs', 'api-error.jsonl'),
+  ];
+  const discoveredCandidates = fs.existsSync(logDir)
+    ? fs.readdirSync(logDir, { withFileTypes: true })
+        .filter((entry) => entry.isFile() && /\.(?:jsonl|log|txt)$/i.test(entry.name))
+        .map((entry) => path.resolve(logDir, entry.name))
+        .sort((left, right) => getFileModifiedTimeMs(right) - getFileModifiedTimeMs(left))
+        .slice(0, 8)
+    : [];
+
+  return Array.from(new Set([...seededCandidates, ...discoveredCandidates]));
+}
+
+function resolveLogInsights(state: ControlPlaneState): LogInsight[] {
+  return listRecentLogCandidatePaths(state)
+    .map((filePath) => ({ file: path.relative(state.repoRoot, filePath), lines: readTailLines(filePath, DEFAULT_LOG_TAIL_LINE_COUNT) }))
+    .filter((entry) => entry.lines.length > 0)
+    .map((entry) => LogInsightSchema.parse(entry));
+}
+
+function buildRedisConnectionUrl(db: string): string {
+  const rawUrl = String(process.env.CONTROL_PLANE_REDIS_URL || process.env.REDIS_URL || '127.0.0.1:6380').trim();
+  const username = String(process.env.CONTROL_PLANE_REDIS_USERNAME || process.env.REDIS_USERNAME || 'default').trim();
+  const password = String(process.env.CONTROL_PLANE_REDIS_PASSWORD || process.env.REDIS_PASSWORD || '').trim();
+  const tls = String(process.env.CONTROL_PLANE_REDIS_TLS || process.env.REDIS_TLS || 'false').trim().toLowerCase() === 'true';
+  const scheme = tls ? 'rediss' : 'redis';
+  const normalized = rawUrl.includes('://') ? rawUrl : `${scheme}://${rawUrl}`;
+  const url = new URL(normalized);
+  if (username) url.username = username;
+  if (password) url.password = password;
+  url.pathname = `/${db}`;
+  return url.toString();
+}
+
+function normalizeRedisDumpPayload(payload: unknown): Buffer {
+  if (Buffer.isBuffer(payload)) return payload;
+  if (payload instanceof Uint8Array) return Buffer.from(payload);
+  if (payload instanceof ArrayBuffer) return Buffer.from(payload);
+  throw new Error(`Redis DUMP returned a non-binary payload (${typeof payload}).`);
+}
+
+async function cloneProductionRedisToExperimental(): Promise<string> {
+  const preference = String(process.env.CONTROL_PLANE_DATA_SOURCE_PREFERENCE || 'redis').trim().toLowerCase();
+  if (preference !== 'redis') {
+    return 'Redis cloning skipped because CONTROL_PLANE_DATA_SOURCE_PREFERENCE is not redis.';
+  }
+
+  const sourceDb = String(process.env.CONTROL_PLANE_SOURCE_REDIS_DB || CONTROL_PLANE_SOURCE_REDIS_DB);
+  const targetDb = String(process.env.CONTROL_PLANE_TARGET_REDIS_DB || CONTROL_PLANE_TARGET_REDIS_DB);
+  const source = createClient({ url: buildRedisConnectionUrl(sourceDb) });
+  const target = createClient({ url: buildRedisConnectionUrl(targetDb) });
+  let copied = 0;
+  let copyMethod: 'copy' | 'dump-restore' = 'copy';
+
+  try {
+    await source.connect();
+    await target.connect();
+    await target.flushDb();
+
+    for await (const key of source.scanIterator()) {
+      if (copyMethod === 'copy') {
+        try {
+          const copiedResult = await source.sendCommand<number>(['COPY', key, key, 'DB', targetDb, 'REPLACE']);
+          if (copiedResult === 1) copied += 1;
+          continue;
+        } catch {
+          copyMethod = 'dump-restore';
+        }
+      }
+
+      try {
+        const serializedValue = await source.sendCommand<Buffer | Uint8Array | ArrayBuffer | null>(
+          ['DUMP', key],
+          commandOptions({ returnBuffers: true }),
+        );
+        if (!serializedValue) continue;
+        const serializedBuffer = normalizeRedisDumpPayload(serializedValue);
+        const ttlMs = await source.sendCommand<number>(['PTTL', key]);
+        await target.sendCommand([
+          'RESTORE',
+          key,
+          ttlMs > 0 ? String(ttlMs) : '0',
+          serializedBuffer,
+          'REPLACE',
+        ]);
+        copied += 1;
+      } catch (restoreError: any) {
+        const serializedRestoreError = restoreError?.stack
+          || restoreError?.message
+          || JSON.stringify(restoreError)
+          || String(restoreError);
+        throw new Error(`Redis clone fallback failed for key ${key}: ${serializedRestoreError}`);
+      }
+    }
+  } finally {
+    await source.quit().catch(() => undefined);
+    await target.quit().catch(() => undefined);
+  }
+
+  const methodLabel = copyMethod === 'copy' ? 'COPY' : 'DUMP/RESTORE fallback';
+  return `Cloned Redis/Dragonfly DB ${sourceDb} -> DB ${targetDb} (${copied} keys via ${methodLabel}).`;
+}
+
+function loadMcpServers(configPath: string): LoadedMcpServerConfig[] {
+  if (!fs.existsSync(configPath)) return [];
+  try {
+    const raw = fs.readFileSync(configPath, 'utf8');
+    const parsed = JSON.parse(raw);
+    const servers = parsed?.mcpServers && typeof parsed.mcpServers === 'object'
+      ? parsed.mcpServers
+      : {};
+    return Object.entries(servers).map(([name, config]: [string, any]) => ({
+      name,
+      command: String(config?.command || ''),
+      args: coerceStringArray(config?.args),
+      type: typeof config?.type === 'string' && config.type.trim().length > 0 ? config.type.trim() : 'stdio',
+      disabled: config?.disabled === true,
+      alwaysAllow: coerceStringArray(config?.alwaysAllow),
+      disabledTools: coerceStringArray(config?.disabledTools),
+      env: coerceStringRecord(config?.env),
+      cwd: typeof config?.cwd === 'string' && config.cwd.trim().length > 0 ? config.cwd.trim() : undefined,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+function isUnsafeProductionDeployCommand(command: string): boolean {
+  const lower = String(command || '').toLowerCase();
+  return lower.includes('systemctl') && (
+    lower.includes('anygpt.service')
+    || lower.includes('anygpt-api.service')
+    || lower.includes('restart anygpt-api')
+    || lower.includes('restart anygpt.service')
+  );
+}
+
+function getDefaultDeployCommand(state: ControlPlaneState): string {
+  const scopes = uniqueScopes(state.scopes);
+  if (scopes.includes('api') || scopes.includes('api-experimental')) {
+    return SAFE_EXPERIMENTAL_DEPLOY_COMMAND;
+  }
+  return 'echo "No default deploy command for this scope. Provide --deploy-command to enable execution."';
+}
+
+async function inspectMcpNode(state: ControlPlaneState): Promise<Partial<ControlPlaneState>> {
+  const configPath = resolveMcpConfigPath(state);
+  const mcpServerConfigs = loadMcpServers(configPath);
+  const mcpServers = mcpServerConfigs.map((config) => sanitizeMcpServer(config));
+  const mcpInspections: McpInspection[] = [];
+  const logInsights = resolveLogInsights(state);
+  const langSmithConfig = resolveLangSmithRuntimeConfig();
+  const evaluationGatePolicy = resolveStateEvaluationGatePolicy(state);
+  const promptIdentifier = String(state.promptIdentifier || DEFAULT_CONTROL_PLANE_PROMPT_IDENTIFIER).trim()
+    || DEFAULT_CONTROL_PLANE_PROMPT_IDENTIFIER;
+  const promptRef = String(state.promptRef || '').trim();
+  const promptChannel = normalizePromptChannel(state.promptChannel) || DEFAULT_CONTROL_PLANE_PROMPT_CHANNEL;
+  const promptSyncEnabled = state.promptSyncEnabled !== false;
+  const promptSyncChannel = normalizePromptChannel(state.promptSyncChannel) || DEFAULT_CONTROL_PLANE_PROMPT_SYNC_CHANNEL;
+  const promptPromoteChannel = normalizePromptChannel(state.promptPromoteChannel);
+  const projectGovernanceMetadata = buildControlPlaneLangSmithProjectMetadata(
+    promptIdentifier,
+    promptSyncChannel,
+    evaluationGatePolicy,
+  );
+  const localPromptBundle = getDefaultControlPlanePromptBundle();
+  let controlPlanePrompts = localPromptBundle;
+  let selectedPromptReference = '';
+  let selectedPromptSource: ControlPlanePromptSelectionSource = 'local';
+  let selectedPromptCommitHash = '';
+  let promptSyncUrl = '';
+  let promptPromotionUrl = '';
+  const promptSelectionNotes: string[] = [];
+  let langSmithSnapshot: Awaited<ReturnType<typeof collectLangSmithClientSnapshot>> | null = null;
+  let langSmithProject: z.infer<typeof LangSmithProjectSummarySchema> | null = null;
+  let langSmithAccessibleWorkspaces: Array<z.infer<typeof LangSmithWorkspaceSummarySchema>> = [];
+  let langSmithGovernance: z.infer<typeof LangSmithGovernanceSummarySchema> | null = null;
+  const langSmithGovernanceMutations: Array<z.infer<typeof LangSmithGovernanceMutationSchema>> = [];
+  const langSmithNotes: string[] = [];
+  let langSmithEvaluations: Array<z.infer<typeof LangSmithEvaluationSummarySchema>> = [];
+  let controlPlaneRunDataset: z.infer<typeof LangSmithDatasetSummarySchema> | null = null;
+  let seededDataset: z.infer<typeof LangSmithDatasetSummarySchema> | null = null;
+  const plannerNotes = mcpServers.length > 0
+    ? [`MCP config detected at ${configPath} with servers: ${mcpServers.map((server) => server.name).join(', ')}`]
+    : [`No MCP config found at ${configPath}; workflow will use shell jobs only.`];
+
+  if (langSmithConfig) {
+    try {
+      const governanceMutation = await syncLangSmithProjectGovernance(langSmithConfig, {
+        description: CONTROL_PLANE_LANGSMITH_PROJECT_DESCRIPTION,
+        metadata: projectGovernanceMetadata,
+      }).catch(() => null);
+      if (governanceMutation) {
+        langSmithGovernanceMutations.push(LangSmithGovernanceMutationSchema.parse(governanceMutation));
+      }
+      langSmithSnapshot = await collectLangSmithClientSnapshot(langSmithConfig);
+      if (langSmithSnapshot) {
+        langSmithProject = langSmithSnapshot.currentProject
+          ? LangSmithProjectSummarySchema.parse(langSmithSnapshot.currentProject)
+          : null;
+        langSmithAccessibleWorkspaces = (langSmithSnapshot.accessibleWorkspaces || [])
+          .map((workspace) => LangSmithWorkspaceSummarySchema.parse(workspace));
+        langSmithNotes.push(
+          `LangSmith workspace ${langSmithSnapshot.workspace?.displayName || 'unknown'} project ${langSmithSnapshot.projectName} with ${langSmithSnapshot.recentProjects.length} project(s), ${langSmithSnapshot.recentRuns.length} recent run(s), ${langSmithSnapshot.datasets.length} dataset(s), ${langSmithSnapshot.prompts.length} prompt(s), ${langSmithSnapshot.annotationQueues.length} annotation queue(s), and ${langSmithSnapshot.feedback.length} feedback item(s).`,
+        );
+        langSmithNotes.push(...summarizeLangSmithQueueFeedbackSnapshot(langSmithSnapshot));
+
+        const controlPlaneDatasetName = `${langSmithSnapshot.projectName}-control-plane-runs`;
+        controlPlaneRunDataset = await createControlPlaneRunDatasetFromProject(langSmithConfig, controlPlaneDatasetName).catch(() => null);
+        if (controlPlaneRunDataset?.name) {
+          langSmithNotes.push(`LangSmith dataset ready: ${controlPlaneRunDataset.name}`);
+        }
+
+        const seededDatasetName = `${langSmithSnapshot.projectName}-control-plane-seed`;
+        seededDataset = await ensureLangSmithExamplesDataset(
+          langSmithConfig,
+          seededDatasetName,
+          [
+            {
+              inputs: {
+                goal: state.goal,
+                scopes: uniqueScopes(state.scopes),
+                task: 'Summarize current control-plane priorities',
+              },
+              outputs: {
+                answer: 'Prioritize safe control-plane planning, log analysis, MCP inspection, and experimental-only operations.',
+              },
+              metadata: { source: 'control-plane-seed' },
+            },
+          ],
+          {
+            description: 'Seed examples for control-plane evaluation and experimentation',
+          },
+        ).catch(() => null);
+        if (seededDataset?.name) {
+          langSmithNotes.push(`LangSmith seed dataset ready: ${seededDataset.name}`);
+        }
+
+        if (promptSyncEnabled) {
+          promptSyncUrl = await ensureLangSmithPrompt(
+            langSmithConfig,
+            promptIdentifier,
+            buildControlPlanePromptManifest(localPromptBundle),
+            {
+              description: CONTROL_PLANE_PROMPT_DESCRIPTION,
+              tags: uniqueNormalizedStrings([...CONTROL_PLANE_PROMPT_TAGS, promptSyncChannel, 'sync']),
+              readme: CONTROL_PLANE_PROMPT_README,
+            },
+          ).catch(() => null) || '';
+          if (promptSyncUrl) {
+            promptSelectionNotes.push(`LangSmith prompt synced to ${buildLangSmithPromptReference(promptIdentifier, promptSyncChannel)}.`);
+          } else {
+            promptSelectionNotes.push(`LangSmith prompt sync was enabled for ${buildLangSmithPromptReference(promptIdentifier, promptSyncChannel)} but no URL was returned.`);
+          }
+        } else {
+          promptSelectionNotes.push(`LangSmith prompt sync disabled for ${promptIdentifier}; using existing prompt versions only.`);
+        }
+
+        const promptPullCandidates = [
+          promptRef
+            ? {
+                source: 'explicit' as const,
+                ref: promptRef,
+                label: `explicit ref ${promptRef}`,
+              }
+            : null,
+          promptChannel
+            ? {
+                source: 'channel' as const,
+                ref: buildLangSmithPromptReference(promptIdentifier, promptChannel),
+                label: `channel ${promptChannel}`,
+              }
+            : null,
+          {
+            source: 'latest' as const,
+            ref: promptIdentifier,
+            label: `latest prompt ${promptIdentifier}`,
+          },
+        ].filter(Boolean) as Array<{ source: ControlPlanePromptSelectionSource; ref: string; label: string }>;
+
+        const attemptedPromptRefs = new Set<string>();
+        for (const candidate of promptPullCandidates) {
+          if (!candidate.ref || attemptedPromptRefs.has(candidate.ref)) continue;
+          attemptedPromptRefs.add(candidate.ref);
+
+          const pulledPrompt = await pullLangSmithPromptCommit(langSmithConfig, candidate.ref).catch(() => null);
+          if (!pulledPrompt) {
+            promptSelectionNotes.push(`LangSmith prompt ${candidate.label} unavailable; continuing fallback selection.`);
+            continue;
+          }
+
+          const extractedPromptBundle = extractControlPlanePromptBundleFromCommit(pulledPrompt);
+          if (!extractedPromptBundle) {
+            promptSelectionNotes.push(`LangSmith prompt ${candidate.ref} returned an unsupported manifest; continuing fallback selection.`);
+            continue;
+          }
+
+          controlPlanePrompts = extractedPromptBundle;
+          selectedPromptReference = candidate.ref;
+          selectedPromptSource = candidate.source;
+          selectedPromptCommitHash = extractPromptCommitHash(pulledPrompt);
+          break;
+        }
+
+        if (selectedPromptReference) {
+          promptSelectionNotes.push(`LangSmith prompt selected: ${selectedPromptReference}${selectedPromptCommitHash ? ` @ ${selectedPromptCommitHash}` : ''} (${selectedPromptSource}).`);
+        }
+
+        if (promptPromoteChannel) {
+          promptPromotionUrl = await ensureLangSmithPrompt(
+            langSmithConfig,
+            promptIdentifier,
+            buildControlPlanePromptManifest(controlPlanePrompts),
+            {
+              description: CONTROL_PLANE_PROMPT_DESCRIPTION,
+              tags: uniqueNormalizedStrings([...CONTROL_PLANE_PROMPT_TAGS, promptPromoteChannel, 'promotion']),
+              readme: CONTROL_PLANE_PROMPT_README,
+              parentCommitHash: selectedPromptCommitHash || undefined,
+            },
+          ).catch(() => null) || '';
+          if (promptPromotionUrl) {
+            promptSelectionNotes.push(`LangSmith prompt promoted to ${buildLangSmithPromptReference(promptIdentifier, promptPromoteChannel)}: ${promptPromotionUrl}`);
+          } else {
+            promptSelectionNotes.push(`LangSmith prompt promotion requested for ${buildLangSmithPromptReference(promptIdentifier, promptPromoteChannel)} but no URL was returned.`);
+          }
+        }
+
+        if (seededDataset?.name) {
+          const evaluation = await runLangSmithDatasetEvaluation(
+            langSmithConfig,
+            seededDataset.name,
+            async (inputs: Record<string, any>) => ({
+              answer: `Control-plane goal: ${String(inputs?.goal || '').trim() || 'unknown goal'}`,
+            }),
+            `${langSmithSnapshot.projectName}-control-plane-eval`,
+            [
+              (run: any, example: any) => {
+                const prediction = String(run?.outputs?.answer || '');
+                const reference = String(example?.outputs?.answer || '');
+                return {
+                  key: 'contains_goal_context',
+                  score: prediction.length > 0 && reference.length > 0 ? 1 : 0,
+                  comment: `prediction_length=${prediction.length}`,
+                };
+              },
+            ],
+          ).catch(() => null);
+          if (evaluation) {
+            langSmithEvaluations.push(LangSmithEvaluationSummarySchema.parse(evaluation));
+            langSmithNotes.push(`LangSmith evaluation recorded: ${evaluation.experimentName} on ${evaluation.datasetName}`);
+          }
+        }
+      }
+    } catch (error: any) {
+      langSmithNotes.push(`LangSmith snapshot unavailable: ${redactSensitiveText(error?.message || String(error))}`);
+    }
+  } else {
+    if (promptSyncEnabled) {
+      promptSelectionNotes.push(`Prompt sync requested for ${buildLangSmithPromptReference(promptIdentifier, promptSyncChannel)} but LangSmith runtime integration is disabled.`);
+    }
+    if (promptPromoteChannel) {
+      promptSelectionNotes.push(`Prompt promotion requested for ${buildLangSmithPromptReference(promptIdentifier, promptPromoteChannel)} but LangSmith runtime integration is disabled.`);
+    }
+  }
+
+  if (!selectedPromptReference.trim()) {
+    selectedPromptReference = promptIdentifier;
+    promptSelectionNotes.push(`Using local control-plane prompt bundle fallback for ${promptIdentifier}.`);
+  }
+
+  langSmithNotes.push(...promptSelectionNotes);
+
+  const evaluationGateResult = resolveEvaluationGateResult(
+    evaluationGatePolicy,
+    langSmithEvaluations,
+    Boolean(langSmithConfig),
+  );
+  langSmithNotes.push(evaluationGateResult.reason);
+  const blockedActions = describeEvaluationGateBlockedActions(evaluationGateResult);
+  if (blockedActions.length > 0) {
+    langSmithNotes.push(`Evaluation gate blocked: ${blockedActions.join(', ')}`);
+  }
+
+  const mergedLangSmithDatasets = [...(langSmithSnapshot?.datasets || [])];
+  for (const dataset of [controlPlaneRunDataset, seededDataset]) {
+    if (!dataset?.name) continue;
+    if (!mergedLangSmithDatasets.some((entry) => entry.name === dataset.name)) {
+      mergedLangSmithDatasets.unshift(LangSmithDatasetSummarySchema.parse(dataset));
+    }
+  }
+
+  const mergedLangSmithPrompts = [...(langSmithSnapshot?.prompts || [])];
+  if (
+    promptIdentifier
+    && (promptSyncUrl || promptPromotionUrl || selectedPromptSource !== 'local')
+    && !mergedLangSmithPrompts.some((prompt) => prompt.identifier === promptIdentifier)
+  ) {
+    mergedLangSmithPrompts.unshift(LangSmithPromptSummarySchema.parse({
+      identifier: promptIdentifier,
+      description: CONTROL_PLANE_PROMPT_DESCRIPTION,
+      updatedAt: new Date().toISOString(),
+    }));
+  }
+
+  if (langSmithConfig && langSmithSnapshot) {
+    const governanceSnapshot = await collectLangSmithGovernanceSnapshot(langSmithConfig, {
+      snapshot: {
+        ...langSmithSnapshot,
+        accessibleWorkspaces: langSmithAccessibleWorkspaces,
+        currentProject: langSmithProject,
+        datasets: mergedLangSmithDatasets,
+        prompts: mergedLangSmithPrompts,
+      },
+      promptIdentifier,
+      expectedDatasetNames: [`${langSmithSnapshot.projectName}-control-plane-runs`, `${langSmithSnapshot.projectName}-control-plane-seed`],
+      requiredProjectMetadata: projectGovernanceMetadata,
+      mutations: langSmithGovernanceMutations,
+    }).catch(() => null);
+
+    if (governanceSnapshot) {
+      langSmithGovernance = LangSmithGovernanceSummarySchema.parse(governanceSnapshot);
+      langSmithNotes.push(...summarizeLangSmithGovernanceSnapshot(governanceSnapshot));
+    }
+  }
+
+  plannerNotes.push(...langSmithNotes);
+
+  for (const config of mcpServerConfigs) {
+    mcpInspections.push(await inspectMcpServer(config, state.repoRoot));
+  }
+
+  const connectedServers = mcpInspections.filter((inspection) => inspection.status === 'connected');
+  const failedServers = mcpInspections.filter((inspection) => inspection.status === 'failed');
+  const discoveredToolCount = connectedServers.reduce((total, inspection) => total + inspection.tools.length, 0);
+
+  if (connectedServers.length > 0) {
+    plannerNotes.push(`Connected to ${connectedServers.length} MCP server(s) and discovered ${discoveredToolCount} tool(s).`);
+    for (const inspection of connectedServers) {
+      const toolNames = inspection.tools.map((tool) => tool.name).join(', ') || 'none';
+      plannerNotes.push(`MCP server ${inspection.server} tools: ${toolNames}`);
+    }
+  }
+
+  if (failedServers.length > 0) {
+    for (const inspection of failedServers) {
+      plannerNotes.push(`MCP server ${inspection.server} inspection failed: ${inspection.message}`);
+    }
+  }
+
+  if (logInsights.length > 0) {
+    plannerNotes.push(`Loaded ${logInsights.length} log input(s) for planning and fix guidance.`);
+  }
+
+    return {
+      mcpConfigPath: configPath,
+      mcpServers,
+      mcpInspections,
+      logInsights,
+      promptIdentifier,
+      promptRef,
+      promptChannel,
+      promptSyncEnabled,
+      promptSyncChannel,
+      promptPromoteChannel,
+      controlPlanePrompts,
+      selectedPromptReference,
+      selectedPromptSource,
+      selectedPromptCommitHash,
+      promptSyncUrl,
+      promptPromotionUrl,
+      promptSelectionNotes,
+      langSmithEnabled: Boolean(langSmithConfig),
+      langSmithProjectName: langSmithProject?.name || langSmithSnapshot?.projectName || langSmithConfig?.projectName || '',
+      langSmithWorkspace: langSmithSnapshot?.workspace || null,
+      langSmithAccessibleWorkspaces,
+      langSmithProject,
+      langSmithProjects: langSmithSnapshot?.recentProjects || [],
+      langSmithRuns: langSmithSnapshot?.recentRuns || [],
+      langSmithDatasets: mergedLangSmithDatasets,
+      langSmithPrompts: mergedLangSmithPrompts,
+      langSmithAnnotationQueues: langSmithSnapshot?.annotationQueues || [],
+      langSmithAnnotationQueueItems: langSmithSnapshot?.annotationQueueItems || [],
+      langSmithFeedback: langSmithSnapshot?.feedback || [],
+      langSmithEvaluations,
+      langSmithGovernance,
+      langSmithNotes,
+      evaluationGatePolicy,
+      evaluationGateResult,
+      plannerNotes,
+    };
+}
+
+async function plannerAgentNode(state: ControlPlaneState): Promise<Partial<ControlPlaneState>> {
+  const scopes = uniqueScopes(state.scopes);
+  const notes = [...state.plannerNotes];
+  const unsupportedScopes = scopes.filter((scope) => !SCOPE_COMMANDS[scope]);
+  if (unsupportedScopes.length > 0) {
+    notes.push(`Unsupported scopes need manual mapping: ${unsupportedScopes.join(', ')}`);
+  }
+  if (scopes.includes('api') || scopes.includes('api-experimental')) {
+    notes.push(`API jobs are pinned to experimental-safe build/test defaults and isolated control-plane data files under ${CONTROL_PLANE_DATA_DIR}.`);
+    notes.push(`Default deploy target is ${SAFE_EXPERIMENTAL_DEPLOY_COMMAND}; production service restarts targeting anygpt.service are intentionally blocked.`);
+    notes.push(`Experimental test jobs clone Redis/Dragonfly DB ${CONTROL_PLANE_SOURCE_REDIS_DB} into DB ${CONTROL_PLANE_TARGET_REDIS_DB} before execution by default.`);
+  }
+
+  for (const insight of state.logInsights) {
+    if (insight.lines.length === 0) continue;
+    notes.push(`Log input ${insight.file}: ${insight.lines[insight.lines.length - 1]}`);
+  }
+
+  const aiPlanner = await callAiNotesAgent(
+    'planner',
+    state,
+    {
+      ...buildSharedAiAgentPayload(state),
+      currentNotes: compactStringArrayForAi(notes, AI_AGENT_CONTEXT_NOTE_LIMIT),
+    },
+    state.controlPlanePrompts.planner,
+  );
+
+  const prefixedAiNotes = aiPlanner.notes.map((note) => `AI planner agent: ${note}`);
+  const mergedNotes = appendUniqueNotes(notes, prefixedAiNotes);
+  if (aiPlanner.error) {
+    mergedNotes.push(`AI planner agent unavailable: ${aiPlanner.error}`);
+  }
+
+  return {
+    scopes,
+    plannerNotes: mergedNotes,
+    aiAgentEnabled: state.aiAgentEnabled || aiPlanner.enabled,
+    aiAgentBackend: state.aiAgentBackend || aiPlanner.backend,
+    aiAgentModel: state.aiAgentModel || aiPlanner.model,
+    plannerAgentInsights: aiPlanner.notes,
+  };
+}
+
+async function buildAgentNode(state: ControlPlaneState): Promise<Partial<ControlPlaneState>> {
+  const buildJobs = buildScopeJobs(uniqueScopes(state.scopes), 'build');
+  const aiBuild = await callAiNotesAgent(
+    'build',
+    state,
+    {
+      ...buildSharedAiAgentPayload(state),
+      buildJobs,
+    },
+    state.controlPlanePrompts.build,
+  );
+
+  return {
+    buildJobs,
+    plannerNotes: appendUniqueNotes(
+      state.plannerNotes,
+      aiBuild.notes.map((note) => `AI build agent: ${note}`),
+    ),
+    aiAgentEnabled: state.aiAgentEnabled || aiBuild.enabled,
+    aiAgentBackend: state.aiAgentBackend || aiBuild.backend,
+    aiAgentModel: state.aiAgentModel || aiBuild.model,
+    buildAgentInsights: aiBuild.notes,
+  };
+}
+
+async function qualityAgentNode(state: ControlPlaneState): Promise<Partial<ControlPlaneState>> {
+  const testJobs = buildScopeJobs(uniqueScopes(state.scopes), 'test');
+  const aiQuality = await callAiNotesAgent(
+    'quality',
+    state,
+    {
+      ...buildSharedAiAgentPayload(state),
+      testJobs,
+    },
+    state.controlPlanePrompts.quality,
+  );
+
+  return {
+    testJobs,
+    plannerNotes: appendUniqueNotes(
+      state.plannerNotes,
+      aiQuality.notes.map((note) => `AI quality agent: ${note}`),
+    ),
+    aiAgentEnabled: state.aiAgentEnabled || aiQuality.enabled,
+    aiAgentBackend: state.aiAgentBackend || aiQuality.backend,
+    aiAgentModel: state.aiAgentModel || aiQuality.model,
+    qualityAgentInsights: aiQuality.notes,
+  };
+}
+
+async function deployAgentNode(state: ControlPlaneState): Promise<Partial<ControlPlaneState>> {
+  const deployJobs: PlannedJob[] = [];
+
+  if (state.allowDeploy) {
+    const chosenCommand = state.deployCommand.trim() || getDefaultDeployCommand(state);
+    deployJobs.push({
+      id: 'deploy',
+      target: 'repo',
+      kind: 'deploy',
+      title: 'Deploy repository changes',
+      command: isUnsafeProductionDeployCommand(chosenCommand)
+        ? 'echo "Blocked unsafe deploy command that targeted the production AnyGPT service"'
+        : chosenCommand,
+      });
+  }
+
+  const aiDeploy = await callAiNotesAgent(
+    'deploy',
+    state,
+    {
+      ...buildSharedAiAgentPayload(state),
+      deployJobs,
+    },
+    state.controlPlanePrompts.deploy,
+  );
+
+  return {
+    deployJobs,
+    plannerNotes: appendUniqueNotes(
+      state.plannerNotes,
+      aiDeploy.notes.map((note) => `AI deploy agent: ${note}`),
+    ),
+    aiAgentEnabled: state.aiAgentEnabled || aiDeploy.enabled,
+    aiAgentBackend: state.aiAgentBackend || aiDeploy.backend,
+    aiAgentModel: state.aiAgentModel || aiDeploy.model,
+    deployAgentInsights: aiDeploy.notes,
+  };
+}
+
+async function repairIntentNode(state: ControlPlaneState): Promise<Partial<ControlPlaneState>> {
+  const repairIntent = deriveRepairIntent(state);
+  const autonomousOperationMode: AutonomousOperationMode = !state.autonomousEditEnabled
+    ? 'idle'
+    : (hasActionableRepairSignals(repairIntent.signals) ? 'repair' : 'improvement');
+  const improvementIntent = autonomousOperationMode === 'improvement'
+    ? deriveImprovementIntent(state)
+    : { summary: '', signals: [] };
+  const notes = [
+    `Autonomous lane: ${autonomousOperationMode}`,
+    `Repair intent: ${repairIntent.summary}`,
+    ...repairIntent.signals.map((signal) => `Repair signal: ${signal}`),
+  ];
+  if (improvementIntent.summary.trim()) {
+    notes.push(`Improvement intent: ${improvementIntent.summary}`);
+  }
+  notes.push(...improvementIntent.signals.map((signal) => `Improvement signal: ${signal}`));
+
+  return {
+    autonomousOperationMode,
+    repairIntentSummary: repairIntent.summary,
+    repairSignals: repairIntent.signals,
+    improvementIntentSummary: improvementIntent.summary,
+    improvementSignals: improvementIntent.signals,
+    repairStatus: state.autonomousEditEnabled && autonomousOperationMode === 'repair' ? 'planned' : 'not-needed',
+    repairDecisionReason: '',
+    repairPromotedPaths: [],
+    repairRollbackPaths: [],
+    repairSmokeJobs: [],
+    repairSmokeResults: [],
+    postRepairValidationJobs: [],
+    postRepairValidationResults: [],
+    postRepairValidationStatus: 'not-needed',
+    experimentalRestartStatus: 'not-needed',
+    experimentalRestartReason: '',
+    repairSessionManifest: null,
+    repairNotes: appendUniqueNotes(state.repairNotes, notes),
+    plannerNotes: appendUniqueNotes(state.plannerNotes, notes),
+  };
+}
+
+async function autonomousEditPlannerNode(state: ControlPlaneState): Promise<Partial<ControlPlaneState>> {
+  if (!state.autonomousEditEnabled) {
+    return {
+      proposedEdits: [],
+      appliedEdits: [],
+      autonomousEditNotes: [],
+      repairStatus: 'not-needed',
+    };
+  }
+
+  const candidatePaths = buildAutonomousEditCandidatePaths(uniqueScopes(state.scopes));
+  const candidateFiles = readAutonomousEditContext(
+    state.repoRoot,
+    uniqueScopes(state.scopes),
+    state.editAllowlist,
+    state.editDenylist,
+  );
+  const candidatePrioritySources = [
+    ...state.repairSignals,
+    ...state.improvementSignals,
+    ...state.plannerNotes,
+    ...state.buildAgentInsights,
+    ...state.qualityAgentInsights,
+    ...state.deployAgentInsights,
+  ].slice(-40);
+  const referencedCandidatePaths = new Set<string>();
+  for (const sourceText of candidatePrioritySources) {
+    for (const match of String(sourceText || '').match(/apps\/[A-Za-z0-9._/-]+\.(?:ts|js|json|md|mts|service)/g) || []) {
+      referencedCandidatePaths.add(match);
+    }
+  }
+  const prioritizedCandidateFiles = [...candidateFiles]
+    .sort((left, right) => {
+      const rank = (candidatePath: string): number => {
+        if (referencedCandidatePaths.has(candidatePath)) return 0;
+        const hotPathIndex = [
+          'apps/api/providers/handler.ts',
+          'apps/api/providers/openrouter.ts',
+          'apps/api/providers/openai.ts',
+          'apps/api/providers/gemini.ts',
+          'apps/api/modules/openaiProviderSelection.ts',
+          'apps/api/modules/openaiRequestSupport.ts',
+          'apps/api/modules/openaiRouteUtils.ts',
+          'apps/api/routes/openai.ts',
+          'apps/langgraph-control-plane/src/workflow.ts',
+          'apps/langgraph-control-plane/src/index.ts',
+        ].indexOf(candidatePath);
+        if (hotPathIndex >= 0) return 10 + hotPathIndex;
+        if (candidatePath.startsWith('apps/api/')) return 100;
+        return 200;
+      };
+      return rank(left.path) - rank(right.path);
+    })
+    .slice(0, AI_CODE_EDIT_CANDIDATE_FILE_LIMIT)
+    .map((file) => ({
+      ...file,
+      content: truncateTextMiddle(file.content, AI_CODE_EDIT_CANDIDATE_FILE_MAX_CHARS),
+    }));
+
+  if (candidateFiles.length === 0) {
+    const notes = ['AI autonomous edit agent: no allowed candidate files were available for autonomous code changes.'];
+    return {
+      proposedEdits: [],
+      appliedEdits: [],
+      autonomousEditNotes: notes,
+      repairStatus: 'not-needed',
+      plannerNotes: appendUniqueNotes(state.plannerNotes, notes),
+    };
+  }
+
+  const runtimeOverride = loadRuntimeAutonomousEditPlanOverride(state);
+  const operationMode: AutonomousOperationMode = state.autonomousOperationMode === 'repair' || state.autonomousOperationMode === 'improvement'
+    ? state.autonomousOperationMode
+    : (hasActionableRepairSignals(state.repairSignals) ? 'repair' : 'improvement');
+  const aiEditPlan = runtimeOverride.plan
+    ? {
+        enabled: false,
+        model: state.aiAgentModel,
+        backend: runtimeOverride.source || 'runtime override',
+        summary: runtimeOverride.plan.summary,
+        edits: runtimeOverride.plan.edits,
+      }
+    : await callAiCodeEditAgent(state, {
+        threadId: state.threadId,
+        goal: state.goal,
+        scopes: uniqueScopes(state.scopes),
+        allowlist: state.editAllowlist,
+        denylist: state.editDenylist,
+        maxEditActions: state.maxEditActions,
+        currentPlannerNotes: compactStringArrayForAi(state.plannerNotes, AI_AGENT_CONTEXT_NOTE_LIMIT),
+        operationMode,
+        repairIntent: {
+          summary: truncateTextMiddle(state.repairIntentSummary, AI_AGENT_PAYLOAD_STRING_MAX_CHARS),
+          signals: compactStringArrayForAi(state.repairSignals, AI_AGENT_SIGNAL_PAYLOAD_LIMIT),
+        },
+        improvementIntent: {
+          summary: truncateTextMiddle(state.improvementIntentSummary, AI_AGENT_PAYLOAD_STRING_MAX_CHARS),
+          signals: compactStringArrayForAi(state.improvementSignals, AI_AGENT_SIGNAL_PAYLOAD_LIMIT),
+        },
+        autonomousCandidatePaths: candidatePaths.slice(0, AI_CODE_EDIT_CANDIDATE_PATH_LIMIT),
+        autonomousCandidateFiles: prioritizedCandidateFiles,
+        sharedPayload: buildSharedAiAgentPayload(state),
+      });
+
+  const notes: string[] = [];
+  if (runtimeOverride.plan) {
+    notes.push(`Runtime autonomous edit plan override loaded from ${runtimeOverride.source}.`);
+  }
+  if (runtimeOverride.error) {
+    notes.push(`Runtime autonomous edit plan override invalid: ${runtimeOverride.error}`);
+  }
+  if (aiEditPlan.summary.trim()) {
+    notes.push(`AI autonomous ${operationMode} agent: ${aiEditPlan.summary.trim()}`);
+  }
+  if (aiEditPlan.error) {
+    notes.push(`AI autonomous ${operationMode} agent unavailable: ${aiEditPlan.error}`);
+  }
+
+  const proposedEdits = aiEditPlan.edits.slice(0, state.maxEditActions);
+  for (const edit of proposedEdits) {
+    notes.push(`AI autonomous edit proposal: ${edit.type} ${edit.path} — ${edit.reason}`);
+  }
+  if (proposedEdits.length === 0 && !aiEditPlan.error) {
+    notes.push(
+      operationMode === 'repair' && state.repairSignals.length > 0
+        ? `No bounded repair edit was proposed despite ${state.repairSignals.length} actionable repair signal(s).`
+        : 'No bounded improvement edit was proposed for this iteration.',
+    );
+  }
+
+  return {
+    autonomousOperationMode: operationMode,
+    proposedEdits,
+    appliedEdits: [],
+    autonomousEditNotes: notes,
+    repairStatus: proposedEdits.length > 0 ? 'planned' : 'not-needed',
+    repairDecisionReason: '',
+    repairPromotedPaths: [],
+    repairRollbackPaths: [],
+    repairSmokeJobs: [],
+    repairSmokeResults: [],
+    postRepairValidationJobs: [],
+    postRepairValidationResults: [],
+    postRepairValidationStatus: 'not-needed',
+    experimentalRestartStatus: 'not-needed',
+    experimentalRestartReason: '',
+    repairSessionManifest: null,
+    repairNotes: appendUniqueNotes(state.repairNotes, notes),
+    plannerNotes: appendUniqueNotes(state.plannerNotes, notes),
+    aiAgentEnabled: state.aiAgentEnabled || aiEditPlan.enabled,
+    aiAgentBackend: state.aiAgentBackend || aiEditPlan.backend,
+    aiAgentModel: state.aiAgentModel || aiEditPlan.model,
+  };
+}
+
+async function approvalGateNode(state: ControlPlaneState): Promise<Partial<ControlPlaneState>> {
+  const pendingApprovals = buildApprovalRequests(state);
+
+  if (pendingApprovals.length === 0) {
+    return {
+      pendingApprovals,
+      approvalGranted: true,
+      approvalMessage: 'No risky operations require approval.',
+    };
+  }
+
+  if (state.approvalMode === 'auto') {
+    return {
+      pendingApprovals,
+      approvalGranted: true,
+      approvalMessage: `Auto-approved ${pendingApprovals.length} risky operation(s).`,
+    };
+  }
+
+  const decision = interrupt({
+    type: 'approval_required',
+    thread_id: state.threadId,
+    message: `Approval is required for ${pendingApprovals.length} risky operation(s). Resume with \"approve\" to continue or \"deny\" to stop.`,
+    operations: pendingApprovals,
+  });
+  const resolved = resolveApprovalDecision(decision);
+
+  return {
+    pendingApprovals,
+    approvalGranted: resolved.approved,
+    approvalMessage: resolved.message,
+  };
+}
+
+async function applyAutonomousEditsNode(state: ControlPlaneState): Promise<Partial<ControlPlaneState>> {
+  if (!shouldApplyAutonomousEditsForState(state)) {
+    return {
+      appliedEdits: [],
+      repairSmokeJobs: [],
+      repairSmokeResults: [],
+    };
+  }
+
+  const { appliedEdits, sessionManifest } = applyAutonomousEditsWithManifest(
+    state.repoRoot,
+    state.proposedEdits.slice(0, state.maxEditActions),
+    state.editAllowlist,
+    state.editDenylist,
+  );
+
+  const notes = appliedEdits.map((edit: AppliedAutonomousEdit) => `Autonomous edit ${edit.status}: ${edit.path} — ${edit.message}`);
+  const touchedPaths = getRepairTouchedPaths({ appliedEdits, repairSessionManifest: sessionManifest });
+  const firstFailure = appliedEdits.find((edit) => edit.status === 'failed');
+
+  return {
+    appliedEdits,
+    repairSessionManifest: sessionManifest,
+    repairStatus: firstFailure ? 'failed' : (touchedPaths.length > 0 ? 'planned' : 'not-needed'),
+    repairDecisionReason: firstFailure
+      ? `Autonomous repair edit application failed before promotion: ${firstFailure.path} — ${firstFailure.message}`
+      : '',
+    repairPromotedPaths: [],
+    repairRollbackPaths: [],
+    repairSmokeJobs: [],
+    repairSmokeResults: [],
+    repairNotes: appendUniqueNotes(state.repairNotes, notes),
+    plannerNotes: appendUniqueNotes(state.plannerNotes, notes),
+  };
+}
+
+async function runShellCommand(
+  command: string,
+  cwd: string,
+  options?: { timeoutMs?: number },
+): Promise<{ exitCode: number; output: string; timedOut: boolean }> {
+  return new Promise((resolve) => {
+    const child = spawn('bash', ['-lc', command], {
+      cwd,
+      env: process.env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    let output = '';
+    let settled = false;
+    const timeoutMs = options?.timeoutMs;
+    const finish = (exitCode: number, timedOut: boolean) => {
+      if (settled) return;
+      settled = true;
+      resolve({ exitCode, output, timedOut });
+    };
+
+    let timeoutId: NodeJS.Timeout | undefined;
+    if (timeoutMs && timeoutMs > 0) {
+      timeoutId = setTimeout(() => {
+        output += `\n[command timed out after ${timeoutMs}ms]`;
+        child.kill('SIGTERM');
+        finish(124, true);
+      }, timeoutMs);
+    }
+
+    child.stdout.on('data', (chunk) => {
+      output += chunk.toString();
+    });
+    child.stderr.on('data', (chunk) => {
+      output += chunk.toString();
+    });
+    child.on('error', (error) => {
+      output += `\n${error instanceof Error ? error.message : String(error)}`;
+      if (timeoutId) clearTimeout(timeoutId);
+      finish(1, false);
+    });
+    child.on('close', (code) => {
+      if (timeoutId) clearTimeout(timeoutId);
+      finish(typeof code === 'number' ? code : 1, false);
+    });
+  });
+}
+
+async function executePlannedJobs(
+  state: ControlPlaneState,
+  jobs: PlannedJob[],
+  options?: { timeoutMs?: number },
+): Promise<ExecutedJob[]> {
+  const cwd = path.resolve(state.repoRoot);
+  const executedJobs: ExecutedJob[] = [];
+  let redisCloneDone = false;
+
+  for (const job of jobs) {
+    if (job.kind === 'note') {
+      executedJobs.push({ ...job, status: 'skipped', exitCode: 0, output: job.command });
+      continue;
+    }
+
+    if (job.kind === 'deploy' && !state.deployCommand.trim()) {
+      const defaultDeploy = getDefaultDeployCommand(state);
+      if (!defaultDeploy.trim()) {
+        executedJobs.push({
+          ...job,
+          status: 'skipped',
+          exitCode: 0,
+          output: 'Deploy skipped because no deploy command was provided.',
+        });
+        continue;
+      }
+    }
+
+    if (job.kind === 'deploy' && isUnsafeProductionDeployCommand(job.command)) {
+      executedJobs.push({
+        ...job,
+        status: 'skipped',
+        exitCode: 0,
+        output: 'Deploy skipped because the command targeted the production AnyGPT service.',
+      });
+      continue;
+    }
+
+    if (!redisCloneDone && job.kind === 'test' && (job.target === 'api' || job.target === 'api-experimental')) {
+      try {
+        const cloneSummary = await cloneProductionRedisToExperimental();
+        executedJobs.push({
+          id: 'redis-clone',
+          target: job.target,
+          kind: 'note',
+          title: 'Clone production Redis/Dragonfly DB into experimental DB',
+          command: cloneSummary,
+          status: 'success',
+          exitCode: 0,
+          output: cloneSummary,
+        });
+      } catch (error: any) {
+        executedJobs.push({
+          id: 'redis-clone',
+          target: job.target,
+          kind: 'note',
+          title: 'Clone production Redis/Dragonfly DB into experimental DB',
+          command: 'clone failed',
+          status: 'failed',
+          exitCode: 1,
+          output: error?.stack || error?.message || String(error),
+        });
+        break;
+      }
+      redisCloneDone = true;
+    }
+
+    const result = await runShellCommand(job.command, cwd, options);
+    executedJobs.push({
+      ...job,
+      status: result.exitCode === 0 ? 'success' : 'failed',
+      exitCode: result.exitCode,
+      output: result.output,
+    });
+
+    if (result.exitCode !== 0) {
+      break;
+    }
+  }
+
+  return executedJobs;
+}
+
+async function repairValidateNode(state: ControlPlaneState): Promise<Partial<ControlPlaneState>> {
+  const appliedPaths = getAppliedRepairPaths(state);
+  if (appliedPaths.length === 0) {
+    const notes = ['Repair smoke validation skipped because no autonomous repair edit was applied.'];
+    return {
+      repairSmokeJobs: [],
+      repairSmokeResults: [],
+      repairNotes: appendUniqueNotes(state.repairNotes, notes),
+      plannerNotes: appendUniqueNotes(state.plannerNotes, notes),
+    };
+  }
+
+  const repairSmokeJobs = buildRepairSmokeJobs(state);
+  const repairSmokeResults = await executePlannedJobs(state, repairSmokeJobs, { timeoutMs: REPAIR_SMOKE_TIMEOUT_MS });
+  const notes = repairSmokeResults.length > 0
+    ? repairSmokeResults.map((job) => `Repair smoke ${job.status}: ${job.title}${typeof job.exitCode === 'number' ? ` (exit ${job.exitCode})` : ''}`)
+    : ['Repair smoke validation completed without executable jobs.'];
+
+  return {
+    repairSmokeJobs,
+    repairSmokeResults,
+    repairNotes: appendUniqueNotes(state.repairNotes, notes),
+    plannerNotes: appendUniqueNotes(state.plannerNotes, notes),
+  };
+}
+
+async function repairEvaluateNode(state: ControlPlaneState): Promise<Partial<ControlPlaneState>> {
+  const appliedPaths = getAppliedRepairPaths(state);
+  if (appliedPaths.length === 0) {
+    return {};
+  }
+
+  const evaluationGatePolicy = resolveStateEvaluationGatePolicy(state);
+  const langSmithConfig = resolveLangSmithRuntimeConfig();
+  const smokeFailures = state.repairSmokeResults.filter((job) => job.status === 'failed');
+  const smokePassed = !hasFailedExecutedJobs(state.repairSmokeResults);
+  let nextEvaluations = state.langSmithEvaluations.map((evaluation) => LangSmithEvaluationSummarySchema.parse(evaluation));
+  const notes: string[] = [];
+  const repairToken = normalizePromptChannel(state.repairSessionManifest?.sessionId || state.threadId || 'repair') || 'repair';
+  const repairProjectName = state.langSmithProjectName || langSmithConfig?.projectName || 'anygpt-control-plane';
+  const repairDatasetName = `${repairProjectName}-control-plane-repair-${repairToken}`;
+
+  if (langSmithConfig) {
+    const repairDataset = await ensureLangSmithExamplesDataset(
+      langSmithConfig,
+      repairDatasetName,
+      [
+        {
+          inputs: {
+            goal: state.goal,
+            repairIntent: state.repairIntentSummary,
+            repairSignals: state.repairSignals,
+            touchedFiles: appliedPaths,
+            smokeFailureCount: smokeFailures.length,
+          },
+          outputs: {
+            answer: smokePassed ? 'repair-smoke-passed' : 'repair-smoke-failed',
+          },
+          metadata: {
+            source: 'control-plane-repair-eval',
+            thread_id: state.threadId,
+            repair_session_id: state.repairSessionManifest?.sessionId || '',
+          },
+        },
+      ],
+      {
+        description: 'Runtime repair-loop smoke dataset',
+      },
+    ).catch(() => null);
+
+    if (repairDataset?.name) {
+      notes.push(`Repair evaluation dataset ready: ${repairDataset.name}`);
+      const evaluation = await runLangSmithDatasetEvaluation(
+        langSmithConfig,
+        repairDataset.name,
+        async (inputs: Record<string, any>) => ({
+          answer: [
+            `goal=${String(inputs?.goal || '').trim()}`,
+            `repair_intent=${String(inputs?.repairIntent || '').trim()}`,
+            `touched_files=${appliedPaths.join(',') || 'none'}`,
+            `smoke=${smokePassed ? 'passed' : 'failed'}`,
+            `smoke_failures=${smokeFailures.length}`,
+          ].join(' | '),
+        }),
+        `${repairProjectName}-control-plane-repair-eval`,
+        [
+          (run: any, example: any) => {
+            const answer = String(run?.outputs?.answer || '');
+            const goal = String(example?.inputs?.goal || '').trim();
+            const goalAligned = goal ? answer.includes(`goal=${goal}`) : answer.includes('goal=');
+            const repairGateScore = goalAligned && smokePassed ? 1 : 0;
+            return [
+              {
+                key: evaluationGatePolicy.metricKey,
+                score: repairGateScore,
+                comment: `repair_smoke=${smokePassed ? 'passed' : 'failed'} touched=${appliedPaths.length}`,
+              },
+              {
+                key: 'repair_smoke_passed',
+                score: smokePassed ? 1 : 0,
+                comment: `repair_smoke_failures=${smokeFailures.length}`,
+              },
+            ];
+          },
+        ],
+      ).catch(() => null);
+
+      if (evaluation) {
+        nextEvaluations = [...nextEvaluations, LangSmithEvaluationSummarySchema.parse(evaluation)];
+        notes.push(`Repair evaluation recorded: ${evaluation.experimentName || repairDataset.name}`);
+      }
+    }
+  } else {
+    notes.push('Repair evaluation reused existing evaluation-gate state because LangSmith runtime integration is unavailable.');
+  }
+
+  const evaluationGateResult = resolveEvaluationGateResult(
+    evaluationGatePolicy,
+    nextEvaluations,
+    state.langSmithEnabled || Boolean(langSmithConfig),
+  );
+  notes.push(`Repair evaluation gate: ${evaluationGateResult.reason}`);
+
+  return {
+    langSmithEvaluations: nextEvaluations,
+    evaluationGateResult,
+    repairNotes: appendUniqueNotes(state.repairNotes, notes),
+    plannerNotes: appendUniqueNotes(state.plannerNotes, notes),
+  };
+}
+
+async function repairDecisionNode(state: ControlPlaneState): Promise<Partial<ControlPlaneState>> {
+  const appliedPaths = getAppliedRepairPaths(state);
+  const smokeFailures = state.repairSmokeResults.filter((job) => job.status === 'failed');
+  const evaluationGateResult = resolveStateEvaluationGateResult(state);
+  const autonomousLaneLabel = state.autonomousOperationMode === 'improvement' ? 'Improvement' : 'Repair';
+  let repairStatus: RepairStatus = 'not-needed';
+  let repairDecisionReason = state.autonomousOperationMode === 'improvement'
+    ? 'No bounded improvement edit was applied, so no promotion or rollback was required.'
+    : 'No autonomous repair edit was applied, so no promotion or rollback was required.';
+  let repairPromotedPaths: string[] = [];
+
+  if (appliedPaths.length === 0) {
+    if (state.appliedEdits.some((edit) => edit.status === 'failed')) {
+      repairStatus = 'failed';
+      repairDecisionReason = state.repairDecisionReason || `Autonomous ${autonomousLaneLabel.toLowerCase()} edit application failed before any change could be promoted.`;
+    }
+  } else if (smokeFailures.length > 0) {
+    repairStatus = 'failed';
+    repairDecisionReason = `${autonomousLaneLabel} smoke validation failed: ${smokeFailures[0].title}${typeof smokeFailures[0].exitCode === 'number' ? ` (exit ${smokeFailures[0].exitCode})` : ''}`;
+  } else if (evaluationGateResult.blocksAutonomousEdits || evaluationGateResult.blocksExecution) {
+    repairStatus = 'failed';
+    repairDecisionReason = `${autonomousLaneLabel} promotion blocked by the evaluation gate: ${evaluationGateResult.reason}`;
+  } else {
+    repairStatus = 'promoted';
+    repairPromotedPaths = appliedPaths;
+    repairDecisionReason = `${autonomousLaneLabel} promoted after ${state.repairSmokeResults.filter((job) => job.status === 'success').length} successful smoke job(s) and evaluation gate status ${evaluationGateResult.status}.`;
+  }
+
+  return {
+    repairStatus,
+    repairDecisionReason,
+    repairPromotedPaths,
+    repairNotes: appendUniqueNotes(state.repairNotes, [repairDecisionReason]),
+    plannerNotes: appendUniqueNotes(state.plannerNotes, [repairDecisionReason]),
+  };
+}
+
+async function postRepairValidateNode(state: ControlPlaneState): Promise<Partial<ControlPlaneState>> {
+  if (!shouldRunPostRepairValidation(state)) {
+    return {
+      postRepairValidationJobs: [],
+      postRepairValidationResults: [],
+      postRepairValidationStatus: 'not-needed',
+    };
+  }
+
+  const postRepairValidationJobs = buildPostRepairValidationJobs(state);
+  const postRepairValidationResults = await executePlannedJobs(
+    state,
+    postRepairValidationJobs,
+    { timeoutMs: POST_REPAIR_VALIDATION_TIMEOUT_MS },
+  );
+  const failures = postRepairValidationResults.filter((job) => job.status === 'failed');
+  const postRepairValidationStatus: PostRepairValidationStatus = failures.length > 0 ? 'failed' : 'passed';
+  const validationReason = failures.length > 0
+    ? `Post-repair validation failed: ${failures[0].title}${typeof failures[0].exitCode === 'number' ? ` (exit ${failures[0].exitCode})` : ''}`
+    : `Post-repair validation passed with ${postRepairValidationResults.filter((job) => job.status === 'success').length} successful job(s).`;
+  const notes = postRepairValidationResults.length > 0
+    ? postRepairValidationResults.map((job) => `Post-repair validation ${job.status}: ${job.title}${typeof job.exitCode === 'number' ? ` (exit ${job.exitCode})` : ''}`)
+    : ['Post-repair validation completed without executable jobs.'];
+  notes.push(validationReason);
+
+  return {
+    postRepairValidationJobs,
+    postRepairValidationResults,
+    postRepairValidationStatus,
+    repairStatus: failures.length > 0 ? 'failed' : state.repairStatus,
+    repairDecisionReason: failures.length > 0 ? validationReason : state.repairDecisionReason,
+    repairNotes: appendUniqueNotes(state.repairNotes, notes),
+    plannerNotes: appendUniqueNotes(state.plannerNotes, notes),
+  };
+}
+
+async function restartExperimentalServiceNode(state: ControlPlaneState): Promise<Partial<ControlPlaneState>> {
+  const touchesApiCode = getRepairTouchedPaths(state).some((candidatePath) => candidatePath.startsWith('apps/api/'));
+  if (!touchesApiCode || state.repairStatus !== 'promoted') {
+    return {
+      experimentalRestartStatus: 'not-needed',
+      experimentalRestartReason: '',
+    };
+  }
+
+  if (!state.autonomous) {
+    const reason = 'Experimental auto-restart is reserved for autonomous runs; manual runs keep restart decisions operator-controlled.';
+    return {
+      experimentalRestartStatus: 'skipped',
+      experimentalRestartReason: reason,
+      repairNotes: appendUniqueNotes(state.repairNotes, [reason]),
+      plannerNotes: appendUniqueNotes(state.plannerNotes, [reason]),
+    };
+  }
+
+  if (state.postRepairValidationStatus !== 'passed') {
+    const reason = state.postRepairValidationStatus === 'failed'
+      ? 'Experimental restart skipped because post-repair validation failed.'
+      : 'Experimental restart skipped because post-repair validation did not complete.';
+    return {
+      experimentalRestartStatus: 'skipped',
+      experimentalRestartReason: reason,
+      repairNotes: appendUniqueNotes(state.repairNotes, [reason]),
+      plannerNotes: appendUniqueNotes(state.plannerNotes, [reason]),
+    };
+  }
+
+  if (!AUTO_RESTART_EXPERIMENTAL_AFTER_REPAIR) {
+    const reason = 'Experimental auto-restart skipped because CONTROL_PLANE_AUTO_RESTART_EXPERIMENTAL=false.';
+    return {
+      experimentalRestartStatus: 'skipped',
+      experimentalRestartReason: reason,
+      repairNotes: appendUniqueNotes(state.repairNotes, [reason]),
+      plannerNotes: appendUniqueNotes(state.plannerNotes, [reason]),
+    };
+  }
+
+  const restartJob: PlannedJob = {
+    id: 'restart-experimental-service',
+    target: 'api-experimental',
+    kind: 'deploy',
+    title: 'Restart experimental AnyGPT service',
+    command: SAFE_EXPERIMENTAL_DEPLOY_COMMAND,
+  };
+  const restartResults = await executePlannedJobs(
+    state,
+    [restartJob],
+    { timeoutMs: POST_REPAIR_VALIDATION_TIMEOUT_MS },
+  );
+  const restartResult = restartResults[0];
+  const experimentalRestartStatus: ExperimentalRestartStatus = !restartResult
+    ? 'failed'
+    : restartResult.status === 'success'
+      ? 'success'
+      : restartResult.status === 'skipped'
+        ? 'skipped'
+        : 'failed';
+  const experimentalRestartReason = experimentalRestartStatus === 'success'
+    ? 'Experimental AnyGPT service restarted after passing post-repair validation.'
+    : restartResult
+      ? `Experimental AnyGPT service restart ${restartResult.status}: ${restartResult.title}${typeof restartResult.exitCode === 'number' ? ` (exit ${restartResult.exitCode})` : ''}`
+      : 'Experimental AnyGPT service restart did not run.';
+  const notes = restartResult
+    ? [`Experimental restart ${restartResult.status}: ${restartResult.title}${typeof restartResult.exitCode === 'number' ? ` (exit ${restartResult.exitCode})` : ''}`, experimentalRestartReason]
+    : [experimentalRestartReason];
+
+  return {
+    experimentalRestartStatus,
+    experimentalRestartReason,
+    repairNotes: appendUniqueNotes(state.repairNotes, notes),
+    plannerNotes: appendUniqueNotes(state.plannerNotes, notes),
+  };
+}
+
+function shouldContinueAfterRepairDecision(state: ControlPlaneState): 'rollbackRepair' | 'runJobs' | 'summarize' {
+  const touchedPaths = getRepairTouchedPaths(state);
+  if (state.repairStatus === 'failed') {
+    return touchedPaths.length > 0 ? 'rollbackRepair' : 'summarize';
+  }
+  if (state.repairStatus === 'promoted' || state.repairStatus === 'not-needed') {
+    return shouldRunJobsForState(state) ? 'runJobs' : 'summarize';
+  }
+  return 'summarize';
+}
+
+async function rollbackRepairNode(state: ControlPlaneState): Promise<Partial<ControlPlaneState>> {
+  if (!state.repairSessionManifest) {
+    const notes = ['Repair rollback could not run because no autonomous edit session manifest was recorded.'];
+    return {
+      repairStatus: 'failed',
+      repairNotes: appendUniqueNotes(state.repairNotes, notes),
+      plannerNotes: appendUniqueNotes(state.plannerNotes, notes),
+    };
+  }
+
+  const rollbackResult = rollbackAutonomousEditSession(
+    state.repoRoot,
+    state.repairSessionManifest,
+    state.editAllowlist,
+    state.editDenylist,
+  );
+  const notes = rollbackResult.notes.length > 0
+    ? rollbackResult.notes
+    : ['Repair rollback completed without additional notes.'];
+
+  return {
+    repairSessionManifest: rollbackResult.sessionManifest,
+    repairStatus: rollbackResult.status === 'rolled-back' ? 'rolled-back' : 'failed',
+    repairRollbackPaths: rollbackResult.restoredPaths,
+    repairDecisionReason: rollbackResult.status === 'rolled-back'
+      ? `${state.repairDecisionReason || 'Repair rollback applied.'} Rollback restored ${rollbackResult.restoredPaths.length} path(s).`
+      : `${state.repairDecisionReason || 'Repair rollback failed.'} ${rollbackResult.failedPaths.length} path(s) could not be restored.`,
+    repairNotes: appendUniqueNotes(state.repairNotes, notes),
+    plannerNotes: appendUniqueNotes(state.plannerNotes, notes),
+  };
+}
+
+async function mergePlanNode(state: ControlPlaneState): Promise<Partial<ControlPlaneState>> {
+  const noteJobs = state.plannerNotes.map((note, index) => buildNoteJob(`note-${index + 1}`, `Planner note ${index + 1}`, note));
+  const mcpJobs = state.mcpServers.map((server) => {
+    const inspection = state.mcpInspections.find((entry) => entry.server === server.name);
+    const toolNames = inspection?.tools.map((tool) => tool.name).join(',') || 'none';
+    return buildNoteJob(
+      `mcp-${server.name}`,
+      `MCP server ${server.name}`,
+      `status=${inspection?.status || 'skipped'} command=${server.command} args=${server.args.join(' ')} envKeys=${server.envKeys.join(',') || 'none'} tools=${toolNames} alwaysAllow=${server.alwaysAllow.join(',') || 'none'} disabled=${server.disabled ? 'true' : 'false'} message=${inspection?.message || 'No inspection result.'}`,
+    );
+  });
+  const autonomousEditJobs = state.proposedEdits.map((edit, index) => buildNoteJob(
+    `autonomous-edit-${index + 1}`,
+    `Autonomous edit ${index + 1}`,
+    `${edit.type} ${edit.path} reason=${edit.reason}`,
+  ));
+  const governanceFlagJobs = (state.langSmithGovernance?.flags || [])
+    .filter((flag) => flag.status !== 'pass')
+    .map((flag) => buildNoteJob(
+      `langsmith-governance-flag-${flag.key}`,
+      `LangSmith governance flag ${flag.key}`,
+      `${flag.status}: ${flag.summary}`,
+    ));
+  const governanceMutationJobs = (state.langSmithGovernance?.mutations || []).map((mutation) => buildNoteJob(
+    `langsmith-governance-mutation-${mutation.key}`,
+    `LangSmith governance mutation ${mutation.key}`,
+    `${mutation.status}: ${mutation.summary}`,
+  ));
+
+  return {
+    jobs: [
+      ...noteJobs,
+      ...mcpJobs,
+      ...governanceFlagJobs,
+      ...governanceMutationJobs,
+      ...autonomousEditJobs,
+      ...state.buildJobs,
+      ...state.testJobs,
+      ...state.deployJobs,
+    ],
+  };
+}
+
+function shouldExecuteNode(state: ControlPlaneState): 'approvalGate' | 'summarize' {
+  if (!state.executePlan) return 'summarize';
+  return shouldApplyAutonomousEditsForState(state) || shouldRunJobsForState(state) ? 'approvalGate' : 'summarize';
+}
+
+function shouldContinueAfterApproval(state: ControlPlaneState): 'applyAutonomousEdits' | 'runJobs' | 'summarize' {
+  if (state.approvalGranted === false) return 'summarize';
+  if (shouldApplyAutonomousEditsForState(state)) return 'applyAutonomousEdits';
+  if (shouldRunJobsForState(state)) return 'runJobs';
+  return 'summarize';
+}
+
+function shouldContinueAfterAutonomousEdits(state: ControlPlaneState): 'repairValidate' | 'rollbackRepair' | 'runJobs' | 'summarize' {
+  const touchedPaths = getRepairTouchedPaths(state);
+  if (state.appliedEdits.some((edit) => edit.status === 'failed')) {
+    return touchedPaths.length > 0 ? 'rollbackRepair' : 'summarize';
+  }
+  if (getAppliedRepairPaths(state).length > 0) return 'repairValidate';
+  return shouldRunJobsForState(state) ? 'runJobs' : 'summarize';
+}
+
+async function runJobsNode(state: ControlPlaneState): Promise<Partial<ControlPlaneState>> {
+  if (!shouldRunJobsForState(state)) {
+    return { executedJobs: [] };
+  }
+
+  const executedJobs = await executePlannedJobs(state, state.jobs);
+  return { executedJobs };
+}
+
+async function summarizeNode(state: ControlPlaneState): Promise<Partial<ControlPlaneState>> {
+  const jobs = state.executePlan
+    ? (state.executedJobs.length > 0 ? state.executedJobs : state.jobs)
+    : state.jobs;
+  const evaluationGatePolicy = resolveStateEvaluationGatePolicy(state);
+  const evaluationGateResult = resolveStateEvaluationGateResult(state);
+  const blockedActions = describeEvaluationGateBlockedActions(evaluationGateResult);
+  const lines: string[] = [];
+  lines.push(`Goal: ${state.goal}`);
+  lines.push(`Scopes: ${uniqueScopes(state.scopes).join(', ')}`);
+  if (state.threadId.trim()) {
+    lines.push(`Thread: ${state.threadId}`);
+  }
+  lines.push(
+    state.aiAgentEnabled
+      ? `AI agents: enabled (${state.aiAgentModel || 'configured model'} via ${state.aiAgentBackend || 'configured base URL'})`
+      : 'AI agents: disabled (set CONTROL_PLANE_AI_BASE_URL/KEY/MODEL or provide ANYGPT_API_KEY; local AnyGPT fallback will be used when available)',
+  );
+  lines.push(
+    state.selectedPromptSource === 'local'
+      ? `Prompt bundle: local fallback (${state.promptIdentifier || DEFAULT_CONTROL_PLANE_PROMPT_IDENTIFIER})`
+      : `Prompt bundle: ${state.selectedPromptSource} selection ${state.selectedPromptReference || state.promptIdentifier || DEFAULT_CONTROL_PLANE_PROMPT_IDENTIFIER}${state.selectedPromptCommitHash ? ` @ ${state.selectedPromptCommitHash}` : ''}`,
+  );
+  lines.push(
+    state.promptSyncEnabled
+      ? `Prompt sync: ${state.promptSyncUrl || `${buildLangSmithPromptReference(state.promptIdentifier, state.promptSyncChannel)}${state.langSmithEnabled ? ' (no URL returned)' : ' (LangSmith disabled)'}`}`
+      : 'Prompt sync: disabled',
+  );
+  if (state.promptPromoteChannel.trim()) {
+    lines.push(
+      state.promptPromotionUrl
+        ? `Prompt promotion: ${buildLangSmithPromptReference(state.promptIdentifier, state.promptPromoteChannel)} -> ${state.promptPromotionUrl}`
+        : `Prompt promotion: requested for ${buildLangSmithPromptReference(state.promptIdentifier, state.promptPromoteChannel)} but not completed`,
+    );
+  }
+  lines.push(
+    state.langSmithEnabled
+      ? `LangSmith: workspace ${state.langSmithWorkspace?.displayName || 'unknown'}, project ${state.langSmithProjectName || 'unset'}, ${state.langSmithProjects.length} project(s), ${state.langSmithDatasets.length} dataset(s), ${state.langSmithPrompts.length} prompt(s), ${state.langSmithRuns.length} recent run(s), ${state.langSmithAnnotationQueues.length} annotation queue(s), ${state.langSmithFeedback.length} feedback item(s)`
+      : 'LangSmith: runtime integration disabled',
+  );
+  if (state.langSmithAccessibleWorkspaces.length > 0) {
+    lines.push(`LangSmith accessible workspaces: ${state.langSmithAccessibleWorkspaces.map((workspace) => `${workspace.displayName}${workspace.roleName ? ` (${workspace.roleName})` : ''}`).join(', ')}`);
+  }
+  if (state.langSmithProject) {
+    const metadataKeys = Object.keys(state.langSmithProject.metadata || {});
+    lines.push(`LangSmith project admin: ${state.langSmithProject.name}${state.langSmithProject.description ? ` — ${state.langSmithProject.description}` : ''}${metadataKeys.length > 0 ? ` [metadata: ${metadataKeys.join(', ')}]` : ''}`);
+  }
+  if (state.langSmithAnnotationQueues.length > 0) {
+    lines.push(`LangSmith annotation queues: ${state.langSmithAnnotationQueues.map((queue) => `${queue.name}${typeof queue.itemCount === 'number' ? ` (${queue.itemCount})` : ''}`).join(', ')}`);
+  }
+  if (state.langSmithAnnotationQueueItems.length > 0) {
+    lines.push(`LangSmith queue samples: ${state.langSmithAnnotationQueueItems.slice(0, 5).map((item) => item.runName || item.runId || item.id).join(', ')}`);
+  }
+  if (state.langSmithFeedback.length > 0) {
+    lines.push(`LangSmith feedback: ${state.langSmithFeedback.slice(0, 5).map((item) => `${item.key}${typeof item.score !== 'undefined' && item.score !== null ? `=${item.score}` : ''}`).join(', ')}`);
+  }
+  if (state.langSmithEvaluations.length > 0) {
+    lines.push(`LangSmith evaluations: ${state.langSmithEvaluations.map((item) => item.experimentName ? `${item.datasetName} (${item.experimentName})` : item.datasetName).join(', ')}`);
+  }
+  if (state.langSmithGovernance) {
+    const actionableFlags = state.langSmithGovernance.flags.filter((flag) => flag.status !== 'pass');
+    lines.push(`LangSmith governance: ${state.langSmithGovernance.counts.workspaces} workspace(s), ${state.langSmithGovernance.counts.projects} project(s), ${state.langSmithGovernance.counts.runFailures} recent failed run(s), ${state.langSmithGovernance.counts.annotationQueueBacklog} queued review item(s), ${actionableFlags.length} actionable flag(s)`);
+    if (state.langSmithGovernance.feedbackKeyCounts.length > 0) {
+      lines.push(`LangSmith feedback keys: ${state.langSmithGovernance.feedbackKeyCounts.map((entry) => `${entry.key} x${entry.count}`).join(', ')}`);
+    }
+    if (actionableFlags.length > 0) {
+      lines.push(`LangSmith governance flags: ${actionableFlags.slice(0, 5).map((flag) => `${flag.key}=${flag.status}`).join(', ')}`);
+    }
+    if (state.langSmithGovernance.mutations.length > 0) {
+      lines.push(`LangSmith governance mutations: ${state.langSmithGovernance.mutations.map((mutation) => `${mutation.key}=${mutation.status}`).join(', ')}`);
+    }
+  }
+  lines.push(`Evaluation gate: ${evaluationGateResult.status} (${evaluationGatePolicy.mode}, target=${evaluationGatePolicy.target}, metric=${evaluationGatePolicy.metricKey}, min_avg=${evaluationGatePolicy.minMetricAverageScore}, min_results=${evaluationGatePolicy.minResultCount})`);
+  if (evaluationGateResult.metricCount > 0 || evaluationGateResult.metricAverageScore !== null) {
+    lines.push(`Evaluation metric ${evaluationGatePolicy.metricKey}: ${evaluationGateResult.metricAverageScore ?? 'n/a'} across ${evaluationGateResult.metricCount} scored result(s)`);
+  }
+  if (evaluationGateResult.reason.trim()) {
+    lines.push(`Evaluation gate reason: ${evaluationGateResult.reason}`);
+  }
+  if (blockedActions.length > 0) {
+    lines.push(`Evaluation gate blocked: ${blockedActions.join(', ')}`);
+  }
+  if (state.repairIntentSummary.trim()) {
+    lines.push(`Repair intent: ${state.repairIntentSummary}`);
+  }
+  if (state.repairSignals.length > 0) {
+    lines.push(`Repair signals: ${state.repairSignals.slice(0, 5).join(' | ')}`);
+  }
+  if (state.improvementIntentSummary.trim()) {
+    lines.push(`Improvement intent: ${state.improvementIntentSummary}`);
+  }
+  if (state.improvementSignals.length > 0) {
+    lines.push(`Improvement signals: ${state.improvementSignals.slice(0, 5).join(' | ')}`);
+  }
+  if (state.autonomousEditEnabled) {
+    lines.push(`Autonomous loop: ${state.autonomousOperationMode}/${state.repairStatus}${state.repairDecisionReason.trim() ? ` — ${state.repairDecisionReason}` : ''}`);
+    if (state.repairSessionManifest?.sessionId) {
+      lines.push(`Repair session: ${state.repairSessionManifest.sessionId} (rollback=${state.repairSessionManifest.rollbackStatus})`);
+    }
+    if (state.repairSmokeResults.length > 0) {
+      lines.push(`Repair smoke validation: ${state.repairSmokeResults.map((job) => `${job.title}=${job.status}${typeof job.exitCode === 'number' ? `(${job.exitCode})` : ''}`).join('; ')}`);
+    }
+    if (state.postRepairValidationStatus !== 'not-needed') {
+      lines.push(`Post-repair validation: ${state.postRepairValidationStatus}${state.postRepairValidationResults.length > 0 ? ` — ${state.postRepairValidationResults.map((job) => `${job.title}=${job.status}${typeof job.exitCode === 'number' ? `(${job.exitCode})` : ''}`).join('; ')}` : ''}`);
+    }
+    if (state.repairPromotedPaths.length > 0) {
+      lines.push(`Repair promoted paths: ${state.repairPromotedPaths.join(', ')}`);
+    }
+    if (state.repairRollbackPaths.length > 0) {
+      lines.push(`Repair rollback paths: ${state.repairRollbackPaths.join(', ')}`);
+    }
+    if (state.experimentalRestartStatus !== 'not-needed') {
+      lines.push(`Experimental restart: ${state.experimentalRestartStatus}${state.experimentalRestartReason.trim() ? ` — ${state.experimentalRestartReason}` : ''}`);
+    }
+  }
+  lines.push(
+    state.autonomousEditEnabled
+      ? `Autonomous edits: enabled (${state.autonomousOperationMode}, ${state.proposedEdits.length} proposed, ${state.appliedEdits.filter((edit) => edit.status === 'applied').length} applied${evaluationGateResult.blocksAutonomousEdits ? ', blocked by evaluation gate' : ''}, status=${state.repairStatus})`
+      : 'Autonomous edits: disabled',
+  );
+  lines.push(`Execution mode: ${state.executePlan ? 'execute' : 'plan-only'}`);
+  if (state.approvalMessage.trim()) {
+    lines.push(`Approval: ${state.approvalMessage}`);
+  }
+  if (state.autonomousEditEnabled && evaluationGateResult.blocksAutonomousEdits) {
+    lines.push('Autonomous edits were skipped because the evaluation gate blocked code modification.');
+  }
+  if (state.executePlan && evaluationGateResult.blocksExecution) {
+    lines.push('Execution halted before running jobs because the evaluation gate blocked job execution.');
+  }
+  if (state.executePlan && state.approvalGranted === false) {
+    lines.push('Execution halted before running jobs because approval was denied.');
+  }
+  if (state.executePlan && state.approvalGranted === null && state.pendingApprovals.length > 0) {
+    lines.push('Execution is paused awaiting manual approval.');
+  }
+  if (state.pendingApprovals.length > 0) {
+    lines.push(`Risk controls: ${state.pendingApprovals.map((approval) => approval.title).join('; ')}`);
+  }
+
+  if (jobs.length === 0) {
+    lines.push('No jobs were created.');
+    return { summary: lines.join('\n') };
+  }
+
+  for (const job of jobs) {
+    const status = 'status' in job ? job.status : 'planned';
+    lines.push(`- [${status}] ${job.title}: ${job.command}`);
+  }
+
+  return { summary: lines.join('\n') };
+}
+
+function buildControlPlaneGraph(checkpointer: any) {
+  return new StateGraph(ControlPlaneStateSchema)
+    .addNode('inspectMcp', inspectMcpNode)
+    .addNode('plannerAgent', plannerAgentNode)
+    .addNode('buildAgent', buildAgentNode)
+    .addNode('qualityAgent', qualityAgentNode)
+    .addNode('deployAgent', deployAgentNode)
+    .addNode('repairIntent', repairIntentNode)
+    .addNode('autonomousEditPlanner', autonomousEditPlannerNode)
+    .addNode('mergePlan', mergePlanNode)
+    .addNode('approvalGate', approvalGateNode)
+    .addNode('applyAutonomousEdits', applyAutonomousEditsNode)
+    .addNode('repairValidate', repairValidateNode)
+    .addNode('repairEvaluate', repairEvaluateNode)
+    .addNode('repairDecision', repairDecisionNode)
+    .addNode('postRepairValidate', postRepairValidateNode)
+    .addNode('restartExperimentalService', restartExperimentalServiceNode)
+    .addNode('rollbackRepair', rollbackRepairNode)
+    .addNode('runJobs', runJobsNode)
+    .addNode('summarize', summarizeNode)
+    .addEdge(START, 'inspectMcp')
+    .addEdge('inspectMcp', 'plannerAgent')
+    .addEdge('plannerAgent', 'buildAgent')
+    .addEdge('buildAgent', 'qualityAgent')
+    .addEdge('qualityAgent', 'deployAgent')
+    .addEdge('deployAgent', 'repairIntent')
+    .addEdge('repairIntent', 'autonomousEditPlanner')
+    .addEdge('autonomousEditPlanner', 'mergePlan')
+    .addConditionalEdges('mergePlan', shouldExecuteNode, ['approvalGate', 'summarize'])
+    .addConditionalEdges('approvalGate', shouldContinueAfterApproval, ['applyAutonomousEdits', 'runJobs', 'summarize'])
+    .addConditionalEdges('applyAutonomousEdits', shouldContinueAfterAutonomousEdits, ['repairValidate', 'rollbackRepair', 'runJobs', 'summarize'])
+    .addEdge('repairValidate', 'repairEvaluate')
+    .addEdge('repairEvaluate', 'repairDecision')
+    .addEdge('repairDecision', 'postRepairValidate')
+    .addEdge('postRepairValidate', 'restartExperimentalService')
+    .addConditionalEdges('restartExperimentalService', shouldContinueAfterRepairDecision, ['rollbackRepair', 'runJobs', 'summarize'])
+    .addEdge('rollbackRepair', 'summarize')
+    .addEdge('runJobs', 'summarize')
+    .addEdge('summarize', END)
+    .compile({ checkpointer });
+}
+
+export async function createControlPlaneGraph(options: { repoRoot: string; checkpointPath?: string }) {
+  const checkpointPath = resolveControlPlaneCheckpointPath(options.repoRoot, options.checkpointPath);
+  const checkpointer = new FileMemorySaver(checkpointPath);
+  await checkpointer.setup();
+  return buildControlPlaneGraph(checkpointer);
+}
+
+export const controlPlaneGraph = buildControlPlaneGraph(new MemorySaver());

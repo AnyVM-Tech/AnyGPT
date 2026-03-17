@@ -1,0 +1,25 @@
+{
+  "name": "anygpt-langgraph-control-plane",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.3.10",
+  "scripts": {
+    "dev": "bash ../../bun.sh run ./src/index.ts",
+    "start": "bash ../../bun.sh run ./src/index.ts",
+    "build": "tsc --project tsconfig.json --outDir dist",
+    "typecheck": "tsc --project tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@langchain/langgraph": "^1.0.8",
+    "@langchain/langgraph-checkpoint": "^1.0.0",
+    "@modelcontextprotocol/sdk": "^1.27.1",
+    "dotenv": "^16.6.1",
+    "langsmith": "^0.5.10",
+    "redis": "^4.7.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.35",
+    "typescript": "^5.9.3"
+  }
+}

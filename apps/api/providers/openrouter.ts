@@ -487,7 +487,16 @@ export class OpenRouterAI implements IAIProvider {
       data.tools = this.normalizeChatTools(message.tools) ?? message.tools;
     }
     if (typeof message.tool_choice !== 'undefined') {
-      data.tool_choice = this.normalizeChatToolChoice(message.tool_choice);
+      const normalizedToolChoice = this.normalizeChatToolChoice(message.tool_choice);
+      if (
+        this.shouldRelaxToolChoiceForThinkingMode(message)
+        && normalizedToolChoice
+        && (normalizedToolChoice === 'required' || typeof normalizedToolChoice === 'object')
+      ) {
+        data.tool_choice = 'auto';
+      } else {
+        data.tool_choice = normalizedToolChoice;
+      }
     }
     if (message.reasoning) data.reasoning = message.reasoning;
     return data;
@@ -530,6 +539,12 @@ export class OpenRouterAI implements IAIProvider {
       return { type: (toolChoice as any).type ?? 'function', function: { name } };
     }
     return toolChoice;
+  }
+
+  private shouldRelaxToolChoiceForThinkingMode(message: IMessage): boolean {
+    const modelId = String(message?.model?.id || '').toLowerCase();
+    if (modelId.includes('thinking')) return true;
+    return Boolean((message as any)?.reasoning);
   }
 
   async sendMessage(message: IMessage): Promise<ProviderResponse> {

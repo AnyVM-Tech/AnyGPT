@@ -4,7 +4,7 @@ export class QueueOverloadedError extends Error {
   readonly code = 'QUEUE_OVERLOADED';
   readonly statusCode = 503;
 
-  constructor(message: string = 'Service temporarily unavailable: request queue overloaded.') {
+  constructor(message: string = 'Service temporarily unavailable: request queue is busy. Retry in a few seconds.') {
     super(message);
     this.name = 'QueueOverloadedError';
   }
@@ -44,7 +44,9 @@ export class RequestQueue {
     }
 
     if (this.queue.length >= this.maxPending) {
-      throw new QueueOverloadedError();
+      throw new QueueOverloadedError(
+        `Service temporarily unavailable: request queue is busy (in_flight=${this.running}, pending=${this.queue.length}, max_pending=${this.maxPending}). Retry in a few seconds.`
+      );
     }
 
     return new Promise((resolve) => {
@@ -80,7 +82,8 @@ function getBaselineTierRps(): number {
 }
 
 const REQUEST_QUEUE_CONCURRENCY = (() => {
-  const suggestedDefault = 4;
+  const baselineTierRps = getBaselineTierRps();
+  const suggestedDefault = Math.max(8, Math.min(24, Math.ceil(baselineTierRps / 2)));
   const raw = Number(process.env.REQUEST_QUEUE_CONCURRENCY ?? String(suggestedDefault));
   if (!Number.isFinite(raw) || raw <= 0) return suggestedDefault;
   return Math.floor(raw);
@@ -88,7 +91,10 @@ const REQUEST_QUEUE_CONCURRENCY = (() => {
 
 const REQUEST_QUEUE_MAX_PENDING = (() => {
   const baselineTierRps = getBaselineTierRps();
-  const suggestedDefault = Math.max(16, Math.min(128, baselineTierRps * 2));
+  const suggestedDefault = Math.min(
+    4096,
+    Math.max(256, REQUEST_QUEUE_CONCURRENCY * 64, baselineTierRps * 8)
+  );
   const raw = Number(process.env.REQUEST_QUEUE_MAX_PENDING ?? String(suggestedDefault));
   if (!Number.isFinite(raw) || raw < 0) return suggestedDefault;
   return Math.floor(raw);

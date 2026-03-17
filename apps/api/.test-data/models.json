@@ -4,24 +4,19 @@
     {
       "id": "gpt-3.5-turbo",
       "object": "model",
-      "created": 1773614862,
+      "created": 1773705227,
       "owned_by": "openai-mock",
       "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
         "tool_calling"
-      ],
-      "pricing": {
-        "input": 0.0233,
-        "output": 0.0699,
-        "unit": "per_million_tokens"
-      }
+      ]
     },
     {
       "id": "gpt-5.4",
       "object": "model",
-      "created": 1773614862,
+      "created": 1773705227,
       "owned_by": "openai-mock",
       "providers": 1,
       "throughput": 50,

@@ -25,10 +25,17 @@ Thumbs.db
 
 # Temp directories
 apps/api/.tmp/
+apps/api/.control-plane/
+apps/api/apps/
+
+# LangGraph control-plane runtime artifacts
+apps/langgraph-control-plane/.control-plane/
+apps/langgraph-control-plane/apps/langgraph-control-plane/
 
 # Build directories
 /dist
 apps/api/dist
+apps/langgraph-control-plane/dist/
 # Specific files
 vite.config.ts.timestamp*
 apps/api/dist/
@@ -44,6 +51,7 @@ apps/api/keys.json
 apps/api/providers.json
 apps/api/models.json
 apps/api/tiers.json
+apps/api/.test-data/*.backup
 apps/api/keys.json.invalid-2026-03-01T19-09-59-257Z.bak
 # Excluded errors (if generated)
 apps/api/excluded-errors.json

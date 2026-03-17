@@ -263,6 +263,7 @@ export class OpenAI implements IAIProvider {
       normalized.startsWith('o1')
       || normalized.startsWith('o3')
       || normalized.startsWith('o4')
+      || normalized.includes('gpt-5.4')
       || normalized.includes('omni')
       || normalized.includes('deep-research')
       || normalized.includes('gpt-5')

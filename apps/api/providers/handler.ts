@@ -220,6 +220,11 @@ const NON_STREAM_MIN_TTFT_MS = (() => {
     return Number.isFinite(parsed) && parsed >= 0 ? parsed : 25;
 })();
 const PROVIDER_COOLDOWN_MS = Math.max(0, Number(process.env.PROVIDER_COOLDOWN_MS ?? 60_000));
+const PROVIDER_MIN_ACTIVE_MODEL_CANDIDATES = (() => {
+    const raw = Number(process.env.PROVIDER_MIN_ACTIVE_MODEL_CANDIDATES ?? 6);
+    if (!Number.isFinite(raw) || raw <= 0) return 6;
+    return Math.max(1, Math.floor(raw));
+})();
 const PROVIDER_COOLDOWN_REDIS_PREFIX = 'provider:cooldown:';
 const PROVIDER_DISTRIBUTED_SCHEDULER_ENABLED = process.env.PROVIDER_DISTRIBUTED_SCHEDULER !== '0';
 const PROVIDER_DISTRIBUTED_BUCKET_REDIS_PREFIX = 'provider:scheduler:bucket:';
@@ -967,6 +972,54 @@ export class MessageHandler {
         return false;
     }
 
+    private temporarilyReenableDisabledModelCandidates(
+        activeProviders: LoadedProviderData[],
+        candidateProviders: LoadedProviderData[],
+        modelId: string,
+        minimumCount: number
+    ): LoadedProviderData[] {
+        if (candidateProviders.length >= minimumCount) return candidateProviders;
+
+        const seenProviderIds = new Set(candidateProviders.map((provider) => provider.id));
+        const reenabledProviders = activeProviders
+            .filter((provider) => {
+                if (!provider || seenProviderIds.has(provider.id)) return false;
+                const modelData = provider.models?.[modelId] as any;
+                return Boolean(modelData?.disabled);
+            })
+            .sort((left, right) => {
+                const leftModelData = left.models?.[modelId] as any;
+                const rightModelData = right.models?.[modelId] as any;
+                const leftDisabledAt = Number(leftModelData?.disabled_at || 0);
+                const rightDisabledAt = Number(rightModelData?.disabled_at || 0);
+                if (leftDisabledAt !== rightDisabledAt) return leftDisabledAt - rightDisabledAt;
+                return (right.provider_score ?? -Infinity) - (left.provider_score ?? -Infinity);
+            })
+            .slice(0, Math.max(0, minimumCount - candidateProviders.length))
+            .map((provider) => {
+                const modelData = provider.models?.[modelId] as any;
+                return {
+                    ...provider,
+                    models: {
+                        ...provider.models,
+                        [modelId]: {
+                            ...modelData,
+                            disabled: false,
+                        },
+                    },
+                };
+            });
+
+        if (reenabledProviders.length > 0) {
+            console.warn(
+                `Temporarily re-enabling ${reenabledProviders.length} cooled-down model candidate(s) for ${modelId} `
+                + `to preserve fallback breadth (target=${minimumCount}).`
+            );
+        }
+
+        return [...candidateProviders, ...reenabledProviders];
+    }
+
     private appendCreditFallbackProviders(
         allProviders: LoadedProviders,
         candidateProviders: LoadedProviderData[],
@@ -1174,6 +1227,22 @@ export class MessageHandler {
             return Boolean(modelData && !(modelData as any).disabled);
         });
         if (compatibleProviders.length === 0) {
+            const activeModelDisabled = activeProviders
+                .filter((p: LoadedProviderData) => Boolean((p.models?.[modelId] as any)?.disabled))
+                .map((p: LoadedProviderData) => ({
+                    ...p,
+                    models: {
+                        ...p.models,
+                        [modelId]: {
+                            ...(p.models?.[modelId] as any),
+                            disabled: false,
+                        },
+                    },
+                }));
+            if (activeModelDisabled.length > 0) {
+                console.warn(`No currently active providers support model ${modelId}; temporarily re-enabling ${activeModelDisabled.length} cooled-down model candidate(s).`);
+                compatibleProviders = activeModelDisabled;
+            } else {
             const disabledSupporting = allProvidersOriginal.filter((p: LoadedProviderData) => p.disabled && p.models && modelId in p.models);
             if (disabledSupporting.length > 0) {
                 console.warn(`Re-enabling ${disabledSupporting.length} disabled provider(s) for model ${modelId}.`);
@@ -1191,7 +1260,15 @@ export class MessageHandler {
                     throw new Error(`No currently active provider supports model ${modelId}. All supporting providers may be temporarily disabled.`);
                 }
             }
+            }
         }
+
+        compatibleProviders = this.temporarilyReenableDisabledModelCandidates(
+            activeProviders,
+            compatibleProviders,
+            modelId,
+            PROVIDER_MIN_ACTIVE_MODEL_CANDIDATES
+        );
 
         const eligibleProviders = compatibleProviders.filter((p: LoadedProviderData) => {
             const score = p.provider_score;
@@ -1457,6 +1534,10 @@ export class MessageHandler {
                 modelData.consecutive_errors = this.CONSECUTIVE_ERROR_THRESHOLD;
                 modelData.disabled_at = Date.now();
                 modelData.disable_count = (modelData.disable_count || 0) + 1;
+            } else if (this.isRateLimitOrQuotaError(attemptError)) {
+                // Cooldown and distributed throttling already handle transient capacity failures.
+                // Avoid converting 429/quota bursts into model auto-disables that collapse the
+                // candidate pool for subsequent requests.
             // Skip error counting entirely for excluded error patterns
             } else if (isExcludedError(attemptError) || this.isToolUnsupportedError(attemptError)) {
                 // Don't increment errors or disable — treat as a non-event
@@ -1895,7 +1976,11 @@ export class MessageHandler {
             } // End of loop through candidateProviders
 
             const hasCooldownSkips = skippedByCooldown > 0 || skippedByProviderRateLimit > 0;
-            if (attemptedSinceCooldown || !hasCooldownSkips || !shouldRespectCooldowns || nextCooldownMs === null) {
+            const shouldRetryAfterCooldown = hasCooldownSkips
+                && shouldRespectCooldowns
+                && nextCooldownMs !== null
+                && (!attemptedSinceCooldown || this.isRateLimitOrQuotaError(lastError));
+            if (!shouldRetryAfterCooldown) {
                 break;
             }
             const waited = await waitForCooldownOrDeadline(
@@ -2342,7 +2427,11 @@ export class MessageHandler {
             }
 
             const hasCooldownSkips = skippedByCooldown > 0 || skippedByProviderRateLimit > 0;
-            if (attemptedSinceCooldown || !hasCooldownSkips || !shouldRespectCooldowns || nextCooldownMs === null) {
+            const shouldRetryAfterCooldown = hasCooldownSkips
+                && shouldRespectCooldowns
+                && nextCooldownMs !== null
+                && (!attemptedSinceCooldown || this.isRateLimitOrQuotaError(lastError));
+            if (!shouldRetryAfterCooldown) {
                 break;
             }
             const waited = await waitForCooldownOrDeadline(
