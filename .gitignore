@@ -6,10 +6,11 @@ yarn-error.log*
 
 # Environment variables
 .env
+.env.local
 
 # Editor directories and files
-.env
 apps/api/.env
+apps/api/.env.local
 apps/api/.env.test
 # Do NOT ignore .env.example (template)
 .vscode
@@ -31,6 +32,7 @@ apps/api/apps/
 # LangGraph control-plane runtime artifacts
 apps/langgraph-control-plane/.control-plane/
 apps/langgraph-control-plane/apps/langgraph-control-plane/
+apps/langgraph-control-plane/studio-server.log
 
 # Build directories
 /dist
@@ -78,8 +80,6 @@ apps/api/logs/probe-errors.jsonl
 # LibreChat repo (cloned into apps/ui)
 apps/ui/librechat/
 apps/api/keys.json.backup
-.gitignore
-.gitignore
 apps/api/logs/nano-banana-sweep.log
 apps/api/providers.json.backup
 apps/api/providers.json.bak

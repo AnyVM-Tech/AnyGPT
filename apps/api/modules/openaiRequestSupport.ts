@@ -10,7 +10,7 @@ export function normalizeImageFetchReferer(raw?: string): string | undefined {
   try {
     const parsed = new URL(raw);
     if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
-      return parsed.toString();
+      return parsed.origin;
     }
   } catch {
     return undefined;

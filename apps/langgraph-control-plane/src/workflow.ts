@@ -596,8 +596,25 @@ function isLikelyRepairLogLine(line: string): boolean {
   return /\b(?:429|500|502|503|504)\b/.test(normalized);
 }
 
+function isExternallyCausedRepairSignal(signal: string): boolean {
+  const normalized = String(signal || '').trim();
+  if (!normalized) return false;
+
+  if (/saved providers\.json\.\s+kept\s+\d+,\s+removed\s+\d+/i.test(normalized)) {
+    return true;
+  }
+
+  return /(key_invalid|api[_-]?key[_-]?invalid|invalid api key|unauthorized|resource has been exhausted|check quota|quota exceeded|insufficient_quota|insufficient quota|no quota|insufficient credits|credit balance|billing|request failed with status code 402|\b402\b)/i.test(normalized);
+}
+
+function isActionableRepairSignal(signal: string): boolean {
+  const normalized = String(signal || '').trim();
+  if (!normalized) return false;
+  return !isExternallyCausedRepairSignal(normalized);
+}
+
 function hasActionableRepairSignals(signals: string[]): boolean {
-  return signals.map((signal) => String(signal || '').trim()).filter(Boolean).length > 0;
+  return signals.some((signal) => isActionableRepairSignal(signal));
 }
 
 function deriveRepairIntent(state: ControlPlaneState): { summary: string; signals: string[] } {
@@ -673,13 +690,17 @@ function deriveRepairIntent(state: ControlPlaneState): { summary: string; signal
   }
 
   const dedupedSignals = Array.from(new Set(signals.map((signal) => String(signal || '').trim()).filter(Boolean))).slice(0, 12);
-  const summary = dedupedSignals.length > 0
-    ? `Bounded repair focus: ${dedupedSignals.slice(0, 3).join(' | ')}`
-    : 'No concrete failure signals were detected; only propose a bounded repair when logs, LangSmith signals, prompt fallback, or the evaluation gate identify a clear issue.';
+  const actionableSignals = dedupedSignals.filter((signal) => isActionableRepairSignal(signal));
+  const deferredSignals = dedupedSignals.filter((signal) => !actionableSignals.includes(signal));
+  const summary = actionableSignals.length > 0
+    ? `Bounded repair focus: ${actionableSignals.slice(0, 3).join(' | ')}`
+    : deferredSignals.length > 0
+      ? `Observed external provider/key/quota churn without a clear code-local repair target; favor a bounded experimental improvement while monitoring: ${deferredSignals.slice(0, 3).join(' | ')}`
+      : 'No concrete failure signals were detected; only propose a bounded repair when logs, LangSmith signals, prompt fallback, or the evaluation gate identify a clear issue.';
 
   return {
     summary,
-    signals: dedupedSignals,
+    signals: actionableSignals,
   };
 }
 
@@ -718,6 +739,125 @@ function deriveImprovementIntent(state: ControlPlaneState): { summary: string; s
     summary,
     signals: dedupedSignals,
   };
+}
+
+function buildDeterministicQueueOverloadFallbackEdits(
+  repoRoot: string,
+  candidateFiles: Array<{ path: string; content: string }>,
+): AutonomousEditAction[] {
+  const edits: AutonomousEditAction[] = [];
+
+  const resolveCandidateContent = (candidatePath: string): string | undefined => {
+    try {
+      return fs.readFileSync(path.resolve(repoRoot, candidatePath), 'utf8');
+    } catch {
+      const inMemory = candidateFiles.find((file) => file.path === candidatePath)?.content;
+      if (typeof inMemory === 'string' && inMemory.length > 0) return inMemory;
+      return undefined;
+    }
+  };
+
+  const openAiRouteContent = resolveCandidateContent('apps/api/routes/openai.ts');
+  const openAiRouteFind = [
+    "const REQUEST_ADMISSION_QUEUE_CONCURRENCY = Math.max(1, readEnvNumber('REQUEST_ADMISSION_QUEUE_CONCURRENCY', Math.max(8, Math.min(32, Number(process.env.REQUEST_QUEUE_CONCURRENCY || 12) || 12))));",
+    "const REQUEST_ADMISSION_QUEUE_MAX_PENDING = Math.max(0, readEnvNumber('REQUEST_ADMISSION_QUEUE_MAX_PENDING', Math.max(256, REQUEST_ADMISSION_QUEUE_CONCURRENCY * 64)));",
+    "const RESPONSES_ADMISSION_QUEUE_CONCURRENCY = Math.max(1, readEnvNumber('RESPONSES_ADMISSION_QUEUE_CONCURRENCY', Math.max(8, REQUEST_ADMISSION_QUEUE_CONCURRENCY)));",
+    "const RESPONSES_ADMISSION_QUEUE_MAX_PENDING = Math.max(0, readEnvNumber('RESPONSES_ADMISSION_QUEUE_MAX_PENDING', Math.max(256, RESPONSES_ADMISSION_QUEUE_CONCURRENCY * 64)));",
+  ].join('\n');
+  const openAiRouteReplace = [
+    "const REQUEST_ADMISSION_QUEUE_CONCURRENCY = Math.max(1, readEnvNumber('REQUEST_ADMISSION_QUEUE_CONCURRENCY', Math.max(12, Math.min(48, Number(process.env.REQUEST_QUEUE_CONCURRENCY || 16) || 16))));",
+    "const REQUEST_ADMISSION_QUEUE_MAX_PENDING = Math.max(0, readEnvNumber('REQUEST_ADMISSION_QUEUE_MAX_PENDING', Math.max(1024, REQUEST_ADMISSION_QUEUE_CONCURRENCY * 192)));",
+    "const RESPONSES_ADMISSION_QUEUE_CONCURRENCY = Math.max(1, readEnvNumber('RESPONSES_ADMISSION_QUEUE_CONCURRENCY', Math.max(12, REQUEST_ADMISSION_QUEUE_CONCURRENCY)));",
+    "const RESPONSES_ADMISSION_QUEUE_MAX_PENDING = Math.max(0, readEnvNumber('RESPONSES_ADMISSION_QUEUE_MAX_PENDING', Math.max(1024, RESPONSES_ADMISSION_QUEUE_CONCURRENCY * 192)));",
+  ].join('\n');
+  if (openAiRouteContent?.includes(openAiRouteFind)) {
+    edits.push(AutonomousEditActionSchema.parse({
+      type: 'replace',
+      path: 'apps/api/routes/openai.ts',
+      reason: 'Raise experimental admission-queue concurrency and backlog headroom after repeated QUEUE_OVERLOADED signals.',
+      find: openAiRouteFind,
+      replace: openAiRouteReplace,
+    }));
+  }
+
+  const requestQueueContent = resolveCandidateContent('apps/api/modules/requestQueue.ts');
+  const requestQueueFind = [
+    '  const baselineTierRps = getBaselineTierRps();',
+    '  const suggestedDefault = Math.max(8, Math.min(24, Math.ceil(baselineTierRps / 2)));',
+    '  const raw = Number(process.env.REQUEST_QUEUE_CONCURRENCY ?? String(suggestedDefault));',
+    '  if (!Number.isFinite(raw) || raw <= 0) return suggestedDefault;',
+    '  return Math.floor(raw);',
+    '})();',
+    '',
+    'const REQUEST_QUEUE_MAX_PENDING = (() => {',
+    '  const baselineTierRps = getBaselineTierRps();',
+    '  const suggestedDefault = Math.min(',
+    '    4096,',
+    '    Math.max(256, REQUEST_QUEUE_CONCURRENCY * 64, baselineTierRps * 8)',
+    '  );',
+    '  const raw = Number(process.env.REQUEST_QUEUE_MAX_PENDING ?? String(suggestedDefault));',
+    '  if (!Number.isFinite(raw) || raw < 0) return suggestedDefault;',
+    '  return Math.floor(raw);',
+    '})();',
+  ].join('\n');
+  const requestQueueReplace = [
+    '  const baselineTierRps = getBaselineTierRps();',
+    '  const suggestedDefault = Math.max(12, Math.min(32, Math.ceil(baselineTierRps * 0.75)));',
+    '  const raw = Number(process.env.REQUEST_QUEUE_CONCURRENCY ?? String(suggestedDefault));',
+    '  if (!Number.isFinite(raw) || raw <= 0) return suggestedDefault;',
+    '  return Math.floor(raw);',
+    '})();',
+    '',
+    'const REQUEST_QUEUE_MAX_PENDING = (() => {',
+    '  const baselineTierRps = getBaselineTierRps();',
+    '  const suggestedDefault = Math.min(',
+    '    8192,',
+    '    Math.max(1024, REQUEST_QUEUE_CONCURRENCY * 192, baselineTierRps * 24)',
+    '  );',
+    '  const raw = Number(process.env.REQUEST_QUEUE_MAX_PENDING ?? String(suggestedDefault));',
+    '  if (!Number.isFinite(raw) || raw < 0) return suggestedDefault;',
+    '  return Math.floor(raw);',
+    '})();',
+  ].join('\n');
+  if (requestQueueContent?.includes(requestQueueFind)) {
+    edits.push(AutonomousEditActionSchema.parse({
+      type: 'replace',
+      path: 'apps/api/modules/requestQueue.ts',
+      reason: 'Increase generic experimental queue concurrency and pending headroom to reduce saturation under bursty load.',
+      find: requestQueueFind,
+      replace: requestQueueReplace,
+    }));
+  }
+
+  return edits;
+}
+
+function buildDeterministicAutonomousFallbackPlan(
+  state: ControlPlaneState,
+  operationMode: AutonomousOperationMode,
+  candidateFiles: Array<{ path: string; content: string }>,
+): { summary: string; edits: AutonomousEditAction[] } | null {
+  if (operationMode !== 'repair') return null;
+
+  const signalText = [
+    state.repairIntentSummary,
+    ...state.repairSignals,
+    ...state.plannerNotes,
+  ].join('\n');
+  const queueSignalDetected = /queue (?:overloaded|is busy)|QUEUE_OVERLOADED|max_pending/i.test(signalText);
+  const queueEdits = buildDeterministicQueueOverloadFallbackEdits(state.repoRoot, candidateFiles).slice(0, state.maxEditActions);
+  const activeScopes = new Set(uniqueScopes(state.scopes));
+
+  if (queueEdits.length > 0 && (queueSignalDetected || activeScopes.has('api-experimental') || activeScopes.has('api') || activeScopes.has('repo'))) {
+    return {
+      summary: queueSignalDetected
+        ? 'Deterministic experimental fallback: widen queue concurrency and backlog headroom after repeated request-queue overload signals.'
+        : 'Deterministic experimental fallback: apply the prebuilt queue-headroom patch instead of ending the repair iteration with no code changes.',
+      edits: queueEdits,
+    };
+  }
+
+  return null;
 }
 
 function buildRepairSmokeJobs(state: ControlPlaneState): PlannedJob[] {
@@ -899,18 +1039,19 @@ const MCP_CLIENT_VERSION = '0.1.0';
 const DEFAULT_LOG_TAIL_LINE_COUNT = parsePositiveIntegerEnv('CONTROL_PLANE_LOG_TAIL_LINES', 16, 4);
 const MCP_INSPECTION_TIMEOUT_MS = parsePositiveIntegerEnv('CONTROL_PLANE_MCP_INSPECTION_TIMEOUT_MS', 8_000, 1_000);
 const MCP_MAX_TOOL_PAGES = 20;
-const AI_AGENT_REQUEST_TIMEOUT_MS = parsePositiveIntegerEnv('CONTROL_PLANE_AI_AGENT_TIMEOUT_MS', 25_000, 5_000);
+const AI_NOTES_AGENT_REQUEST_TIMEOUT_MS = parsePositiveIntegerEnv('CONTROL_PLANE_AI_NOTES_TIMEOUT_MS', 8_000, 1_000);
+const AI_AGENT_REQUEST_TIMEOUT_MS = parsePositiveIntegerEnv('CONTROL_PLANE_AI_AGENT_TIMEOUT_MS', 40_000, 5_000);
 const AI_AGENT_NOTE_LIMIT = 6;
 const AI_AGENT_PAYLOAD_STRING_MAX_CHARS = parsePositiveIntegerEnv('CONTROL_PLANE_AI_MAX_STRING_CHARS', 1_200, 200);
 const AI_AGENT_LOG_LINE_MAX_CHARS = parsePositiveIntegerEnv('CONTROL_PLANE_AI_LOG_LINE_MAX_CHARS', 1_600, 200);
 const AI_AGENT_PAYLOAD_ARRAY_LIMIT = parsePositiveIntegerEnv('CONTROL_PLANE_AI_ARRAY_LIMIT', 8, 2);
 const AI_AGENT_PAYLOAD_OBJECT_KEY_LIMIT = parsePositiveIntegerEnv('CONTROL_PLANE_AI_OBJECT_KEY_LIMIT', 12, 4);
-const AI_AGENT_CONTEXT_NOTE_LIMIT = parsePositiveIntegerEnv('CONTROL_PLANE_AI_CONTEXT_NOTE_LIMIT', 10, 2);
-const AI_AGENT_SIGNAL_PAYLOAD_LIMIT = parsePositiveIntegerEnv('CONTROL_PLANE_AI_SIGNAL_PAYLOAD_LIMIT', 8, 2);
-const AI_CODE_EDIT_CANDIDATE_FILE_LIMIT = parsePositiveIntegerEnv('CONTROL_PLANE_AI_CANDIDATE_FILE_LIMIT', 10, 2);
-const AI_CODE_EDIT_CANDIDATE_PATH_LIMIT = parsePositiveIntegerEnv('CONTROL_PLANE_AI_CANDIDATE_PATH_LIMIT', 16, 4);
-const AI_CODE_EDIT_CANDIDATE_FILE_MAX_CHARS = parsePositiveIntegerEnv('CONTROL_PLANE_AI_CANDIDATE_FILE_MAX_CHARS', 2_500, 400);
-const AI_CODE_EDIT_PAYLOAD_STRING_MAX_CHARS = parsePositiveIntegerEnv('CONTROL_PLANE_AI_CODE_EDIT_MAX_STRING_CHARS', 2_500, 400);
+const AI_AGENT_CONTEXT_NOTE_LIMIT = parsePositiveIntegerEnv('CONTROL_PLANE_AI_CONTEXT_NOTE_LIMIT', 6, 2);
+const AI_AGENT_SIGNAL_PAYLOAD_LIMIT = parsePositiveIntegerEnv('CONTROL_PLANE_AI_SIGNAL_PAYLOAD_LIMIT', 6, 2);
+const AI_CODE_EDIT_CANDIDATE_FILE_LIMIT = parsePositiveIntegerEnv('CONTROL_PLANE_AI_CANDIDATE_FILE_LIMIT', 6, 2);
+const AI_CODE_EDIT_CANDIDATE_PATH_LIMIT = parsePositiveIntegerEnv('CONTROL_PLANE_AI_CANDIDATE_PATH_LIMIT', 10, 4);
+const AI_CODE_EDIT_CANDIDATE_FILE_MAX_CHARS = parsePositiveIntegerEnv('CONTROL_PLANE_AI_CANDIDATE_FILE_MAX_CHARS', 1_400, 400);
+const AI_CODE_EDIT_PAYLOAD_STRING_MAX_CHARS = parsePositiveIntegerEnv('CONTROL_PLANE_AI_CODE_EDIT_MAX_STRING_CHARS', 1_600, 400);
 const CONTROL_PLANE_TYPECHECK_COMMAND = 'bash ./bun.sh run -F anygpt-langgraph-control-plane typecheck';
 const REPAIR_SMOKE_JOB_LIMIT = 2;
 const REPAIR_SMOKE_TIMEOUT_MS = parsePositiveIntegerEnv('CONTROL_PLANE_REPAIR_SMOKE_TIMEOUT_MS', 120_000, 5_000);
@@ -1286,8 +1427,11 @@ function getDefaultControlPlanePromptBundle(): ControlPlanePromptBundle {
   return ControlPlanePromptBundleSchema.parse(DEFAULT_CONTROL_PLANE_PROMPT_BUNDLE);
 }
 
-function buildControlPlanePromptManifest(bundle: ControlPlanePromptBundle): Record<string, unknown> {
-  return {
+function buildControlPlanePromptManifest(
+  promptIdentifier: string,
+  bundle: ControlPlanePromptBundle,
+): Record<string, unknown> {
+  const bundleManifest = {
     _type: 'anygpt_control_plane_prompt_bundle',
     version: 1,
     prompts: {
@@ -1299,6 +1443,18 @@ function buildControlPlanePromptManifest(bundle: ControlPlanePromptBundle): Reco
     },
     metadata: {
       source: 'anygpt-langgraph-control-plane',
+      promptIdentifier,
+    },
+  };
+
+  return {
+    lc: 1,
+    type: 'constructor',
+    id: ['langchain', 'prompts', 'prompt', 'PromptTemplate'],
+    kwargs: {
+      input_variables: [],
+      template_format: 'f-string',
+      template: JSON.stringify(bundleManifest, null, 2),
     },
   };
 }
@@ -1312,6 +1468,9 @@ function extractPromptText(value: unknown): string | undefined {
   if (!value || typeof value !== 'object') return undefined;
 
   const candidate = value as Record<string, unknown>;
+  const candidateKwargs = candidate.kwargs && typeof candidate.kwargs === 'object'
+    ? candidate.kwargs as Record<string, unknown>
+    : null;
   if (typeof candidate.content === 'string' && candidate.content.trim()) {
     return candidate.content.trim();
   }
@@ -1320,6 +1479,17 @@ function extractPromptText(value: unknown): string | undefined {
   }
   if (typeof candidate.template === 'string' && candidate.template.trim()) {
     return candidate.template.trim();
+  }
+  if (candidateKwargs) {
+    if (typeof candidateKwargs.content === 'string' && candidateKwargs.content.trim()) {
+      return candidateKwargs.content.trim();
+    }
+    if (typeof candidateKwargs.prompt === 'string' && candidateKwargs.prompt.trim()) {
+      return candidateKwargs.prompt.trim();
+    }
+    if (typeof candidateKwargs.template === 'string' && candidateKwargs.template.trim()) {
+      return candidateKwargs.template.trim();
+    }
   }
   return undefined;
 }
@@ -1358,6 +1528,20 @@ function extractControlPlanePromptBundle(source: unknown): ControlPlanePromptBun
 
   const sharedPrompt = extractPromptText(candidate);
   if (sharedPrompt) {
+    const trimmedSharedPrompt = sharedPrompt.trim();
+    if (
+      (trimmedSharedPrompt.startsWith('{') && trimmedSharedPrompt.endsWith('}'))
+      || (trimmedSharedPrompt.startsWith('[') && trimmedSharedPrompt.endsWith(']'))
+    ) {
+      try {
+        const parsedSharedPrompt = JSON.parse(trimmedSharedPrompt);
+        const nestedBundle = extractControlPlanePromptBundle(parsedSharedPrompt);
+        if (nestedBundle) return nestedBundle;
+      } catch {
+        // Fall through to legacy shared-prompt handling.
+      }
+    }
+
     return buildLegacyControlPlanePromptBundle(sharedPrompt);
   }
 
@@ -1407,7 +1591,12 @@ function resolveControlPlaneAiConfig(): ControlPlaneAiConfig {
 
   const anygptApiKey = String(process.env.ANYGPT_API_KEY || '').trim();
   const anygptBaseUrl = normalizeOpenAiCompatibleBaseUrl(
-    String(process.env.ANYGPT_API_BASE_URL || process.env.OPENAI_BASE_URL || 'http://127.0.0.1:3000').trim(),
+    String(
+      process.env.CONTROL_PLANE_ANYGPT_API_BASE_URL
+      || process.env.ANYGPT_API_BASE_URL
+      || process.env.OPENAI_BASE_URL
+      || 'http://127.0.0.1:3310',
+    ).trim(),
   );
   const anygptModel = String(process.env.ANYGPT_MODEL || process.env.OPENAI_MODEL || 'gpt-5.4').trim();
   const parsedTemperature = Number(process.env.CONTROL_PLANE_AI_TEMPERATURE || '0.2');
@@ -1683,7 +1872,7 @@ async function callAiNotesAgent(
   }
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), AI_AGENT_REQUEST_TIMEOUT_MS);
+  const timeoutId = setTimeout(() => controller.abort(), AI_NOTES_AGENT_REQUEST_TIMEOUT_MS);
 
   try {
     const response = await fetch(`${config.baseUrl}/chat/completions`, {
@@ -1805,8 +1994,8 @@ async function callAiCodeEditAgent(
                 || DEFAULT_CONTROL_PLANE_PROMPT_BUNDLE.autonomousEdit,
               'Return JSON only in the form {"summary": string, "edits": [{"type": "replace" | "write", "path": string, "reason": string, "find"?: string, "replace"?: string, "content"?: string}]}.',
               requestedOperationMode === 'repair'
-                ? `You are operating in repair mode with ${repairSignalCount} actionable repair signal(s). Prefer a minimal bounded replace edit whenever a safe fix is possible. Empty edits are only acceptable when no safe bounded fix exists, and then the summary must explain why.`
-                : `You are operating in improvement mode with ${improvementSignalCount} improvement signal(s). Prefer one minimal bounded experimental improvement that can be validated quickly. If no safe improvement is justified, explain that in the summary.`,
+                ? `You are operating in repair mode with ${repairSignalCount} actionable repair signal(s). Prefer a minimal bounded replace edit whenever a safe fix is possible. When the safest direct repair is still ambiguous but the signals point at a hot path, propose the smallest resilience or observability improvement in that path instead of returning an empty plan. Empty edits are only acceptable when no safe bounded change fits the allowlist or available context, and then the summary must explain why.`
+                : `You are operating in improvement mode with ${improvementSignalCount} improvement signal(s). On experimental scope, default to proposing at least one small hot-path throughput, routing, resilience, or observability improvement that can be validated quickly. Return an empty edits array only when the candidate context is too weak or every plausible change would violate path or safety rules, and then the summary must explain why.`,
               'Prefer the smallest safe replace edit over rewriting entire files.',
               'When the provided signals mention a file family or subsystem, bias the proposal toward the most relevant candidate file instead of returning a no-op.',
               'Only modify explicitly allowed paths and never modify denied paths, secrets, key files, environment files, lockfiles, node_modules, or generated outputs.',
@@ -2303,7 +2492,7 @@ async function inspectMcpNode(state: ControlPlaneState): Promise<Partial<Control
           promptSyncUrl = await ensureLangSmithPrompt(
             langSmithConfig,
             promptIdentifier,
-            buildControlPlanePromptManifest(localPromptBundle),
+            buildControlPlanePromptManifest(promptIdentifier, localPromptBundle),
             {
               description: CONTROL_PLANE_PROMPT_DESCRIPTION,
               tags: uniqueNormalizedStrings([...CONTROL_PLANE_PROMPT_TAGS, promptSyncChannel, 'sync']),
@@ -2373,7 +2562,7 @@ async function inspectMcpNode(state: ControlPlaneState): Promise<Partial<Control
           promptPromotionUrl = await ensureLangSmithPrompt(
             langSmithConfig,
             promptIdentifier,
-            buildControlPlanePromptManifest(controlPlanePrompts),
+            buildControlPlanePromptManifest(promptIdentifier, controlPlanePrompts),
             {
               description: CONTROL_PLANE_PROMPT_DESCRIPTION,
               tags: uniqueNormalizedStrings([...CONTROL_PLANE_PROMPT_TAGS, promptPromoteChannel, 'promotion']),
@@ -2845,7 +3034,14 @@ async function autonomousEditPlannerNode(state: ControlPlaneState): Promise<Part
     notes.push(`AI autonomous ${operationMode} agent unavailable: ${aiEditPlan.error}`);
   }
 
-  const proposedEdits = aiEditPlan.edits.slice(0, state.maxEditActions);
+  const deterministicFallbackPlan = !runtimeOverride.plan && aiEditPlan.edits.length === 0
+    ? buildDeterministicAutonomousFallbackPlan(state, operationMode, candidateFiles)
+    : null;
+  if (deterministicFallbackPlan) {
+    notes.push(`Deterministic autonomous ${operationMode} fallback: ${deterministicFallbackPlan.summary}`);
+  }
+
+  const proposedEdits = (deterministicFallbackPlan?.edits || aiEditPlan.edits).slice(0, state.maxEditActions);
   for (const edit of proposedEdits) {
     notes.push(`AI autonomous edit proposal: ${edit.type} ${edit.path} — ${edit.reason}`);
   }

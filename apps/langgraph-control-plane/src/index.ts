@@ -201,7 +201,7 @@ async function configureLangSmithRuntime(): Promise<void> {
     || process.env.LANGCHAIN_API_KEY
     || '',
   ).trim();
-  const runtimeKey = serviceKey || genericKey || personalKey;
+  const runtimeKey = personalKey || serviceKey || genericKey;
   let workspaceId = String(
     process.env.CONTROL_PLANE_LANGSMITH_WORKSPACE_ID
     || process.env.LANGSMITH_WORKSPACE_ID
@@ -220,7 +220,7 @@ async function configureLangSmithRuntime(): Promise<void> {
 
   if (!workspaceId) {
     try {
-      const discoveryKey = serviceKey || personalKey || genericKey;
+      const discoveryKey = personalKey || serviceKey || genericKey;
       if (discoveryKey) {
         const discoveredWorkspaceId = await discoverLangSmithWorkspaceId(discoveryKey, workspaceName);
         if (discoveredWorkspaceId) {
@@ -680,7 +680,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     1_000,
   );
   const maxIterations = parseMaxIterations(argMap.get('max-iterations'));
-  const maxEditActions = parseIntegerArg(argMap.get('max-edit-actions'), 3, 1);
+  const maxEditActions = parseIntegerArg(argMap.get('max-edit-actions'), 5, 1);
   const promptIdentifier = String(
     argMap.get('prompt-identifier')
     || process.env.CONTROL_PLANE_PROMPT_IDENTIFIER

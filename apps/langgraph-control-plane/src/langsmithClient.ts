@@ -578,7 +578,8 @@ function normalizeApiUrl(value: string | undefined): string {
 
 export function resolveLangSmithRuntimeConfig(): LangSmithRuntimeConfig | null {
   const apiKey = String(
-    process.env.CONTROL_PLANE_LANGSMITH_SERVICE_KEY
+    process.env.CONTROL_PLANE_LANGSMITH_PERSONAL_API_KEY
+    || process.env.CONTROL_PLANE_LANGSMITH_SERVICE_KEY
     || process.env.CONTROL_PLANE_LANGSMITH_API_KEY
     || process.env.LANGSMITH_API_KEY
     || process.env.LANGCHAIN_API_KEY

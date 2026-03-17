@@ -10,6 +10,24 @@ It now includes:
 - experimental-safe defaults for AnyGPT API build, test, and deploy flows
 - deterministic LangSmith-backed evaluation/regression gating for autonomous edits and execution
 
+## Studio-Compatible Agent Server
+
+This workspace now includes a LangGraph Studio-compatible app config in [`langgraph.json`](langgraph.json) that points Studio at the existing control-plane graph export in [`src/studioGraph.ts`](src/studioGraph.ts).
+
+Run the local Studio/agent server with:
+
+```bash
+bash ./bun.sh run -F anygpt-langgraph-control-plane studio:dev
+```
+
+Default connection details:
+
+- Base URL: `http://localhost:2024`
+- Host binding: `0.0.0.0`
+- Config: [`apps/langgraph-control-plane/langgraph.json`](apps/langgraph-control-plane/langgraph.json)
+
+The LangGraph server currently loads environment variables from [`../../.env.local`](../../.env.local) via [`langgraph.json`](langgraph.json). If you keep your control-plane credentials elsewhere, update the `env` path in [`langgraph.json`](langgraph.json) before launching Studio.
+
 ## Purpose
 
 This package is intentionally separated from [`apps/api`](../api/README.md) so that agent orchestration, approval flow, and deployment logic do not become part of the API runtime.

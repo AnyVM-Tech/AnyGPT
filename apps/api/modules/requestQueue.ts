@@ -83,7 +83,7 @@ function getBaselineTierRps(): number {
 
 const REQUEST_QUEUE_CONCURRENCY = (() => {
   const baselineTierRps = getBaselineTierRps();
-  const suggestedDefault = Math.max(8, Math.min(24, Math.ceil(baselineTierRps / 2)));
+  const suggestedDefault = Math.max(12, Math.min(32, Math.ceil(baselineTierRps * 0.75)));
   const raw = Number(process.env.REQUEST_QUEUE_CONCURRENCY ?? String(suggestedDefault));
   if (!Number.isFinite(raw) || raw <= 0) return suggestedDefault;
   return Math.floor(raw);
@@ -92,8 +92,8 @@ const REQUEST_QUEUE_CONCURRENCY = (() => {
 const REQUEST_QUEUE_MAX_PENDING = (() => {
   const baselineTierRps = getBaselineTierRps();
   const suggestedDefault = Math.min(
-    4096,
-    Math.max(256, REQUEST_QUEUE_CONCURRENCY * 64, baselineTierRps * 8)
+    8192,
+    Math.max(1024, REQUEST_QUEUE_CONCURRENCY * 192, baselineTierRps * 24)
   );
   const raw = Number(process.env.REQUEST_QUEUE_MAX_PENDING ?? String(suggestedDefault));
   if (!Number.isFinite(raw) || raw < 0) return suggestedDefault;

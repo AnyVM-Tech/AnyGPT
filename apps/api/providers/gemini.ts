@@ -9,6 +9,7 @@ import {
 } from './interfaces.js'; // Only import necessary interfaces
 import { fetchWithTimeout } from '../modules/http.js';
 import { logUniqueProviderError } from '../modules/errorLogger.js';
+import { normalizeImageFetchReferer } from '../modules/openaiRequestSupport.js';
 // Removed imports related to compute and Provider state
 
 dotenv.config();
@@ -727,7 +728,7 @@ export class GeminiAI implements IAIProvider {
       const errorMessage = error.message || 'Unknown Gemini API error';
       GeminiAI.updateModelTokenLimitsFromError(message.model?.id ?? '', errorMessage);
       const normalizedMessage = /cannot fetch content from the provided url/i.test(errorMessage)
-        ? 'unsupported_remote_media_url'
+        ? 'gemini:invalid_argument:unsupported_remote_media_url'
         : errorMessage;
       const wrappedError = new Error(`Gemini API stream call failed: ${normalizedMessage}`);
       (wrappedError as any).__providerUniqueLogged = true;

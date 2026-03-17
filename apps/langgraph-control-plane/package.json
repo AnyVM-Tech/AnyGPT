@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "bash ../../bun.sh run ./src/index.ts",
     "start": "bash ../../bun.sh run ./src/index.ts",
+    "studio:dev": "bash ../../bun.sh x @langchain/langgraph-cli dev --config ./langgraph.json --host 0.0.0.0 --port 2024 --no-browser",
     "build": "tsc --project tsconfig.json --outDir dist",
     "typecheck": "tsc --project tsconfig.json --noEmit"
   },
