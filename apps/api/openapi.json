@@ -1158,6 +1158,7 @@
     "/api/admin/metrics/summary": {
       "get": {
         "summary": "Metrics summary",
+        "description": "Returns an admin metrics summary including provider/model/key counts, queue aggregates, and error log stats.",
         "security": [
           {
             "BearerAuth": []
@@ -1168,7 +1169,26 @@
         ],
         "responses": {
           "200": {
-            "description": "Metrics summary"
+            "description": "Metrics summary including queue totals and busiest queue details"
+          }
+        }
+      }
+    },
+    "/api/admin/metrics/queues": {
+      "get": {
+        "summary": "Queue metrics",
+        "description": "Returns live queue snapshots for the shared request handler, embeddings admission queue, and provider-stats worker queues.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyHeader": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Queue metrics with per-queue snapshots and aggregate queue summary"
           }
         }
       }

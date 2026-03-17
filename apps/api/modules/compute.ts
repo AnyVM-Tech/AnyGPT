@@ -151,28 +151,57 @@ export function computeProviderStatsWithEMA(
   }
 }
 
-export function computeProviderScore(
+function scoreLatencyMetric(
+  avgLatencyMs: number | null | undefined,
+  fastMs: number,
+  slowMs: number,
+  fallbackScore: number = 50
+): number {
+  if (typeof avgLatencyMs !== 'number' || !Number.isFinite(avgLatencyMs)) {
+    return fallbackScore;
+  }
+  if (avgLatencyMs <= fastMs) return 100;
+  if (avgLatencyMs >= slowMs) return 0;
+  return Math.max(0, Math.min(100, 100 * (1 - ((avgLatencyMs - fastMs) / (slowMs - fastMs)))));
+}
+
+function countSuccessfulProviderRequests(providerData: Provider): number {
+  if (!providerData?.models) return 0;
+  return Object.values(providerData.models).reduce((sum, model) => {
+    return sum + (Array.isArray(model?.response_times) ? model.response_times.length : 0);
+  }, 0);
+}
+
+export function calculateProviderScore(
   providerData: Provider,
   latencyWeight: number,
   errorWeight: number
-): void {
-  if (!providerData) return;
+): number {
+  if (!providerData) return 0;
+
+  const totalRequests = countSuccessfulProviderRequests(providerData);
+  const totalErrors = Math.max(0, Number(providerData.errors ?? 0));
+  const hasProviderLatency = typeof providerData.avg_provider_latency === 'number'
+    && Number.isFinite(providerData.avg_provider_latency);
+  const hasResponseTime = typeof providerData.avg_response_time === 'number'
+    && Number.isFinite(providerData.avg_response_time);
+
+  const providerLatencyScore = scoreLatencyMetric(providerData.avg_provider_latency, 50, 5000, 50);
+  const responseTimeScore = scoreLatencyMetric(providerData.avg_response_time, 750, 12_000, 50);
 
   let latencyScore = 50;
-  const avgLatency = providerData.avg_provider_latency;
-  if (avgLatency !== null && !isNaN(avgLatency)) {
-    if (avgLatency <= 50) latencyScore = 100;
-    else if (avgLatency > 5000) latencyScore = 0;
-    else latencyScore = Math.min(100, Math.max(0, 100 * (1 - (avgLatency - 50) / (5000 - 50))));
+  if (hasProviderLatency && hasResponseTime) {
+    latencyScore = Math.round((providerLatencyScore * 0.2) + (responseTimeScore * 0.8));
+  } else if (hasResponseTime) {
+    latencyScore = responseTimeScore;
+  } else if (hasProviderLatency) {
+    latencyScore = providerLatencyScore;
+  } else if (totalErrors > 0) {
+    // Providers with only failures and no successful latency samples should sink quickly.
+    latencyScore = 0;
   }
 
   let errorScore = 100;
-  let totalRequests = 0;
-  if (providerData.models) {
-    totalRequests = Object.values(providerData.models).reduce((sum, model) => sum + (model?.response_times?.length || 0), 0);
-  }
-  const totalErrors = providerData.errors ?? 0;
-
   if (totalRequests > 0) {
     const errorRate = Math.min(1, totalErrors / totalRequests);
     errorScore = Math.max(0, 100 * (1 - errorRate));
@@ -180,13 +209,20 @@ export function computeProviderScore(
     errorScore = 0;
   }
 
-  // Normalize weights if they don't sum to 1
   const weightSum = latencyWeight + errorWeight;
-  const normLatencyWeight = (weightSum > 0) ? latencyWeight / weightSum : 0.5;
-  const normErrorWeight = (weightSum > 0) ? errorWeight / weightSum : 0.5;
-
+  const normLatencyWeight = weightSum > 0 ? latencyWeight / weightSum : 0.5;
+  const normErrorWeight = weightSum > 0 ? errorWeight / weightSum : 0.5;
   const combinedScore = (normLatencyWeight * latencyScore) + (normErrorWeight * errorScore);
-  providerData.provider_score = Math.max(0, Math.min(100, Math.round(combinedScore)));
+  return Math.max(0, Math.min(100, Math.round(combinedScore)));
+}
+
+export function computeProviderScore(
+  providerData: Provider,
+  latencyWeight: number,
+  errorWeight: number
+): void {
+  if (!providerData) return;
+  providerData.provider_score = calculateProviderScore(providerData, latencyWeight, errorWeight);
 }
 
 export function applyTimeWindow(providersData: Provider[], windowInHours: number): void {

@@ -197,6 +197,28 @@ function buildInferredToolCall(name: string, rawArguments: any): any {
   };
 }
 
+function collectInferableToolNames(tools: any[] | undefined): string[] {
+  if (!Array.isArray(tools) || tools.length === 0) return [];
+
+  return tools
+    .map((tool) => {
+      if (!tool || typeof tool !== 'object') return undefined;
+
+      const toolType = typeof tool.type === 'string' ? tool.type.trim().toLowerCase() : '';
+      const isFunctionTool = Boolean(tool?.function && typeof tool.function === 'object')
+        || !toolType
+        || toolType === 'function';
+      if (!isFunctionTool) return undefined;
+
+      const name = typeof tool?.function?.name === 'string'
+        ? tool.function.name
+        : (typeof tool?.name === 'string' ? tool.name : undefined);
+      const trimmed = typeof name === 'string' ? name.trim() : '';
+      return trimmed || undefined;
+    })
+    .filter((name): name is string => Boolean(name));
+}
+
 export function inferToolCallsFromJsonText(raw: string, tools: any[] | undefined, toolChoice?: any): any[] | undefined {
   if (typeof raw !== 'string') return undefined;
   if (!Array.isArray(tools) || tools.length === 0) return undefined;
@@ -207,92 +229,39 @@ export function inferToolCallsFromJsonText(raw: string, tools: any[] | undefined
   const requestedToolName = typeof toolChoice === 'object' && toolChoice
     ? (toolChoice?.function?.name || toolChoice?.name)
     : undefined;
-  const availableToolNames = tools
-    .map((tool) => {
-      const fn = tool?.function;
-      return typeof fn?.name === 'string' ? fn.name : (typeof tool?.name === 'string' ? tool.name : undefined);
-    })
-    .filter((name): name is string => Boolean(name));
+  const availableToolNames = collectInferableToolNames(tools);
+  if (availableToolNames.length === 0) return undefined;
+  const availableToolNameSet = new Set(availableToolNames);
 
-  const directToolCalls = ((): any[] | undefined => {
-    for (const parsed of parsedCandidates) {
-      if (Array.isArray(parsed.tool_calls) && parsed.tool_calls.length > 0) {
-        const normalized = parsed.tool_calls
-          .map((call: any) => {
-            const name = call?.function?.name ?? call?.name ?? call?.tool_name;
-            const argumentsPayload = call?.function?.arguments ?? call?.arguments ?? call?.parameters ?? call?.args;
-            if (typeof name !== 'string' || !name.trim()) return null;
-            if (requestedToolName && name !== requestedToolName) return null;
-            return buildInferredToolCall(name, argumentsPayload);
-          })
-          .filter(Boolean);
-        if (normalized.length > 0) return normalized;
-      }
+  const normalizeExplicitToolCall = (rawName: unknown, rawArguments: any): any | null => {
+    const name = typeof rawName === 'string' ? rawName.trim() : '';
+    if (!name) return null;
+    if (!availableToolNameSet.has(name)) return null;
+    if (requestedToolName && name !== requestedToolName) return null;
+    return buildInferredToolCall(name, rawArguments);
+  };
 
-      const wrappedName = parsed?.function?.name ?? parsed?.name ?? parsed?.tool_name ?? parsed?.tool;
-      const wrappedArguments = parsed?.function?.arguments ?? parsed?.arguments ?? parsed?.parameters ?? parsed?.args;
-      if (typeof wrappedName === 'string' && wrappedName.trim()) {
-        if (!requestedToolName || wrappedName === requestedToolName) {
-          return [buildInferredToolCall(wrappedName, wrappedArguments)];
-        }
-      }
-
-      if (requestedToolName && parsed[requestedToolName] && typeof parsed[requestedToolName] === 'object' && !Array.isArray(parsed[requestedToolName])) {
-        return [buildInferredToolCall(requestedToolName, parsed[requestedToolName])];
-      }
-
-      if (availableToolNames.length === 1) {
-        const soleToolName = availableToolNames[0];
-        const commonArgsPayload = parsed?.arguments ?? parsed?.parameters ?? parsed?.args;
-        if (commonArgsPayload && typeof commonArgsPayload === 'object' && !Array.isArray(commonArgsPayload)) {
-          return [buildInferredToolCall(soleToolName, commonArgsPayload)];
-        }
-      }
-    }
-
-    return undefined;
-  })();
-
-  if (directToolCalls && directToolCalls.length > 0) return directToolCalls;
-
-  let bestMatch: { name: string; score: number; parsed: Record<string, any> } | undefined;
-
+  // Keep inference intentionally strict. Broad schema matching caused plain assistant
+  // JSON output to be mistaken for a new tool call, which can loop client-side tools.
   for (const parsed of parsedCandidates) {
-    const keys = Object.keys(parsed);
-    for (const tool of tools) {
-      const fn = tool?.function;
-      const name = typeof fn?.name === 'string' ? fn.name : (typeof tool?.name === 'string' ? tool.name : undefined);
-      const params = fn?.parameters || tool?.parameters;
-      if (!name) continue;
-      if (requestedToolName && name !== requestedToolName) continue;
-
-      const properties = params && typeof params === 'object' && params.properties && typeof params.properties === 'object'
-        ? Object.keys(params.properties)
-        : [];
-      const required = params && typeof params === 'object' && Array.isArray(params.required)
-        ? params.required.filter((key: any) => typeof key === 'string')
-        : [];
-
-      const matchedRequired = required.filter((key: string) => keys.includes(key)).length;
-      const missingRequired = required.length - matchedRequired;
-      const matchedProperties = properties.filter((key: string) => keys.includes(key)).length;
-      const unexpectedKeys = properties.length > 0
-        ? keys.filter((key) => !properties.includes(key)).length
-        : 0;
-
-      if (required.length > 0 && missingRequired > 0) continue;
-      if (properties.length > 0 && matchedProperties === 0) continue;
-
-      const score = (matchedRequired * 100) + (matchedProperties * 10) - unexpectedKeys;
-      if (!bestMatch || score > bestMatch.score) {
-        bestMatch = { name, score, parsed };
-      }
+    if (Array.isArray(parsed.tool_calls) && parsed.tool_calls.length > 0) {
+      const normalized = parsed.tool_calls
+        .map((call: any) => normalizeExplicitToolCall(
+          call?.function?.name ?? call?.name ?? call?.tool_name,
+          call?.function?.arguments ?? call?.arguments ?? call?.parameters ?? call?.args,
+        ))
+        .filter(Boolean);
+      if (normalized.length > 0) return normalized;
     }
+
+    const wrappedCall = normalizeExplicitToolCall(
+      parsed?.function?.name ?? parsed?.name ?? parsed?.tool_name ?? parsed?.tool,
+      parsed?.function?.arguments ?? parsed?.arguments ?? parsed?.parameters ?? parsed?.args,
+    );
+    if (wrappedCall) return [wrappedCall];
   }
 
-  if (!bestMatch) return undefined;
-
-  return [buildInferredToolCall(bestMatch.name, bestMatch.parsed)];
+  return undefined;
 }
 
 export function filterValidChatMessages(rawMessages: any): { role: string; content: any; tool_calls?: any[]; tool_call_id?: string; name?: string }[] {

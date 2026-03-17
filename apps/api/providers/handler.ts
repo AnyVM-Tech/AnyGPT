@@ -14,7 +14,7 @@ import { ImagenAI } from './imagen.js';
 import { OpenAI } from './openai.js';
 import { OpenRouterAI } from './openrouter.js';
 import { DeepseekAI } from './deepseek.js';
-import { updateProviderData, applyTimeWindow } from '../modules/compute.js';
+import { updateProviderData, applyTimeWindow, calculateProviderScore } from '../modules/compute.js';
 import { computeProviderMetricsInWorker } from '../modules/workerPool.js';
 // Import DataManager and necessary EXPORTED types
 import { 
@@ -125,7 +125,8 @@ const PROVIDER_STATS_BUFFER_MAX_PENDING = (() => {
         ? Math.floor(parsed)
         : suggestedDefault;
 })();
-const providerStatsQueues = Array.from({ length: PROVIDER_STATS_QUEUE_WORKERS }, () => new RequestQueue(PROVIDER_STATS_QUEUE_CONCURRENCY, {
+const providerStatsQueues = Array.from({ length: PROVIDER_STATS_QUEUE_WORKERS }, (_value, index) => new RequestQueue(PROVIDER_STATS_QUEUE_CONCURRENCY, {
+    label: `provider-stats-worker-${index + 1}`,
     maxPending: PROVIDER_STATS_QUEUE_MAX_PENDING,
 }));
 
@@ -149,6 +150,16 @@ function getProviderStatsQueue(providerId: string, modelId: string): { queue: Re
 
 function getProviderStatsQueueByIndex(index: number): RequestQueue {
     return providerStatsQueues[index] || providerStatsQueues[0];
+}
+
+export function getProviderStatsQueueSnapshots(): ReturnType<RequestQueue['snapshot']>[] {
+    return providerStatsQueues.map((queue, index) => {
+        const snapshot = queue.snapshot();
+        return {
+            ...snapshot,
+            label: snapshot.label || `provider-stats-worker-${index + 1}`,
+        };
+    });
 }
 const RATE_LIMIT_WAIT_MAX_MS = (() => {
     const raw = process.env.RATE_LIMIT_WAIT_MAX_MS;
@@ -182,6 +193,11 @@ const SHARED_PROVIDER_WINDOW_REQUEST_RESERVE = (() => {
 const SHARED_PROVIDER_WINDOW_JITTER_MS = (() => {
     const raw = Number(process.env.SHARED_PROVIDER_WINDOW_JITTER_MS ?? 1500);
     if (!Number.isFinite(raw) || raw < 0) return 1500;
+    return Math.floor(raw);
+})();
+const SHARED_PROVIDER_RETRY_AFTER_SAFETY_MS = (() => {
+    const raw = Number(process.env.SHARED_PROVIDER_RETRY_AFTER_SAFETY_MS ?? 350);
+    if (!Number.isFinite(raw) || raw < 0) return 350;
     return Math.floor(raw);
 })();
 const SHARED_PROVIDER_BURST_GAP_MS = (() => {
@@ -225,16 +241,29 @@ const PROVIDER_MIN_ACTIVE_MODEL_CANDIDATES = (() => {
     if (!Number.isFinite(raw) || raw <= 0) return 6;
     return Math.max(1, Math.floor(raw));
 })();
+const PROVIDER_SELECTION_LATENCY_WEIGHT = 0.7;
+const PROVIDER_SELECTION_ERROR_WEIGHT = 0.3;
+const PROVIDER_SELECTION_DEGRADED_SCORE = (() => {
+    const raw = Number(process.env.PROVIDER_SELECTION_DEGRADED_SCORE ?? 20);
+    if (!Number.isFinite(raw)) return 20;
+    return Math.max(0, Math.min(100, Math.round(raw)));
+})();
 const PROVIDER_COOLDOWN_REDIS_PREFIX = 'provider:cooldown:';
 const PROVIDER_DISTRIBUTED_SCHEDULER_ENABLED = process.env.PROVIDER_DISTRIBUTED_SCHEDULER !== '0';
 const PROVIDER_DISTRIBUTED_BUCKET_REDIS_PREFIX = 'provider:scheduler:bucket:';
 const PROVIDER_DISTRIBUTED_COOLDOWN_REDIS_PREFIX = 'provider:scheduler:cooldown:';
 const PROVIDER_DISTRIBUTED_LEASE_REDIS_PREFIX = 'provider:scheduler:lease:';
 const PROVIDER_DISTRIBUTED_LEASE_MS = Math.max(100, Number(process.env.PROVIDER_DISTRIBUTED_LEASE_MS ?? 1000));
+const PROVIDER_AUTH_FAILURE_FAST_SKIP_MS = (() => {
+    const raw = process.env.PROVIDER_AUTH_FAILURE_FAST_SKIP_MS;
+    const parsed = raw !== undefined ? Number(raw) : NaN;
+    return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 10 * 60 * 1000;
+})();
 const providerCooldowns = new Map<string, number>();
 const providerDistributedCooldowns = new Map<string, number>();
 const providerRateLimitStarts = new Map<string, number>();
 const providerRateLimitWindows = new Map<string, number[]>();
+const providerFastSkips = new Map<string, number>();
 const COOLDOWN_EVICTION_INTERVAL_MS = 5 * 60 * 1000; // Sweep expired entries every 5 minutes
 const DISTRIBUTED_PROVIDER_BUCKET_LUA = `
 local bucket_key = KEYS[1]
@@ -291,6 +320,12 @@ const _cooldownEvictionTimer = setInterval(() => {
             evicted++;
         }
     }
+    for (const [key, expiresAt] of providerFastSkips) {
+        if (expiresAt <= now) {
+            providerFastSkips.delete(key);
+            evicted++;
+        }
+    }
     if (evicted > 0) {
         console.log(`[CooldownEviction] Swept ${evicted} expired cooldown entries. Remaining: ${providerCooldowns.size}`);
     }
@@ -325,6 +360,32 @@ function getDistributedProviderCooldownKey(providerId: string, modelId: string):
 
 function getDistributedProviderLeaseKey(providerId: string, modelId: string): string {
     return `${PROVIDER_DISTRIBUTED_LEASE_REDIS_PREFIX}${hashToken(getDistributedProviderIdentity(providerId, modelId))}`;
+}
+
+function getProviderFastSkipRemainingMs(providerId: string): number | null {
+    const expiresAt = providerFastSkips.get(providerId);
+    if (!expiresAt) return null;
+    const remainingMs = expiresAt - Date.now();
+    if (remainingMs <= 0) {
+        providerFastSkips.delete(providerId);
+        return null;
+    }
+    return remainingMs;
+}
+
+function markProviderFastSkip(providerId: string, reason?: string, ttlMs: number = PROVIDER_AUTH_FAILURE_FAST_SKIP_MS): void {
+    if (!providerId || !Number.isFinite(ttlMs) || ttlMs <= 0) return;
+    const nextExpiresAt = Date.now() + Math.max(1, Math.ceil(ttlMs));
+    const previousExpiresAt = providerFastSkips.get(providerId) ?? 0;
+    if (previousExpiresAt >= nextExpiresAt) return;
+    providerFastSkips.set(providerId, nextExpiresAt);
+    const suffix = reason ? ` (${String(reason).slice(0, 200)})` : '';
+    console.warn(`[ProviderFastSkip] Temporarily skipping ${providerId} for ${Math.round(ttlMs / 1000)}s${suffix}`);
+}
+
+function clearProviderFastSkip(providerId: string): void {
+    if (!providerId) return;
+    providerFastSkips.delete(providerId);
 }
 
 function isSharedRateLimitProvider(providerId: string): boolean {
@@ -435,10 +496,10 @@ function getProviderRateLimitWaitMs(
 
     if (rawWaitMs <= 0) return { waitMs: 0, earlyWakeMs: null };
     const cappedWaitMs = Math.min(rawWaitMs, RATE_LIMIT_WAIT_MAX_MS);
-    const earlyWakeMs = Math.max(
-        0,
-        PROVIDER_RATE_LIMIT_WAKE_EARLY_MS + (isSharedRateLimitProvider(providerId) ? SHARED_PROVIDER_WINDOW_JITTER_MS : 0)
-    );
+    const configuredEarlyWakeMs = isSharedRateLimitProvider(providerId)
+        ? 0
+        : Math.max(0, PROVIDER_RATE_LIMIT_WAKE_EARLY_MS);
+    const earlyWakeMs = Math.min(Math.max(0, cappedWaitMs - 1), configuredEarlyWakeMs);
     return { waitMs: cappedWaitMs, earlyWakeMs };
 }
 
@@ -477,6 +538,13 @@ function estimateRateLimitRequestsFromBurst(providerId: string, modelId: string,
 
     const successfulBeforeLimit = Math.max(1, burstCount - 1);
     return successfulBeforeLimit;
+}
+
+function normalizeRetryAfterCooldownMs(providerId: string, retryAfterMs: number | null | undefined): number | null {
+    if (!Number.isFinite(retryAfterMs as number) || (retryAfterMs as number) <= 0) return null;
+    const baseMs = Math.max(1, Math.ceil(retryAfterMs as number));
+    if (!isSharedRateLimitProvider(providerId)) return baseMs;
+    return baseMs + SHARED_PROVIDER_RETRY_AFTER_SAFETY_MS;
 }
 
 function smoothPositiveInteger(previousValue: number | null | undefined, nextValue: number): number {
@@ -652,7 +720,9 @@ async function waitForCooldownOrDeadline(
         : PROVIDER_COOLDOWN_MS;
     if (baseDelay <= 0) return false;
     const earlyWake = hasExplicitCooldown
-        ? Math.max(0, Math.floor(earlyWakeMs ?? RATE_LIMIT_WAKE_EARLY_MS))
+        ? (earlyWakeMs === undefined
+            ? Math.max(0, Math.floor(RATE_LIMIT_WAKE_EARLY_MS))
+            : Math.max(0, Math.floor(earlyWakeMs ?? 0)))
         : 0;
     const adjustedDelay = Math.max(0, baseDelay - earlyWake);
     const cappedDelay = Math.min(adjustedDelay, RATE_LIMIT_WAIT_MAX_MS);
@@ -709,6 +779,7 @@ interface HandleMessagesOptions extends Partial<IMessage> {
 interface HandleStreamingOptions extends Partial<IMessage> {
     disablePassthrough?: boolean;
     requestId?: string;
+    skipQueue?: boolean;
 }
 
 let providerConfigs: { [providerId: string]: ProviderConfig } = {};
@@ -900,6 +971,9 @@ export class MessageHandler {
         (err as any).audioTokenEstimate = breakdown.audioTokens;
         (err as any).hasImageInput = hasImageInput;
         (err as any).hasAudioInput = hasAudioInput;
+        (err as any).status = 400;
+        (err as any).retryable = false;
+        (err as any).requestRetryWorthless = true;
         return err;
     }
 
@@ -934,6 +1008,21 @@ export class MessageHandler {
         const normalized = String(providerId || '').toLowerCase();
         const dashIndex = normalized.indexOf('-');
         return dashIndex > 0 ? normalized.slice(0, dashIndex) : normalized;
+    }
+
+    private getEffectiveProviderScore(provider: LoadedProviderData): number | null {
+        if (!provider) return null;
+        try {
+            const computed = calculateProviderScore(
+                provider as unknown as ProviderStateStructure,
+                PROVIDER_SELECTION_LATENCY_WEIGHT,
+                PROVIDER_SELECTION_ERROR_WEIGHT
+            );
+            return Number.isFinite(computed) ? computed : (provider.provider_score ?? null);
+        } catch (error) {
+            console.warn(`Failed to compute effective score for provider ${provider.id}:`, error);
+            return provider.provider_score ?? null;
+        }
     }
 
     private shouldPreventProviderAutoDisable(
@@ -993,7 +1082,7 @@ export class MessageHandler {
                 const leftDisabledAt = Number(leftModelData?.disabled_at || 0);
                 const rightDisabledAt = Number(rightModelData?.disabled_at || 0);
                 if (leftDisabledAt !== rightDisabledAt) return leftDisabledAt - rightDisabledAt;
-                return (right.provider_score ?? -Infinity) - (left.provider_score ?? -Infinity);
+                return (this.getEffectiveProviderScore(right) ?? -Infinity) - (this.getEffectiveProviderScore(left) ?? -Infinity);
             })
             .slice(0, Math.max(0, minimumCount - candidateProviders.length))
             .map((provider) => {
@@ -1270,40 +1359,57 @@ export class MessageHandler {
             PROVIDER_MIN_ACTIVE_MODEL_CANDIDATES
         );
 
+        const selectionScoreCache = new Map<string, number | null>();
+        const getSelectionScore = (provider: LoadedProviderData): number | null => {
+            if (selectionScoreCache.has(provider.id)) {
+                return selectionScoreCache.get(provider.id) ?? null;
+            }
+            const score = this.getEffectiveProviderScore(provider);
+            selectionScoreCache.set(provider.id, score);
+            return score;
+        };
+
         const eligibleProviders = compatibleProviders.filter((p: LoadedProviderData) => {
-            const score = p.provider_score;
+            const score = getSelectionScore(p);
             const minOk = tierLimits.min_provider_score === null || (score !== null && score >= tierLimits.min_provider_score);
             const maxOk = tierLimits.max_provider_score === null || (score !== null && score <= tierLimits.max_provider_score);
             return minOk && maxOk;
         });
+        const healthyEligibleProviders = eligibleProviders.filter((provider) => {
+            const score = getSelectionScore(provider);
+            return score === null || score >= PROVIDER_SELECTION_DEGRADED_SCORE;
+        });
+        const primaryEligibleProviders = healthyEligibleProviders.length > 0
+            ? healthyEligibleProviders
+            : eligibleProviders;
 
         let candidateProviders: LoadedProviderData[] = [];
         const randomChoice = Math.random();
 
-        if (eligibleProviders.length > 0) {
+        if (primaryEligibleProviders.length > 0) {
             if (userTierName === 'enterprise') {
-                eligibleProviders.sort((a, b) => (b.provider_score ?? -Infinity) - (a.provider_score ?? -Infinity));
+                primaryEligibleProviders.sort((a, b) => (getSelectionScore(b) ?? -Infinity) - (getSelectionScore(a) ?? -Infinity));
             } else if (userTierName === 'pro') {
-                eligibleProviders.sort((a, b) => (b.provider_score ?? -Infinity) - (a.provider_score ?? -Infinity));
+                primaryEligibleProviders.sort((a, b) => (getSelectionScore(b) ?? -Infinity) - (getSelectionScore(a) ?? -Infinity));
                 const pickBestProbability = 0.80;
-                if (randomChoice >= pickBestProbability && eligibleProviders.length > 1) {
-                    const randomIndex = Math.floor(Math.random() * (eligibleProviders.length - 1)) + 1;
-                    [eligibleProviders[0], eligibleProviders[randomIndex]] = [eligibleProviders[randomIndex], eligibleProviders[0]];
+                if (randomChoice >= pickBestProbability && primaryEligibleProviders.length > 1) {
+                    const randomIndex = Math.floor(Math.random() * (primaryEligibleProviders.length - 1)) + 1;
+                    [primaryEligibleProviders[0], primaryEligibleProviders[randomIndex]] = [primaryEligibleProviders[randomIndex], primaryEligibleProviders[0]];
                 }
             } else {
-                eligibleProviders.sort((a, b) => (a.provider_score ?? Infinity) - (b.provider_score ?? Infinity));
+                primaryEligibleProviders.sort((a, b) => (a === b ? 0 : (getSelectionScore(a) ?? Infinity) - (getSelectionScore(b) ?? Infinity)));
                 const pickWorstProbability = 0.70;
-                if (randomChoice >= pickWorstProbability && eligibleProviders.length > 1) {
-                    const randomIndex = Math.floor(Math.random() * (eligibleProviders.length - 1)) + 1;
-                    [eligibleProviders[0], eligibleProviders[randomIndex]] = [eligibleProviders[randomIndex], eligibleProviders[0]];
+                if (randomChoice >= pickWorstProbability && primaryEligibleProviders.length > 1) {
+                    const randomIndex = Math.floor(Math.random() * (primaryEligibleProviders.length - 1)) + 1;
+                    [primaryEligibleProviders[0], primaryEligibleProviders[randomIndex]] = [primaryEligibleProviders[randomIndex], primaryEligibleProviders[0]];
                 }
             }
-            candidateProviders = [...eligibleProviders];
+            candidateProviders = [...primaryEligibleProviders];
         }
 
         const fallbackProviders = compatibleProviders
             .filter(cp => !candidateProviders.some(cand => cand.id === cp.id))
-            .sort((a, b) => (b.provider_score ?? -Infinity) - (a.provider_score ?? -Infinity));
+            .sort((a, b) => (getSelectionScore(b) ?? -Infinity) - (getSelectionScore(a) ?? -Infinity));
 
         candidateProviders = [...candidateProviders, ...fallbackProviders];
 
@@ -1625,6 +1731,7 @@ export class MessageHandler {
         const requestId = normalizedArgs.requestId;
         const options = normalizedArgs.options;
         const messageOverrides = this.extractMessageOverrides(options);
+        const shouldUseRequestQueue = !options?.skipQueue;
         const execute = async () => {
             if (!messages?.length || !modelId || !apiKey) throw new Error("Invalid arguments");
             if (!messageHandler) throw new Error("Service temporarily unavailable.");
@@ -1676,7 +1783,12 @@ export class MessageHandler {
             let nextCooldownEarlyWakeMs: number | null = null;
             let attemptedSinceCooldown = false;
             for (;;) {
-                for (let idx = 0; idx < candidateProviders.length; idx++) {
+                let releaseQueueSlot: (() => void) | null = null;
+                try {
+                    if (shouldUseRequestQueue) {
+                        releaseQueueSlot = await requestQueue.acquire();
+                    }
+                    for (let idx = 0; idx < candidateProviders.length; idx++) {
                     // Check request-level deadline before each attempt
                     const elapsed = Date.now() - requestStartTime;
                     if (REQUEST_DEADLINE_MS > 0 && elapsed >= REQUEST_DEADLINE_MS) {
@@ -1690,6 +1802,9 @@ export class MessageHandler {
                     const providerId = selectedProvider.id;
                     const providerApiKey = selectedProvider.apiKey ?? '';
                     const modelStats = selectedProvider?.models?.[modelId];
+                    if (getProviderFastSkipRemainingMs(providerId) !== null) {
+                        continue;
+                    }
                     if (providerApiKey && await isApiKeyCoolingDownForModel(providerApiKey, modelId)) {
                         skippedByCooldown++;
                         if (shouldRespectCooldowns) {
@@ -1896,22 +2011,33 @@ export class MessageHandler {
 
                 if (sendMessageError && this.isRateLimitOrQuotaError(sendMessageError)) {
                     const retryAfterMs = extractRetryAfterMs(String(sendMessageError?.message || sendMessageError || ''));
+                    const cooldownMs = normalizeRetryAfterCooldownMs(providerId, retryAfterMs);
                     if (providerApiKey) {
                         blockedApiKeys.add(providerApiKey);
                     }
                     if (providerApiKey && shouldRespectCooldowns) {
-                        await setApiKeyCooldownForModel(providerApiKey, modelId, retryAfterMs ?? undefined);
+                        await setApiKeyCooldownForModel(providerApiKey, modelId, cooldownMs ?? undefined);
                     }
-                    await setDistributedProviderCooldown(providerId, modelId, retryAfterMs ?? undefined);
+                    await setDistributedProviderCooldown(providerId, modelId, cooldownMs ?? undefined);
                     console.warn(`Rate limit/quota hit for ${providerId}; skipping this key for the remainder of the request.`);
-                    if (shouldRespectCooldowns && retryAfterMs && retryAfterMs > 0) {
+                    if (shouldRespectCooldowns && cooldownMs && cooldownMs > 0) {
                         nextCooldownMs = nextCooldownMs === null
-                            ? retryAfterMs
-                            : Math.min(nextCooldownMs, retryAfterMs);
-                        if (nextCooldownMs === retryAfterMs) {
+                            ? cooldownMs
+                            : Math.min(nextCooldownMs, cooldownMs);
+                        if (nextCooldownMs === cooldownMs) {
                             nextCooldownEarlyWakeMs = null;
                         }
                     }
+                }
+                if (sendMessageError && (
+                    this.isInvalidProviderCredentialError(sendMessageError)
+                    || sendMessageError?.authFailure === true
+                    || sendMessageError?.code === 'GEMINI_CATALOG_AUTH_DISABLED'
+                    || sendMessageError?.code === 'GEMINI_API_DISABLED'
+                    || sendMessageError?.code === 'GEMINI_PROJECT_AUTH_FAILURE'
+                    || sendMessageError?.code === 'GEMINI_INVALID_API_KEY'
+                )) {
+                    markProviderFastSkip(providerId, sendMessageError?.message || 'provider auth failure');
                 }
              // --- Update Stats & Save (Always, regardless of attempt outcome) ---
                 this.updateStatsInBackground(
@@ -1932,6 +2058,7 @@ export class MessageHandler {
                     )
                 );
                 if (!sendMessageError && result && responseEntry && hasMeaningfulResult) {
+                    clearProviderFastSkip(providerId);
                     return {
                         response: result.response,
                         latency: result.latency,
@@ -1947,6 +2074,9 @@ export class MessageHandler {
                     lastError = sendMessageError || new Error(`Provider ${providerId} for model ${modelId} finished in invalid state or stats update failed after success.`);
                     // Reinstate this important operational warning
                     console.warn(`Provider ${providerId} failed for model ${modelId}. Error: ${lastError.message}. Trying next provider if available...`);
+                }
+                if (sendMessageError && isNonRetryableRequestError(sendMessageError)) {
+                    throw buildNonRetryableRequestError(sendMessageError);
                 }
 
                 if (sendMessageError && this.isInsufficientCreditsError(sendMessageError)) {
@@ -1973,7 +2103,12 @@ export class MessageHandler {
                         console.warn(`All active providers failed for model ${modelId}. Trying ${added} disabled provider(s) as last resort.`);
                     }
                 }
-            } // End of loop through candidateProviders
+                    } // End of loop through candidateProviders
+                } finally {
+                    if (releaseQueueSlot) {
+                        releaseQueueSlot();
+                    }
+                }
 
             const hasCooldownSkips = skippedByCooldown > 0 || skippedByProviderRateLimit > 0;
             const shouldRetryAfterCooldown = hasCooldownSkips
@@ -2035,11 +2170,7 @@ export class MessageHandler {
          throw finalError;
         };
 
-        if (options?.skipQueue) {
-            return execute();
-        }
-
-        return requestQueue.run(execute);
+        return execute();
     }
 
     async *handleStreamingMessages(
@@ -2049,17 +2180,10 @@ export class MessageHandler {
         options?: HandleStreamingOptions
     ): AsyncGenerator<any, void, unknown> {
         const messageOverrides = this.extractMessageOverrides(options);
-        const release = await requestQueue.acquire();
-        let queueReleased = false;
-        const releaseQueue = () => {
-            if (queueReleased) return;
-            queueReleased = true;
-            release();
-        };
-        try {
-            if (!messages?.length || !modelId || !apiKey) throw new Error("Invalid arguments for streaming");
-            if (!messageHandler) throw new Error("Service temporarily unavailable.");
-            modelId = this.applyModelReroute(modelId);
+        const shouldUseRequestQueue = !options?.skipQueue;
+        if (!messages?.length || !modelId || !apiKey) throw new Error("Invalid arguments for streaming");
+        if (!messageHandler) throw new Error("Service temporarily unavailable.");
+        modelId = this.applyModelReroute(modelId);
 
             await this.refreshModelCapabilities();
             modelId = await this.resolveModelIdForRequest(modelId);
@@ -2107,7 +2231,21 @@ export class MessageHandler {
             let nextCooldownEarlyWakeMs: number | null = null;
             let attemptedSinceCooldown = false;
             for (;;) {
-                for (let idx = 0; idx < candidateProviders.length; idx++) {
+                let releaseQueueSlot: (() => void) | null = null;
+                let queueReleased = false;
+                const releaseQueue = () => {
+                    if (queueReleased) return;
+                    queueReleased = true;
+                    if (releaseQueueSlot) {
+                        releaseQueueSlot();
+                        releaseQueueSlot = null;
+                    }
+                };
+                try {
+                    if (shouldUseRequestQueue) {
+                        releaseQueueSlot = await requestQueue.acquire();
+                    }
+                    for (let idx = 0; idx < candidateProviders.length; idx++) {
                     // Check request-level deadline before each attempt
                     const elapsed = Date.now() - requestStartTime;
                     if (REQUEST_DEADLINE_MS > 0 && elapsed >= REQUEST_DEADLINE_MS) {
@@ -2121,6 +2259,9 @@ export class MessageHandler {
                     const providerId = selectedProviderData.id;
                     const providerApiKey = selectedProviderData.apiKey ?? '';
                     const modelStats = selectedProviderData?.models?.[modelId];
+                    if (getProviderFastSkipRemainingMs(providerId) !== null) {
+                        continue;
+                    }
                     if (providerApiKey && await isApiKeyCoolingDownForModel(providerApiKey, modelId)) {
                         skippedByCooldown++;
                         if (shouldRespectCooldowns) {
@@ -2324,6 +2465,7 @@ export class MessageHandler {
                         };
 
                         this.updateStatsInBackground(providerId, modelId, responseEntry, false);
+                        clearProviderFastSkip(providerId);
 
                         yield {
                             type: 'final',
@@ -2378,22 +2520,36 @@ export class MessageHandler {
                     this.updateStatsInBackground(providerId, modelId, null, true, error);
                     console.warn(`Stream failed for provider ${providerId}. Error: ${error.message}. Trying next provider if available...`);
                     lastError = error;
+                    if (
+                        this.isInvalidProviderCredentialError(error)
+                        || error?.authFailure === true
+                        || error?.code === 'GEMINI_CATALOG_AUTH_DISABLED'
+                        || error?.code === 'GEMINI_API_DISABLED'
+                        || error?.code === 'GEMINI_PROJECT_AUTH_FAILURE'
+                        || error?.code === 'GEMINI_INVALID_API_KEY'
+                    ) {
+                        markProviderFastSkip(providerId, error?.message || 'provider auth failure');
+                    }
+                    if (isNonRetryableRequestError(error)) {
+                        throw buildNonRetryableRequestError(error);
+                    }
 
                     if (this.isRateLimitOrQuotaError(error)) {
                         const retryAfterMs = extractRetryAfterMs(String(error?.message || error || ''));
+                        const cooldownMs = normalizeRetryAfterCooldownMs(providerId, retryAfterMs);
                         if (providerApiKey) {
                             blockedApiKeys.add(providerApiKey);
                         }
                         if (providerApiKey && shouldRespectCooldowns) {
-                            await setApiKeyCooldownForModel(providerApiKey, modelId, retryAfterMs ?? undefined);
+                            await setApiKeyCooldownForModel(providerApiKey, modelId, cooldownMs ?? undefined);
                         }
-                        await setDistributedProviderCooldown(providerId, modelId, retryAfterMs ?? undefined);
+                        await setDistributedProviderCooldown(providerId, modelId, cooldownMs ?? undefined);
                         console.warn(`Rate limit/quota hit for ${providerId}; skipping this key for the remainder of the request.`);
-                        if (shouldRespectCooldowns && retryAfterMs && retryAfterMs > 0) {
+                        if (shouldRespectCooldowns && cooldownMs && cooldownMs > 0) {
                             nextCooldownMs = nextCooldownMs === null
-                                ? retryAfterMs
-                                : Math.min(nextCooldownMs, retryAfterMs);
-                            if (nextCooldownMs === retryAfterMs) {
+                                ? cooldownMs
+                                : Math.min(nextCooldownMs, cooldownMs);
+                            if (nextCooldownMs === cooldownMs) {
                                 nextCooldownEarlyWakeMs = null;
                             }
                         }
@@ -2424,7 +2580,10 @@ export class MessageHandler {
                     }
                     continue;
                 }
-            }
+                    }
+                } finally {
+                    releaseQueue();
+                }
 
             const hasCooldownSkips = skippedByCooldown > 0 || skippedByProviderRateLimit > 0;
             const shouldRetryAfterCooldown = hasCooldownSkips
@@ -2484,11 +2643,6 @@ export class MessageHandler {
          (finalError as any).skippedByProviderRateLimit = skippedByProviderRateLimit;
         (finalError as any).allSkippedByRateLimit = allSkipped;
         throw finalError;
-    } finally {
-        if (!queueReleased) {
-            release();
-        }
-    }
     }
 
     private updateStatsInBackground(
@@ -2520,5 +2674,109 @@ export class MessageHandler {
 // Token estimation constants/functions now imported from '../modules/tokenEstimation.js'
 // Error classification functions now imported from '../modules/errorClassification.js'
 const GEMINI_INPUT_TOKEN_LIMIT = readEnvNumber('GEMINI_INPUT_TOKEN_LIMIT', 1_048_576);
+
+function isGeminiUnsupportedRemoteMediaUrlError(error: any): boolean {
+    const message = String(error?.message || '').toLowerCase();
+    const code = String(error?.code || '').toUpperCase();
+    return code === 'GEMINI_UNSUPPORTED_REMOTE_MEDIA_URL'
+        || message.includes('gemini:invalid_argument:unsupported_remote_media_url')
+        || message.includes('cannot fetch content from the provided url');
+}
+
+function isProviderSwitchWorthlessError(error: any): boolean {
+    return error?.providerSwitchWorthless === true
+        || error?.requestRetryWorthless === true
+        || isGeminiUnsupportedRemoteMediaUrlError(error)
+        || error?.code === 'GEMINI_UNSUPPORTED_REMOTE_MEDIA_URL'
+        || /Cannot fetch content from the provided URL/i.test(String(error?.message || ''));
+}
+
+function isNonRetryableRequestError(error: any): boolean {
+    return isProviderSwitchWorthlessError(error)
+        || error?.requestRetryWorthless === true;
+}
+
+function toProbeSkipReason(error: any): string {
+    if (isProviderSwitchWorthlessError(error)) return 'unsupported';
+    const message = String(error?.message || '').toLowerCase();
+    if (message.includes('rate limit') || error?.status === 429) return 'rate limit';
+    if (message.includes('timeout') || message.includes('timed out')) return 'timeout';
+    return 'unsupported';
+}
+
+function toNonRetryableRequestErrorMessage(error: any): string {
+    const clientMessage = String(error?.clientMessage || '').trim();
+    if (clientMessage) return clientMessage;
+    if (isGeminiUnsupportedRemoteMediaUrlError(error)) {
+        return 'Invalid request: one or more remote media URLs could not be fetched by the selected provider. Use a publicly accessible URL or inline/base64 media content.';
+    }
+    return String(error?.message || 'Invalid request');
+}
+
+function buildNonRetryableRequestError(error: any): Error {
+    const message = toNonRetryableRequestErrorMessage(error);
+    const wrapped = new Error(message);
+    const status = Number(error?.status ?? error?.statusCode ?? 400);
+    (wrapped as any).status = Number.isFinite(status) && status > 0 ? status : 400;
+    (wrapped as any).code = error?.code || 'INVALID_REQUEST';
+    (wrapped as any).retryable = false;
+    (wrapped as any).clientMessage = message;
+    (wrapped as any).providerSwitchWorthless = true;
+    (wrapped as any).requestRetryWorthless = true;
+    return wrapped;
+}
+
+function collectRemoteMediaUrls(value: unknown, acc: string[] = []): string[] {
+    if (!value) return acc;
+    if (typeof value === 'string') {
+        if (/^https?:\/\//i.test(value)) acc.push(value);
+        return acc;
+    }
+    if (Array.isArray(value)) {
+        for (const item of value) collectRemoteMediaUrls(item, acc);
+        return acc;
+    }
+    if (typeof value === 'object') {
+        for (const nested of Object.values(value as Record<string, unknown>)) {
+            collectRemoteMediaUrls(nested, acc);
+        }
+    }
+    return acc;
+}
+
+function messageContainsRemoteMediaUrl(message: any): boolean {
+    return collectRemoteMediaUrls(message).length > 0;
+}
+
+function shouldSkipGeminiProviderForMessage(provider: any, message: any): boolean {
+    const providerId = String(provider?.id || '').toLowerCase();
+    const providerType = String(provider?.provider || provider?.type || '').toLowerCase();
+    const isGeminiProvider = providerId.includes('gemini') || providerType.includes('gemini');
+    if (!isGeminiProvider) return false;
+
+    const hasRemoteMedia = messageContainsRemoteMediaUrl(message);
+    const lastError = String(provider?.lastError || provider?.last_error || provider?.error || '').toLowerCase();
+
+    if (hasRemoteMedia && (
+        lastError.includes('cannot fetch content from the provided url') ||
+        lastError.includes('unsupported_remote_media_url') ||
+        lastError.includes('gemini_unsupported_remote_media_url')
+    )) {
+        return true;
+    }
+
+    if (
+        lastError.includes('generative language api has not been used in project') ||
+        lastError.includes('generative language api is disabled') ||
+        lastError.includes('service_disabled') ||
+        lastError.includes('accessnotconfigured') ||
+        lastError.includes('generativelanguage.googleapis.com') ||
+        lastError.includes('gemini_project_auth_failure')
+    ) {
+        return true;
+    }
+
+    return false;
+}
 
 export { messageHandler };

@@ -9,6 +9,21 @@ interface OpenRouterOptions {
   title?: string;
 }
 
+function isOpenRouterToolUseUnsupportedError(error: any): boolean {
+  const status = error?.response?.status;
+  const message = String(
+    error?.response?.data?.error?.message
+      || error?.response?.data?.message
+      || error?.message
+      || ''
+  );
+  return status === 404 && /no endpoints found that support (tool use|the provided 'tool_choice' value)/i.test(message);
+}
+
+function hasUsableTools(tools: any): boolean {
+  return Array.isArray(tools) && tools.length > 0;
+}
+
 /**
  * OpenRouter provider: OpenAI-compatible but requires Referer and X-Title headers.
  */
@@ -140,7 +155,7 @@ export class OpenRouterAI implements IAIProvider {
   }
 
   private getRequestTimeoutMs(): number {
-    const upstreamTimeout = this.readEnvNumber('UPSTREAM_TIMEOUT_MS', 120_000);
+    const upstreamTimeout = this.readEnvNumber('UPSTREAM_TIMEOUT_MS', 30_000);
     return this.readEnvNumber('OPENROUTER_TIMEOUT_MS', upstreamTimeout);
   }
 
@@ -590,6 +605,12 @@ export class OpenRouterAI implements IAIProvider {
       });
       const msg = this.extractErrorMessage(error, 'Unknown OpenRouter error');
       const wrappedError = new Error(`OpenRouter API call failed: ${msg} (latency ${latency}ms)`);
+      if (/no endpoints found that support tool use/i.test(msg)) {
+        (wrappedError as any).status = 404;
+        (wrappedError as any).code = 'OPENROUTER_TOOL_USE_UNSUPPORTED';
+        (wrappedError as any).retryable = false;
+        (wrappedError as any).providerIncompatible = true;
+      }
       (wrappedError as any).__providerUniqueLogged = true;
       throw wrappedError;
     }

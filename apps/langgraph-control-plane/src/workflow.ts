@@ -105,6 +105,11 @@ export const LangSmithRunSummarySchema = z.object({
   status: z.string().optional(),
   error: z.string().nullable().optional(),
   runType: z.string().optional(),
+  traceId: z.string().optional(),
+  parentRunId: z.string().optional(),
+  threadId: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+  metadata: z.record(z.unknown()).optional(),
 });
 
 export const LangSmithDatasetSummarySchema = z.object({
@@ -117,6 +122,10 @@ export const LangSmithPromptSummarySchema = z.object({
   identifier: z.string(),
   description: z.string().optional(),
   updatedAt: z.string().optional(),
+  commitHash: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+  channels: z.array(z.string()).optional(),
+  metadata: z.record(z.unknown()).optional(),
 });
 
 export const LangSmithAnnotationQueueSummarySchema = z.object({
@@ -167,12 +176,40 @@ export const LangSmithEvaluationMetricSummarySchema = z.object({
   lastComment: z.string().optional(),
 });
 
+export const LangSmithEvaluationScorecardMetricDeltaSchema = z.object({
+  key: z.string(),
+  baselineAverageScore: z.number().nullable().optional(),
+  candidateAverageScore: z.number().nullable().optional(),
+  deltaAverageScore: z.number().nullable().optional(),
+  threshold: z.number().nullable().optional(),
+  passed: z.boolean().optional(),
+  weight: z.number().nullable().optional(),
+});
+
+export const LangSmithEvaluationScorecardSchema = z.object({
+  name: z.string(),
+  status: z.enum(['passed', 'failed', 'not-evaluated']).default('not-evaluated'),
+  aggregationMode: z.string().optional(),
+  weightedAverageScore: z.number().nullable().optional(),
+  minimumWeightedScore: z.number().nullable().optional(),
+  passingMetricCount: z.number().int().nonnegative().default(0),
+  failingMetricKeys: z.array(z.string()).default([]),
+  baselineExperimentName: z.string().optional(),
+  baselineExperimentId: z.string().optional(),
+  comparisonUrl: z.string().optional(),
+  metricDeltas: z.array(LangSmithEvaluationScorecardMetricDeltaSchema).default([]),
+});
+
 export const LangSmithEvaluationSummarySchema = z.object({
   datasetName: z.string(),
-  experimentName: z.string().optional(),
+  experimentName: z.string().default(''),
+  experimentId: z.string().optional(),
+  experimentUrl: z.string().optional(),
   resultCount: z.number().int().default(0),
   averageScore: z.number().nullable().default(null),
   metrics: z.array(LangSmithEvaluationMetricSummarySchema).default([]),
+  metadata: z.record(z.unknown()).optional(),
+  scorecard: LangSmithEvaluationScorecardSchema.optional(),
 });
 
 export const LangSmithFeedbackKeyCountSummarySchema = z.object({
@@ -201,6 +238,8 @@ export const LangSmithGovernanceCountsSchema = z.object({
   runPending: z.number().int().nonnegative().default(0),
   datasets: z.number().int().nonnegative().default(0),
   prompts: z.number().int().nonnegative().default(0),
+  evaluations: z.number().int().nonnegative().default(0),
+  evaluationResults: z.number().int().nonnegative().default(0),
   annotationQueues: z.number().int().nonnegative().default(0),
   annotationQueueItems: z.number().int().nonnegative().default(0),
   annotationQueueBacklog: z.number().int().nonnegative().default(0),
@@ -227,6 +266,18 @@ export const ControlPlanePromptSelectionSourceSchema = z.enum(['explicit', 'chan
 
 export const EvaluationGateModeSchema = z.enum(['off', 'advisory', 'enforce']);
 export const EvaluationGateTargetSchema = z.enum(['execution', 'autonomous-edits', 'both']);
+export const EvaluationScorecardAggregationModeSchema = z.enum(['all', 'weighted']);
+export const EvaluationMetricGateResultSchema = z.object({
+  key: z.string(),
+  count: z.number().int().nonnegative().default(0),
+  averageScore: z.number().nullable().default(null),
+  minAverageScore: z.number().min(0).max(1).default(0),
+  required: z.boolean().default(true),
+  passed: z.boolean().default(false),
+  weight: z.number().nullable().default(null),
+  baselineAverageScore: z.number().nullable().default(null),
+  deltaAverageScore: z.number().nullable().default(null),
+});
 export const EvaluationGatePolicySchema = z.object({
   mode: EvaluationGateModeSchema.default('advisory'),
   target: EvaluationGateTargetSchema.default('both'),
@@ -234,11 +285,19 @@ export const EvaluationGatePolicySchema = z.object({
   minResultCount: z.number().int().min(1).default(1),
   metricKey: z.string().default('contains_goal_context'),
   minMetricAverageScore: z.number().min(0).max(1).default(1),
+  requiredMetricKeys: z.array(z.string()).default([]),
+  additionalMetricThresholds: z.record(z.string(), z.number().min(0).max(1)).default({}),
+  aggregationMode: EvaluationScorecardAggregationModeSchema.default('all'),
+  metricWeights: z.record(z.string(), z.number().min(0)).default({}),
+  minimumWeightedScore: z.number().min(0).max(1).default(0),
+  scorecardName: z.string().default('control-plane-scorecard'),
+  baselineExperimentName: z.string().default(''),
 });
 export const EvaluationGateResultSchema = z.object({
   status: z.enum(['disabled', 'passed', 'failed', 'not-evaluated']).default('disabled'),
   mode: EvaluationGateModeSchema.default('advisory'),
   target: EvaluationGateTargetSchema.default('both'),
+  aggregationMode: EvaluationScorecardAggregationModeSchema.default('all'),
   enforced: z.boolean().default(false),
   blocksExecution: z.boolean().default(false),
   blocksAutonomousEdits: z.boolean().default(false),
@@ -247,12 +306,30 @@ export const EvaluationGateResultSchema = z.object({
   metricKey: z.string().default('contains_goal_context'),
   metricCount: z.number().int().nonnegative().default(0),
   metricAverageScore: z.number().nullable().default(null),
+  weightedAverageScore: z.number().nullable().default(null),
+  minimumWeightedScore: z.number().nullable().default(null),
+  scorecardStatus: z.enum(['passed', 'failed', 'not-evaluated']).default('not-evaluated'),
+  baselineExperimentName: z.string().default(''),
+  comparisonUrl: z.string().default(''),
+  metricResults: z.array(EvaluationMetricGateResultSchema).default([]),
   failingChecks: z.array(z.string()).default([]),
   reason: z.string().default('Evaluation gate disabled.'),
 });
 
+export const GovernanceGateResultSchema = z.object({
+  status: z.enum(['disabled', 'passed', 'failed', 'not-evaluated']).default('not-evaluated'),
+  target: EvaluationGateTargetSchema.default('autonomous-edits'),
+  enforced: z.boolean().default(true),
+  blocksExecution: z.boolean().default(false),
+  blocksAutonomousEdits: z.boolean().default(false),
+  actionableFlagKeys: z.array(z.string()).default([]),
+  failedFlagKeys: z.array(z.string()).default([]),
+  reason: z.string().default('Governance gate has not been evaluated yet.'),
+});
+
 export type ControlPlaneEvaluationGatePolicy = z.infer<typeof EvaluationGatePolicySchema>;
 export type ControlPlaneEvaluationGateResult = z.infer<typeof EvaluationGateResultSchema>;
+export type ControlPlaneGovernanceGateResult = z.infer<typeof GovernanceGateResultSchema>;
 
 const DEFAULT_EVALUATION_GATE_POLICY = EvaluationGatePolicySchema.parse({
   mode: 'advisory',
@@ -261,6 +338,13 @@ const DEFAULT_EVALUATION_GATE_POLICY = EvaluationGatePolicySchema.parse({
   minResultCount: 1,
   metricKey: 'contains_goal_context',
   minMetricAverageScore: 1,
+  requiredMetricKeys: [],
+  additionalMetricThresholds: {},
+  aggregationMode: 'all',
+  metricWeights: {},
+  minimumWeightedScore: 0,
+  scorecardName: 'control-plane-scorecard',
+  baselineExperimentName: '',
 });
 
 function buildDefaultEvaluationGateResult(policy: ControlPlaneEvaluationGatePolicy): ControlPlaneEvaluationGateResult {
@@ -268,6 +352,7 @@ function buildDefaultEvaluationGateResult(policy: ControlPlaneEvaluationGatePoli
     status: policy.mode === 'off' ? 'disabled' : 'not-evaluated',
     mode: policy.mode,
     target: policy.target,
+    aggregationMode: policy.aggregationMode,
     enforced: policy.mode === 'enforce',
     blocksExecution: false,
     blocksAutonomousEdits: false,
@@ -276,6 +361,12 @@ function buildDefaultEvaluationGateResult(policy: ControlPlaneEvaluationGatePoli
     metricKey: policy.metricKey,
     metricCount: 0,
     metricAverageScore: null,
+    weightedAverageScore: null,
+    minimumWeightedScore: policy.aggregationMode === 'weighted' ? policy.minimumWeightedScore : null,
+    scorecardStatus: 'not-evaluated',
+    baselineExperimentName: policy.baselineExperimentName,
+    comparisonUrl: '',
+    metricResults: [],
     failingChecks: [],
     reason: policy.mode === 'off'
       ? 'Evaluation gate disabled.'
@@ -283,13 +374,26 @@ function buildDefaultEvaluationGateResult(policy: ControlPlaneEvaluationGatePoli
   });
 }
 
+const DEFAULT_GOVERNANCE_GATE_RESULT = GovernanceGateResultSchema.parse({
+  status: 'not-evaluated',
+  target: 'autonomous-edits',
+  enforced: true,
+  blocksExecution: false,
+  blocksAutonomousEdits: false,
+  actionableFlagKeys: [],
+  failedFlagKeys: [],
+  reason: 'Governance gate has not been evaluated yet.',
+});
+
 const DEFAULT_CONTROL_PLANE_PROMPT_IDENTIFIER = 'anygpt-control-plane-agent';
 const DEFAULT_CONTROL_PLANE_PROMPT_CHANNEL = 'live';
 const DEFAULT_CONTROL_PLANE_PROMPT_SYNC_CHANNEL = 'default';
 const CONTROL_PLANE_PROMPT_DESCRIPTION = 'AnyGPT control-plane AI prompt bundle';
 const CONTROL_PLANE_PROMPT_README = 'Managed by the AnyGPT LangGraph control plane. Contains the planner, build, quality, deploy, and autonomous-edit system prompts.';
 const CONTROL_PLANE_PROMPT_TAGS = ['control-plane', 'autonomous', 'anygpt', 'prompt-bundle'];
+const CONTROL_PLANE_PROMPT_LIFECYCLE_CHANNELS = ['candidate', 'default', 'live'];
 const CONTROL_PLANE_LANGSMITH_PROJECT_DESCRIPTION = 'AnyGPT LangGraph control plane runtime project with bounded workspace/project governance automation';
+const CONTROL_PLANE_GOVERNANCE_PROFILE_FILE = 'apps/langgraph-control-plane/governance-profiles.json';
 
 const DEFAULT_CONTROL_PLANE_PROMPT_BUNDLE = ControlPlanePromptBundleSchema.parse({
   planner: 'You are the planner agent for the AnyGPT LangGraph control plane. Produce concise, actionable planning notes based on logs, MCP findings, and requested scopes. Focus on priorities, risks, and safe next steps.',
@@ -305,16 +409,105 @@ function buildControlPlaneLangSmithProjectMetadata(
   promptIdentifier: string,
   promptSyncChannel: string,
   evaluationGatePolicy: ControlPlaneEvaluationGatePolicy,
+  experimentalApiBaseUrl: string,
+  experimentalServiceName: string,
+  governanceProfile: string,
 ): Record<string, unknown> {
   return {
     source: 'anygpt-langgraph-control-plane',
     managed_by: 'anygpt-control-plane',
     automation_scope: 'bounded-workspace-project-admin',
     governance_scope: 'workspace-project-admin',
+    governance_profile: governanceProfile,
     prompt_identifier: promptIdentifier,
     prompt_sync_channel: promptSyncChannel,
     evaluation_gate_mode: evaluationGatePolicy.mode,
     evaluation_gate_target: evaluationGatePolicy.target,
+    experimental_api_base_url: experimentalApiBaseUrl,
+    experimental_service_name: experimentalServiceName,
+  };
+}
+
+type ControlPlaneGovernanceProfile = {
+  name: string;
+  queueBacklogWarnThreshold: number;
+  requireFeedback: boolean;
+  minimumFeedbackCount: number;
+  minimumEvaluationResults: number;
+  minimumSuccessfulEvaluations: number;
+  blockAutonomousOnWarn: boolean;
+  gateTarget: z.infer<typeof EvaluationGateTargetSchema>;
+  requirePromptCommit: boolean;
+};
+
+function resolveControlPlaneGovernanceProfile(repoRoot: string): ControlPlaneGovernanceProfile {
+  const selectedName = String(process.env.CONTROL_PLANE_GOVERNANCE_PROFILE || 'experimental').trim() || 'experimental';
+  const defaults: Record<string, Omit<ControlPlaneGovernanceProfile, 'name'>> = {
+    experimental: {
+      queueBacklogWarnThreshold: 10,
+      requireFeedback: false,
+      blockAutonomousOnWarn: false,
+      minimumFeedbackCount: 0,
+      minimumEvaluationResults: 0,
+      minimumSuccessfulEvaluations: 0,
+      gateTarget: 'autonomous-edits',
+      requirePromptCommit: false,
+    },
+    staging: {
+      queueBacklogWarnThreshold: 5,
+      requireFeedback: true,
+      blockAutonomousOnWarn: false,
+      minimumFeedbackCount: 1,
+      minimumEvaluationResults: 1,
+      minimumSuccessfulEvaluations: 1,
+      gateTarget: 'autonomous-edits',
+      requirePromptCommit: true,
+    },
+    prod: {
+      queueBacklogWarnThreshold: 3,
+      requireFeedback: true,
+      blockAutonomousOnWarn: true,
+      minimumFeedbackCount: 3,
+      minimumEvaluationResults: 3,
+      minimumSuccessfulEvaluations: 1,
+      gateTarget: 'both',
+      requirePromptCommit: true,
+    },
+  };
+
+  let configuredProfiles: Record<string, Partial<Omit<ControlPlaneGovernanceProfile, 'name'>>> = {};
+  try {
+    const raw = fs.readFileSync(path.resolve(repoRoot, CONTROL_PLANE_GOVERNANCE_PROFILE_FILE), 'utf8');
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') {
+      configuredProfiles = parsed as Record<string, Partial<Omit<ControlPlaneGovernanceProfile, 'name'>>>;
+    }
+  } catch {
+    configuredProfiles = {};
+  }
+
+  const baseline = defaults[selectedName] || defaults.experimental;
+  const override = configuredProfiles[selectedName] || {};
+  const requireFeedback = override.requireFeedback === true
+    ? true
+    : override.requireFeedback === false
+      ? false
+      : baseline.requireFeedback;
+  let minimumFeedbackCount = Math.max(0, Math.floor(Number(override.minimumFeedbackCount ?? baseline.minimumFeedbackCount) || 0));
+  if (requireFeedback && minimumFeedbackCount < 1) {
+    minimumFeedbackCount = 1;
+  }
+  const rawGateTarget = String(override.gateTarget ?? baseline.gateTarget).trim();
+  return {
+    name: selectedName,
+    queueBacklogWarnThreshold: Math.max(1, Math.floor(Number(override.queueBacklogWarnThreshold ?? baseline.queueBacklogWarnThreshold) || baseline.queueBacklogWarnThreshold)),
+    requireFeedback,
+    minimumFeedbackCount,
+    minimumEvaluationResults: Math.max(0, Math.floor(Number(override.minimumEvaluationResults ?? baseline.minimumEvaluationResults) || 0)),
+    minimumSuccessfulEvaluations: Math.max(0, Math.floor(Number(override.minimumSuccessfulEvaluations ?? baseline.minimumSuccessfulEvaluations) || 0)),
+    blockAutonomousOnWarn: override.blockAutonomousOnWarn === true ? true : baseline.blockAutonomousOnWarn,
+    gateTarget: rawGateTarget === 'execution' || rawGateTarget === 'both' ? rawGateTarget : 'autonomous-edits',
+    requirePromptCommit: override.requirePromptCommit === true ? true : baseline.requirePromptCommit,
   };
 }
 
@@ -335,6 +528,16 @@ export const ControlPlaneStateSchema = z.object({
   threadId: z.string().default(''),
   continuous: z.boolean().default(false),
   autonomous: z.boolean().default(false),
+  governanceProfile: z.string().default('experimental'),
+  experimentalApiBaseUrl: z.string().default(
+    String(
+      process.env.CONTROL_PLANE_ANYGPT_API_BASE_URL
+      || process.env.ANYGPT_API_BASE_URL
+      || process.env.OPENAI_BASE_URL
+      || 'http://127.0.0.1:3310',
+    ).trim() || 'http://127.0.0.1:3310',
+  ),
+  experimentalServiceName: z.string().default('anygpt-experimental.service'),
   approvalMode: z.enum(['manual', 'auto']).default('manual'),
   approvalGranted: z.boolean().nullable().default(null),
   approvalMessage: z.string().default(''),
@@ -351,9 +554,15 @@ export const ControlPlaneStateSchema = z.object({
   controlPlanePrompts: ControlPlanePromptBundleSchema.default(DEFAULT_CONTROL_PLANE_PROMPT_BUNDLE),
   selectedPromptReference: z.string().default(''),
   selectedPromptSource: ControlPlanePromptSelectionSourceSchema.default('local'),
+  selectedPromptChannel: z.string().default(''),
   selectedPromptCommitHash: z.string().default(''),
+  selectedPromptMetadata: z.record(z.unknown()).default({}),
+  selectedPromptAvailableChannels: z.array(z.string()).default([]),
+  promptRollbackReference: z.string().default(''),
   promptSyncUrl: z.string().default(''),
   promptPromotionUrl: z.string().default(''),
+  promptPromotionReason: z.string().default(''),
+  promptPromotionBlockedReason: z.string().default(''),
   promptSelectionNotes: z.array(z.string()).default([]),
   plannerAgentInsights: z.array(z.string()).default([]),
   buildAgentInsights: z.array(z.string()).default([]),
@@ -373,7 +582,10 @@ export const ControlPlaneStateSchema = z.object({
   langSmithFeedback: z.array(LangSmithFeedbackSummarySchema).default([]),
   langSmithEvaluations: z.array(LangSmithEvaluationSummarySchema).default([]),
   langSmithGovernance: LangSmithGovernanceSummarySchema.nullable().default(null),
+  governanceGateResult: GovernanceGateResultSchema.default(DEFAULT_GOVERNANCE_GATE_RESULT),
   langSmithNotes: z.array(z.string()).default([]),
+  observabilityTags: z.array(z.string()).default([]),
+  observabilityMetadata: z.record(z.unknown()).default({}),
   evaluationGatePolicy: EvaluationGatePolicySchema.default(DEFAULT_EVALUATION_GATE_POLICY),
   evaluationGateResult: EvaluationGateResultSchema.default(buildDefaultEvaluationGateResult(DEFAULT_EVALUATION_GATE_POLICY)),
   autonomousEditEnabled: z.boolean().default(false),
@@ -449,8 +661,16 @@ function resolveStateEvaluationGateResult(state: Partial<ControlPlaneState>): Co
     ...((state as any)?.evaluationGateResult || {}),
     mode: policy.mode,
     target: policy.target,
+    aggregationMode: policy.aggregationMode,
     enforced: policy.mode === 'enforce',
     metricKey: policy.metricKey,
+  });
+}
+
+function resolveStateGovernanceGateResult(state: Partial<ControlPlaneState>): ControlPlaneGovernanceGateResult {
+  return GovernanceGateResultSchema.parse({
+    ...DEFAULT_GOVERNANCE_GATE_RESULT,
+    ...((state as any)?.governanceGateResult || {}),
   });
 }
 
@@ -459,6 +679,28 @@ function describeEvaluationGateBlockedActions(result: ControlPlaneEvaluationGate
   if (result.blocksAutonomousEdits) blocked.push('autonomous-edits');
   if (result.blocksExecution) blocked.push('execution');
   return blocked;
+}
+
+function describeGovernanceGateBlockedActions(result: ControlPlaneGovernanceGateResult): string[] {
+  const blocked: string[] = [];
+  if (result.blocksAutonomousEdits) blocked.push('autonomous-edits');
+  if (result.blocksExecution) blocked.push('execution');
+  return blocked;
+}
+
+function selectBaselineEvaluation(
+  evaluations: Array<z.infer<typeof LangSmithEvaluationSummarySchema>>,
+  datasetName: string,
+): z.infer<typeof LangSmithEvaluationSummarySchema> | null {
+  const normalizedDatasetName = String(datasetName || '').trim();
+  if (!normalizedDatasetName) return null;
+
+  const match = [...evaluations]
+    .map((evaluation) => LangSmithEvaluationSummarySchema.parse(evaluation))
+    .reverse()
+    .find((evaluation) => String(evaluation.datasetName || '').trim() === normalizedDatasetName);
+
+  return match || null;
 }
 
 function resolveEvaluationGateResult(
@@ -470,13 +712,71 @@ function resolveEvaluationGateResult(
   const normalizedEvaluations = evaluations.map((evaluation) => LangSmithEvaluationSummarySchema.parse(evaluation));
   const evaluationCount = normalizedEvaluations.length;
   const resultCount = normalizedEvaluations.reduce((total, evaluation) => total + Math.max(0, evaluation.resultCount || 0), 0);
-  const metricMatches = normalizedEvaluations.flatMap((evaluation) => evaluation.metrics.filter((metric) => metric.key === policy.metricKey));
-  const metricCount = metricMatches.reduce((total, metric) => total + Math.max(0, metric.count || 0), 0);
-  const metricWeightedTotal = metricMatches.reduce((total, metric) => {
-    if (typeof metric.averageScore !== 'number' || !Number.isFinite(metric.averageScore)) return total;
-    return total + (metric.averageScore * Math.max(0, metric.count || 0));
-  }, 0);
-  const metricAverageScore = metricCount > 0 ? roundGateScore(metricWeightedTotal / metricCount) : null;
+  const latestScorecard = [...normalizedEvaluations]
+    .map((evaluation) => evaluation.scorecard)
+    .reverse()
+    .find((scorecard): scorecard is z.infer<typeof LangSmithEvaluationScorecardSchema> => Boolean(scorecard)) || null;
+  const latestScorecardMetricMap = new Map(
+    (latestScorecard?.metricDeltas || []).map((metric) => [metric.key, metric]),
+  );
+  const metricKeysToCheck = Array.from(new Set([
+    policy.metricKey,
+    ...policy.requiredMetricKeys,
+    ...Object.keys(policy.additionalMetricThresholds || {}),
+  ].map((key) => String(key || '').trim()).filter(Boolean)));
+  const metricResults = metricKeysToCheck.map((metricKey) => {
+    const metricMatches = normalizedEvaluations.flatMap((evaluation) => evaluation.metrics.filter((metric) => metric.key === metricKey));
+    const count = metricMatches.reduce((total, metric) => total + Math.max(0, metric.count || 0), 0);
+    const weightedTotal = metricMatches.reduce((total, metric) => {
+      if (typeof metric.averageScore !== 'number' || !Number.isFinite(metric.averageScore)) return total;
+      return total + (metric.averageScore * Math.max(0, metric.count || 0));
+    }, 0);
+    const averageScore = count > 0 ? roundGateScore(weightedTotal / count) : null;
+    const minAverageScore = metricKey === policy.metricKey
+      ? policy.minMetricAverageScore
+      : (policy.additionalMetricThresholds?.[metricKey] ?? 0);
+    const required = metricKey === policy.metricKey || policy.requiredMetricKeys.includes(metricKey);
+    const passed = count > 0 && averageScore !== null && averageScore >= minAverageScore;
+    const latestScorecardMetric = latestScorecardMetricMap.get(metricKey);
+    return EvaluationMetricGateResultSchema.parse({
+      key: metricKey,
+      count,
+      averageScore,
+      minAverageScore,
+      required,
+      passed,
+      weight: typeof policy.metricWeights?.[metricKey] === 'number' ? policy.metricWeights[metricKey] : null,
+      baselineAverageScore: latestScorecardMetric?.baselineAverageScore ?? null,
+      deltaAverageScore: latestScorecardMetric?.deltaAverageScore ?? null,
+    });
+  });
+  const primaryMetricResult = metricResults.find((metric) => metric.key === policy.metricKey)
+    || EvaluationMetricGateResultSchema.parse({
+      key: policy.metricKey,
+      count: 0,
+      averageScore: null,
+      minAverageScore: policy.minMetricAverageScore,
+      required: true,
+      passed: false,
+      weight: typeof policy.metricWeights?.[policy.metricKey] === 'number' ? policy.metricWeights[policy.metricKey] : null,
+      baselineAverageScore: null,
+      deltaAverageScore: null,
+    });
+  const metricCount = primaryMetricResult.count;
+  const metricAverageScore = primaryMetricResult.averageScore;
+  const weightedMetricEntries = metricResults
+    .map((metric) => {
+      if (metric.averageScore === null) return null;
+      return {
+        averageScore: metric.averageScore,
+        weight: typeof metric.weight === 'number' && Number.isFinite(metric.weight) && metric.weight > 0 ? metric.weight : 1,
+      };
+    })
+    .filter(Boolean) as Array<{ averageScore: number; weight: number }>;
+  const totalMetricWeight = weightedMetricEntries.reduce((sum, entry) => sum + entry.weight, 0);
+  const weightedAverageScore = totalMetricWeight > 0
+    ? roundGateScore(weightedMetricEntries.reduce((sum, entry) => sum + (entry.averageScore * entry.weight), 0) / totalMetricWeight)
+    : null;
   const enforced = policy.mode === 'enforce';
 
   if (policy.mode === 'off') {
@@ -487,6 +787,12 @@ function resolveEvaluationGateResult(
       resultCount,
       metricCount,
       metricAverageScore,
+      weightedAverageScore,
+      minimumWeightedScore: policy.aggregationMode === 'weighted' ? policy.minimumWeightedScore : null,
+      scorecardStatus: 'not-evaluated',
+      baselineExperimentName: latestScorecard?.baselineExperimentName || policy.baselineExperimentName,
+      comparisonUrl: latestScorecard?.comparisonUrl || '',
+      metricResults,
       reason: 'Evaluation gate disabled.',
     });
   }
@@ -510,10 +816,23 @@ function resolveEvaluationGateResult(
     if (resultCount < policy.minResultCount) {
       failingChecks.push(`LangSmith evaluation produced ${resultCount} result(s); policy requires at least ${policy.minResultCount}.`);
     }
-    if (metricCount === 0) {
-      failingChecks.push(`LangSmith evaluators did not report metric ${policy.metricKey}.`);
-    } else if (metricAverageScore === null || metricAverageScore < policy.minMetricAverageScore) {
-      failingChecks.push(`Metric ${policy.metricKey} averaged ${metricAverageScore ?? 'n/a'}; policy requires at least ${policy.minMetricAverageScore}.`);
+    for (const metricResult of metricResults) {
+      if (!metricResult.required) continue;
+      if (metricResult.count === 0) {
+        failingChecks.push(`LangSmith evaluators did not report metric ${metricResult.key}.`);
+        continue;
+      }
+      if (metricResult.averageScore === null || metricResult.averageScore < metricResult.minAverageScore) {
+        failingChecks.push(`Metric ${metricResult.key} averaged ${metricResult.averageScore ?? 'n/a'}; policy requires at least ${metricResult.minAverageScore}.`);
+      }
+    }
+
+    if (
+      policy.aggregationMode === 'weighted'
+      && weightedAverageScore !== null
+      && weightedAverageScore < policy.minimumWeightedScore
+    ) {
+      failingChecks.push(`Weighted scorecard averaged ${weightedAverageScore}; policy requires at least ${policy.minimumWeightedScore}.`);
     }
 
     if (failingChecks.length > 0) {
@@ -529,6 +848,7 @@ function resolveEvaluationGateResult(
     status,
     mode: policy.mode,
     target: policy.target,
+    aggregationMode: policy.aggregationMode,
     enforced,
     blocksExecution: enforced && status === 'failed' && (policy.target === 'execution' || policy.target === 'both'),
     blocksAutonomousEdits: enforced && status === 'failed' && (policy.target === 'autonomous-edits' || policy.target === 'both'),
@@ -537,22 +857,79 @@ function resolveEvaluationGateResult(
     metricKey: policy.metricKey,
     metricCount,
     metricAverageScore,
+    weightedAverageScore,
+    minimumWeightedScore: policy.aggregationMode === 'weighted' ? policy.minimumWeightedScore : null,
+    scorecardStatus: evaluationCount === 0 || resultCount === 0 ? 'not-evaluated' : (failingChecks.length > 0 ? 'failed' : 'passed'),
+    baselineExperimentName: latestScorecard?.baselineExperimentName || policy.baselineExperimentName,
+    comparisonUrl: latestScorecard?.comparisonUrl || '',
+    metricResults,
     failingChecks,
     reason,
   });
 }
 
+function resolveGovernanceGateResult(
+  governanceProfile: ControlPlaneGovernanceProfile,
+  governance: z.infer<typeof LangSmithGovernanceSummarySchema> | null | undefined,
+  langSmithEnabled: boolean,
+): ControlPlaneGovernanceGateResult {
+  if (!langSmithEnabled) {
+    return GovernanceGateResultSchema.parse({
+      ...DEFAULT_GOVERNANCE_GATE_RESULT,
+      target: governanceProfile.gateTarget,
+      reason: 'LangSmith runtime integration is disabled or unavailable; governance gate left open.',
+    });
+  }
+
+  if (!governance) {
+    return GovernanceGateResultSchema.parse({
+      ...DEFAULT_GOVERNANCE_GATE_RESULT,
+      target: governanceProfile.gateTarget,
+      reason: 'Governance gate has not been evaluated yet because no LangSmith governance snapshot was available.',
+    });
+  }
+
+  const actionableFlags = governance.flags.filter((flag) => flag.status !== 'pass');
+  const failedFlags = governance.flags.filter((flag) => flag.status === 'fail');
+  const warnedFlags = governance.flags.filter((flag) => flag.status === 'warn');
+  const shouldBlock = failedFlags.length > 0 || (governanceProfile.blockAutonomousOnWarn && warnedFlags.length > 0);
+  const blocksExecution = shouldBlock && (governanceProfile.gateTarget === 'execution' || governanceProfile.gateTarget === 'both');
+  const blocksAutonomousEdits = shouldBlock && (governanceProfile.gateTarget === 'autonomous-edits' || governanceProfile.gateTarget === 'both');
+
+  return GovernanceGateResultSchema.parse({
+    status: shouldBlock ? 'failed' : 'passed',
+    target: governanceProfile.gateTarget,
+    enforced: true,
+    blocksExecution,
+    blocksAutonomousEdits,
+    actionableFlagKeys: actionableFlags.map((flag) => flag.key),
+    failedFlagKeys: failedFlags.map((flag) => flag.key),
+    reason: shouldBlock
+      ? `Governance gate blocked ${describeGovernanceGateBlockedActions({
+          ...DEFAULT_GOVERNANCE_GATE_RESULT,
+          blocksExecution,
+          blocksAutonomousEdits,
+        }).join(', ') || governanceProfile.gateTarget} because ${failedFlags.length > 0 ? `${failedFlags.length} fail flag(s)` : `${warnedFlags.length} warn flag(s)`} were sampled.`
+      : actionableFlags.length > 0
+        ? `Governance gate left open with ${actionableFlags.length} actionable LangSmith flag(s) under profile ${governanceProfile.name}.`
+        : `Governance gate passed under profile ${governanceProfile.name}; sampled LangSmith signals are within policy.`,
+  });
+}
+
 function shouldApplyAutonomousEditsForState(state: ControlPlaneState): boolean {
   const evaluationGateResult = resolveStateEvaluationGateResult(state);
+  const governanceGateResult = resolveStateGovernanceGateResult(state);
   return state.executePlan
     && state.autonomousEditEnabled
     && state.proposedEdits.length > 0
-    && !evaluationGateResult.blocksAutonomousEdits;
+    && !evaluationGateResult.blocksAutonomousEdits
+    && !governanceGateResult.blocksAutonomousEdits;
 }
 
 function shouldRunJobsForState(state: ControlPlaneState): boolean {
   const evaluationGateResult = resolveStateEvaluationGateResult(state);
-  return state.executePlan && !evaluationGateResult.blocksExecution;
+  const governanceGateResult = resolveStateGovernanceGateResult(state);
+  return state.executePlan && !evaluationGateResult.blocksExecution && !governanceGateResult.blocksExecution;
 }
 
 function isLangSmithRunFailure(run: z.infer<typeof LangSmithRunSummarySchema>): boolean {
@@ -1347,8 +1724,9 @@ function buildApprovalRequests(state: ControlPlaneState): ApprovalRequest[] {
   const approvals: ApprovalRequest[] = [];
   const seen = new Set<string>();
   const evaluationGateResult = resolveStateEvaluationGateResult(state);
+  const governanceGateResult = resolveStateGovernanceGateResult(state);
 
-  if (!evaluationGateResult.blocksExecution) {
+  if (!evaluationGateResult.blocksExecution && !governanceGateResult.blocksExecution) {
     for (const job of state.jobs) {
       if (job.kind === 'test' && (job.target === 'api' || job.target === 'api-experimental')) {
         const approvalId = `redis-clone-${job.target}`;
@@ -1376,7 +1754,12 @@ function buildApprovalRequests(state: ControlPlaneState): ApprovalRequest[] {
     }
   }
 
-  if (!evaluationGateResult.blocksAutonomousEdits && state.autonomousEditEnabled && state.proposedEdits.length > 0) {
+  if (
+    !evaluationGateResult.blocksAutonomousEdits
+    && !governanceGateResult.blocksAutonomousEdits
+    && state.autonomousEditEnabled
+    && state.proposedEdits.length > 0
+  ) {
     approvals.push(ApprovalRequestSchema.parse({
       id: 'autonomous-code-edits',
       title: `Approve ${state.proposedEdits.length} autonomous code edit(s)`,
@@ -1421,6 +1804,16 @@ function buildLangSmithPromptReference(promptIdentifier: string, commitOrTag?: s
   const normalizedCommitOrTag = String(commitOrTag || '').trim();
   if (!normalizedPromptIdentifier) return '';
   return normalizedCommitOrTag ? `${normalizedPromptIdentifier}:${normalizedCommitOrTag}` : normalizedPromptIdentifier;
+}
+
+function inferPromptChannelFromReference(reference: string): string {
+  const trimmed = String(reference || '').trim();
+  const colonIndex = trimmed.lastIndexOf(':');
+  if (colonIndex <= 0) return '';
+
+  const candidate = normalizePromptChannel(trimmed.slice(colonIndex + 1));
+  if (!candidate || /^[a-f0-9]{12,}$/i.test(candidate)) return '';
+  return candidate;
 }
 
 function getDefaultControlPlanePromptBundle(): ControlPlanePromptBundle {
@@ -1560,8 +1953,88 @@ function extractControlPlanePromptBundleFromCommit(commit: any): ControlPlanePro
   return extractControlPlanePromptBundle(manifest);
 }
 
+function extractPromptMetadataFromCommit(commit: any): Record<string, unknown> {
+  if (!commit || typeof commit !== 'object') return {};
+
+  const manifest = typeof commit?.manifest === 'object' && commit.manifest
+    ? (typeof (commit.manifest as any).object === 'object' && (commit.manifest as any).object
+        ? (commit.manifest as any).object
+        : commit.manifest)
+    : (typeof commit?.object === 'object' && commit.object ? commit.object : null);
+
+  if (!manifest || typeof manifest !== 'object') return {};
+
+  const metadata = (manifest as Record<string, unknown>).metadata;
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return {};
+  return { ...(metadata as Record<string, unknown>) };
+}
+
+function extractPromptChannelsFromCommit(commit: any): string[] {
+  const metadata = extractPromptMetadataFromCommit(commit);
+  return uniqueNormalizedStrings([
+    ...(Array.isArray((metadata as any)?.channels)
+      ? ((metadata as any).channels as unknown[]).map((entry) => String(entry || '').trim())
+      : []),
+    typeof (metadata as any)?.channel === 'string' ? String((metadata as any).channel).trim() : '',
+  ]);
+}
+
 function extractPromptCommitHash(commit: any): string {
   return String(commit?.commit_hash || commit?.commitHash || '').trim();
+}
+
+function buildControlPlaneObservabilityTags(
+  state: Pick<ControlPlaneState, 'scopes' | 'autonomous' | 'promptIdentifier' | 'selectedPromptReference' | 'selectedPromptSource' | 'selectedPromptChannel' | 'governanceProfile' | 'evaluationGatePolicy'>,
+  datasetNames: string[] = [],
+): string[] {
+  return uniqueNormalizedStrings([
+    ...uniqueScopes(state.scopes).map((scope) => `scope:${scope}`),
+    `autonomous:${state.autonomous ? 'true' : 'false'}`,
+    `prompt_identifier:${state.promptIdentifier}`,
+    state.selectedPromptReference ? `prompt_ref:${state.selectedPromptReference}` : undefined,
+    state.selectedPromptSource ? `prompt_source:${state.selectedPromptSource}` : undefined,
+    state.selectedPromptChannel ? `prompt_channel:${state.selectedPromptChannel}` : undefined,
+    state.governanceProfile ? `governance_profile:${state.governanceProfile}` : undefined,
+    `eval_gate_mode:${state.evaluationGatePolicy.mode}`,
+    `eval_gate_target:${state.evaluationGatePolicy.target}`,
+    ...datasetNames.map((datasetName) => `eval_dataset:${datasetName}`),
+  ]);
+}
+
+function buildControlPlaneObservabilityMetadata(
+  state: ControlPlaneState,
+  extra: Record<string, unknown> = {},
+): Record<string, unknown> {
+  const evaluationGateResult = resolveStateEvaluationGateResult(state);
+  const governanceGateResult = resolveStateGovernanceGateResult(state);
+  return {
+    source: 'anygpt-langgraph-control-plane',
+    goal: state.goal,
+    scopes: uniqueScopes(state.scopes),
+    thread_id: state.threadId,
+    autonomous: state.autonomous,
+    autonomous_edit_enabled: state.autonomousEditEnabled,
+    prompt_identifier: state.promptIdentifier,
+    prompt_selected_ref: state.selectedPromptReference || undefined,
+    prompt_selected_channel: state.selectedPromptChannel || undefined,
+    prompt_source: state.selectedPromptSource,
+    prompt_commit_hash: state.selectedPromptCommitHash || undefined,
+    prompt_rollback_reference: state.promptRollbackReference || undefined,
+    prompt_sync_channel: state.promptSyncChannel || undefined,
+    prompt_promote_channel: state.promptPromoteChannel || undefined,
+    governance_profile: state.governanceProfile,
+    evaluation_gate_status: evaluationGateResult.status,
+    governance_gate_status: governanceGateResult.status,
+    experimental_api_base_url: state.experimentalApiBaseUrl,
+    experimental_service_name: state.experimentalServiceName,
+    repair_session_id: state.repairSessionManifest?.sessionId || undefined,
+    repair_status: state.repairStatus,
+    repair_touched_paths: getRepairTouchedPaths(state),
+    repair_rollback_status: state.repairSessionManifest?.rollbackStatus || undefined,
+    post_repair_validation_status: state.postRepairValidationStatus,
+    experimental_restart_status: state.experimentalRestartStatus,
+    ...extra,
+  };
 }
 
 function resolveControlPlaneAiConfig(): ControlPlaneAiConfig {
@@ -1736,9 +2209,14 @@ function loadRuntimeAutonomousEditPlanOverride(
 function buildSharedAiAgentPayload(state: ControlPlaneState): Record<string, unknown> {
   const evaluationGatePolicy = resolveStateEvaluationGatePolicy(state);
   const evaluationGateResult = resolveStateEvaluationGateResult(state);
+  const governanceGateResult = resolveStateGovernanceGateResult(state);
   const payload = {
     goal: state.goal,
     scopes: uniqueScopes(state.scopes),
+    experimentalTarget: {
+      apiBaseUrl: state.experimentalApiBaseUrl,
+      serviceName: state.experimentalServiceName,
+    },
     langSmith: {
       enabled: state.langSmithEnabled,
       workspace: state.langSmithWorkspace,
@@ -1757,9 +2235,21 @@ function buildSharedAiAgentPayload(state: ControlPlaneState): Record<string, unk
         : null,
       projectName: state.langSmithProjectName,
       recentProjects: state.langSmithProjects.map((project) => project.name),
-      recentRuns: state.langSmithRuns.map((run) => ({ name: run.name, status: run.status, runType: run.runType })),
+      recentRuns: state.langSmithRuns.map((run) => ({
+        name: run.name,
+        status: run.status,
+        runType: run.runType,
+        traceId: run.traceId,
+        parentRunId: run.parentRunId,
+        threadId: run.threadId,
+        tags: run.tags,
+      })),
       datasets: state.langSmithDatasets.map((dataset) => dataset.name),
-      prompts: state.langSmithPrompts.map((prompt) => prompt.identifier),
+      prompts: state.langSmithPrompts.map((prompt) => ({
+        identifier: prompt.identifier,
+        commitHash: prompt.commitHash,
+        channels: prompt.channels,
+      })),
       annotationQueues: state.langSmithAnnotationQueues.map((queue) => ({
         name: queue.name,
         itemCount: queue.itemCount,
@@ -1780,13 +2270,16 @@ function buildSharedAiAgentPayload(state: ControlPlaneState): Record<string, unk
       evaluations: state.langSmithEvaluations.map((evaluation) => ({
         datasetName: evaluation.datasetName,
         experimentName: evaluation.experimentName,
+        experimentId: evaluation.experimentId,
+        experimentUrl: evaluation.experimentUrl,
         resultCount: evaluation.resultCount,
         averageScore: evaluation.averageScore,
         metrics: evaluation.metrics.map((metric) => ({
           key: metric.key,
           count: metric.count,
-            averageScore: metric.averageScore,
-          })),
+          averageScore: metric.averageScore,
+        })),
+        scorecard: evaluation.scorecard,
       })),
       governance: state.langSmithGovernance
         ? {
@@ -1796,20 +2289,32 @@ function buildSharedAiAgentPayload(state: ControlPlaneState): Record<string, unk
             mutations: state.langSmithGovernance.mutations,
           }
         : null,
+      governanceGate: governanceGateResult,
       evaluationGatePolicy,
       evaluationGate: evaluationGateResult,
+      evaluationMetricResults: evaluationGateResult.metricResults,
       selectedPrompt: {
         identifier: state.promptIdentifier,
         requestedRef: state.promptRef || undefined,
         requestedChannel: state.promptChannel || undefined,
         selectedReference: state.selectedPromptReference || undefined,
         source: state.selectedPromptSource,
+        selectedChannel: state.selectedPromptChannel || undefined,
         commitHash: state.selectedPromptCommitHash || undefined,
+        availableChannels: state.selectedPromptAvailableChannels,
+        metadata: state.selectedPromptMetadata,
+        rollbackReference: state.promptRollbackReference || undefined,
         syncEnabled: state.promptSyncEnabled,
         syncChannel: state.promptSyncChannel || undefined,
         promoteChannel: state.promptPromoteChannel || undefined,
+        promotionReason: state.promptPromotionReason || undefined,
+        promotionBlockedReason: state.promptPromotionBlockedReason || undefined,
       },
       notes: compactStringArrayForAi(state.langSmithNotes, AI_AGENT_CONTEXT_NOTE_LIMIT),
+    },
+    observability: {
+      tags: state.observabilityTags,
+      metadata: state.observabilityMetadata,
     },
     mcpServers: state.mcpInspections.map((inspection) => ({
       server: inspection.server,
@@ -1831,6 +2336,11 @@ function buildSharedAiAgentPayload(state: ControlPlaneState): Record<string, unk
       improvementSignals: state.improvementSignals,
       status: state.repairStatus,
       decisionReason: state.repairDecisionReason,
+      sessionId: state.repairSessionManifest?.sessionId,
+      rollbackStatus: state.repairSessionManifest?.rollbackStatus,
+      touchedPaths: getRepairTouchedPaths(state),
+      promotedPaths: state.repairPromotedPaths,
+      rollbackPaths: state.repairRollbackPaths,
       smokeResults: state.repairSmokeResults.map((job) => ({
         title: job.title,
         status: job.status,
@@ -2403,6 +2913,7 @@ async function inspectMcpNode(state: ControlPlaneState): Promise<Partial<Control
   const logInsights = resolveLogInsights(state);
   const langSmithConfig = resolveLangSmithRuntimeConfig();
   const evaluationGatePolicy = resolveStateEvaluationGatePolicy(state);
+  const governanceProfile = resolveControlPlaneGovernanceProfile(state.repoRoot);
   const promptIdentifier = String(state.promptIdentifier || DEFAULT_CONTROL_PLANE_PROMPT_IDENTIFIER).trim()
     || DEFAULT_CONTROL_PLANE_PROMPT_IDENTIFIER;
   const promptRef = String(state.promptRef || '').trim();
@@ -2414,22 +2925,37 @@ async function inspectMcpNode(state: ControlPlaneState): Promise<Partial<Control
     promptIdentifier,
     promptSyncChannel,
     evaluationGatePolicy,
+    state.experimentalApiBaseUrl,
+    state.experimentalServiceName,
+    governanceProfile.name,
   );
   const localPromptBundle = getDefaultControlPlanePromptBundle();
   let controlPlanePrompts = localPromptBundle;
   let selectedPromptReference = '';
   let selectedPromptSource: ControlPlanePromptSelectionSource = 'local';
+  let selectedPromptChannel = '';
   let selectedPromptCommitHash = '';
+  let selectedPromptMetadata: Record<string, unknown> = {};
+  let selectedPromptAvailableChannels: string[] = [];
+  let promptRollbackReference = '';
   let promptSyncUrl = '';
   let promptPromotionUrl = '';
+  let promptPromotionReason = '';
+  let promptPromotionBlockedReason = '';
   const promptSelectionNotes: string[] = [];
   let langSmithSnapshot: Awaited<ReturnType<typeof collectLangSmithClientSnapshot>> | null = null;
   let langSmithProject: z.infer<typeof LangSmithProjectSummarySchema> | null = null;
   let langSmithAccessibleWorkspaces: Array<z.infer<typeof LangSmithWorkspaceSummarySchema>> = [];
   let langSmithGovernance: z.infer<typeof LangSmithGovernanceSummarySchema> | null = null;
+  let governanceGateResult: ControlPlaneGovernanceGateResult = GovernanceGateResultSchema.parse({
+    ...DEFAULT_GOVERNANCE_GATE_RESULT,
+    target: governanceProfile.gateTarget,
+  });
   const langSmithGovernanceMutations: Array<z.infer<typeof LangSmithGovernanceMutationSchema>> = [];
   const langSmithNotes: string[] = [];
   let langSmithEvaluations: Array<z.infer<typeof LangSmithEvaluationSummarySchema>> = [];
+  let observabilityTags: string[] = [];
+  let observabilityMetadata: Record<string, unknown> = {};
   let controlPlaneRunDataset: z.infer<typeof LangSmithDatasetSummarySchema> | null = null;
   let seededDataset: z.infer<typeof LangSmithDatasetSummarySchema> | null = null;
   const plannerNotes = mcpServers.length > 0
@@ -2497,6 +3023,21 @@ async function inspectMcpNode(state: ControlPlaneState): Promise<Partial<Control
               description: CONTROL_PLANE_PROMPT_DESCRIPTION,
               tags: uniqueNormalizedStrings([...CONTROL_PLANE_PROMPT_TAGS, promptSyncChannel, 'sync']),
               readme: CONTROL_PLANE_PROMPT_README,
+              channel: promptSyncChannel,
+              metadata: {
+                source: 'anygpt-langgraph-control-plane',
+                promptIdentifier,
+                channels: CONTROL_PLANE_PROMPT_LIFECYCLE_CHANNELS,
+                channel: promptSyncChannel,
+                requestedChannel: promptChannel,
+                syncChannel: promptSyncChannel,
+                promoteChannel: promptPromoteChannel || undefined,
+                governanceProfile: governanceProfile.name,
+                evaluationGateMode: evaluationGatePolicy.mode,
+                evaluationGateTarget: evaluationGatePolicy.target,
+                experimentalApiBaseUrl: state.experimentalApiBaseUrl,
+                experimentalServiceName: state.experimentalServiceName,
+              },
             },
           ).catch(() => null) || '';
           if (promptSyncUrl) {
@@ -2551,6 +3092,14 @@ async function inspectMcpNode(state: ControlPlaneState): Promise<Partial<Control
           selectedPromptReference = candidate.ref;
           selectedPromptSource = candidate.source;
           selectedPromptCommitHash = extractPromptCommitHash(pulledPrompt);
+          selectedPromptMetadata = extractPromptMetadataFromCommit(pulledPrompt);
+          selectedPromptAvailableChannels = extractPromptChannelsFromCommit(pulledPrompt);
+          selectedPromptChannel = candidate.source === 'channel'
+            ? normalizePromptChannel(promptChannel)
+            : normalizePromptChannel(String((selectedPromptMetadata as any)?.channel || '')) || inferPromptChannelFromReference(candidate.ref);
+          promptRollbackReference = selectedPromptCommitHash
+            ? buildLangSmithPromptReference(promptIdentifier, selectedPromptCommitHash)
+            : candidate.ref;
           break;
         }
 
@@ -2558,44 +3107,79 @@ async function inspectMcpNode(state: ControlPlaneState): Promise<Partial<Control
           promptSelectionNotes.push(`LangSmith prompt selected: ${selectedPromptReference}${selectedPromptCommitHash ? ` @ ${selectedPromptCommitHash}` : ''} (${selectedPromptSource}).`);
         }
 
-        if (promptPromoteChannel) {
-          promptPromotionUrl = await ensureLangSmithPrompt(
-            langSmithConfig,
-            promptIdentifier,
-            buildControlPlanePromptManifest(promptIdentifier, controlPlanePrompts),
-            {
-              description: CONTROL_PLANE_PROMPT_DESCRIPTION,
-              tags: uniqueNormalizedStrings([...CONTROL_PLANE_PROMPT_TAGS, promptPromoteChannel, 'promotion']),
-              readme: CONTROL_PLANE_PROMPT_README,
-              parentCommitHash: selectedPromptCommitHash || undefined,
-            },
-          ).catch(() => null) || '';
-          if (promptPromotionUrl) {
-            promptSelectionNotes.push(`LangSmith prompt promoted to ${buildLangSmithPromptReference(promptIdentifier, promptPromoteChannel)}: ${promptPromotionUrl}`);
-          } else {
-            promptSelectionNotes.push(`LangSmith prompt promotion requested for ${buildLangSmithPromptReference(promptIdentifier, promptPromoteChannel)} but no URL was returned.`);
-          }
-        }
-
         if (seededDataset?.name) {
+          const baselineSeedEvaluation = selectBaselineEvaluation(state.langSmithEvaluations, seededDataset.name);
           const evaluation = await runLangSmithDatasetEvaluation(
             langSmithConfig,
             seededDataset.name,
             async (inputs: Record<string, any>) => ({
-              answer: `Control-plane goal: ${String(inputs?.goal || '').trim() || 'unknown goal'}`,
+              answer: [
+                `Control-plane goal: ${String(inputs?.goal || '').trim() || 'unknown goal'}`,
+                `scopes=${Array.isArray(inputs?.scopes) ? inputs.scopes.join(',') : ''}`,
+              ].join(' | '),
             }),
             `${langSmithSnapshot.projectName}-control-plane-eval`,
             [
               (run: any, example: any) => {
                 const prediction = String(run?.outputs?.answer || '');
-                const reference = String(example?.outputs?.answer || '');
-                return {
-                  key: 'contains_goal_context',
-                  score: prediction.length > 0 && reference.length > 0 ? 1 : 0,
-                  comment: `prediction_length=${prediction.length}`,
-                };
+                const goal = String(example?.inputs?.goal || '').trim();
+                const scopes = Array.isArray(example?.inputs?.scopes)
+                  ? example.inputs.scopes.map((scope: unknown) => String(scope || '').trim()).filter(Boolean)
+                  : [];
+                const hasGoalContext = goal ? prediction.includes(goal) : prediction.length > 0;
+                const scopesTracked = scopes.length === 0 || scopes.every((scope: string) => prediction.includes(scope));
+                return [
+                  {
+                    key: evaluationGatePolicy.metricKey,
+                    score: hasGoalContext ? 1 : 0,
+                    comment: `prediction_length=${prediction.length}`,
+                  },
+                  {
+                    key: 'scopes_echoed',
+                    score: scopesTracked ? 1 : 0,
+                    comment: `scope_count=${scopes.length}`,
+                  },
+                  {
+                    key: 'prompt_commit_tracked',
+                    score: selectedPromptCommitHash ? 1 : 0,
+                    comment: `prompt_commit=${selectedPromptCommitHash || 'local'}`,
+                  },
+                ];
               },
             ],
+            {
+              metadata: {
+                goal: state.goal,
+                scopes: uniqueScopes(state.scopes),
+                thread_id: state.threadId,
+                prompt_identifier: promptIdentifier,
+                prompt_ref: selectedPromptReference || promptIdentifier,
+                prompt_channel: selectedPromptChannel || promptChannel,
+                prompt_source: selectedPromptSource,
+                prompt_commit_hash: selectedPromptCommitHash || undefined,
+                governance_profile: governanceProfile.name,
+                eval_gate_mode: evaluationGatePolicy.mode,
+                eval_gate_target: evaluationGatePolicy.target,
+                autonomous: state.autonomous,
+              },
+              scorecardName: evaluationGatePolicy.scorecardName,
+              aggregationMode: evaluationGatePolicy.aggregationMode,
+              primaryMetricKey: evaluationGatePolicy.metricKey,
+              requiredMetricKeys: evaluationGatePolicy.requiredMetricKeys,
+              metricThresholds: {
+                [evaluationGatePolicy.metricKey]: evaluationGatePolicy.minMetricAverageScore,
+                ...evaluationGatePolicy.additionalMetricThresholds,
+              },
+              metricWeights: evaluationGatePolicy.metricWeights,
+              minimumWeightedScore: evaluationGatePolicy.minimumWeightedScore,
+              baselineEvaluation: baselineSeedEvaluation
+                ? {
+                    ...baselineSeedEvaluation,
+                    experimentName: baselineSeedEvaluation.experimentName || baselineSeedEvaluation.datasetName,
+                  }
+                : undefined,
+              baselineExperimentName: baselineSeedEvaluation?.experimentName || evaluationGatePolicy.baselineExperimentName || undefined,
+            },
           ).catch(() => null);
           if (evaluation) {
             langSmithEvaluations.push(LangSmithEvaluationSummarySchema.parse(evaluation));
@@ -2614,13 +3198,6 @@ async function inspectMcpNode(state: ControlPlaneState): Promise<Partial<Control
       promptSelectionNotes.push(`Prompt promotion requested for ${buildLangSmithPromptReference(promptIdentifier, promptPromoteChannel)} but LangSmith runtime integration is disabled.`);
     }
   }
-
-  if (!selectedPromptReference.trim()) {
-    selectedPromptReference = promptIdentifier;
-    promptSelectionNotes.push(`Using local control-plane prompt bundle fallback for ${promptIdentifier}.`);
-  }
-
-  langSmithNotes.push(...promptSelectionNotes);
 
   const evaluationGateResult = resolveEvaluationGateResult(
     evaluationGatePolicy,
@@ -2651,6 +3228,9 @@ async function inspectMcpNode(state: ControlPlaneState): Promise<Partial<Control
       identifier: promptIdentifier,
       description: CONTROL_PLANE_PROMPT_DESCRIPTION,
       updatedAt: new Date().toISOString(),
+      commitHash: selectedPromptCommitHash || undefined,
+      channels: uniqueNormalizedStrings([...selectedPromptAvailableChannels, promptSyncChannel, selectedPromptChannel].filter(Boolean)),
+      metadata: selectedPromptMetadata,
     }));
   }
 
@@ -2664,16 +3244,132 @@ async function inspectMcpNode(state: ControlPlaneState): Promise<Partial<Control
         prompts: mergedLangSmithPrompts,
       },
       promptIdentifier,
-      expectedDatasetNames: [`${langSmithSnapshot.projectName}-control-plane-runs`, `${langSmithSnapshot.projectName}-control-plane-seed`],
-      requiredProjectMetadata: projectGovernanceMetadata,
-      mutations: langSmithGovernanceMutations,
-    }).catch(() => null);
+        expectedDatasetNames: [`${langSmithSnapshot.projectName}-control-plane-runs`, `${langSmithSnapshot.projectName}-control-plane-seed`],
+        requiredProjectMetadata: projectGovernanceMetadata,
+        queueBacklogWarnThreshold: governanceProfile.queueBacklogWarnThreshold,
+        evaluations: langSmithEvaluations.map((evaluation) => LangSmithEvaluationSummarySchema.parse(evaluation)),
+        minimumFeedbackCount: governanceProfile.minimumFeedbackCount,
+        minimumEvaluationResults: governanceProfile.minimumEvaluationResults,
+        minimumSuccessfulEvaluations: governanceProfile.minimumSuccessfulEvaluations,
+        blockOnWarn: governanceProfile.blockAutonomousOnWarn,
+        requirePromptCommit: governanceProfile.requirePromptCommit,
+        mutations: langSmithGovernanceMutations,
+      }).catch(() => null);
 
     if (governanceSnapshot) {
       langSmithGovernance = LangSmithGovernanceSummarySchema.parse(governanceSnapshot);
       langSmithNotes.push(...summarizeLangSmithGovernanceSnapshot(governanceSnapshot));
     }
   }
+
+  governanceGateResult = resolveGovernanceGateResult(
+    governanceProfile,
+    langSmithGovernance,
+    Boolean(langSmithConfig),
+  );
+  langSmithNotes.push(governanceGateResult.reason);
+  const governanceBlockedActions = describeGovernanceGateBlockedActions(governanceGateResult);
+  if (governanceBlockedActions.length > 0) {
+    langSmithNotes.push(`Governance gate blocked: ${governanceBlockedActions.join(', ')}`);
+  }
+
+  if (!selectedPromptReference.trim()) {
+    selectedPromptReference = promptIdentifier;
+    selectedPromptChannel = promptChannel;
+    selectedPromptAvailableChannels = uniqueNormalizedStrings([...selectedPromptAvailableChannels, ...CONTROL_PLANE_PROMPT_LIFECYCLE_CHANNELS, promptChannel]);
+    selectedPromptMetadata = {
+      source: 'local',
+      channel: promptChannel,
+      channels: CONTROL_PLANE_PROMPT_LIFECYCLE_CHANNELS,
+    };
+    promptSelectionNotes.push(`Using local control-plane prompt bundle fallback for ${promptIdentifier}.`);
+  }
+
+  if (promptRollbackReference) {
+    promptSelectionNotes.push(`Prompt rollback reference: ${promptRollbackReference}`);
+  }
+
+  if (promptPromoteChannel) {
+    promptPromotionReason = `Promote ${selectedPromptReference || promptIdentifier} to ${buildLangSmithPromptReference(promptIdentifier, promptPromoteChannel)} after evaluation ${evaluationGateResult.status} and governance ${governanceGateResult.status}.`;
+    const promotionAllowed = !evaluationGateResult.blocksAutonomousEdits
+      && !evaluationGateResult.blocksExecution
+      && !governanceGateResult.blocksAutonomousEdits
+      && !governanceGateResult.blocksExecution;
+
+    if (!langSmithConfig) {
+      promptPromotionBlockedReason = `Prompt promotion requested for ${buildLangSmithPromptReference(promptIdentifier, promptPromoteChannel)} but LangSmith runtime integration is disabled.`;
+      promptSelectionNotes.push(promptPromotionBlockedReason);
+    } else if (!promotionAllowed) {
+      promptPromotionBlockedReason = `Prompt promotion blocked by active gates: ${[evaluationGateResult.reason, governanceGateResult.reason].filter(Boolean).join(' | ')}`;
+      promptSelectionNotes.push(promptPromotionBlockedReason);
+    } else {
+      promptPromotionUrl = await ensureLangSmithPrompt(
+        langSmithConfig,
+        promptIdentifier,
+        buildControlPlanePromptManifest(promptIdentifier, controlPlanePrompts),
+        {
+          description: CONTROL_PLANE_PROMPT_DESCRIPTION,
+          tags: uniqueNormalizedStrings([...CONTROL_PLANE_PROMPT_TAGS, promptPromoteChannel, 'promotion']),
+          readme: CONTROL_PLANE_PROMPT_README,
+          parentCommitHash: selectedPromptCommitHash || undefined,
+          channel: promptPromoteChannel,
+          metadata: {
+            source: 'anygpt-langgraph-control-plane',
+            promptIdentifier,
+            channels: CONTROL_PLANE_PROMPT_LIFECYCLE_CHANNELS,
+            channel: promptPromoteChannel,
+            selectedPromptReference,
+            selectedPromptCommitHash: selectedPromptCommitHash || undefined,
+            promptRollbackReference: promptRollbackReference || undefined,
+            promotionReason: promptPromotionReason,
+            governanceProfile: governanceProfile.name,
+            evaluationGateStatus: evaluationGateResult.status,
+            governanceGateStatus: governanceGateResult.status,
+          },
+        },
+      ).catch(() => null) || '';
+
+      if (promptPromotionUrl) {
+        promptSelectionNotes.push(`LangSmith prompt promoted to ${buildLangSmithPromptReference(promptIdentifier, promptPromoteChannel)}: ${promptPromotionUrl}`);
+      } else {
+        promptPromotionBlockedReason = `LangSmith prompt promotion requested for ${buildLangSmithPromptReference(promptIdentifier, promptPromoteChannel)} but no URL was returned.`;
+        promptSelectionNotes.push(promptPromotionBlockedReason);
+      }
+    }
+  }
+
+  observabilityTags = buildControlPlaneObservabilityTags(
+    {
+      scopes: state.scopes,
+      autonomous: state.autonomous,
+      promptIdentifier,
+      selectedPromptReference,
+      selectedPromptSource,
+      selectedPromptChannel,
+      governanceProfile: governanceProfile.name,
+      evaluationGatePolicy,
+    },
+    mergedLangSmithDatasets.slice(0, 3).map((dataset) => dataset.name),
+  );
+  observabilityMetadata = buildControlPlaneObservabilityMetadata(state, {
+    prompt_identifier: promptIdentifier,
+    prompt_ref: selectedPromptReference || promptIdentifier,
+    prompt_channel: selectedPromptChannel || promptChannel,
+    prompt_source: selectedPromptSource,
+    prompt_commit_hash: selectedPromptCommitHash || undefined,
+    prompt_rollback_reference: promptRollbackReference || undefined,
+    prompt_sync_channel: promptSyncChannel,
+    prompt_promote_channel: promptPromoteChannel || undefined,
+    prompt_promotion_reason: promptPromotionReason || undefined,
+    prompt_promotion_blocked_reason: promptPromotionBlockedReason || undefined,
+    governance_profile: governanceProfile.name,
+    evaluation_gate_status: evaluationGateResult.status,
+    governance_gate_status: governanceGateResult.status,
+    sampled_dataset_names: mergedLangSmithDatasets.map((dataset) => dataset.name),
+    sampled_prompt_identifiers: mergedLangSmithPrompts.map((prompt) => prompt.identifier),
+  });
+
+  langSmithNotes.push(...promptSelectionNotes);
 
   plannerNotes.push(...langSmithNotes);
 
@@ -2717,10 +3413,17 @@ async function inspectMcpNode(state: ControlPlaneState): Promise<Partial<Control
       controlPlanePrompts,
       selectedPromptReference,
       selectedPromptSource,
+      selectedPromptChannel,
       selectedPromptCommitHash,
+      selectedPromptMetadata,
+      selectedPromptAvailableChannels,
+      promptRollbackReference,
       promptSyncUrl,
       promptPromotionUrl,
+      promptPromotionReason,
+      promptPromotionBlockedReason,
       promptSelectionNotes,
+      governanceProfile: governanceProfile.name,
       langSmithEnabled: Boolean(langSmithConfig),
       langSmithProjectName: langSmithProject?.name || langSmithSnapshot?.projectName || langSmithConfig?.projectName || '',
       langSmithWorkspace: langSmithSnapshot?.workspace || null,
@@ -2735,7 +3438,10 @@ async function inspectMcpNode(state: ControlPlaneState): Promise<Partial<Control
       langSmithFeedback: langSmithSnapshot?.feedback || [],
       langSmithEvaluations,
       langSmithGovernance,
+      governanceGateResult,
       langSmithNotes,
+      observabilityTags,
+      observabilityMetadata,
       evaluationGatePolicy,
       evaluationGateResult,
       plannerNotes,
@@ -3041,7 +3747,18 @@ async function autonomousEditPlannerNode(state: ControlPlaneState): Promise<Part
     notes.push(`Deterministic autonomous ${operationMode} fallback: ${deterministicFallbackPlan.summary}`);
   }
 
-  const proposedEdits = (deterministicFallbackPlan?.edits || aiEditPlan.edits).slice(0, state.maxEditActions);
+  const dedupedPlannedEdits: AutonomousEditAction[] = [];
+  const seenEditPaths = new Set<string>();
+  for (const edit of (deterministicFallbackPlan?.edits || aiEditPlan.edits)) {
+    const normalizedEditPath = String(edit?.path || '').trim();
+    if (!normalizedEditPath) continue;
+    if (seenEditPaths.has(normalizedEditPath)) continue;
+    seenEditPaths.add(normalizedEditPath);
+    dedupedPlannedEdits.push(edit);
+    if (dedupedPlannedEdits.length >= state.maxEditActions) break;
+  }
+
+  const proposedEdits = dedupedPlannedEdits;
   for (const edit of proposedEdits) {
     notes.push(`AI autonomous edit proposal: ${edit.type} ${edit.path} — ${edit.reason}`);
   }
@@ -3351,6 +4068,7 @@ async function repairEvaluateNode(state: ControlPlaneState): Promise<Partial<Con
 
     if (repairDataset?.name) {
       notes.push(`Repair evaluation dataset ready: ${repairDataset.name}`);
+      const baselineRepairEvaluation = selectBaselineEvaluation(state.langSmithEvaluations, repairDataset.name);
       const evaluation = await runLangSmithDatasetEvaluation(
         langSmithConfig,
         repairDataset.name,
@@ -3381,9 +4099,47 @@ async function repairEvaluateNode(state: ControlPlaneState): Promise<Partial<Con
                 score: smokePassed ? 1 : 0,
                 comment: `repair_smoke_failures=${smokeFailures.length}`,
               },
+              {
+                key: 'repair_touched_paths_tracked',
+                score: appliedPaths.length > 0 ? 1 : 0,
+                comment: `repair_touched_paths=${appliedPaths.join(',') || 'none'}`,
+              },
             ];
           },
         ],
+        {
+          metadata: {
+            ...state.observabilityMetadata,
+            evaluation_kind: 'repair',
+            evaluation_gate_status: state.evaluationGateResult.status,
+            governance_gate_status: state.governanceGateResult.status,
+            repair_session_id: state.repairSessionManifest?.sessionId || undefined,
+            repair_touched_paths: appliedPaths,
+            repair_smoke_failures: smokeFailures.length,
+            repair_status: state.repairStatus,
+          },
+          scorecardName: `${evaluationGatePolicy.scorecardName}-repair`,
+          aggregationMode: evaluationGatePolicy.aggregationMode,
+          primaryMetricKey: evaluationGatePolicy.metricKey,
+          requiredMetricKeys: uniqueNormalizedStrings([...evaluationGatePolicy.requiredMetricKeys, 'repair_smoke_passed']),
+          metricThresholds: {
+            [evaluationGatePolicy.metricKey]: evaluationGatePolicy.minMetricAverageScore,
+            repair_smoke_passed: 1,
+            ...evaluationGatePolicy.additionalMetricThresholds,
+          },
+          metricWeights: {
+            repair_smoke_passed: 1,
+            ...evaluationGatePolicy.metricWeights,
+          },
+          minimumWeightedScore: evaluationGatePolicy.minimumWeightedScore,
+          baselineEvaluation: baselineRepairEvaluation
+            ? {
+                ...baselineRepairEvaluation,
+                experimentName: baselineRepairEvaluation.experimentName || baselineRepairEvaluation.datasetName,
+              }
+            : undefined,
+          baselineExperimentName: baselineRepairEvaluation?.experimentName || evaluationGatePolicy.baselineExperimentName || undefined,
+        },
       ).catch(() => null);
 
       if (evaluation) {
@@ -3414,6 +4170,7 @@ async function repairDecisionNode(state: ControlPlaneState): Promise<Partial<Con
   const appliedPaths = getAppliedRepairPaths(state);
   const smokeFailures = state.repairSmokeResults.filter((job) => job.status === 'failed');
   const evaluationGateResult = resolveStateEvaluationGateResult(state);
+  const governanceGateResult = resolveStateGovernanceGateResult(state);
   const autonomousLaneLabel = state.autonomousOperationMode === 'improvement' ? 'Improvement' : 'Repair';
   let repairStatus: RepairStatus = 'not-needed';
   let repairDecisionReason = state.autonomousOperationMode === 'improvement'
@@ -3429,6 +4186,9 @@ async function repairDecisionNode(state: ControlPlaneState): Promise<Partial<Con
   } else if (smokeFailures.length > 0) {
     repairStatus = 'failed';
     repairDecisionReason = `${autonomousLaneLabel} smoke validation failed: ${smokeFailures[0].title}${typeof smokeFailures[0].exitCode === 'number' ? ` (exit ${smokeFailures[0].exitCode})` : ''}`;
+  } else if (governanceGateResult.blocksAutonomousEdits || governanceGateResult.blocksExecution) {
+    repairStatus = 'failed';
+    repairDecisionReason = `${autonomousLaneLabel} promotion blocked by the governance gate: ${governanceGateResult.reason}`;
   } else if (evaluationGateResult.blocksAutonomousEdits || evaluationGateResult.blocksExecution) {
     repairStatus = 'failed';
     repairDecisionReason = `${autonomousLaneLabel} promotion blocked by the evaluation gate: ${evaluationGateResult.reason}`;
@@ -3684,6 +4444,8 @@ async function summarizeNode(state: ControlPlaneState): Promise<Partial<ControlP
   const evaluationGatePolicy = resolveStateEvaluationGatePolicy(state);
   const evaluationGateResult = resolveStateEvaluationGateResult(state);
   const blockedActions = describeEvaluationGateBlockedActions(evaluationGateResult);
+  const governanceGateResult = resolveStateGovernanceGateResult(state);
+  const governanceBlockedActions = describeGovernanceGateBlockedActions(governanceGateResult);
   const lines: string[] = [];
   lines.push(`Goal: ${state.goal}`);
   lines.push(`Scopes: ${uniqueScopes(state.scopes).join(', ')}`);
@@ -3695,11 +4457,18 @@ async function summarizeNode(state: ControlPlaneState): Promise<Partial<ControlP
       ? `AI agents: enabled (${state.aiAgentModel || 'configured model'} via ${state.aiAgentBackend || 'configured base URL'})`
       : 'AI agents: disabled (set CONTROL_PLANE_AI_BASE_URL/KEY/MODEL or provide ANYGPT_API_KEY; local AnyGPT fallback will be used when available)',
   );
+  lines.push(`Experimental target: ${state.experimentalApiBaseUrl || 'http://127.0.0.1:3310'} via ${state.experimentalServiceName || 'anygpt-experimental.service'}`);
   lines.push(
     state.selectedPromptSource === 'local'
-      ? `Prompt bundle: local fallback (${state.promptIdentifier || DEFAULT_CONTROL_PLANE_PROMPT_IDENTIFIER})`
-      : `Prompt bundle: ${state.selectedPromptSource} selection ${state.selectedPromptReference || state.promptIdentifier || DEFAULT_CONTROL_PLANE_PROMPT_IDENTIFIER}${state.selectedPromptCommitHash ? ` @ ${state.selectedPromptCommitHash}` : ''}`,
+      ? `Prompt bundle: local fallback (${state.promptIdentifier || DEFAULT_CONTROL_PLANE_PROMPT_IDENTIFIER})${state.selectedPromptChannel ? ` via ${state.selectedPromptChannel}` : ''}`
+      : `Prompt bundle: ${state.selectedPromptSource} selection ${state.selectedPromptReference || state.promptIdentifier || DEFAULT_CONTROL_PLANE_PROMPT_IDENTIFIER}${state.selectedPromptCommitHash ? ` @ ${state.selectedPromptCommitHash}` : ''}${state.selectedPromptChannel ? ` via ${state.selectedPromptChannel}` : ''}`,
   );
+  if (state.selectedPromptAvailableChannels.length > 0) {
+    lines.push(`Prompt channels: ${state.selectedPromptAvailableChannels.join(', ')}`);
+  }
+  if (state.promptRollbackReference.trim()) {
+    lines.push(`Prompt rollback: ${state.promptRollbackReference}`);
+  }
   lines.push(
     state.promptSyncEnabled
       ? `Prompt sync: ${state.promptSyncUrl || `${buildLangSmithPromptReference(state.promptIdentifier, state.promptSyncChannel)}${state.langSmithEnabled ? ' (no URL returned)' : ' (LangSmith disabled)'}`}`
@@ -3712,17 +4481,27 @@ async function summarizeNode(state: ControlPlaneState): Promise<Partial<ControlP
         : `Prompt promotion: requested for ${buildLangSmithPromptReference(state.promptIdentifier, state.promptPromoteChannel)} but not completed`,
     );
   }
+  if (state.promptPromotionReason.trim()) {
+    lines.push(`Prompt promotion reason: ${state.promptPromotionReason}`);
+  }
+  if (state.promptPromotionBlockedReason.trim()) {
+    lines.push(`Prompt promotion blocked: ${state.promptPromotionBlockedReason}`);
+  }
   lines.push(
     state.langSmithEnabled
       ? `LangSmith: workspace ${state.langSmithWorkspace?.displayName || 'unknown'}, project ${state.langSmithProjectName || 'unset'}, ${state.langSmithProjects.length} project(s), ${state.langSmithDatasets.length} dataset(s), ${state.langSmithPrompts.length} prompt(s), ${state.langSmithRuns.length} recent run(s), ${state.langSmithAnnotationQueues.length} annotation queue(s), ${state.langSmithFeedback.length} feedback item(s)`
       : 'LangSmith: runtime integration disabled',
   );
+  lines.push(`Governance profile: ${resolveControlPlaneGovernanceProfile(state.repoRoot).name}`);
   if (state.langSmithAccessibleWorkspaces.length > 0) {
     lines.push(`LangSmith accessible workspaces: ${state.langSmithAccessibleWorkspaces.map((workspace) => `${workspace.displayName}${workspace.roleName ? ` (${workspace.roleName})` : ''}`).join(', ')}`);
   }
   if (state.langSmithProject) {
     const metadataKeys = Object.keys(state.langSmithProject.metadata || {});
     lines.push(`LangSmith project admin: ${state.langSmithProject.name}${state.langSmithProject.description ? ` — ${state.langSmithProject.description}` : ''}${metadataKeys.length > 0 ? ` [metadata: ${metadataKeys.join(', ')}]` : ''}`);
+  }
+  if (state.langSmithRuns.length > 0) {
+    lines.push(`LangSmith recent runs: ${state.langSmithRuns.slice(0, 3).map((run) => `${run.name}${run.traceId ? ` trace=${run.traceId}` : ''}${run.threadId ? ` thread=${run.threadId}` : ''}${Array.isArray(run.tags) && run.tags.length > 0 ? ` tags=${run.tags.join('|')}` : ''}`).join(' ; ')}`);
   }
   if (state.langSmithAnnotationQueues.length > 0) {
     lines.push(`LangSmith annotation queues: ${state.langSmithAnnotationQueues.map((queue) => `${queue.name}${typeof queue.itemCount === 'number' ? ` (${queue.itemCount})` : ''}`).join(', ')}`);
@@ -3735,6 +4514,12 @@ async function summarizeNode(state: ControlPlaneState): Promise<Partial<ControlP
   }
   if (state.langSmithEvaluations.length > 0) {
     lines.push(`LangSmith evaluations: ${state.langSmithEvaluations.map((item) => item.experimentName ? `${item.datasetName} (${item.experimentName})` : item.datasetName).join(', ')}`);
+    const metricSummaries = state.langSmithEvaluations
+      .flatMap((item) => item.metrics.map((metric) => `${metric.key}=${metric.averageScore ?? 'n/a'}x${metric.count}`))
+      .filter(Boolean);
+    if (metricSummaries.length > 0) {
+      lines.push(`LangSmith evaluation metrics: ${metricSummaries.join(', ')}`);
+    }
   }
   if (state.langSmithGovernance) {
     const actionableFlags = state.langSmithGovernance.flags.filter((flag) => flag.status !== 'pass');
@@ -3753,11 +4538,33 @@ async function summarizeNode(state: ControlPlaneState): Promise<Partial<ControlP
   if (evaluationGateResult.metricCount > 0 || evaluationGateResult.metricAverageScore !== null) {
     lines.push(`Evaluation metric ${evaluationGatePolicy.metricKey}: ${evaluationGateResult.metricAverageScore ?? 'n/a'} across ${evaluationGateResult.metricCount} scored result(s)`);
   }
+  if (evaluationGateResult.aggregationMode === 'weighted') {
+    lines.push(`Evaluation weighted score: ${evaluationGateResult.weightedAverageScore ?? 'n/a'} (min=${evaluationGateResult.minimumWeightedScore ?? 'n/a'})`);
+  }
+  if (evaluationGateResult.metricResults.length > 1) {
+    lines.push(`Evaluation scorecard: ${evaluationGateResult.metricResults.map((metric) => `${metric.key}=${metric.averageScore ?? 'n/a'}x${metric.count}${metric.required ? `/${metric.minAverageScore}` : ''}`).join(', ')}`);
+  }
+  if (evaluationGateResult.baselineExperimentName.trim()) {
+    lines.push(`Evaluation baseline: ${evaluationGateResult.baselineExperimentName}`);
+  }
+  if (evaluationGateResult.comparisonUrl.trim()) {
+    lines.push(`Evaluation comparison: ${evaluationGateResult.comparisonUrl}`);
+  }
   if (evaluationGateResult.reason.trim()) {
     lines.push(`Evaluation gate reason: ${evaluationGateResult.reason}`);
   }
   if (blockedActions.length > 0) {
     lines.push(`Evaluation gate blocked: ${blockedActions.join(', ')}`);
+  }
+  lines.push(`Governance gate: ${governanceGateResult.status} (target=${governanceGateResult.target})`);
+  if (governanceGateResult.reason.trim()) {
+    lines.push(`Governance gate reason: ${governanceGateResult.reason}`);
+  }
+  if (governanceBlockedActions.length > 0) {
+    lines.push(`Governance gate blocked: ${governanceBlockedActions.join(', ')}`);
+  }
+  if (state.observabilityTags.length > 0) {
+    lines.push(`Observability tags: ${state.observabilityTags.join(', ')}`);
   }
   if (state.repairIntentSummary.trim()) {
     lines.push(`Repair intent: ${state.repairIntentSummary}`);
@@ -3775,6 +4582,10 @@ async function summarizeNode(state: ControlPlaneState): Promise<Partial<ControlP
     lines.push(`Autonomous loop: ${state.autonomousOperationMode}/${state.repairStatus}${state.repairDecisionReason.trim() ? ` — ${state.repairDecisionReason}` : ''}`);
     if (state.repairSessionManifest?.sessionId) {
       lines.push(`Repair session: ${state.repairSessionManifest.sessionId} (rollback=${state.repairSessionManifest.rollbackStatus})`);
+    }
+    const touchedPaths = getRepairTouchedPaths(state);
+    if (touchedPaths.length > 0) {
+      lines.push(`Repair touched paths: ${touchedPaths.join(', ')}`);
     }
     if (state.repairSmokeResults.length > 0) {
       lines.push(`Repair smoke validation: ${state.repairSmokeResults.map((job) => `${job.title}=${job.status}${typeof job.exitCode === 'number' ? `(${job.exitCode})` : ''}`).join('; ')}`);
@@ -3794,7 +4605,7 @@ async function summarizeNode(state: ControlPlaneState): Promise<Partial<ControlP
   }
   lines.push(
     state.autonomousEditEnabled
-      ? `Autonomous edits: enabled (${state.autonomousOperationMode}, ${state.proposedEdits.length} proposed, ${state.appliedEdits.filter((edit) => edit.status === 'applied').length} applied${evaluationGateResult.blocksAutonomousEdits ? ', blocked by evaluation gate' : ''}, status=${state.repairStatus})`
+      ? `Autonomous edits: enabled (${state.autonomousOperationMode}, ${state.proposedEdits.length} proposed, ${state.appliedEdits.filter((edit) => edit.status === 'applied').length} applied${evaluationGateResult.blocksAutonomousEdits ? ', blocked by evaluation gate' : ''}${governanceGateResult.blocksAutonomousEdits ? ', blocked by governance gate' : ''}, status=${state.repairStatus})`
       : 'Autonomous edits: disabled',
   );
   lines.push(`Execution mode: ${state.executePlan ? 'execute' : 'plan-only'}`);
@@ -3806,6 +4617,9 @@ async function summarizeNode(state: ControlPlaneState): Promise<Partial<ControlP
   }
   if (state.executePlan && evaluationGateResult.blocksExecution) {
     lines.push('Execution halted before running jobs because the evaluation gate blocked job execution.');
+  }
+  if (state.executePlan && governanceGateResult.blocksExecution) {
+    lines.push('Execution halted before running jobs because the governance gate blocked job execution.');
   }
   if (state.executePlan && state.approvalGranted === false) {
     lines.push('Execution halted before running jobs because approval was denied.');

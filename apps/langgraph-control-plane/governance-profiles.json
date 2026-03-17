@@ -1,0 +1,32 @@
+{
+  "experimental": {
+    "queueBacklogWarnThreshold": 10,
+    "requireFeedback": false,
+    "minimumFeedbackCount": 0,
+    "minimumEvaluationResults": 0,
+    "minimumSuccessfulEvaluations": 0,
+    "blockAutonomousOnWarn": false,
+    "gateTarget": "autonomous-edits",
+    "requirePromptCommit": false
+  },
+  "staging": {
+    "queueBacklogWarnThreshold": 5,
+    "requireFeedback": true,
+    "minimumFeedbackCount": 1,
+    "minimumEvaluationResults": 1,
+    "minimumSuccessfulEvaluations": 1,
+    "blockAutonomousOnWarn": false,
+    "gateTarget": "autonomous-edits",
+    "requirePromptCommit": true
+  },
+  "prod": {
+    "queueBacklogWarnThreshold": 3,
+    "requireFeedback": true,
+    "minimumFeedbackCount": 3,
+    "minimumEvaluationResults": 3,
+    "minimumSuccessfulEvaluations": 1,
+    "blockAutonomousOnWarn": true,
+    "gateTarget": "both",
+    "requirePromptCommit": true
+  }
+}

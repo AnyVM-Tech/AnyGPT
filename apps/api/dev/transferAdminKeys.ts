@@ -180,6 +180,48 @@ interface ProbeProviderStatus {
   noAccess: Set<string>;
 }
 
+type ProbeProviderAvailability = 'quota' | 'noAccess' | 'ready';
+
+function shouldPersistQuotaDisable(providerName: string | null | undefined): boolean {
+  const lower = String(providerName || '').toLowerCase();
+  return lower !== 'gemini' && lower !== 'google';
+}
+
+function classifyProbeProviderAvailability(entry: any): ProbeProviderAvailability | null {
+  const reason = typeof entry?.reason === 'string' ? entry.reason.toLowerCase() : '';
+  const type = typeof entry?.type === 'string' ? entry.type : '';
+
+  if (type === 'provider_reenabled') return 'ready';
+  if (type === 'key_invalid') return 'noAccess';
+
+  if (type === 'provider_disabled' || type === 'key_no_quota' || type === 'provider_no_quota') {
+    if (reason.includes('quota')) return 'quota';
+    if (
+      reason.includes('no access') ||
+      reason.includes('does not have access') ||
+      reason.includes('not valid') ||
+      reason.includes('not found') ||
+      reason.includes('expired') ||
+      reason.includes('suspended') ||
+      reason.includes('has not been used in project') ||
+      reason.includes('permission denied')
+    ) {
+      return 'noAccess';
+    }
+  }
+
+  return null;
+}
+
+function shouldDisableProviderFromProbeStatus(
+  providerId: string,
+  providerName: string | null | undefined,
+  probeProviderStatus: ProbeProviderStatus
+): boolean {
+  if (probeProviderStatus.noAccess.has(providerId)) return true;
+  return shouldPersistQuotaDisable(providerName) && probeProviderStatus.quota.has(providerId);
+}
+
 function hashId(key: string): string {
   if (!key) return 'unknown';
   return hashToken(key).slice(0, 12);
@@ -256,6 +298,7 @@ function loadProbeProviderStatus(): ProbeProviderStatus {
   }
 
   const lines = raw.split(/\r?\n/).filter(Boolean);
+  const currentAvailability = new Map<string, ProbeProviderAvailability>();
   for (const line of lines) {
     let entry: any;
     try {
@@ -264,19 +307,15 @@ function loadProbeProviderStatus(): ProbeProviderStatus {
       continue;
     }
     const providerId = typeof entry?.providerId === 'string' ? entry.providerId : '';
-    const reason = typeof entry?.reason === 'string' ? entry.reason.toLowerCase() : '';
     if (!providerId) continue;
+    const availability = classifyProbeProviderAvailability(entry);
+    if (!availability) continue;
+    currentAvailability.set(providerId, availability);
+  }
 
-    if (entry?.type === 'provider_disabled' || entry?.type === 'key_no_quota' || entry?.type === 'provider_no_quota') {
-      if (reason.includes('quota')) status.quota.add(providerId);
-      if (reason.includes('no access') || reason.includes('does not have access')) status.noAccess.add(providerId);
-      continue;
-    }
-
-    if (entry?.type === 'probe_skip' && reason) {
-      if (reason.includes('quota')) status.quota.add(providerId);
-      if (reason.includes('no access') || reason.includes('does not have access')) status.noAccess.add(providerId);
-    }
+  for (const [providerId, availability] of currentAvailability.entries()) {
+    if (availability === 'quota') status.quota.add(providerId);
+    if (availability === 'noAccess') status.noAccess.add(providerId);
   }
 
   return status;
@@ -467,7 +506,11 @@ async function validateKey(entry: AdminKeyLogEntry): Promise<ValidationResult> {
   if (status.health === 'invalid') {
     throw createValidationFailure('INVALID_KEY', `Key check failed: ${status.error || 'Invalid key'}`);
   }
-  if (status.health === 'no-quota') {
+  const allowGeminiQuotaLimitedRefresh = provider === 'gemini'
+    && status.isValid
+    && Array.isArray(status.models)
+    && status.models.length > 0;
+  if (status.health === 'no-quota' && !allowGeminiQuotaLimitedRefresh) {
     throw createValidationFailure(NO_QUOTA_ERROR, NO_QUOTA_ERROR);
   }
 
@@ -658,7 +701,12 @@ async function main() {
               providerEntry.provider_url = validation.providerUrl;
               providerEntry.streamingCompatible = validation.streamingCompatible;
               providerEntry.models = mergeModelMaps(providerEntry.models, modelsMap);
-              providerEntry.disabled = probeProviderStatus.quota.has(providerEntry.id) || probeProviderStatus.noAccess.has(providerEntry.id);
+              const providerFamily = resolveExistingProviderFamily(providerEntry) || entry.provider;
+              providerEntry.disabled = shouldDisableProviderFromProbeStatus(
+                providerEntry.id,
+                providerFamily,
+                probeProviderStatus
+              );
               console.log(`♻️  refreshed ${providerEntry.id} (${Object.keys(modelsMap).length} models)`);
             });
             refreshedCount += existing.length;
@@ -673,7 +721,7 @@ async function main() {
             provider_url: validation.providerUrl,
             streamingCompatible: validation.streamingCompatible,
             models: modelsMap,
-            disabled: probeProviderStatus.quota.has(providerId) || probeProviderStatus.noAccess.has(providerId),
+            disabled: shouldDisableProviderFromProbeStatus(providerId, entry.provider, probeProviderStatus),
             avg_response_time: null,
             avg_provider_latency: null,
             errors: 0,
@@ -706,8 +754,13 @@ async function main() {
               const idx = providers.findIndex((prov) => prov.id === p.id);
               if (idx === -1) return;
               if (isNoQuota) {
-                providers[idx].disabled = true;
-                console.log(`⏸️  Disabled no-quota provider ${p.id}.`);
+                if (shouldPersistQuotaDisable(entry.provider)) {
+                  providers[idx].disabled = true;
+                  console.log(`⏸️  Disabled no-quota provider ${p.id}.`);
+                } else {
+                  providers[idx].disabled = false;
+                  console.log(`↺ Retained ${p.id}; Gemini quota exhaustion is treated as temporary.`);
+                }
               } else if (isInvalidKey) {
                 providers[idx].disabled = true;
                 console.log(`⏸️  Disabled invalid provider ${p.id}.`);

@@ -8,7 +8,7 @@ function readEnvNumber(name: string, fallback: number): number {
 }
 
 export function getUpstreamTimeoutMs(): number {
-  return readEnvNumber('UPSTREAM_TIMEOUT_MS', 120_000);
+  return readEnvNumber('UPSTREAM_TIMEOUT_MS', 30_000);
 }
 
 function createTimeoutSignal(timeoutMs: number, externalSignal?: AbortSignal | null) {

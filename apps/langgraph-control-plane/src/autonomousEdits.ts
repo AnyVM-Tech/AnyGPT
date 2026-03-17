@@ -201,6 +201,40 @@ function buildAutonomousEditContextContent(raw: string, candidatePath: string, m
   return buildAnchoredExcerpt(raw, candidatePath, maxCharsPerFile);
 }
 
+function countOccurrences(haystack: string, needle: string): number {
+  if (!needle) return 0;
+  let count = 0;
+  let offset = 0;
+  while (true) {
+    const nextIndex = haystack.indexOf(needle, offset);
+    if (nextIndex < 0) break;
+    count += 1;
+    offset = nextIndex + Math.max(1, needle.length);
+  }
+  return count;
+}
+
+function buildReplaceFailureDiagnostic(current: string, find: string): string {
+  const trimmedFind = find.trim();
+  if (!trimmedFind) {
+    return 'Replace target text was not found in the file.';
+  }
+
+  const findLines = trimmedFind.split('\n').map((line) => line.trim()).filter(Boolean);
+  const anchorLine = findLines.find((line) => line.length >= 12) || findLines[0] || trimmedFind.slice(0, 120);
+  const currentLines = current.split('\n');
+  const anchorMatchIndex = currentLines.findIndex((line) => line.includes(anchorLine));
+
+  if (anchorMatchIndex >= 0) {
+    const excerpt = currentLines
+      .slice(Math.max(0, anchorMatchIndex - 2), Math.min(currentLines.length, anchorMatchIndex + 3))
+      .join('\n');
+    return `Replace target text was not found in the file. Closest anchor match around line ${anchorMatchIndex + 1}:\n${excerpt}`;
+  }
+
+  return `Replace target text was not found in the file. First anchor fragment: ${anchorLine.slice(0, 160)}`;
+}
+
 export function resolveAutonomousEditAllowlist(value?: string): string[] {
   const configured = splitCommaSeparatedPaths(value);
   return configured.length > 0 ? configured : [...DEFAULT_AUTONOMOUS_EDIT_ALLOWLIST];
@@ -395,12 +429,23 @@ export function applyAutonomousEditsWithManifest(
         }
 
         const current = fs.readFileSync(absolutePath, 'utf8');
-        if (!current.includes(find)) {
+        const matchCount = countOccurrences(current, find);
+        if (matchCount === 0) {
           results.push(AppliedAutonomousEditSchema.parse({
             ...action,
             path: check.normalizedPath,
             status: 'failed',
-            message: 'Replace target text was not found in the file.',
+            message: buildReplaceFailureDiagnostic(current, find),
+          }));
+          continue;
+        }
+
+        if (matchCount > 1) {
+          results.push(AppliedAutonomousEditSchema.parse({
+            ...action,
+            path: check.normalizedPath,
+            status: 'failed',
+            message: `Replace target text matched ${matchCount} times in the file; provide a more specific anchored block.`,
           }));
           continue;
         }

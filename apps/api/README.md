@@ -178,11 +178,17 @@ apps/api/
      *   `VIDEO_REQUEST_CACHE_TTL_MS`: TTL for cached video request IDs in ms (default: 3600000).
 
      ### Admission Queues
-     *   `REQUEST_QUEUE_CONCURRENCY`: Base shared request queue concurrency hint (used by `/v1` admission defaults).
-     *   `REQUEST_ADMISSION_QUEUE_CONCURRENCY`: Explicit concurrency for the general `/v1/chat/completions` admission queue.
-     *   `REQUEST_ADMISSION_QUEUE_MAX_PENDING`: Explicit pending limit for the general `/v1/chat/completions` admission queue.
-     *   `RESPONSES_ADMISSION_QUEUE_CONCURRENCY`: Explicit concurrency for `/v1/responses` admission queues.
-     *   `RESPONSES_ADMISSION_QUEUE_MAX_PENDING`: Explicit pending limit for `/v1/responses` admission queues.
+     *   `REQUEST_QUEUE_CONCURRENCY`: Concurrency for the shared request-handler queue used by `/v1/chat/completions` and `/v1/responses`.
+     *   `REQUEST_QUEUE_MAX_PENDING`: Maximum pending requests allowed in the shared request-handler queue before overload responses are returned.
+     *   `REQUEST_QUEUE_MAX_WAIT_MS`: Maximum time a request may wait in the shared request-handler queue before timing out.
+     *   `EMBEDDINGS_QUEUE_CONCURRENCY`: Concurrency for the dedicated embeddings admission queue.
+     *   `EMBEDDINGS_QUEUE_MAX_PENDING`: Maximum pending requests for the embeddings admission queue.
+     *   `PROVIDER_STATS_QUEUE_CONCURRENCY`: Concurrency per provider-stats worker queue.
+     *   `PROVIDER_STATS_QUEUE_WORKERS`: Number of provider-stats worker queues.
+     *   `PROVIDER_STATS_QUEUE_MAX_PENDING`: Maximum pending jobs per provider-stats worker queue.
+     *   `PROVIDER_STATS_FLUSH_MS`: Flush interval for buffered provider-stats updates.
+     *   `PROVIDER_STATS_BATCH_SIZE`: Batch size for provider-stats queue processing.
+     *   `PROVIDER_STATS_BUFFER_MAX_PENDING`: Maximum buffered provider-stats updates before backpressure/drop behavior applies.
 
     ### Image URL Fetch Proxy
     *   `IMAGE_FETCH_TIMEOUT_MS`: Image fetch timeout in ms (default: 15000).
@@ -313,7 +319,14 @@ Notes:
 *   `POST /admin/models/refresh-provider-counts` or `POST /api/admin/models/refresh-provider-counts` (admin)
 
 ### Admin
-*   Admin endpoints live under `/api/admin` (providers, API keys, metrics). See `openapi.json` for the full list.
+*   Admin endpoints live under `/api/admin` (providers, API keys, metrics) and are also exposed at `/admin`.
+*   `GET /api/admin/metrics/summary` returns aggregate provider/model/key counts, queue totals, and error log stats.
+*   `GET /api/admin/metrics/queues` returns live queue snapshots for:
+    *   the shared request-handler queue used by `/v1/chat/completions` and `/v1/responses`
+    *   the dedicated embeddings admission queue
+    *   each provider-stats worker queue
+*   Queue snapshots include queue label, concurrency, max pending, max wait, in-flight count, pending count, overload count, and last overload timestamp when available.
+*   See `openapi.json` for the full list.
 
 ### OpenAPI Spec
 *   `GET /openapi.json`

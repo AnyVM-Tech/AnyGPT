@@ -58,6 +58,43 @@ type ProbeTestedFile = {
     capability_skips?: Record<string, Record<string, string>>;
 };
 
+const CAPABILITY_ORDER = ['text', 'image_input', 'image_output', 'audio_input', 'audio_output', 'tool_calling'] as const;
+
+function normalizeCapabilities(caps: Iterable<string>): string[] {
+    const unique = new Set<string>();
+    for (const cap of caps) {
+        if (typeof cap === 'string' && cap.length > 0) unique.add(cap);
+    }
+
+    const ordered: string[] = [];
+    for (const cap of CAPABILITY_ORDER) {
+        if (unique.delete(cap)) ordered.push(cap);
+    }
+    ordered.push(...unique);
+    return ordered;
+}
+
+function inferCapabilitiesFromStoredResults(entry?: Record<string, string>): string[] {
+    if (!entry) return [];
+    return CAPABILITY_ORDER.filter((cap) => typeof entry[cap] === 'string' && entry[cap]!.toLowerCase().startsWith('ok'));
+}
+
+function getRememberedCapabilities(
+    modelId: string,
+    currentCapabilities: string[] | undefined,
+    capabilitiesCache: CapabilitiesCache,
+    probeData: Record<string, Record<string, string>>
+): string[] {
+    const current = Array.isArray(currentCapabilities)
+        ? currentCapabilities.filter((cap): cap is string => typeof cap === 'string' && cap.length > 0)
+        : [];
+    const cached = Array.isArray(capabilitiesCache[modelId])
+        ? capabilitiesCache[modelId].filter((cap): cap is string => typeof cap === 'string' && cap.length > 0)
+        : [];
+    const stored = inferCapabilitiesFromStoredResults(probeData[modelId]);
+    return normalizeCapabilities([...current, ...cached, ...stored]);
+}
+
 function loadCapabilitiesCache(): CapabilitiesCache {
     try {
         if (!fs.existsSync(CAPABILITIES_CACHE_PATH)) return {};
@@ -396,9 +433,10 @@ function guessOwnedBy(modelId: string): string {
  * 1. Removes models with 0 providers
  * 2. Adds new models that have at least 1 active provider
  * 3. Updates provider counts for existing models
- * 4. Removes models where their only provider is disabled or doesn't exist
+ * 4. Rehydrates remembered capabilities so re-added models do not need to be re-probed
  */
-export async function refreshProviderCountsInModelsFile(): Promise<void> {
+export async function refreshProviderCountsInModelsFile(options: { notifyProbes?: boolean } = {}): Promise<void> {
+    const notifyProbes = options.notifyProbes ?? true;
     const disableSync = (process.env.DISABLE_MODEL_SYNC || '').toLowerCase() !== 'false';
     if (disableSync) {
         console.log('Model sync is disabled (set DISABLE_MODEL_SYNC=false to enable). Skipping models.json update.');
@@ -421,22 +459,23 @@ export async function refreshProviderCountsInModelsFile(): Promise<void> {
         }
 
         const capabilitiesCache = loadCapabilitiesCache();
+        const probeTested = loadProbeTested();
+        const probeData = probeTested.data || {};
+        const probeSkips = probeTested.capability_skips || {};
 
         // Calculate provider counts and average TPS for each model ID.
         // `activeProviderCounts` only includes currently enabled providers.
         // `knownProviderCounts` includes providers even when temporarily disabled,
-        // so transient outages do not erase model entries from models.json.
+        // and remains useful for diagnostics and pricing heuristics.
         const activeProviderCounts: { [modelId: string]: number } = {};
         const knownProviderCounts: { [modelId: string]: number } = {};
         const availableModelIds = new Set<string>();
-        const knownModelIds = new Set<string>();
         const modelTpsSamples: { [modelId: string]: number[] } = {};
 
         for (const provider of providersData) {
             if (!provider.models) continue;
             for (const modelId in provider.models) {
                 knownProviderCounts[modelId] = (knownProviderCounts[modelId] || 0) + 1;
-                knownModelIds.add(modelId);
 
                 if (!provider.disabled) { // Consider a provider active if 'disabled' is false or undefined
                     activeProviderCounts[modelId] = (activeProviderCounts[modelId] || 0) + 1;
@@ -472,19 +511,28 @@ export async function refreshProviderCountsInModelsFile(): Promise<void> {
         for (const model of modelsFile.data) {
             const newProviderCount = activeProviderCounts[model.id] || 0;
             const knownProviderCount = knownProviderCounts[model.id] || 0;
+            const rememberedCaps = getRememberedCapabilities(model.id, model.capabilities, capabilitiesCache, probeData);
+
+            if (rememberedCaps.length > 0) {
+                const currentCaps = Array.isArray(model.capabilities)
+                    ? model.capabilities.filter((cap): cap is string => typeof cap === 'string' && cap.length > 0)
+                    : [];
+                if (!areCapabilitiesEqual(currentCaps, rememberedCaps)) {
+                    model.capabilities = [...rememberedCaps];
+                    changesMade = true;
+                }
+                const cachedCaps = capabilitiesCache[model.id];
+                if (!cachedCaps || !areCapabilitiesEqual(cachedCaps, rememberedCaps)) {
+                    capabilitiesCache[model.id] = [...rememberedCaps];
+                }
+            }
             
-            if (newProviderCount > 0 || knownProviderCount > 0) {
-                // Keep models that still exist on any provider, even if all providers are
-                // temporarily disabled or cooling down. This prevents startup sync from
-                // erasing whole model families like Gemini from models.json.
+            if (newProviderCount > 0) {
                 if (model.providers !== newProviderCount) {
                     const oldProviderCount = model.providers;
                     model.providers = newProviderCount;
                     changesMade = true;
                     console.log(`Updated provider count for ${model.id}: ${oldProviderCount} -> ${newProviderCount}`);
-                }
-                if (newProviderCount === 0 && knownProviderCount > 0) {
-                    console.log(`Preserving model ${model.id}: ${knownProviderCount} provider(s) still advertise it, but none are currently active.`);
                 }
                 if (!model.owned_by || model.owned_by === 'unknown') {
                     const guessedOwner = guessOwnedBy(model.id);
@@ -509,30 +557,24 @@ export async function refreshProviderCountsInModelsFile(): Promise<void> {
                         changesMade = true;
                     }
                 }
-                // Preserve current capabilities in cache for rehydration later.
-                if (Array.isArray(model.capabilities) && model.capabilities.length > 0) {
-                    const cached = capabilitiesCache[model.id];
-                    if (!cached || !areCapabilitiesEqual(cached, model.capabilities)) {
-                        capabilitiesCache[model.id] = [...model.capabilities];
-                    }
-                }
                 updatedModels.push(model);
             } else {
-                // Remove models only when no provider advertises them anymore.
-                console.log(`Removing model ${model.id}: no providers advertise it anymore`);
+                const reason = knownProviderCount > 0
+                    ? `${knownProviderCount} provider(s) still advertise it, but none are currently active`
+                    : 'no providers advertise it anymore';
+                console.log(`Removing model ${model.id}: ${reason}`);
                 changesMade = true;
             }
         }
 
-        // Add new models that providers advertise even if all supporting providers are
-        // currently disabled. That preserves model ids across restarts and temporary quota events.
+        // Add new models only when they have at least one currently active provider.
         const existingModelIds = new Set(modelsFile.data.map(model => model.id));
         const newModelsWithoutCaps: string[] = [];
-        for (const modelId of knownModelIds) {
+        for (const modelId of availableModelIds) {
             if (!existingModelIds.has(modelId)) {
                 const providerCount = activeProviderCounts[modelId] ?? 0;
                 const knownProviderCount = knownProviderCounts[modelId] ?? 0;
-                if (knownProviderCount <= 0) {
+                if (providerCount <= 0) {
                     continue;
                 }
                 const newModel: any = {
@@ -543,16 +585,22 @@ export async function refreshProviderCountsInModelsFile(): Promise<void> {
                     providers: providerCount,
                     throughput: modelThroughput[modelId] || 50
                 };
-                const cachedCaps = capabilitiesCache[modelId];
-                if (cachedCaps && cachedCaps.length > 0) {
-                    newModel.capabilities = [...cachedCaps];
+                const rememberedCaps = getRememberedCapabilities(modelId, undefined, capabilitiesCache, probeData);
+                if (rememberedCaps.length > 0) {
+                    newModel.capabilities = [...rememberedCaps];
+                    const cachedCaps = capabilitiesCache[modelId];
+                    if (!cachedCaps || !areCapabilitiesEqual(cachedCaps, rememberedCaps)) {
+                        capabilitiesCache[modelId] = [...rememberedCaps];
+                    }
                 }
                 const dynamicPrice = calculateDynamicPricing(modelId, Math.max(providerCount, knownProviderCount));
                 if (dynamicPrice) {
                     newModel.pricing = dynamicPrice;
                 }
                 updatedModels.push(newModel);
-                newModelsWithoutCaps.push(modelId);
+                if (!Array.isArray(newModel.capabilities) || newModel.capabilities.length === 0) {
+                    newModelsWithoutCaps.push(modelId);
+                }
                 console.log(`Added new model ${modelId} with ${providerCount} active / ${knownProviderCount} known provider(s), owned by: ${newModel.owned_by}`);
                 changesMade = true;
             }
@@ -588,12 +636,12 @@ export async function refreshProviderCountsInModelsFile(): Promise<void> {
             }
         }
 
-        // Track models that have never been scanned (no probe-tested entries or capability skips).
-        const probeTested = loadProbeTested();
-        const probeData = probeTested.data || {};
-        const probeSkips = probeTested.capability_skips || {};
+        // Track models that still have no capabilities and no probe history.
         const modelsWithoutProbe: string[] = [];
         for (const model of updatedModels) {
+            if (Array.isArray(model.capabilities) && model.capabilities.length > 0) {
+                continue;
+            }
             const dataEntry = probeData[model.id];
             const skipEntry = probeSkips[model.id];
             if (isProbeEntryEmpty(dataEntry) && isProbeEntryEmpty(skipEntry)) {
@@ -607,7 +655,7 @@ export async function refreshProviderCountsInModelsFile(): Promise<void> {
 
         // Trigger capability probing for models without capabilities
         const modelsNeedingProbe = Array.from(new Set([...allModelsWithoutCaps, ...modelsWithoutProbe]));
-        const disableProbeNotify = (process.env.DISABLE_MODEL_PROBE_NOTIFY || '').toLowerCase() === 'true';
+        const disableProbeNotify = !notifyProbes || (process.env.DISABLE_MODEL_PROBE_NOTIFY || '').toLowerCase() === 'true';
         if (modelsNeedingProbe.length > 0 && !disableProbeNotify) {
             try {
                 if (allModelsWithoutCaps.length > 0) {

@@ -75,7 +75,7 @@ import { dataManager, LoadedProviders, LoadedProviderData, type ModelsFileStruct
 import { logger } from '../modules/logger.js';
 import { redactAuthorizationHeader, redactToken, hashToken } from '../modules/redaction.js';
 import { fetchWithTimeout } from '../modules/http.js';
-import { RequestQueue } from '../modules/requestQueue.js';
+import { RequestQueue, QueueOverloadedError, requestQueue } from '../modules/requestQueue.js';
 import {
     getHeaderValue,
     normalizeImageFetchReferer,
@@ -243,10 +243,6 @@ function getBaselineTierRps(): number {
 
 const BASELINE_TIER_RPS = getBaselineTierRps();
 const UPSTREAM_TIMEOUT_MS = readEnvNumber('UPSTREAM_TIMEOUT_MS', 120_000);
-const REQUEST_ADMISSION_QUEUE_CONCURRENCY = Math.max(1, readEnvNumber('REQUEST_ADMISSION_QUEUE_CONCURRENCY', Math.max(12, Math.min(48, Number(process.env.REQUEST_QUEUE_CONCURRENCY || 16) || 16))));
-const REQUEST_ADMISSION_QUEUE_MAX_PENDING = Math.max(0, readEnvNumber('REQUEST_ADMISSION_QUEUE_MAX_PENDING', Math.max(1024, REQUEST_ADMISSION_QUEUE_CONCURRENCY * 192)));
-const RESPONSES_ADMISSION_QUEUE_CONCURRENCY = Math.max(1, readEnvNumber('RESPONSES_ADMISSION_QUEUE_CONCURRENCY', Math.max(12, REQUEST_ADMISSION_QUEUE_CONCURRENCY)));
-const RESPONSES_ADMISSION_QUEUE_MAX_PENDING = Math.max(0, readEnvNumber('RESPONSES_ADMISSION_QUEUE_MAX_PENDING', Math.max(1024, RESPONSES_ADMISSION_QUEUE_CONCURRENCY * 192)));
 const EMBEDDINGS_QUEUE_CONCURRENCY = Math.max(1, readEnvNumber('EMBEDDINGS_QUEUE_CONCURRENCY', Math.max(1, Math.min(8, Math.floor(BASELINE_TIER_RPS / 10)))));
 const EMBEDDINGS_QUEUE_MAX_PENDING = Math.max(0, readEnvNumber('EMBEDDINGS_QUEUE_MAX_PENDING', Math.max(8, Math.min(64, BASELINE_TIER_RPS))));
 const VIDEO_REQUEST_CACHE_TTL_MS = readEnvNumber('VIDEO_REQUEST_CACHE_TTL_MS', 60 * 60 * 1000);
@@ -259,67 +255,46 @@ const IMAGE_FETCH_USER_AGENT = process.env.IMAGE_FETCH_USER_AGENT || 'Mozilla/5.
 const IMAGE_FETCH_REFERER = process.env.IMAGE_FETCH_REFERER;
 const IMAGE_FETCH_ALLOWED_PROTOCOLS = (readEnvCsv('IMAGE_FETCH_ALLOWED_PROTOCOLS') ?? ['http', 'https']).map((p) => p.toLowerCase());
 const IMAGE_FETCH_ALLOWED_HOSTS = readEnvCsv('IMAGE_FETCH_ALLOWED_HOSTS');
-const requestAdmissionQueue = new RequestQueue(REQUEST_ADMISSION_QUEUE_CONCURRENCY, {
-    maxPending: REQUEST_ADMISSION_QUEUE_MAX_PENDING,
-});
-type ResponsesAdmissionQueueFamily = 'openai' | 'gemini' | 'deepseek' | 'xai' | 'default';
 
-function inferResponsesAdmissionQueueFamily(rawModelId: unknown): ResponsesAdmissionQueueFamily {
-    const lower = String(rawModelId || '').trim().toLowerCase();
-    if (!lower) return 'default';
-    if (
-        lower.startsWith('openai/')
-        || lower.startsWith('gpt')
-        || lower.startsWith('o1')
-        || lower.startsWith('o3')
-        || lower.startsWith('o4')
-        || lower.startsWith('dall-e')
-        || lower.startsWith('whisper')
-        || lower.startsWith('tts-')
-        || lower.includes('chatgpt')
-    ) {
-        return 'openai';
-    }
-    if (
-        lower.startsWith('google/')
-        || lower.includes('gemini')
-        || lower.includes('gemma')
-        || lower.startsWith('imagen')
-        || lower.startsWith('veo-')
-        || lower.includes('nano-banana')
-        || lower === 'aqa'
-    ) {
-        return 'gemini';
-    }
-    if (lower.includes('deepseek')) return 'deepseek';
-    if (lower.includes('grok') || lower.includes('xai') || lower.includes('x-ai')) return 'xai';
-    return 'default';
+export function getOpenAiAdmissionQueueSnapshots(): Array<Record<string, unknown>> {
+    return [
+        {
+            lane: 'shared-request-handler',
+            routes: ['/v1/chat/completions', '/v1/responses'],
+            shared: true,
+            ...requestQueue.snapshot(),
+        }, {
+            lane: 'embeddings',
+            route: '/v1/embeddings',
+            shared: false,
+            ...embeddingsQueue.snapshot(),
+        },
+    ];
 }
 
-const responsesAdmissionQueues: Record<ResponsesAdmissionQueueFamily, RequestQueue> = {
-    openai: new RequestQueue(RESPONSES_ADMISSION_QUEUE_CONCURRENCY, {
-        maxPending: RESPONSES_ADMISSION_QUEUE_MAX_PENDING,
-    }),
-    gemini: new RequestQueue(RESPONSES_ADMISSION_QUEUE_CONCURRENCY, {
-        maxPending: RESPONSES_ADMISSION_QUEUE_MAX_PENDING,
-    }),
-    deepseek: new RequestQueue(RESPONSES_ADMISSION_QUEUE_CONCURRENCY, {
-        maxPending: RESPONSES_ADMISSION_QUEUE_MAX_PENDING,
-    }),
-    xai: new RequestQueue(RESPONSES_ADMISSION_QUEUE_CONCURRENCY, {
-        maxPending: RESPONSES_ADMISSION_QUEUE_MAX_PENDING,
-    }),
-    default: new RequestQueue(RESPONSES_ADMISSION_QUEUE_CONCURRENCY, {
-        maxPending: RESPONSES_ADMISSION_QUEUE_MAX_PENDING,
-    }),
-};
-
-function getResponsesAdmissionQueue(rawModelId: unknown): RequestQueue {
-    return responsesAdmissionQueues[inferResponsesAdmissionQueueFamily(rawModelId)];
-}
 const embeddingsQueue = new RequestQueue(EMBEDDINGS_QUEUE_CONCURRENCY, {
+    label: 'embeddings-admission',
     maxPending: EMBEDDINGS_QUEUE_MAX_PENDING,
 });
+
+function attachQueueOverloadMetadata(error: unknown, queue: RequestQueue, extra: Record<string, unknown> = {}): void {
+    if (!(error instanceof QueueOverloadedError) && typeof error !== 'object') return;
+    const target = error as Record<string, unknown>;
+    const snapshot = queue.snapshot();
+    target.queueLabel = typeof target.queueLabel === 'string' && String(target.queueLabel).trim()
+        ? target.queueLabel
+        : snapshot.label;
+    target.queue = {
+        label: snapshot.label,
+        concurrency: snapshot.concurrency,
+        maxPending: snapshot.maxPending,
+        inFlight: snapshot.inFlight,
+        pending: snapshot.pending,
+        overloadCount: snapshot.overloadCount,
+        lastOverloadedAt: snapshot.lastOverloadedAt,
+        ...extra,
+    };
+}
 
 // readEnvNumber, readEnvBool, readEnvCsv now imported from '../modules/tokenEstimation.js'
 
@@ -512,7 +487,6 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
         } else { return; }
    }
   try {
-    return await requestAdmissionQueue.run(async () => {
     const userApiKey = request.apiKey!; 
     const tierLimits = request.tierLimits!; 
     
@@ -1363,9 +1337,12 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
 
         response.json(openaiResponse);
     }
-    });
  
   } catch (error: any) { 
+    attachQueueOverloadMetadata(error, requestQueue, {
+        route: '/v1/chat/completions',
+        lane: 'chat-completions',
+    });
     await logError(error, request);
     const errorText = String(error?.message || '');
     console.error('Chat completions error:', errorText, error.stack);
@@ -1468,8 +1445,6 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
 
     try {
         const requestBody = await request.json();
-        const responsesAdmissionQueue = getResponsesAdmissionQueue(requestBody?.model);
-        return await responsesAdmissionQueue.run(async () => {
         const userApiKey = request.apiKey!;
 
     if (requestBody?.reasoning === undefined && requestBody?.reasoning_effort !== undefined) {
@@ -2120,8 +2095,11 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
             created,
         });
         return response.json(responseBody);
-        });
     } catch (error: any) {
+        attachQueueOverloadMetadata(error, requestQueue, {
+            route: '/v1/responses',
+            lane: 'responses',
+        });
         await logError(error, request);
         const errorText = String(error?.message || '');
         console.error('Responses API error:', errorText, error.stack);

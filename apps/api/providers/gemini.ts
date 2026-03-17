@@ -10,7 +10,257 @@ import {
 import { fetchWithTimeout } from '../modules/http.js';
 import { logUniqueProviderError } from '../modules/errorLogger.js';
 import { normalizeImageFetchReferer } from '../modules/openaiRequestSupport.js';
+import dns from 'node:dns/promises';
+import net from 'node:net';
 // Removed imports related to compute and Provider state
+
+function isLikelyFetchableRemoteMediaUrl(url: string): boolean {
+  if (!url || typeof url !== 'string') return false;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+    if (!parsed.hostname || parsed.hostname === 'localhost') return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function canGeminiFetchRemoteMediaUrl(url: string, referer?: string): Promise<boolean> {
+  try {
+    const headers: Record<string, string> = {
+      Accept: '*/*',
+      'User-Agent': 'AnyGPT/1.0 Gemini remote media preflight',
+    };
+    const normalizedReferer = normalizeImageFetchReferer(referer);
+    if (normalizedReferer) headers.Referer = normalizedReferer;
+
+    const response = await fetchWithTimeout(url, {
+      method: 'HEAD',
+      headers,
+      redirect: 'follow',
+    }, 5000);
+
+    if (response.ok) return true;
+    if (response.status === 405 || response.status === 501) {
+      const fallback = await fetchWithTimeout(url, {
+        method: 'GET',
+        headers: { ...headers, Range: 'bytes=0-0' },
+        redirect: 'follow',
+      }, 5000);
+      return fallback.ok;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+async function assertGeminiRemoteMediaAccessible(message: IMessage): Promise<void> {
+  const remoteUrls = Array.from(new Set(collectRemoteMediaUrls(message)));
+  if (remoteUrls.length === 0) return;
+
+  const referer = normalizeImageFetchReferer((message as any)?.metadata?.referer || (message as any)?.referer);
+  for (const url of remoteUrls) {
+    const ok = await canGeminiFetchRemoteMediaUrl(url, referer);
+    if (!ok) {
+      const error = new Error(`Gemini API call failed: gemini:invalid_argument:unsupported_remote_media_url (${url})`);
+      (error as any).code = 'GEMINI_UNSUPPORTED_REMOTE_MEDIA_URL';
+      (error as any).retryable = false;
+      (error as any).providerSwitchWorthless = true;
+      (error as any).clientMessage = 'Invalid request: one or more remote media URLs could not be fetched by Gemini. Use a publicly accessible URL or inline/base64 media content.';
+      throw error;
+    }
+  }
+}
+
+function collectRemoteMediaUrls(value: unknown, acc: string[] = []): string[] {
+  if (!value) return acc;
+  if (typeof value === 'string') {
+    if (/^https?:\/\//i.test(value)) acc.push(value);
+    return acc;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) collectRemoteMediaUrls(item, acc);
+    return acc;
+  }
+  if (typeof value === 'object') {
+    for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+      if ((key === 'url' || key === 'image_url' || key === 'file_uri' || key === 'media_url') && typeof nested === 'string' && /^https?:\/\//i.test(nested)) {
+        acc.push(nested);
+        continue;
+      }
+      collectRemoteMediaUrls(nested, acc);
+    }
+  }
+  return acc;
+}
+
+function isLikelyUnsupportedRemoteMediaUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
+    if (!host) return true;
+    if (host === 'localhost' || host.endsWith('.local')) return true;
+    if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) {
+      const parts = host.split('.').map((part) => Number(part));
+      const [a, b] = parts;
+      if (
+        a === 10 ||
+        a === 127 ||
+        a === 0 ||
+        (a === 169 && b === 254) ||
+        (a === 172 && b >= 16 && b <= 31) ||
+        (a === 192 && b === 168)
+      ) {
+        return true;
+      }
+    }
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+const GEMINI_CATALOG_AUTH_FAILURE_CACHE_MS = Math.max(30_000, Number(process.env.GEMINI_CATALOG_AUTH_FAILURE_CACHE_MS ?? 5 * 60_000));
+const GEMINI_SHARED_CATALOG_AUTH_FAILURE_CACHE_KEY = '__shared_project_auth_failure__';
+
+function isGeminiProjectAuthFailureMessage(message: string | undefined): boolean {
+  const normalized = String(message || '').toLowerCase();
+  return normalized.includes('generativelanguage.googleapis.com')
+    || normalized.includes('generative language api has not been used in project')
+    || normalized.includes('api activation')
+    || normalized.includes('permission_denied');
+}
+const GEMINI_SHARED_CATALOG_LIST_FAILURE_CACHE_KEY = '__shared_catalog_list_failure__';
+const geminiCatalogAuthFailureCache = new Map<string, { expiresAt: number; error: Error }>();
+
+function getGeminiCatalogAuthFailureCacheKey(apiKey: string, endpoint: string): string {
+  return `${endpoint}::${apiKey.slice(0, 12)}`;
+}
+
+function isGeminiCatalogAuthFailure(error: any): boolean {
+  const status = Number(error?.response?.status ?? error?.status ?? 0);
+  const message = String(error?.message || error?.response?.data?.error?.message || '').toLowerCase();
+  return status === 401
+    || status === 403
+    || message.includes('api key not found')
+    || message.includes('api_key_invalid')
+    || message.includes('generative language api has not been used')
+    || message.includes('service_disabled')
+    || message.includes('api key not valid')
+    || message.includes('permission denied')
+    || message.includes('forbidden');
+}
+
+function copyGeminiErrorMetadata(target: Error, source: any): Error {
+  const keys = [
+    'status',
+    'statusCode',
+    'code',
+    'retryable',
+    'authFailure',
+    'providerSwitchWorthless',
+    'clientMessage',
+    'requestRetryWorthless',
+  ];
+  for (const key of keys) {
+    if (source?.[key] !== undefined) {
+      (target as any)[key] = source[key];
+    }
+  }
+  return target;
+}
+
+function getCachedGeminiCatalogAuthFailure(apiKey: string, endpoint: string): Error | null {
+  const key = getGeminiCatalogAuthFailureCacheKey(apiKey, endpoint);
+  const cached = geminiCatalogAuthFailureCache.get(key);
+  if (!cached) return null;
+  if (cached.expiresAt <= Date.now()) {
+    geminiCatalogAuthFailureCache.delete(key);
+    return null;
+  }
+  return copyGeminiErrorMetadata(new Error(cached.error.message), cached.error);
+}
+
+function cacheGeminiCatalogAuthFailure(apiKey: string, endpoint: string, error: any): void {
+  const key = getGeminiCatalogAuthFailureCacheKey(apiKey, endpoint);
+  const message = String(error?.message || error?.response?.data?.error?.message || 'Gemini ListModels failed');
+  const wrapped = copyGeminiErrorMetadata(new Error(message), error);
+  const status = Number(error?.response?.status ?? error?.status ?? (wrapped as any).status ?? 403);
+  (wrapped as any).status = status;
+  (wrapped as any).statusCode = status;
+  (wrapped as any).code = 'GEMINI_CATALOG_AUTH_DISABLED';
+  (wrapped as any).retryable = false;
+  (wrapped as any).authFailure = true;
+  geminiCatalogAuthFailureCache.set(key, {
+    expiresAt: Date.now() + GEMINI_CATALOG_AUTH_FAILURE_CACHE_MS,
+    error: wrapped,
+  });
+}
+
+async function inlineUnsupportedRemoteImageParts(parts: any[], referer?: string): Promise<any[]> {
+  const normalizedReferer = normalizeImageFetchReferer(referer);
+  return Promise.all(parts.map(async (part: any) => {
+    const imageUrl = part?.fileData?.fileUri;
+    if (!imageUrl || typeof imageUrl !== 'string') return part;
+    if (!/^https?:\/\//i.test(imageUrl)) return part;
+
+    try {
+      const response = await fetchWithTimeout(imageUrl, {
+        method: 'GET',
+        headers: normalizedReferer ? { Referer: normalizedReferer } : undefined,
+      }, 15000);
+      if (!response.ok) return part;
+
+      const contentType = response.headers.get('content-type') || 'application/octet-stream';
+      if (!/^image\//i.test(contentType)) return part;
+
+      const arrayBuffer = await response.arrayBuffer();
+      if (!arrayBuffer || arrayBuffer.byteLength === 0) return part;
+
+      return {
+        inlineData: {
+          mimeType: contentType,
+          data: Buffer.from(arrayBuffer).toString('base64'),
+        },
+      };
+    } catch {
+      return part;
+    }
+  }));
+}
+
+function isUnsupportedRemoteMediaUrlErrorMessage(value: string | undefined): boolean {
+  return /cannot fetch content from the provided url/i.test(value ?? '');
+}
+
+function isUnsupportedRemoteMediaUrlError(error: any): boolean {
+  const message = String(error?.message ?? '');
+  const responseMessage = String(error?.response?.data?.error?.message ?? '');
+  const responseStatus = String(error?.response?.data?.error?.status ?? '');
+  const responseCode = Number(error?.response?.data?.error?.code ?? error?.response?.status ?? 0);
+
+  return (
+    isUnsupportedRemoteMediaUrlErrorMessage(message) ||
+    isUnsupportedRemoteMediaUrlErrorMessage(responseMessage) ||
+    (responseCode === 400 && responseStatus.toUpperCase() === 'INVALID_ARGUMENT' &&
+      /cannot fetch content from the provided url/i.test(responseMessage))
+  );
+}
+
+function sanitizeGeminiContentParts(parts: ContentPart[] | undefined): ContentPart[] | undefined {
+  if (!Array.isArray(parts)) return parts;
+  const filtered = parts.filter((part: any) => {
+    if (!part || typeof part !== 'object') return true;
+    const fileUri = typeof part.fileData?.fileUri === 'string' ? part.fileData.fileUri : undefined;
+    const inlineUrl = typeof part.imageUrl?.url === 'string' ? part.imageUrl.url : undefined;
+    const candidateUrl = fileUri ?? inlineUrl;
+    if (!candidateUrl) return true;
+    return !/^https?:\/\//i.test(candidateUrl);
+  });
+  return filtered.length > 0 ? filtered : parts.filter((part: any) => typeof part?.text === 'string' && part.text.trim().length > 0);
+}
 
 dotenv.config();
 
@@ -36,6 +286,83 @@ type GeminiModelCatalogCacheEntry = {
 };
 
 export class GeminiAI implements IAIProvider {
+  private sanitizeUnsupportedRemoteMediaContent(content: string | ContentPart[] | undefined): {
+    content: string | ContentPart[] | undefined;
+    changed: boolean;
+  } {
+    if (typeof content === 'string' || !Array.isArray(content)) {
+      return { content, changed: false };
+    }
+
+    const filteredParts = content.filter((part: any) => {
+      const candidate = typeof part?.image_url?.url === 'string'
+        ? part.image_url.url
+        : typeof part?.file_url?.url === 'string'
+          ? part.file_url.url
+          : undefined;
+      if (!candidate) return true;
+      try {
+        const parsed = new URL(candidate);
+        return parsed.protocol !== 'http:' && parsed.protocol !== 'https:';
+      } catch {
+        return true;
+      }
+    });
+
+    return {
+      content: filteredParts,
+      changed: filteredParts.length !== content.length,
+    };
+  }
+
+  private stripUnsupportedRemoteMediaParts(message: IMessage): { message: IMessage; changed: boolean } {
+    let changed = false;
+
+    const topLevelContent = this.sanitizeUnsupportedRemoteMediaContent(message.content);
+    changed = changed || topLevelContent.changed;
+
+    const sanitizedMessages = Array.isArray(message.messages)
+      ? message.messages.map((entry) => {
+          const sanitized = this.sanitizeUnsupportedRemoteMediaContent(entry?.content as any);
+          changed = changed || sanitized.changed;
+          return sanitized.changed
+            ? { ...entry, content: sanitized.content as any }
+            : entry;
+        })
+      : message.messages;
+
+    return changed
+      ? {
+          message: {
+            ...message,
+            content: topLevelContent.content as any,
+            ...(sanitizedMessages ? { messages: sanitizedMessages } : {}),
+          },
+          changed: true,
+        }
+      : { message, changed: false };
+  }
+
+  private hasUnsupportedRemoteMediaUrl(message: IMessage): boolean {
+    return this.stripUnsupportedRemoteMediaParts(message).changed;
+  }
+
+  private buildUnsupportedRemoteMediaError(mode: 'call' | 'stream'): Error {
+    const wrappedError = new Error(
+      mode === 'stream'
+        ? 'Gemini API stream call failed: gemini:invalid_argument:unsupported_remote_media_url'
+        : 'Gemini API call failed: gemini:invalid_argument:unsupported_remote_media_url'
+    );
+    (wrappedError as any).__providerUniqueLogged = true;
+    (wrappedError as any).status = 400;
+    (wrappedError as any).code = 'GEMINI_UNSUPPORTED_REMOTE_MEDIA_URL';
+    (wrappedError as any).retryable = false;
+    (wrappedError as any).providerSwitchWorthless = true;
+    (wrappedError as any).requestRetryWorthless = true;
+    (wrappedError as any).clientMessage = 'Invalid request: one or more remote media URLs could not be fetched by Gemini. Use a publicly accessible URL or inline/base64 media content.';
+    return wrappedError;
+  }
+
   private static modelCatalogCache: Map<string, GeminiModelCatalogCacheEntry> = new Map();
   private static modelTokenLimits: Map<string, { inputTokenLimit?: number; outputTokenLimit?: number }> = new Map();
 
@@ -149,44 +476,59 @@ export class GeminiAI implements IAIProvider {
     if (cached && cached.expiresAt > now) {
       return cached.models;
     }
-
-    const endpoint = `${GEMINI_API_BASE}/models?key=${encodeURIComponent(this.apiKey)}`;
-    const response = await fetchWithTimeout(endpoint);
-    if (!response.ok) {
-      const responseText = await response.text().catch(() => '');
-      console.error(`Gemini ListModels raw error response: ${this.redactApiKey(responseText)}`);
-      throw new Error(`Gemini ListModels failed: [${response.status} ${response.statusText}] ${this.redactApiKey(responseText)}`);
+    const cachedAuthFailure = getCachedGeminiCatalogAuthFailure(this.apiKey, GEMINI_API_BASE);
+    if (cachedAuthFailure) {
+      throw cachedAuthFailure;
     }
 
-    const payload = await response.json();
-    const modelsRaw = Array.isArray(payload?.models) ? payload.models : [];
-    const models: GeminiModelCatalogItem[] = modelsRaw
-      .map((model: any) => {
-        const name = typeof model?.name === 'string' ? model.name : '';
-        const id = name.startsWith('models/') ? name.slice('models/'.length) : name;
-        const inputTokenLimit = typeof model?.inputTokenLimit === 'number' ? model.inputTokenLimit : undefined;
-        const outputTokenLimit = typeof model?.outputTokenLimit === 'number' ? model.outputTokenLimit : undefined;
-        const supportedGenerationMethods = Array.isArray(model?.supportedGenerationMethods)
-          ? model.supportedGenerationMethods
-          : [];
-        const supportedMethods = new Set(
-          supportedGenerationMethods
-            .filter((method: any) => typeof method === 'string' && method.length > 0)
-            .map((method: string) => method.toLowerCase())
-        );
-        if (Number.isFinite(inputTokenLimit) || Number.isFinite(outputTokenLimit)) {
-          GeminiAI.recordModelTokenLimits(id, inputTokenLimit, outputTokenLimit);
-        }
-        return { id, supportedMethods, inputTokenLimit, outputTokenLimit };
-      })
-      .filter((entry: GeminiModelCatalogItem) => entry.id.length > 0);
+    try {
+      const endpoint = `${GEMINI_API_BASE}/models?key=${encodeURIComponent(this.apiKey)}`;
+      const response = await fetchWithTimeout(endpoint);
+      if (!response.ok) {
+        const responseText = await response.text().catch(() => '');
+        console.error(`Gemini ListModels raw error response: ${this.redactApiKey(responseText)}`);
+        const listModelsError = new Error(`Gemini ListModels failed: [${response.status} ${response.statusText}] ${this.redactApiKey(responseText)}`);
+        (listModelsError as any).status = response.status;
+        (listModelsError as any).statusCode = response.status;
+        throw listModelsError;
+      }
 
-    GeminiAI.modelCatalogCache.set(cacheKey, {
-      expiresAt: now + MODEL_CATALOG_TTL_MS,
-      models,
-    });
+      const payload = await response.json();
+      const modelsRaw = Array.isArray(payload?.models) ? payload.models : [];
+      const models: GeminiModelCatalogItem[] = modelsRaw
+        .map((model: any) => {
+          const name = typeof model?.name === 'string' ? model.name : '';
+          const id = name.startsWith('models/') ? name.slice('models/'.length) : name;
+          const inputTokenLimit = typeof model?.inputTokenLimit === 'number' ? model.inputTokenLimit : undefined;
+          const outputTokenLimit = typeof model?.outputTokenLimit === 'number' ? model.outputTokenLimit : undefined;
+          const supportedGenerationMethods = Array.isArray(model?.supportedGenerationMethods)
+            ? model.supportedGenerationMethods
+            : [];
+          const supportedMethods = new Set(
+            supportedGenerationMethods
+              .filter((method: any) => typeof method === 'string' && method.length > 0)
+              .map((method: string) => method.toLowerCase())
+          );
+          if (Number.isFinite(inputTokenLimit) || Number.isFinite(outputTokenLimit)) {
+            GeminiAI.recordModelTokenLimits(id, inputTokenLimit, outputTokenLimit);
+          }
+          return { id, supportedMethods, inputTokenLimit, outputTokenLimit };
+        })
+        .filter((entry: GeminiModelCatalogItem) => entry.id.length > 0);
 
-    return models;
+      GeminiAI.modelCatalogCache.set(cacheKey, {
+        expiresAt: now + MODEL_CATALOG_TTL_MS,
+        models,
+      });
+
+      return models;
+    } catch (error: any) {
+      if (isGeminiCatalogAuthFailure(error)) {
+        cacheGeminiCatalogAuthFailure(this.apiKey, GEMINI_API_BASE, error);
+        throw getCachedGeminiCatalogAuthFailure(this.apiKey, GEMINI_API_BASE) ?? error;
+      }
+      throw error;
+    }
   }
 
   private async resolveModelIdForMethod(
@@ -519,12 +861,41 @@ export class GeminiAI implements IAIProvider {
    * @returns A promise containing the API response content and latency.
    */
   async sendMessage(message: IMessage): Promise<ProviderResponse> {
+    const originalParts = Array.isArray((message as any)?.parts) ? (message as any).parts : null;
+    let retriedWithInlinedRemoteMedia = false;
+    if (Array.isArray((message as any)?.parts) && (message as any).parts.length > 0) {
+      try {
+        (message as any).parts = await inlineUnsupportedRemoteImageParts(
+          (message as any).parts,
+          (message as any)?.referer
+        );
+      } catch {
+        // Best-effort normalization only; preserve existing provider behavior on fetch failures.
+      }
+    }
+    if (Array.isArray(message?.messages)) {
+      message.messages = await Promise.all(
+        message.messages.map(async (entry: any) => {
+          if (!Array.isArray(entry?.content)) return entry;
+          return {
+            ...entry,
+            content: await inlineUnsupportedRemoteImageParts(entry.content, (message as any)?.referer),
+          };
+        })
+      );
+    }
     // Removed busy flag management
     const startTime = Date.now();
 
     try {
-      const resolved = await this.resolveModelIdForMethod(message.model.id, 'generateContent');
-      const body = this.buildRequestBody(message);
+      const sanitizedMessage = this.stripUnsupportedRemoteMediaParts(message);
+      if (sanitizedMessage.changed) {
+        throw this.buildUnsupportedRemoteMediaError('call');
+      }
+
+      const activeMessage = sanitizedMessage.message;
+      const resolved = await this.resolveModelIdForMethod(activeMessage.model.id, 'generateContent');
+      const body = this.buildRequestBody(activeMessage);
       const response = await this.requestGemini(resolved.modelId, 'generateContent', body);
       if (!response.ok) {
         await this.throwGeminiHttpError(response, 'generateContent');
@@ -581,9 +952,34 @@ export class GeminiAI implements IAIProvider {
       // Extract a more specific error message if possible
       const errorMessage = error.message || 'Unknown Gemini API error';
       GeminiAI.updateModelTokenLimitsFromError(message.model?.id ?? '', errorMessage);
+      if (
+        (error as any)?.code === 'GEMINI_UNSUPPORTED_REMOTE_MEDIA_URL'
+        || /cannot fetch content from the provided url|unsupported_remote_media_url/i.test(errorMessage)
+      ) {
+        throw this.buildUnsupportedRemoteMediaError('call');
+      }
+      const isProjectAuthFailure = /generative language api has not been used in project|api\s+has\s+not\s+been\s+used\s+in\s+project|service disabled|api_disabled|accessnotconfigured/i.test(errorMessage);
+      const isInvalidKeyFailure = /api key not found|api key not valid|api_key_invalid/i.test(errorMessage);
       // Rethrow the error to be handled by the MessageHandler
-      const wrappedError = new Error(`Gemini API call failed: ${errorMessage}`);
+      const wrappedError = copyGeminiErrorMetadata(new Error(`Gemini API call failed: ${errorMessage}`), error);
       (wrappedError as any).__providerUniqueLogged = true;
+      if (isProjectAuthFailure) {
+        (wrappedError as any).status = 403;
+        (wrappedError as any).statusCode = 403;
+        (wrappedError as any).code = 'GEMINI_API_DISABLED';
+        (wrappedError as any).retryable = false;
+        (wrappedError as any).authFailure = true;
+      } else if (isInvalidKeyFailure) {
+        const status = Number((wrappedError as any).status ?? (wrappedError as any).statusCode ?? 400);
+        (wrappedError as any).status = status;
+        (wrappedError as any).statusCode = status;
+        (wrappedError as any).code = 'GEMINI_INVALID_API_KEY';
+        (wrappedError as any).retryable = false;
+        (wrappedError as any).authFailure = true;
+      } else if (/invalid response structure received from gemini api/i.test(errorMessage) && (wrappedError as any).code === undefined) {
+        (wrappedError as any).code = 'GEMINI_INVALID_RESPONSE_STRUCTURE';
+        (wrappedError as any).retryable = false;
+      }
       throw wrappedError;
     }
   }
@@ -596,8 +992,14 @@ export class GeminiAI implements IAIProvider {
     const startTime = Date.now();
 
     try {
-      const resolved = await this.resolveModelIdForMethod(message.model.id, 'streamGenerateContent', true);
-      const body = this.buildRequestBody(message);
+      const sanitizedMessage = this.stripUnsupportedRemoteMediaParts(message);
+      if (sanitizedMessage.changed) {
+        throw this.buildUnsupportedRemoteMediaError('stream');
+      }
+
+      const activeMessage = sanitizedMessage.message;
+      const resolved = await this.resolveModelIdForMethod(activeMessage.model.id, 'streamGenerateContent', true);
+      const body = this.buildRequestBody(activeMessage);
 
       if (!resolved.usesStreamMethod) {
         const nonStreamResponse = await this.requestGemini(resolved.modelId, 'generateContent', body);
@@ -727,11 +1129,42 @@ export class GeminiAI implements IAIProvider {
       console.error(`Error during sendMessageStream with Gemini model ${message.model.id} (Latency: ${latency}ms):`, error);
       const errorMessage = error.message || 'Unknown Gemini API error';
       GeminiAI.updateModelTokenLimitsFromError(message.model?.id ?? '', errorMessage);
-      const normalizedMessage = /cannot fetch content from the provided url/i.test(errorMessage)
+      const isUnsupportedRemoteMediaUrl = /cannot fetch content from the provided url/i.test(errorMessage);
+      const isProjectAuthFailure = /generative language api has not been used in project|it is disabled\. enable it by visiting|permission_denied/i.test(errorMessage);
+      const isInvalidKeyFailure = /api key not found|api key not valid|api_key_invalid/i.test(errorMessage);
+      const normalizedMessage = isUnsupportedRemoteMediaUrl
         ? 'gemini:invalid_argument:unsupported_remote_media_url'
-        : errorMessage;
-      const wrappedError = new Error(`Gemini API stream call failed: ${normalizedMessage}`);
+        : isProjectAuthFailure
+          ? 'gemini:auth_failure:project_api_disabled_or_unavailable'
+          : isInvalidKeyFailure
+            ? 'gemini:auth_failure:invalid_api_key'
+          : errorMessage;
+      const wrappedError = copyGeminiErrorMetadata(new Error(`Gemini API stream call failed: ${normalizedMessage}`), error);
       (wrappedError as any).__providerUniqueLogged = true;
+      const status = isUnsupportedRemoteMediaUrl
+        ? 400
+        : ((isProjectAuthFailure || isInvalidKeyFailure)
+          ? Number((wrappedError as any).status ?? (wrappedError as any).statusCode ?? (isProjectAuthFailure ? 403 : 400))
+          : Number((wrappedError as any).status ?? (wrappedError as any).statusCode ?? 400));
+      (wrappedError as any).status = status;
+      (wrappedError as any).statusCode = status;
+      (wrappedError as any).code = isUnsupportedRemoteMediaUrl
+        ? 'GEMINI_UNSUPPORTED_REMOTE_MEDIA_URL'
+        : isProjectAuthFailure
+          ? 'GEMINI_PROJECT_AUTH_FAILURE'
+          : isInvalidKeyFailure
+            ? 'GEMINI_INVALID_API_KEY'
+          : 'GEMINI_API_ERROR';
+      (wrappedError as any).retryable = false;
+      (wrappedError as any).authFailure = isProjectAuthFailure || isInvalidKeyFailure;
+      // Gemini may reject remote media URLs that other providers can still consume,
+      // so keep provider fallback available while avoiding pointless retries against
+      // the same provider with the same request payload.
+      (wrappedError as any).providerSwitchWorthless = false;
+      (wrappedError as any).requestRetryWorthless = isUnsupportedRemoteMediaUrl;
+      if (isUnsupportedRemoteMediaUrl) {
+        (wrappedError as any).clientMessage = 'Invalid request: one or more remote media URLs could not be fetched by Gemini. Use a publicly accessible URL or inline/base64 media content.';
+      }
       throw wrappedError;
     }
   }

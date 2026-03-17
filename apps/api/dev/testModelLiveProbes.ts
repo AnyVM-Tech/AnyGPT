@@ -1102,15 +1102,15 @@ function loadProbeLogHints(): ProbeLogHints {
 }
 
 function loadQuotaDisabledProviders(): Set<string> {
-  const disabled = new Set<string>();
-  if (!fs.existsSync(PROBE_LOG_PATH)) return disabled;
+  const currentState = new Map<string, boolean>();
+  if (!fs.existsSync(PROBE_LOG_PATH)) return new Set<string>();
 
   let raw = '';
   try {
     raw = fs.readFileSync(PROBE_LOG_PATH, 'utf8');
   } catch (err) {
     console.warn('Failed to read probe log for quota-disabled providers:', err);
-    return disabled;
+    return new Set<string>();
   }
 
   const lines = raw.split(/\r?\n/).filter(Boolean);
@@ -1125,16 +1125,26 @@ function loadQuotaDisabledProviders(): Set<string> {
       continue;
     }
     if (!entry || typeof entry !== 'object') continue;
-    if (entry.type !== 'provider_disabled') continue;
     const providerId = typeof entry.providerId === 'string' ? entry.providerId : '';
     const reason = typeof entry.reason === 'string' ? entry.reason.toLowerCase() : '';
     if (!providerId || !reason) continue;
-    if (reason.includes('quota')) {
-      disabled.add(providerId);
+    if (entry.type === 'provider_reenabled') {
+      currentState.set(providerId, false);
+      continue;
+    }
+    if (
+      (entry.type === 'provider_disabled' || entry.type === 'provider_no_quota' || entry.type === 'key_no_quota')
+      && reason.includes('quota')
+    ) {
+      currentState.set(providerId, true);
     }
   }
 
-  return disabled;
+  return new Set<string>(
+    Array.from(currentState.entries())
+      .filter(([_, disabled]) => disabled)
+      .map(([providerId]) => providerId)
+  );
 }
 
 const SAMPLE_IMAGE_URLS = [
@@ -1998,6 +2008,10 @@ async function main() {
     appendProbeLog({ type: 'provider_disabled', providerId: provider.id, reason });
   }
 
+  function shouldPersistQuotaDisable(provider: LoadedProviderData): boolean {
+    return resolveProviderFamily(provider.id) !== 'gemini';
+  }
+
   function removeModelFromProvider(provider: LoadedProviderData, modelId: string, reason: string) {
     if (!provider.models || !provider.models[modelId]) return;
     delete provider.models[modelId];
@@ -2085,7 +2099,13 @@ async function main() {
           appendProbeLog({ type: 'key_invalid', providerId: provider.id, reason: status.reason || 'invalid key' });
         }
       } else if (!status.hasQuota) {
-        disableProvider(provider, 'quota exceeded');
+        if (shouldPersistQuotaDisable(provider)) {
+          disableProvider(provider, 'quota exceeded');
+        } else if (provider.disabled) {
+          provider.disabled = false;
+          providersChanged = true;
+          appendProbeLog({ type: 'provider_reenabled', providerId: provider.id, reason: 'quota handled via cooldown' });
+        }
         appendProbeLog({ type: 'key_no_quota', providerId: provider.id, reason: 'quota exceeded' });
       } else if (provider.disabled && quotaDisabledProviders.has(provider.id)) {
         provider.disabled = false;
@@ -2707,7 +2727,9 @@ async function main() {
           }
 
           if (skipReason === 'quota exceeded') {
-            disableProvider(provider, 'quota exceeded');
+            if (shouldPersistQuotaDisable(provider)) {
+              disableProvider(provider, 'quota exceeded');
+            }
             providerValidity.set(provider.id, { ok: true, hasQuota: false });
             appendProbeLog({ type: 'provider_no_quota', providerId: provider.id, modelId: model.id, test: key, reason: 'quota exceeded' });
             providerTried.add(provider.id);

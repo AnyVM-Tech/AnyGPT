@@ -12,9 +12,38 @@ import { logUniqueProviderError } from '../modules/errorLogger.js';
 const OPENAI_CHAT_ENDPOINT = 'https://api.openai.com/v1/chat/completions';
 const OPENAI_RESPONSES_ENDPOINT = 'https://api.openai.com/v1/responses';
 
+function isXaiBaseUrl(baseUrl?: string): boolean {
+  return /(^https?:\/\/)?([^/]*\.)?x\.ai(?::\d+)?(\/|$)/i.test(String(baseUrl || ''));
+}
+
+function isTransientOpenAIError(error: any): boolean {
+  const status = Number(error?.response?.status || error?.status || 0);
+  if (status === 520) return true;
+  const code = String(error?.code || '').toUpperCase();
+  const message = String(
+    error?.response?.data?.error?.message ||
+    error?.response?.data?.message ||
+    error?.message ||
+    ''
+  ).toLowerCase();
+
+  if (status === 408 || status === 409 || status === 425 || status === 429) return true;
+  if (status >= 500 && status <= 599) return true;
+  if (code === 'ECONNABORTED' || code === 'ETIMEDOUT' || code === 'ECONNRESET' || code === 'ERR_BAD_RESPONSE') return true;
+  return message.includes('rate limit')
+    || message.includes('timeout')
+    || message.includes('timed out')
+    || message.includes('temporarily unavailable')
+    || message.includes('overloaded');
+}
+
 export class OpenAI implements IAIProvider {
     private isAudioModel(modelId: string): boolean {
       return this.normalizeModelId(modelId).includes('audio');
+    }
+
+    private isMeaningfulTextContent(value: unknown): value is string {
+      return typeof value === 'string' && value.trim().length > 0;
     }
 
     private isMissingMessagesError(error: any): boolean {
@@ -238,7 +267,7 @@ export class OpenAI implements IAIProvider {
   }
 
   private getRequestTimeoutMs(): number {
-    const upstreamTimeout = this.readEnvNumber('UPSTREAM_TIMEOUT_MS', 120_000);
+    const upstreamTimeout = this.readEnvNumber('UPSTREAM_TIMEOUT_MS', 30_000);
     return this.readEnvNumber('OPENAI_TIMEOUT_MS', upstreamTimeout);
   }
 
@@ -1812,13 +1841,22 @@ export class OpenAI implements IAIProvider {
         data: error?.response?.data,
       });
       const errorMessage = String(error?.message || this.extractApiErrorMessage(error));
+      const isEmptyStreamingResponse = /empty streaming response/i.test(errorMessage);
       if (errorMessage.startsWith('API stream call failed:')) {
         const wrappedError = new Error(errorMessage);
         (wrappedError as any).__providerUniqueLogged = true;
+        if (isEmptyStreamingResponse) {
+          (wrappedError as any).retryable = true;
+          (wrappedError as any).providerSwitchWorthless = false;
+        }
         throw wrappedError;
       }
       const wrappedError = new Error(`API stream call failed: ${errorMessage}`);
       (wrappedError as any).__providerUniqueLogged = true;
+      if (isEmptyStreamingResponse) {
+        (wrappedError as any).retryable = true;
+        (wrappedError as any).providerSwitchWorthless = false;
+      }
       throw wrappedError;
     }
   }

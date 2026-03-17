@@ -35,6 +35,9 @@ const INVALID_KEY_ERROR_PATTERNS = [
     'api_key_invalid',
     'api_key_http_referrer_blocked',
     'api key not found',
+    'api key not valid',
+    'api key expired',
+    'please renew the api key',
     'invalid api key',
     'invalid authentication',
     'incorrect api key',
@@ -45,6 +48,10 @@ const INVALID_KEY_ERROR_PATTERNS = [
     'access token is invalid',
     'invalid x-api-key',
     'invalid key',
+    'has been suspended',
+    'generative language api has not been used in project',
+    'it is disabled. enable it by visiting',
+    'permission denied',
 ];
 
 const TRANSIENT_KEY_ERROR_PATTERNS = [
@@ -340,14 +347,9 @@ export async function checkGemini(apiKey: string): Promise<KeyStatus> {
              } else if (billRes.status === 200) {
                  status.billingEnabled = true;
              }
-             if (isQuotaExhausted(billErr)) {
-                 // Only mark hasQuota false if the error is truly about exhausted quota
-                 // (not just "not accessible to free users")
-                 const msg = (billErr.message || '').toLowerCase();
-                 if (!msg.includes('only accessible to billed users')) {
-                     status.hasQuota = false;
-                 }
-             }
+             // Keep the billing probe isolated from text-model quota status. A billed-only
+             // Imagen check can 429 or reject free-tier keys even when text generation still
+             // works, so only use it to infer billing availability.
          } else if (modelsRes.status === 429) {
              status.isValid = true;
              status.hasQuota = false;

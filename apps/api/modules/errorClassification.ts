@@ -29,17 +29,24 @@ export function isRateLimitOrQuotaError(error: any): boolean {
  */
 export function extractRetryAfterMs(message: string): number | null {
     if (!message) return null;
-    const retryDelayMatch = message.match(/retryDelay"\s*:\s*"([0-9]+(?:\.[0-9]+)?)s"/i);
-    if (retryDelayMatch) {
-        const parsed = Number.parseFloat(retryDelayMatch[1]);
-        if (Number.isFinite(parsed) && parsed > 0) return Math.ceil(parsed * 1000);
-    }
-    const retryInMatch = message.match(/retry in ([0-9]+(?:\.[0-9]+)?)s/i);
-    if (retryInMatch) {
-        const parsed = Number.parseFloat(retryInMatch[1]);
-        if (Number.isFinite(parsed) && parsed > 0) return Math.ceil(parsed * 1000);
-    }
-    return null;
+    const candidates: number[] = [];
+    const collectMatches = (regex: RegExp) => {
+        regex.lastIndex = 0;
+        let match: RegExpExecArray | null;
+        while ((match = regex.exec(message)) !== null) {
+            const parsed = Number.parseFloat(match[1]);
+            if (Number.isFinite(parsed) && parsed > 0) {
+                candidates.push(Math.ceil(parsed * 1000));
+            }
+        }
+    };
+
+    collectMatches(/retryDelay"\s*:\s*"([0-9]+(?:\.[0-9]+)?)s"/ig);
+    collectMatches(/retry in ([0-9]+(?:\.[0-9]+)?)s/ig);
+    collectMatches(/retry after ([0-9]+(?:\.[0-9]+)?)s/ig);
+
+    if (candidates.length === 0) return null;
+    return Math.max(...candidates);
 }
 
 /**
@@ -166,11 +173,18 @@ export function isInvalidProviderCredentialError(error: any): boolean {
         message.includes('api_key_invalid') ||
         message.includes('api_key_http_referrer_blocked') ||
         message.includes('api key not found') ||
+        message.includes('api key not valid') ||
+        message.includes('api key expired') ||
+        message.includes('please renew the api key') ||
         message.includes('invalid api key') ||
         message.includes('invalid authentication') ||
         message.includes('incorrect api key') ||
         message.includes('requests from referer') ||
         message.includes('http referrer blocked') ||
+        message.includes('has been suspended') ||
+        message.includes('generative language api has not been used in project') ||
+        message.includes('it is disabled. enable it by visiting') ||
+        message.includes('service_disabled') ||
         message.includes('unauthorized')
     );
 }
@@ -181,6 +195,9 @@ export function isModelAccessError(error: any): boolean {
     const message = String(error?.message || error || '').toLowerCase();
     return (
         message.includes('does not have access to model') ||
+        message.includes('you are not allowed to sample from this model') ||
+        message.includes('not allowed to sample from this model') ||
+        message.includes('not allowed to sample') ||
         message.includes('model_not_found') ||
         message.includes('no gemini model available') ||
         message.includes('no eligible image models found') ||

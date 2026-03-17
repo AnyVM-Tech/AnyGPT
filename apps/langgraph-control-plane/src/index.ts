@@ -109,6 +109,7 @@ type RunnerStatus = {
   langSmithFeedbackKeys?: string[];
   langSmithEvaluationCount?: number;
   langSmithEvaluationDatasets?: string[];
+  langSmithEvaluationMetrics?: string[];
   langSmithGovernanceFlagCount?: number;
   langSmithGovernanceAttentionFlags?: string[];
   langSmithGovernanceMutationCount?: number;
@@ -118,25 +119,48 @@ type RunnerStatus = {
   promptRequestedChannel?: string;
   promptSelectionSource?: string;
   promptSelectedRef?: string;
+  promptSelectedChannel?: string;
+  promptAvailableChannels?: string[];
   promptCommitHash?: string;
+  promptRollbackReference?: string;
   promptSyncEnabled: boolean;
   promptSyncChannel: string;
   promptSyncUrl?: string;
   promptPromoteChannel?: string;
   promptPromotionUrl?: string;
+  promptPromotionReason?: string;
+  promptPromotionBlockedReason?: string;
   promptSelectionNotes?: string[];
+  governanceProfile?: string;
+  governanceGateStatus?: string;
+  governanceGateReason?: string;
+  governanceGateBlocks?: string[];
+  governanceGateActionableFlags?: string[];
+  controlPlaneAiBackend?: string;
+  controlPlaneAiModel?: string;
+  experimentalApiBaseUrl?: string;
+  experimentalServiceName?: string;
   evaluationGateMode: ControlPlaneEvaluationGatePolicy['mode'];
   evaluationGateTarget: ControlPlaneEvaluationGatePolicy['target'];
+  evaluationGateAggregationMode?: string;
   evaluationGateRequireEvaluation: boolean;
   evaluationGateMinResults: number;
   evaluationGateMetricKey: string;
   evaluationGateMinMetricAverageScore: number;
+  evaluationGateMinimumWeightedScore?: number | null;
   evaluationGateStatus?: string;
   evaluationGateReason?: string;
   evaluationGateBlocks?: string[];
   evaluationGateMetricAverageScore?: number | null;
   evaluationGateMetricCount?: number;
+  evaluationGateMetricResults?: string[];
+  evaluationGateWeightedAverageScore?: number | null;
+  evaluationGateScorecardStatus?: string;
+  evaluationGateBaselineExperiment?: string;
+  evaluationGateComparisonUrl?: string;
   evaluationResultCount?: number;
+  repairTouchedPaths?: string[];
+  observabilityTags?: string[];
   summary?: string;
 };
 
@@ -145,6 +169,8 @@ const DEFAULT_CONTROL_PLANE_PROMPT_IDENTIFIER = 'anygpt-control-plane-agent';
 const DEFAULT_CONTROL_PLANE_PROMPT_CHANNEL = 'live';
 const DEFAULT_CONTROL_PLANE_PROMPT_SYNC_CHANNEL = 'default';
 const DEFAULT_REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+const DEFAULT_CONTROL_PLANE_EXPERIMENTAL_API_BASE_URL = 'http://127.0.0.1:3310';
+const DEFAULT_CONTROL_PLANE_EXPERIMENTAL_SERVICE = 'anygpt-experimental.service';
 
 function loadEnvForControlPlane(repoRoot: string): void {
   const candidates = [
@@ -297,6 +323,50 @@ function parseNormalizedScore(value: string | undefined, fallback: number): numb
   return Math.max(0, Math.min(1, parsed));
 }
 
+function parseStringArrayArg(value: string | undefined): string[] {
+  return String(value || '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function parseMetricThresholdMap(value: string | undefined): Record<string, number> {
+  const entries = String(value || '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  const result: Record<string, number> = {};
+  for (const entry of entries) {
+    const [rawKey, rawValue] = entry.split(/[:=]/, 2);
+    const key = String(rawKey || '').trim();
+    if (!key) continue;
+    result[key] = parseNormalizedScore(rawValue, 0);
+  }
+  return result;
+}
+
+function parseMetricWeightMap(value: string | undefined): Record<string, number> {
+  const entries = String(value || '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  const result: Record<string, number> = {};
+  for (const entry of entries) {
+    const [rawKey, rawValue] = entry.split(/[:=]/, 2);
+    const key = String(rawKey || '').trim();
+    if (!key) continue;
+    const parsed = Number(rawValue);
+    if (!Number.isFinite(parsed) || parsed <= 0) continue;
+    result[key] = parsed;
+  }
+  return result;
+}
+
+function parseEvaluationGateAggregationMode(value: string | undefined): NonNullable<ControlPlaneEvaluationGatePolicy['aggregationMode']> {
+  const normalized = String(value || '').trim().toLowerCase();
+  return normalized === 'weighted' ? 'weighted' : 'all';
+}
+
 function parseResumeValue(rawValue: string | undefined): unknown {
   if (typeof rawValue !== 'string') return undefined;
   const trimmed = rawValue.trim();
@@ -389,12 +459,13 @@ function resolveLangSmithRunnerStatusSeed(): Partial<RunnerStatus> {
 
   const configuredWorkspaceName = String(process.env.CONTROL_PLANE_LANGSMITH_WORKSPACE_NAME || '').trim();
 
-  return {
-    langSmithOrganizationId: runtimeConfig.workspaceId || undefined,
-    langSmithWorkspaceId: runtimeConfig.workspaceId || undefined,
-    langSmithWorkspaceName: configuredWorkspaceName || undefined,
-    langSmithProjectName: runtimeConfig.projectName || undefined,
-  };
+    return {
+      langSmithOrganizationId: runtimeConfig.workspaceId || undefined,
+      langSmithWorkspaceId: runtimeConfig.workspaceId || undefined,
+      langSmithWorkspaceName: configuredWorkspaceName || undefined,
+      langSmithProjectName: runtimeConfig.projectName || undefined,
+      promptAvailableChannels: ['candidate', 'default', 'live'],
+    };
 }
 
 function readPersistedLangSmithRunnerStatusSeed(statusFilePath: string): Partial<RunnerStatus> {
@@ -444,6 +515,57 @@ function readPersistedLangSmithRunnerStatusSeed(statusFilePath: string): Partial
           : typeof parsed.langSmithProjectName === 'string' && parsed.langSmithProjectName.trim()
             ? 'unknown'
             : undefined,
+      promptSelectedChannel: typeof parsed.promptSelectedChannel === 'string' && parsed.promptSelectedChannel.trim()
+        ? parsed.promptSelectedChannel.trim()
+        : undefined,
+      promptAvailableChannels: Array.isArray(parsed.promptAvailableChannels)
+        ? parsed.promptAvailableChannels.map((entry) => String(entry || '').trim()).filter(Boolean).slice(0, 10)
+        : undefined,
+      promptRollbackReference: typeof parsed.promptRollbackReference === 'string' && parsed.promptRollbackReference.trim()
+        ? parsed.promptRollbackReference.trim()
+        : undefined,
+      promptPromotionReason: typeof parsed.promptPromotionReason === 'string' && parsed.promptPromotionReason.trim()
+        ? parsed.promptPromotionReason.trim()
+        : undefined,
+      promptPromotionBlockedReason: typeof parsed.promptPromotionBlockedReason === 'string' && parsed.promptPromotionBlockedReason.trim()
+        ? parsed.promptPromotionBlockedReason.trim()
+        : undefined,
+      governanceGateStatus: typeof parsed.governanceGateStatus === 'string' && parsed.governanceGateStatus.trim()
+        ? parsed.governanceGateStatus.trim()
+        : undefined,
+      governanceGateReason: typeof parsed.governanceGateReason === 'string' && parsed.governanceGateReason.trim()
+        ? parsed.governanceGateReason.trim()
+        : undefined,
+      governanceGateBlocks: Array.isArray(parsed.governanceGateBlocks)
+        ? parsed.governanceGateBlocks.map((entry) => String(entry || '').trim()).filter(Boolean)
+        : undefined,
+      governanceGateActionableFlags: Array.isArray(parsed.governanceGateActionableFlags)
+        ? parsed.governanceGateActionableFlags.map((entry) => String(entry || '').trim()).filter(Boolean).slice(0, 10)
+        : undefined,
+      evaluationGateAggregationMode: typeof parsed.evaluationGateAggregationMode === 'string' && parsed.evaluationGateAggregationMode.trim()
+        ? parsed.evaluationGateAggregationMode.trim()
+        : undefined,
+      evaluationGateMinimumWeightedScore: typeof parsed.evaluationGateMinimumWeightedScore === 'number' && Number.isFinite(parsed.evaluationGateMinimumWeightedScore)
+        ? parsed.evaluationGateMinimumWeightedScore
+        : undefined,
+      evaluationGateWeightedAverageScore: typeof parsed.evaluationGateWeightedAverageScore === 'number' && Number.isFinite(parsed.evaluationGateWeightedAverageScore)
+        ? parsed.evaluationGateWeightedAverageScore
+        : undefined,
+      evaluationGateScorecardStatus: typeof parsed.evaluationGateScorecardStatus === 'string' && parsed.evaluationGateScorecardStatus.trim()
+        ? parsed.evaluationGateScorecardStatus.trim()
+        : undefined,
+      evaluationGateBaselineExperiment: typeof parsed.evaluationGateBaselineExperiment === 'string' && parsed.evaluationGateBaselineExperiment.trim()
+        ? parsed.evaluationGateBaselineExperiment.trim()
+        : undefined,
+      evaluationGateComparisonUrl: typeof parsed.evaluationGateComparisonUrl === 'string' && parsed.evaluationGateComparisonUrl.trim()
+        ? parsed.evaluationGateComparisonUrl.trim()
+        : undefined,
+      repairTouchedPaths: Array.isArray(parsed.repairTouchedPaths)
+        ? parsed.repairTouchedPaths.map((entry) => String(entry || '').trim()).filter(Boolean)
+        : undefined,
+      observabilityTags: Array.isArray(parsed.observabilityTags)
+        ? parsed.observabilityTags.map((entry) => String(entry || '').trim()).filter(Boolean).slice(0, 20)
+        : undefined,
     };
   } catch {
     return {};
@@ -541,6 +663,12 @@ function readPersistedLangSmithCheckpointSeed(checkpointPath: string, threadId: 
 
 function createBaseRunnerStatus(parsedArgs: ParsedArgs): RunnerStatus {
   const now = new Date().toISOString();
+  const experimentalApiBaseUrl = String(
+    process.env.CONTROL_PLANE_ANYGPT_API_BASE_URL
+    || process.env.ANYGPT_API_BASE_URL
+    || process.env.OPENAI_BASE_URL
+    || DEFAULT_CONTROL_PLANE_EXPERIMENTAL_API_BASE_URL,
+  ).trim() || DEFAULT_CONTROL_PLANE_EXPERIMENTAL_API_BASE_URL;
   const langSmithRunnerStatusSeed = {
     ...readPersistedLangSmithRunnerStatusSeed(parsedArgs.statusFilePath),
     ...readPersistedLangSmithCheckpointSeed(parsedArgs.checkpointPath, parsedArgs.threadId),
@@ -568,17 +696,28 @@ function createBaseRunnerStatus(parsedArgs: ParsedArgs): RunnerStatus {
     promptSyncEnabled: parsedArgs.promptSyncEnabled,
     promptSyncChannel: parsedArgs.promptSyncChannel,
     promptPromoteChannel: parsedArgs.promptPromoteChannel || undefined,
+    governanceProfile: String(process.env.CONTROL_PLANE_GOVERNANCE_PROFILE || 'experimental').trim() || 'experimental',
+    controlPlaneAiBackend: '',
+    controlPlaneAiModel: '',
+    experimentalApiBaseUrl,
+    experimentalServiceName: DEFAULT_CONTROL_PLANE_EXPERIMENTAL_SERVICE,
     evaluationGateMode: parsedArgs.evaluationGatePolicy.mode,
     evaluationGateTarget: parsedArgs.evaluationGatePolicy.target,
+    evaluationGateAggregationMode: parsedArgs.evaluationGatePolicy.aggregationMode,
     evaluationGateRequireEvaluation: parsedArgs.evaluationGatePolicy.requireEvaluation,
     evaluationGateMinResults: parsedArgs.evaluationGatePolicy.minResultCount,
     evaluationGateMetricKey: parsedArgs.evaluationGatePolicy.metricKey,
     evaluationGateMinMetricAverageScore: parsedArgs.evaluationGatePolicy.minMetricAverageScore,
+    evaluationGateMinimumWeightedScore: parsedArgs.evaluationGatePolicy.minimumWeightedScore,
     evaluationGateStatus: parsedArgs.evaluationGatePolicy.mode === 'off' ? 'disabled' : 'not-evaluated',
     evaluationGateReason: parsedArgs.evaluationGatePolicy.mode === 'off'
       ? 'Evaluation gate disabled.'
       : 'Evaluation gate has not been evaluated yet.',
     evaluationGateBlocks: [],
+    evaluationGateWeightedAverageScore: null,
+    evaluationGateScorecardStatus: 'not-evaluated',
+    evaluationGateBaselineExperiment: parsedArgs.evaluationGatePolicy.baselineExperimentName || '',
+    evaluationGateComparisonUrl: '',
     repairStatus: parsedArgs.autonomousEditEnabled ? 'idle' : 'not-needed',
     repairDecisionReason: '',
     repairIntentSummary: '',
@@ -595,8 +734,19 @@ function createBaseRunnerStatus(parsedArgs: ParsedArgs): RunnerStatus {
     postRepairValidationFailedCount: 0,
     repairPromotedPaths: [],
     repairRollbackPaths: [],
+    repairTouchedPaths: [],
     experimentalRestartStatus: 'not-needed',
     experimentalRestartReason: '',
+    governanceGateStatus: 'not-evaluated',
+    governanceGateReason: 'Governance gate has not been evaluated yet.',
+    governanceGateBlocks: [],
+    governanceGateActionableFlags: [],
+    promptSelectedChannel: '',
+    promptAvailableChannels: [],
+    promptRollbackReference: '',
+    promptPromotionReason: '',
+    promptPromotionBlockedReason: '',
+    observabilityTags: [],
     ...langSmithRunnerStatusSeed,
     lastUpdatedAt: now,
     startedAt: now,
@@ -715,6 +865,9 @@ function parseArgs(argv: string[]): ParsedArgs {
   const evaluationGatePolicy: ControlPlaneEvaluationGatePolicy = {
     mode: parseEvaluationGateMode(argMap.get('eval-gate-mode') || process.env.CONTROL_PLANE_EVAL_GATE_MODE),
     target: parseEvaluationGateTarget(argMap.get('eval-gate-target') || process.env.CONTROL_PLANE_EVAL_GATE_TARGET),
+    aggregationMode: parseEvaluationGateAggregationMode(
+      argMap.get('eval-gate-aggregation-mode') || process.env.CONTROL_PLANE_EVAL_GATE_AGGREGATION_MODE,
+    ),
     requireEvaluation: parseBooleanArg(
       argMap.get('eval-gate-require-evaluation') || process.env.CONTROL_PLANE_EVAL_GATE_REQUIRE_EVALUATION,
       false,
@@ -733,6 +886,29 @@ function parseArgs(argv: string[]): ParsedArgs {
       argMap.get('eval-gate-min-score') || process.env.CONTROL_PLANE_EVAL_GATE_MIN_SCORE,
       1,
     ),
+    requiredMetricKeys: parseStringArrayArg(
+      argMap.get('eval-gate-required-metrics') || process.env.CONTROL_PLANE_EVAL_GATE_REQUIRED_METRICS,
+    ),
+    additionalMetricThresholds: parseMetricThresholdMap(
+      argMap.get('eval-gate-metric-thresholds') || process.env.CONTROL_PLANE_EVAL_GATE_METRIC_THRESHOLDS,
+    ),
+    metricWeights: parseMetricWeightMap(
+      argMap.get('eval-gate-metric-weights') || process.env.CONTROL_PLANE_EVAL_GATE_METRIC_WEIGHTS,
+    ),
+    minimumWeightedScore: parseNormalizedScore(
+      argMap.get('eval-gate-min-weighted-score') || process.env.CONTROL_PLANE_EVAL_GATE_MIN_WEIGHTED_SCORE,
+      0,
+    ),
+    scorecardName: String(
+      argMap.get('eval-gate-scorecard-name')
+      || process.env.CONTROL_PLANE_EVAL_GATE_SCORECARD_NAME
+      || 'control-plane-scorecard',
+    ).trim() || 'control-plane-scorecard',
+    baselineExperimentName: String(
+      argMap.get('eval-gate-baseline-experiment')
+      || process.env.CONTROL_PLANE_EVAL_GATE_BASELINE_EXPERIMENT
+      || '',
+    ).trim(),
   };
 
   return {
@@ -999,6 +1175,19 @@ async function main() {
               .map((evaluation: any) => String(evaluation?.datasetName || '').trim())
               .filter(Boolean)
           : [],
+        langSmithEvaluationMetrics: Array.isArray((result as any).langSmithEvaluations)
+          ? (result as any).langSmithEvaluations
+              .flatMap((evaluation: any) => Array.isArray(evaluation?.metrics)
+                ? evaluation.metrics.map((metric: any) => {
+                    const key = String(metric?.key || '').trim();
+                    const average = typeof metric?.averageScore === 'number' ? metric.averageScore : 'n/a';
+                    const count = typeof metric?.count === 'number' ? metric.count : 0;
+                    return key ? `${key}=${average}x${count}` : '';
+                  })
+                : [])
+              .filter(Boolean)
+              .slice(0, 12)
+          : [],
         langSmithGovernanceFlagCount: Array.isArray((result as any).langSmithGovernance?.flags)
           ? (result as any).langSmithGovernance.flags.length
           : 0,
@@ -1024,8 +1213,20 @@ async function main() {
         promptSelectedRef: typeof (result as any).selectedPromptReference === 'string'
           ? (result as any).selectedPromptReference
           : parsedArgs.promptIdentifier,
+        promptSelectedChannel: typeof (result as any).selectedPromptChannel === 'string'
+          ? (result as any).selectedPromptChannel
+          : '',
+        promptAvailableChannels: Array.isArray((result as any).selectedPromptAvailableChannels)
+          ? (result as any).selectedPromptAvailableChannels
+              .map((channel: any) => String(channel || '').trim())
+              .filter(Boolean)
+              .slice(0, 10)
+          : [],
         promptCommitHash: typeof (result as any).selectedPromptCommitHash === 'string'
           ? (result as any).selectedPromptCommitHash
+          : '',
+        promptRollbackReference: typeof (result as any).promptRollbackReference === 'string'
+          ? (result as any).promptRollbackReference
           : '',
         promptSyncUrl: typeof (result as any).promptSyncUrl === 'string'
           ? (result as any).promptSyncUrl
@@ -1033,6 +1234,43 @@ async function main() {
         promptPromotionUrl: typeof (result as any).promptPromotionUrl === 'string'
           ? (result as any).promptPromotionUrl
           : '',
+        promptPromotionReason: typeof (result as any).promptPromotionReason === 'string'
+          ? (result as any).promptPromotionReason
+          : '',
+        promptPromotionBlockedReason: typeof (result as any).promptPromotionBlockedReason === 'string'
+          ? (result as any).promptPromotionBlockedReason
+          : '',
+        governanceProfile: typeof (result as any).governanceProfile === 'string'
+          ? (result as any).governanceProfile
+          : runnerStatus.governanceProfile,
+        governanceGateStatus: typeof (result as any).governanceGateResult?.status === 'string'
+          ? (result as any).governanceGateResult.status
+          : runnerStatus.governanceGateStatus,
+        governanceGateReason: typeof (result as any).governanceGateResult?.reason === 'string'
+          ? (result as any).governanceGateResult.reason
+          : runnerStatus.governanceGateReason,
+        governanceGateBlocks: [
+          (result as any).governanceGateResult?.blocksAutonomousEdits ? 'autonomous-edits' : '',
+          (result as any).governanceGateResult?.blocksExecution ? 'execution' : '',
+        ].filter(Boolean),
+        governanceGateActionableFlags: Array.isArray((result as any).governanceGateResult?.actionableFlagKeys)
+          ? (result as any).governanceGateResult.actionableFlagKeys
+              .map((flag: any) => String(flag || '').trim())
+              .filter(Boolean)
+              .slice(0, 10)
+          : [],
+        controlPlaneAiBackend: typeof (result as any).aiAgentBackend === 'string'
+          ? (result as any).aiAgentBackend
+          : runnerStatus.controlPlaneAiBackend,
+        controlPlaneAiModel: typeof (result as any).aiAgentModel === 'string'
+          ? (result as any).aiAgentModel
+          : runnerStatus.controlPlaneAiModel,
+        experimentalApiBaseUrl: typeof (result as any).experimentalApiBaseUrl === 'string'
+          ? (result as any).experimentalApiBaseUrl
+          : runnerStatus.experimentalApiBaseUrl,
+        experimentalServiceName: typeof (result as any).experimentalServiceName === 'string'
+          ? (result as any).experimentalServiceName
+          : runnerStatus.experimentalServiceName,
         promptSelectionNotes: Array.isArray((result as any).promptSelectionNotes)
           ? (result as any).promptSelectionNotes
               .map((note: any) => String(note || '').trim())
@@ -1045,6 +1283,9 @@ async function main() {
         evaluationGateReason: typeof (result as any).evaluationGateResult?.reason === 'string'
           ? (result as any).evaluationGateResult.reason
           : runnerStatus.evaluationGateReason,
+        evaluationGateAggregationMode: typeof (result as any).evaluationGateResult?.aggregationMode === 'string'
+          ? (result as any).evaluationGateResult.aggregationMode
+          : runnerStatus.evaluationGateAggregationMode,
         evaluationGateBlocks: [
           (result as any).evaluationGateResult?.blocksAutonomousEdits ? 'autonomous-edits' : '',
           (result as any).evaluationGateResult?.blocksExecution ? 'execution' : '',
@@ -1052,12 +1293,54 @@ async function main() {
         evaluationGateMetricAverageScore: typeof (result as any).evaluationGateResult?.metricAverageScore === 'number'
           ? (result as any).evaluationGateResult.metricAverageScore
           : null,
+        evaluationGateWeightedAverageScore: typeof (result as any).evaluationGateResult?.weightedAverageScore === 'number'
+          ? (result as any).evaluationGateResult.weightedAverageScore
+          : null,
         evaluationGateMetricCount: typeof (result as any).evaluationGateResult?.metricCount === 'number'
           ? (result as any).evaluationGateResult.metricCount
           : 0,
+        evaluationGateMinimumWeightedScore: typeof (result as any).evaluationGateResult?.minimumWeightedScore === 'number'
+          ? (result as any).evaluationGateResult.minimumWeightedScore
+          : runnerStatus.evaluationGateMinimumWeightedScore,
+        evaluationGateScorecardStatus: typeof (result as any).evaluationGateResult?.scorecardStatus === 'string'
+          ? (result as any).evaluationGateResult.scorecardStatus
+          : runnerStatus.evaluationGateScorecardStatus,
+        evaluationGateBaselineExperiment: typeof (result as any).evaluationGateResult?.baselineExperimentName === 'string'
+          ? (result as any).evaluationGateResult.baselineExperimentName
+          : runnerStatus.evaluationGateBaselineExperiment,
+        evaluationGateComparisonUrl: typeof (result as any).evaluationGateResult?.comparisonUrl === 'string'
+          ? (result as any).evaluationGateResult.comparisonUrl
+          : runnerStatus.evaluationGateComparisonUrl,
+        evaluationGateMetricResults: Array.isArray((result as any).evaluationGateResult?.metricResults)
+          ? (result as any).evaluationGateResult.metricResults
+              .map((metric: any) => {
+                const key = String(metric?.key || '').trim();
+                if (!key) return '';
+                const average = typeof metric?.averageScore === 'number' ? metric.averageScore : 'n/a';
+                const count = typeof metric?.count === 'number' ? metric.count : 0;
+                const threshold = typeof metric?.minAverageScore === 'number' ? metric.minAverageScore : 0;
+                const baseline = typeof metric?.baselineAverageScore === 'number' ? metric.baselineAverageScore : null;
+                const delta = typeof metric?.deltaAverageScore === 'number' ? metric.deltaAverageScore : null;
+                const weight = typeof metric?.weight === 'number' ? metric.weight : null;
+                return `${key}=${average}x${count}/${threshold}${baseline !== null ? ` baseline=${baseline}` : ''}${delta !== null ? ` delta=${delta}` : ''}${weight !== null ? ` weight=${weight}` : ''}`;
+              })
+              .filter(Boolean)
+              .slice(0, 12)
+          : [],
         evaluationResultCount: typeof (result as any).evaluationGateResult?.resultCount === 'number'
           ? (result as any).evaluationGateResult.resultCount
           : 0,
+        repairTouchedPaths: Array.isArray((result as any).repairSessionManifest?.touchedFiles)
+          ? (result as any).repairSessionManifest.touchedFiles
+              .map((file: any) => String(file?.path || '').trim())
+              .filter(Boolean)
+          : [],
+        observabilityTags: Array.isArray((result as any).observabilityTags)
+          ? (result as any).observabilityTags
+              .map((tag: any) => String(tag || '').trim())
+              .filter(Boolean)
+              .slice(0, 20)
+          : [],
         summary: result.summary,
         lastRunCompletedAt: new Date().toISOString(),
       });

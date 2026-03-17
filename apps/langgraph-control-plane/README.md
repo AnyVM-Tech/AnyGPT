@@ -185,7 +185,14 @@ Prompt selection precedence for the control-plane AI nodes is:
 3. latest synced version for the prompt identifier
 4. local bundled fallback in [`src/workflow.ts`](src/workflow.ts)
 
-When LangSmith runtime integration is enabled, the inspection stage syncs the local prompt bundle to the configured sync channel and can optionally promote the selected bundle back to another bounded tag on the same prompt identifier. This keeps prompt automation limited to the control-plane prompt bundle instead of expanding into broader workspace or admin automation.
+The prompt lifecycle is now channel-aware and rollback-friendly:
+
+- supported lifecycle channels: `candidate`, `default`, `live`
+- the workflow records the selected prompt channel, commit hash, available channels, promotion reason, and rollback reference in both LangSmith metadata and the runner status file
+- promotion to another channel is only attempted after the deterministic evaluation gate and governance gate both leave the requested target open
+- when promotion is blocked, the blocked reason is surfaced explicitly instead of silently skipping the request
+
+When LangSmith runtime integration is enabled, the inspection stage syncs the local prompt bundle to the configured sync channel, resolves the best prompt ref using the precedence above, and can optionally promote the selected bundle back to another bounded tag on the same prompt identifier. This keeps prompt automation limited to the control-plane prompt bundle instead of expanding into broader workspace or admin automation.
 
 Current LangSmith integration in the control plane now covers:
 
@@ -195,19 +202,72 @@ Current LangSmith integration in the control plane now covers:
 - current-project description/metadata inspection for governance/admin state
 - bounded current-project governance description/metadata sync hooks
 - recent run inspection
+- recent run metadata/tags sampling for trace/thread correlation
 - dataset creation and run-to-dataset seeding
 - seed dataset creation for control-plane experiments
 - prompt listing and prompt commit discovery
 - prompt selection precedence for control-plane AI nodes
 - prompt push/sync hooks for the control-plane prompt bundle
 - bounded prompt promotion/version tagging hooks on the same prompt identifier
+- prompt commit/channel/rollback metadata propagation into LangSmith and runner status
 - annotation queue listing plus bounded queue detail/item sampling
 - recent feedback inspection tied to sampled runs/queue items
 - client helpers for controlled feedback creation against runs/examples
 - evaluation experiment execution against the seed dataset
 - deterministic evaluation/regression gate calculation from LangSmith evaluator output
+- weighted scorecard / baseline-aware evaluation summaries for regression checks
 - deterministic governance/admin flags for workspace pinning, project metadata alignment, run health, review backlog, and feedback signal presence
+- deterministic governance gate calculation for autonomous edits and execution targets
 - summary/status surfacing of workspace/project/dataset/prompt/run/annotation/feedback/governance information
+
+## Experimental Runtime Targeting
+
+The control plane now treats the experimental API target as an explicit runtime surface rather than an implicit fallback.
+
+- default experimental API base URL: [`http://127.0.0.1:3310`](http://127.0.0.1:3310)
+- default experimental service name: [`anygpt-experimental.service`](../../apps/api/anygpt-experimental.service)
+- override env: [`CONTROL_PLANE_ANYGPT_API_BASE_URL`](../api/package.json)
+
+This base URL is used by the control-plane AI path, repair validation, and runner status surfacing so autonomous iterations stop accidentally routing back into the overloaded production loopback target.
+
+## Governance Profiles
+
+The control plane now supports simple governance profiles defined in [`governance-profiles.json`](governance-profiles.json).
+
+- active profile env: `CONTROL_PLANE_GOVERNANCE_PROFILE`
+- default profile: `experimental`
+- built-in examples: `experimental`, `staging`, `prod`
+
+Profiles currently tune LangSmith governance behavior such as annotation queue backlog warning thresholds and whether warn-level governance should block autonomous changes.
+
+Profile fields now include:
+
+- `queueBacklogWarnThreshold`
+- `requireFeedback`
+- `minimumFeedbackCount`
+- `minimumEvaluationResults`
+- `minimumSuccessfulEvaluations`
+- `blockAutonomousOnWarn`
+- `gateTarget` (`autonomous-edits`, `execution`, or `both`)
+- `requirePromptCommit`
+
+This lets operator policy decide whether missing feedback, insufficient recent evaluation coverage, warn-level governance flags, or prompt versions without commit hashes should block bounded automation.
+
+## Evaluation Scorecard Controls
+
+The evaluation gate now supports a scorecard-style metric set in addition to the primary metric.
+
+New env/CLI surfaces:
+
+- `CONTROL_PLANE_EVAL_GATE_REQUIRED_METRICS`
+- `CONTROL_PLANE_EVAL_GATE_METRIC_THRESHOLDS`
+- `CONTROL_PLANE_EVAL_GATE_AGGREGATION_MODE`
+- `CONTROL_PLANE_EVAL_GATE_METRIC_WEIGHTS`
+- `CONTROL_PLANE_EVAL_GATE_MIN_WEIGHTED_SCORE`
+- `CONTROL_PLANE_EVAL_GATE_SCORECARD_NAME`
+- `CONTROL_PLANE_EVAL_GATE_BASELINE_EXPERIMENT`
+
+These extend the existing single-metric gate so additional LangSmith evaluator metrics can be surfaced and enforced without replacing the current `metricKey` / `minMetricAverageScore` path. The workflow now supports both “all required metrics must pass” and weighted scorecard aggregation, plus baseline experiment labeling for regression-oriented scorecards.
 
 The inspection stage keeps this automation bounded: it samples accessible workspaces, current-project admin metadata, queue metadata, bounded queue items, and recent feedback artifacts into workflow state, planner notes, summaries, and the runner status file; reconciles only the configured control-plane project's bounded governance description/metadata markers; syncs the local control-plane prompt bundle; optionally promotes the selected prompt bundle to another tag on the same identifier; computes deterministic evaluation and governance flags from LangSmith artifacts; and now feeds those bounded signals into the closed-loop repair path. It still does **not** implement arbitrary workspace/project mutation, queue triage execution, or feedback moderation automation.
 
@@ -226,6 +286,13 @@ export CONTROL_PLANE_EVAL_GATE_REQUIRE_EVALUATION=false   # fail closed when tru
 export CONTROL_PLANE_EVAL_GATE_MIN_RESULTS=1
 export CONTROL_PLANE_EVAL_GATE_METRIC=contains_goal_context
 export CONTROL_PLANE_EVAL_GATE_MIN_SCORE=1
+export CONTROL_PLANE_EVAL_GATE_AGGREGATION_MODE=all        # all | weighted
+export CONTROL_PLANE_EVAL_GATE_REQUIRED_METRICS=scopes_echoed,prompt_commit_tracked
+export CONTROL_PLANE_EVAL_GATE_METRIC_THRESHOLDS=scopes_echoed=1,prompt_commit_tracked=1
+export CONTROL_PLANE_EVAL_GATE_METRIC_WEIGHTS=contains_goal_context=2,scopes_echoed=1,prompt_commit_tracked=1
+export CONTROL_PLANE_EVAL_GATE_MIN_WEIGHTED_SCORE=0.95
+export CONTROL_PLANE_EVAL_GATE_SCORECARD_NAME=control-plane-scorecard
+export CONTROL_PLANE_EVAL_GATE_BASELINE_EXPERIMENT=anygpt-control-plane-baseline
 
 # CLI equivalents
 bun run dev -- --goal="Regression gate smoke" --scopes=api-experimental --execute \
@@ -234,7 +301,12 @@ bun run dev -- --goal="Regression gate smoke" --scopes=api-experimental --execut
   --eval-gate-require-evaluation=true \
   --eval-gate-min-results=1 \
   --eval-gate-metric=contains_goal_context \
-  --eval-gate-min-score=1
+  --eval-gate-min-score=1 \
+  --eval-gate-required-metrics=scopes_echoed,prompt_commit_tracked \
+  --eval-gate-metric-thresholds=scopes_echoed=1,prompt_commit_tracked=1 \
+  --eval-gate-aggregation-mode=weighted \
+  --eval-gate-metric-weights=contains_goal_context=2,scopes_echoed=1,prompt_commit_tracked=1 \
+  --eval-gate-min-weighted-score=0.95
 ```
 
 Default behavior is intentionally bounded:
@@ -307,7 +379,11 @@ Continuous/autonomous status is persisted to [`apps/langgraph-control-plane/.con
 - experimental restart status and reason
 - sampled LangSmith workspace names/count and current project admin metadata
 - governance flag counts, actionable governance flags, and governance mutation statuses
+- governance gate status/reason/blocked targets
 - evaluation gate mode/status/reason and blocked actions
+- evaluation scorecard aggregation mode, weighted score, baseline experiment, and metric deltas
+- selected prompt channel, available prompt channels, rollback reference, and promotion reasons
+- repair touched paths plus observability tags for trace/run correlation
 - last error, if any
 
 When LangSmith integration is enabled, runner summaries also surface workspace, bounded project-admin, governance, dataset, prompt, run, evaluation, evaluation-gate, prompt-selection, prompt-sync, and prompt-promotion information.
@@ -365,6 +441,15 @@ The control plane now runs a bounded repair/improvement loop on top of the exist
 
 Promotion is only allowed when edit application succeeds, bounded smoke validation succeeds, and the deterministic evaluation gate does not block promotion.
 
+Recent hardening also added:
+
+- one-edit-per-path deduping in the autonomous planner to avoid overlapping replace operations on the same file
+- deterministic queue-overload fallback maintenance against live on-disk source
+- queue overload errors now carry queue label / concurrency / pending / overload-count metadata for route-level correlation
+- runner status and LangSmith metadata now capture prompt provenance, repair touched paths, rollback state, and restart outcomes together
+- replace edits now fail fast when the target block matches multiple times and include a closer anchored diagnostic when the target is missing
+- Gemini remote-media preflight normalization so unsupported remote media URLs fail with a stable non-retryable error shape instead of surfacing ambiguously
+
 Rollback is automatic when a touched repair fails smoke validation, when the evaluation gate blocks promotion after repair evaluation, or when post-repair validation fails after a promoted API change. Rollback restores previous contents for changed files and removes newly created files based on the recorded session manifest.
 
 Runtime speed/aggression controls are now environment-driven:
@@ -379,6 +464,8 @@ CONTROL_PLANE_AUTO_RESTART_EXPERIMENTAL=true
 ```
 
 The runner status file at [`apps/langgraph-control-plane/.control-plane/runner-status.json`](.control-plane/runner-status.json) now surfaces the repair-loop status, intent summary, smoke result counts, promoted paths, rollback paths, and repair session metadata.
+
+It also now persists the prompt lifecycle fields, governance gate state, evaluation scorecard fields, repair touched paths, and observability tags needed to correlate LangSmith runs back to a specific bounded edit session.
 
 For deterministic bounded smoke runs or operator-guided repairs, you can inject a runtime JSON edit plan without writing secrets into the repository:
 
@@ -440,6 +527,27 @@ CONTROL_PLANE_TARGET_REDIS_DB=1
 ```
 
 That makes the control plane clone production Redis/Dragonfly DB `0` into experimental DB `1`, while still seeding isolated filesystem copies from production JSON data.
+
+## Operator Runbook
+
+Recommended bounded operator loop for Studio and autonomous validation:
+
+1. verify Studio / LangGraph agent-server health with [`bash ./bun.sh run -F anygpt-langgraph-control-plane studio:dev`](package.json)
+2. export LangSmith credentials plus the desired workspace / project / governance profile
+3. run [`bash ./bun.sh run -F anygpt-langgraph-control-plane typecheck`](package.json) and [`bash ./bun.sh run -F anygpt-api typecheck`](../api/package.json) before enabling autonomous edits
+4. start a bounded control-plane run and inspect [`apps/langgraph-control-plane/.control-plane/runner-status.json`](.control-plane/runner-status.json) for:
+   - prompt selected channel / commit / rollback reference
+   - evaluation gate scorecard status and weighted score
+   - governance gate blocked targets and actionable flags
+   - repair touched paths and restart status
+5. if a promoted prompt regresses, use the recorded prompt rollback reference to pin the control plane back to the earlier prompt commit without requiring a code rollback
+
+For a no-secrets local smoke pass of the modified control plane itself:
+
+```bash
+bash ./bun.sh run -F anygpt-langgraph-control-plane typecheck
+bash ./bun.sh run -F anygpt-api typecheck
+```
 
 ## Log-Driven Planning
 

@@ -4,7 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { spawn } from 'child_process';
 import redis from './db.js';
-import { dataManager, LoadedProviders, LoadedProviderData, ModelsFileStructure } from './dataManager.js';
+import { dataManager, LoadedProviders, LoadedProviderData } from './dataManager.js';
 import { checkKeyHealth, type KeyHealthStatus } from './keyChecker.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -234,37 +234,17 @@ async function runProbeScript(reason: string): Promise<void> {
 }
 
 async function syncActiveProviderCountsInModels(reason: string): Promise<void> {
+  const previousDisableSync = process.env.DISABLE_MODEL_SYNC;
   try {
-    const providers = await dataManager.load<LoadedProviders>('providers');
-    const modelsFile = await dataManager.load<ModelsFileStructure>('models');
-    if (!providers || !modelsFile || !Array.isArray(modelsFile.data)) return;
-
-    const activeProviderCounts: Record<string, number> = {};
-    for (const provider of providers) {
-      if (provider.disabled || !provider.models) continue;
-      for (const modelId of Object.keys(provider.models)) {
-        activeProviderCounts[modelId] = (activeProviderCounts[modelId] || 0) + 1;
-      }
-    }
-
-    let changed = 0;
-    for (const model of modelsFile.data as Array<Record<string, any>>) {
-      const modelId = String(model.id || '');
-      if (!modelId) continue;
-      const nextCount = activeProviderCounts[modelId] || 0;
-      const currentCount = typeof model.providers === 'number' ? model.providers : 0;
-      if (currentCount !== nextCount) {
-        model.providers = nextCount;
-        changed += 1;
-      }
-    }
-
-    if (changed > 0) {
-      await dataManager.save<ModelsFileStructure>('models', modelsFile);
-      console.log(`[AdminKeySync] Refreshed provider counts for ${changed} model(s) after ${reason}.`);
-    }
+    process.env.DISABLE_MODEL_SYNC = 'false';
+    const { refreshProviderCountsInModelsFile } = await import('./modelUpdater.js');
+    await refreshProviderCountsInModelsFile({ notifyProbes: reason !== 'new-models' });
+    console.log(`[AdminKeySync] Synchronized models.json after ${reason}.`);
   } catch (err) {
-    console.warn(`[AdminKeySync] Failed to refresh provider counts after ${reason}:`, err);
+    console.warn(`[AdminKeySync] Failed to synchronize models.json after ${reason}:`, err);
+  } finally {
+    if (typeof previousDisableSync === 'string') process.env.DISABLE_MODEL_SYNC = previousDisableSync;
+    else delete process.env.DISABLE_MODEL_SYNC;
   }
 }
 
@@ -277,6 +257,12 @@ function getProviderFamily(providerId: string): string {
   if (lower.includes('deepseek')) return 'deepseek';
   if (lower.includes('xai') || lower.includes('x-ai')) return 'xai';
   return '';
+}
+
+function shouldReenableDisabledProvider(provider: LoadedProviderData, status: KeyHealthStatus): boolean {
+  if (status.health === 'healthy') return true;
+  const family = getProviderFamily(provider.id);
+  return family === 'gemini' && status.isValid === true && status.health === 'no-quota';
 }
 
 /**
@@ -313,7 +299,7 @@ async function checkDisabledProviderKeys(): Promise<boolean> {
         const { provider, status } = result.value;
         if (!status) continue;
 
-        if (status.health === 'healthy') {
+        if (shouldReenableDisabledProvider(provider, status)) {
           // Key is valid and has quota — re-enable the provider
           const idx = providers.findIndex((p: LoadedProviderData) => p.id === provider.id);
           if (idx !== -1) {
@@ -330,7 +316,10 @@ async function checkDisabledProviderKeys(): Promise<boolean> {
             }
             reEnabled++;
             changed = true;
-            console.log(`[AdminKeySync] Re-enabled provider ${provider.id} — key is valid with quota.`);
+            const reason = status.health === 'healthy'
+              ? 'key is valid with quota'
+              : 'Gemini quota exhaustion is treated as temporary';
+            console.log(`[AdminKeySync] Re-enabled provider ${provider.id} — ${reason}.`);
           }
         } else if (status.health === 'indeterminate') {
           indeterminate++;

@@ -21,6 +21,8 @@ import { enforceInMemoryRateLimit, RequestTimestampStore } from '../modules/rate
 import { dataManager, type KeysFile, type LoadedProviders, type ModelsFileStructure } from '../modules/dataManager.js';
 import { refreshProviderCountsInModelsFile } from '../modules/modelUpdater.js';
 import { readTierRateLimitsFromEnv } from '../modules/middlewareFactory.js';
+import { getProviderStatsQueueSnapshots } from '../providers/handler.js';
+import { getOpenAiAdmissionQueueSnapshots } from './openai.js';
 import tiersData from '../tiers.json' with { type: 'json' };
 
 const adminRouter = new HyperExpress.Router();
@@ -828,6 +830,46 @@ async function getErrorLogStats(): Promise<{ totalLines: number; lastTimestamp: 
     return { totalLines, lastTimestamp, fileBytes, truncated };
 }
 
+function buildQueueMetricsPayload() {
+    const apiQueues = getOpenAiAdmissionQueueSnapshots().map((entry) => ({
+        category: 'api',
+        ...entry,
+    }));
+    const providerStatsQueues = getProviderStatsQueueSnapshots().map((entry, index) => ({
+        category: 'provider-stats',
+        worker: index + 1,
+        ...entry,
+    }));
+    const entries: Record<string, unknown>[] = [...apiQueues, ...providerStatsQueues];
+    const asNumber = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) ? value : 0);
+    const busiestEntry = entries.reduce<Record<string, unknown> | null>((current, entry) => {
+        if (!current) return entry;
+        const currentLoad = asNumber(current['pending']) + asNumber(current['inFlight']);
+        const nextLoad = asNumber(entry['pending']) + asNumber(entry['inFlight']);
+        return nextLoad > currentLoad ? entry : current;
+    }, null);
+
+    return {
+        entries,
+        count: entries.length,
+        summary: {
+            totalQueues: entries.length,
+            totalPending: entries.reduce((sum, entry) => sum + asNumber(entry['pending']), 0),
+            totalInFlight: entries.reduce((sum, entry) => sum + asNumber(entry['inFlight']), 0),
+            totalOverloadCount: entries.reduce((sum, entry) => sum + asNumber(entry['overloadCount']), 0),
+            overloadedQueues: entries.filter((entry) => asNumber(entry['overloadCount']) > 0).length,
+            busiestQueue: busiestEntry ? {
+                label: busiestEntry['label'],
+                category: busiestEntry['category'],
+                pending: asNumber(busiestEntry['pending']),
+                inFlight: asNumber(busiestEntry['inFlight']),
+                overloadCount: asNumber(busiestEntry['overloadCount']),
+            } : null,
+        },
+        timestamp: new Date().toISOString(),
+    };
+}
+
 adminRouter.get('/metrics/summary', adminOnlyMiddleware, async (request: Request, response: Response) => {
     try {
         const [providers, models, keys, errorStats] = await Promise.all([
@@ -836,6 +878,7 @@ adminRouter.get('/metrics/summary', adminOnlyMiddleware, async (request: Request
             dataManager.load<KeysFile>('keys'),
             getErrorLogStats(),
         ]);
+        const queueMetrics = buildQueueMetricsPayload();
 
         const providerTotal = providers.length;
         const providerDisabled = providers.filter((p) => p.disabled).length;
@@ -874,6 +917,7 @@ adminRouter.get('/metrics/summary', adminOnlyMiddleware, async (request: Request
                 byRole: keysByRole,
                 byTier: keysByTier,
             },
+            queues: queueMetrics.summary,
             errorLog: errorStats,
         });
     } catch (error: any) {
@@ -883,6 +927,22 @@ adminRouter.get('/metrics/summary', adminOnlyMiddleware, async (request: Request
             response.status(500).json({
                 error: 'Internal Server Error',
                 reference: 'Failed to load metrics summary.',
+                timestamp: new Date().toISOString()
+            });
+        }
+    }
+});
+
+adminRouter.get('/metrics/queues', adminOnlyMiddleware, async (request: Request, response: Response) => {
+    try {
+        response.json(buildQueueMetricsPayload());
+    } catch (error: any) {
+        await logError(error, request);
+        console.error('Admin metrics queues error:', error);
+        if (!response.completed) {
+            response.status(500).json({
+                error: 'Internal Server Error',
+                reference: 'Failed to load queue metrics.',
                 timestamp: new Date().toISOString()
             });
         }

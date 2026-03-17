@@ -31,6 +31,11 @@ export type LangSmithRunSummary = {
   status?: string;
   error?: string | null;
   runType?: string;
+  traceId?: string;
+  parentRunId?: string;
+  threadId?: string;
+  tags?: string[];
+  metadata?: Record<string, any>;
 };
 
 export type LangSmithDatasetSummary = {
@@ -49,6 +54,10 @@ export type LangSmithPromptSummary = {
   identifier: string;
   description?: string;
   updatedAt?: string;
+  commitHash?: string;
+  tags?: string[];
+  channels?: string[];
+  metadata?: Record<string, any>;
 };
 
 export type LangSmithAnnotationQueueSummary = {
@@ -111,12 +120,40 @@ export type LangSmithEvaluationMetricSummary = {
   lastComment?: string;
 };
 
+export type LangSmithEvaluationScorecardMetricDelta = {
+  key: string;
+  baselineAverageScore?: number | null;
+  candidateAverageScore?: number | null;
+  deltaAverageScore?: number | null;
+  threshold?: number | null;
+  passed?: boolean;
+  weight?: number | null;
+};
+
+export type LangSmithEvaluationScorecard = {
+  name: string;
+  status: 'passed' | 'failed' | 'not-evaluated';
+  aggregationMode?: string;
+  weightedAverageScore?: number | null;
+  minimumWeightedScore?: number | null;
+  passingMetricCount: number;
+  failingMetricKeys: string[];
+  baselineExperimentName?: string;
+  baselineExperimentId?: string;
+  comparisonUrl?: string;
+  metricDeltas: LangSmithEvaluationScorecardMetricDelta[];
+};
+
 export type LangSmithEvaluationSummary = {
   datasetName: string;
   experimentName: string;
+  experimentId?: string;
+  experimentUrl?: string;
   resultCount: number;
   averageScore?: number | null;
   metrics: LangSmithEvaluationMetricSummary[];
+  metadata?: Record<string, any>;
+  scorecard?: LangSmithEvaluationScorecard;
 };
 
 export type LangSmithFeedbackKeyCountSummary = {
@@ -145,6 +182,8 @@ export type LangSmithGovernanceCounts = {
   runPending: number;
   datasets: number;
   prompts: number;
+  evaluations: number;
+  evaluationResults: number;
   annotationQueues: number;
   annotationQueueItems: number;
   annotationQueueBacklog: number;
@@ -212,7 +251,28 @@ type LangSmithGovernanceSnapshotOptions = {
   expectedDatasetNames?: string[];
   requiredProjectMetadata?: Record<string, any>;
   queueBacklogWarnThreshold?: number;
+  evaluations?: LangSmithEvaluationSummary[];
+  minimumFeedbackCount?: number;
+  minimumEvaluationResults?: number;
+  minimumSuccessfulEvaluations?: number;
+  blockOnWarn?: boolean;
+  requirePromptCommit?: boolean;
   mutations?: LangSmithGovernanceMutation[];
+};
+
+type LangSmithEvaluationRunOptions = {
+  metadata?: Record<string, any>;
+  scorecardName?: string;
+  aggregationMode?: 'all' | 'weighted';
+  primaryMetricKey?: string;
+  requiredMetricKeys?: string[];
+  metricThresholds?: Record<string, number>;
+  metricWeights?: Record<string, number>;
+  minimumWeightedScore?: number;
+  baselineEvaluation?: LangSmithEvaluationSummary | null;
+  baselineExperimentName?: string;
+  baselineExperimentId?: string;
+  comparisonUrl?: string;
 };
 
 function summarizeProject(project: any): LangSmithProjectSummary | null {
@@ -245,12 +305,22 @@ function summarizeRun(run: any): LangSmithRunSummary | null {
   const id = String(run?.id || '').trim();
   const name = String(run?.name || '').trim();
   if (!id || !name) return null;
+  const topLevelMetadata = coerceOptionalRecord(run?.metadata);
+  const extraMetadata = coerceOptionalRecord(run?.extra?.metadata);
+  const metadata = topLevelMetadata && extraMetadata
+    ? { ...extraMetadata, ...topLevelMetadata }
+    : topLevelMetadata || extraMetadata;
   return {
     id,
     name,
     status: typeof run?.status === 'string' ? run.status : undefined,
     error: typeof run?.error === 'string' ? run.error : null,
     runType: typeof run?.run_type === 'string' ? run.run_type : undefined,
+    traceId: coerceOptionalString(run?.trace_id || run?.traceId || run?.session_id || metadata?.trace_id || metadata?.traceId),
+    parentRunId: coerceOptionalString(run?.parent_run_id || run?.parentRunId || metadata?.parent_run_id || metadata?.parentRunId),
+    threadId: coerceOptionalString(run?.thread_id || run?.threadId || metadata?.thread_id || metadata?.threadId),
+    tags: coerceOptionalStringArray(run?.tags),
+    metadata,
   };
 }
 
@@ -268,10 +338,16 @@ function summarizeDataset(dataset: any): LangSmithDatasetSummary | null {
 function summarizePrompt(prompt: any): LangSmithPromptSummary | null {
   const identifier = String(prompt?.identifier || prompt?.name || prompt?.full_name || '').trim();
   if (!identifier) return null;
+  const metadata = extractPromptMetadata(prompt);
+  const tags = coerceOptionalStringArray(prompt?.tags);
   return {
     identifier,
     description: typeof prompt?.description === 'string' ? prompt.description : undefined,
     updatedAt: typeof prompt?.updated_at === 'string' ? prompt.updated_at : undefined,
+    commitHash: coerceOptionalString(prompt?.commit_hash || prompt?.commitHash || prompt?.commit?.hash),
+    tags,
+    channels: extractPromptChannels(prompt, tags, metadata),
+    metadata,
   };
 }
 
@@ -299,6 +375,121 @@ function coerceOptionalRecord(value: unknown): Record<string, any> | undefined {
   const entries = Object.entries(value as Record<string, unknown>)
     .filter(([key]) => String(key || '').trim().length > 0);
   return entries.length > 0 ? Object.fromEntries(entries) : {};
+}
+
+function coerceOptionalStringArray(value: unknown): string[] | undefined {
+  if (Array.isArray(value)) {
+    const items = value
+      .map((entry) => String(entry || '').trim())
+      .filter(Boolean);
+    return items.length > 0 ? Array.from(new Set(items)) : undefined;
+  }
+
+  if (typeof value === 'string' && value.trim()) {
+    const trimmed = value.trim();
+    return [trimmed];
+  }
+
+  return undefined;
+}
+
+function roundMetricValue(value: number): number {
+  return Math.round(value * 1000) / 1000;
+}
+
+function extractPromptTemplateObject(prompt: any): Record<string, unknown> | null {
+  const template = prompt?.object?.kwargs?.template
+    || prompt?.manifest?.object?.kwargs?.template
+    || prompt?.manifest?.kwargs?.template
+    || prompt?.template;
+  if (typeof template !== 'string' || !template.trim()) return null;
+
+  try {
+    const parsed = JSON.parse(template);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function extractPromptMetadata(prompt: any): Record<string, any> | undefined {
+  const topLevelMetadata = coerceOptionalRecord(prompt?.metadata);
+  const nestedTemplateObject = extractPromptTemplateObject(prompt);
+  const nestedMetadata = coerceOptionalRecord(nestedTemplateObject?.metadata);
+
+  if (topLevelMetadata && nestedMetadata) {
+    return {
+      ...nestedMetadata,
+      ...topLevelMetadata,
+    };
+  }
+
+  return topLevelMetadata || nestedMetadata;
+}
+
+function extractPromptChannels(
+  prompt: any,
+  tags: string[] | undefined,
+  metadata: Record<string, any> | undefined,
+): string[] | undefined {
+  const channelCandidates = [
+    ...(tags || []).flatMap((tag) => tag.startsWith('channel:') ? [tag.slice('channel:'.length)] : []),
+    ...(coerceOptionalStringArray(metadata?.channels) || []),
+    coerceOptionalString(metadata?.channel),
+    coerceOptionalString(prompt?.channel),
+  ].filter(Boolean) as string[];
+
+  const channels = uniqueStrings(channelCandidates);
+  return channels.length > 0 ? channels : undefined;
+}
+
+function mergePromptObjectMetadata(promptObject: unknown, metadata: Record<string, any> | undefined): unknown {
+  const normalizedMetadata = coerceOptionalRecord(metadata);
+  if (!normalizedMetadata || Object.keys(normalizedMetadata).length === 0) {
+    return promptObject;
+  }
+
+  if (!promptObject || typeof promptObject !== 'object' || Array.isArray(promptObject)) {
+    return promptObject;
+  }
+
+  const candidate = promptObject as Record<string, any>;
+  const nextCandidate: Record<string, any> = { ...candidate };
+  const nextKwargs = candidate.kwargs && typeof candidate.kwargs === 'object' && !Array.isArray(candidate.kwargs)
+    ? { ...(candidate.kwargs as Record<string, any>) }
+    : null;
+
+  if (nextKwargs && typeof nextKwargs.template === 'string' && nextKwargs.template.trim()) {
+    try {
+      const parsedTemplate = JSON.parse(nextKwargs.template);
+      if (parsedTemplate && typeof parsedTemplate === 'object' && !Array.isArray(parsedTemplate)) {
+        nextKwargs.template = JSON.stringify({
+          ...(parsedTemplate as Record<string, unknown>),
+          metadata: {
+            ...(coerceOptionalRecord((parsedTemplate as Record<string, unknown>).metadata) || {}),
+            ...normalizedMetadata,
+          },
+        }, null, 2);
+        nextCandidate.kwargs = nextKwargs;
+        return nextCandidate;
+      }
+    } catch {
+      // Fall through to shallow metadata merge.
+    }
+  }
+
+  nextCandidate.metadata = {
+    ...(coerceOptionalRecord(candidate.metadata) || {}),
+    ...normalizedMetadata,
+  };
+
+  if (nextKwargs) {
+    nextCandidate.kwargs = nextKwargs;
+  }
+
+  return nextCandidate;
 }
 
 function extractProjectMetadata(project: any): Record<string, any> | undefined {
@@ -883,7 +1074,7 @@ export function summarizeLangSmithGovernanceSnapshot(snapshot: LangSmithGovernan
   const notes: string[] = [];
   const actionableFlags = snapshot.flags.filter((flag) => flag.status !== 'pass');
   notes.push(
-    `LangSmith governance sampled ${snapshot.counts.workspaces} workspace(s), ${snapshot.counts.projects} project(s), ${snapshot.counts.runFailures} recent failed run(s), ${snapshot.counts.annotationQueueBacklog} queued review item(s), and ${actionableFlags.length} flag(s) needing attention.`,
+    `LangSmith governance sampled ${snapshot.counts.workspaces} workspace(s), ${snapshot.counts.projects} project(s), ${snapshot.counts.runFailures} recent failed run(s), ${snapshot.counts.evaluations} evaluation experiment(s), ${snapshot.counts.annotationQueueBacklog} queued review item(s), and ${actionableFlags.length} flag(s) needing attention.`,
   );
 
   for (const flag of actionableFlags.slice(0, 5)) {
@@ -1132,15 +1323,29 @@ export async function ensureLangSmithPrompt(
   config: LangSmithRuntimeConfig | null | undefined,
   promptIdentifier: string,
   promptObject: unknown,
-  options?: { description?: string; tags?: string[]; readme?: string; parentCommitHash?: string },
+  options?: {
+    description?: string;
+    tags?: string[];
+    readme?: string;
+    parentCommitHash?: string;
+    metadata?: Record<string, any>;
+    channel?: string;
+  },
 ): Promise<string | null> {
   const resolved = config || resolveLangSmithRuntimeConfig();
   const client = createLangSmithClient(resolved);
   const normalizedPromptIdentifier = String(promptIdentifier || '').trim();
   if (!client || !resolved || !normalizedPromptIdentifier) return null;
 
+  const channel = coerceOptionalString(options?.channel);
+  const metadata = coerceOptionalRecord(options?.metadata);
+  const mergedPromptObject = mergePromptObjectMetadata(promptObject, {
+    ...(metadata || {}),
+    ...(channel ? { channel } : {}),
+  });
+  const channelTags = channel ? [channel, `channel:${channel}`] : [];
   const normalizedTags = Array.from(new Set(
-    (options?.tags || [])
+    [...(options?.tags || []), ...channelTags]
       .map((tag) => String(tag || '').trim())
       .filter(Boolean),
   ));
@@ -1156,7 +1361,7 @@ export async function ensureLangSmithPrompt(
   }
 
   return await client.pushPrompt(normalizedPromptIdentifier, {
-    object: promptObject,
+    object: mergedPromptObject,
     description: options?.description,
     tags: normalizedTags,
     readme: options?.readme,
@@ -1176,9 +1381,12 @@ export async function runLangSmithDatasetEvaluation(
   target: (inputs: Record<string, any>) => Promise<Record<string, any>>,
   experimentPrefix: string,
   evaluators: Array<(run: any, example: any) => Record<string, any>>,
+  options?: LangSmithEvaluationRunOptions,
 ): Promise<LangSmithEvaluationSummary | null> {
   const resolved = config || resolveLangSmithRuntimeConfig();
   if (!resolved || !datasetName.trim()) return null;
+
+  const evaluationOptions = options || {};
 
   const collectedMetrics = new Map<string, { scores: number[]; comments: string[] }>();
   const wrappedEvaluators = evaluators.map((evaluator) => async (run: any, example: any) => {
@@ -1232,6 +1440,7 @@ export async function runLangSmithDatasetEvaluation(
       workspace_id: resolved.workspaceId,
       project_name: resolved.projectName,
       source: 'anygpt-langgraph-control-plane',
+      ...(evaluationOptions.metadata || {}),
     },
   } as any).catch(() => null);
   if (!results) return null;
@@ -1255,7 +1464,7 @@ export async function runLangSmithDatasetEvaluation(
     return {
       key,
       count,
-      averageScore: count > 0 ? Math.round((total / count) * 1000) / 1000 : null,
+      averageScore: count > 0 ? roundMetricValue(total / count) : null,
       minScore: count > 0 ? Math.min(...metric.scores) : null,
       maxScore: count > 0 ? Math.max(...metric.scores) : null,
       lastComment: metric.comments.length > 0 ? metric.comments[metric.comments.length - 1] : undefined,
@@ -1263,15 +1472,113 @@ export async function runLangSmithDatasetEvaluation(
   });
   const allScores = metrics.flatMap((metric) => collectedMetrics.get(metric.key)?.scores || []);
   const averageScore = allScores.length > 0
-    ? Math.round((allScores.reduce((sum, score) => sum + score, 0) / allScores.length) * 1000) / 1000
+    ? roundMetricValue(allScores.reduce((sum, score) => sum + score, 0) / allScores.length)
     : null;
+
+  const metricThresholds = Object.fromEntries(
+    Object.entries(evaluationOptions.metricThresholds || {})
+      .map(([key, value]) => [String(key || '').trim(), Number(value)])
+      .filter(([key, value]) => Boolean(key) && Number.isFinite(value)),
+  ) as Record<string, number>;
+  const metricWeights = Object.fromEntries(
+    Object.entries(evaluationOptions.metricWeights || {})
+      .map(([key, value]) => [String(key || '').trim(), Number(value)])
+      .filter((entry): entry is [string, number] => {
+        const [key, weight] = entry;
+        return typeof key === 'string' && Boolean(key) && typeof weight === 'number' && Number.isFinite(weight) && weight > 0;
+      }),
+  ) as Record<string, number>;
+  const requiredMetricKeys = uniqueStrings([
+    String(evaluationOptions.primaryMetricKey || '').trim(),
+    ...(evaluationOptions.requiredMetricKeys || []),
+  ].filter(Boolean));
+  const baselineMetrics = new Map(
+    (evaluationOptions.baselineEvaluation?.metrics || []).map((metric) => [metric.key, metric]),
+  );
+  const metricDeltas = metrics.map((metric) => {
+    const baselineMetric = baselineMetrics.get(metric.key);
+    const baselineAverageScore = typeof baselineMetric?.averageScore === 'number'
+      ? baselineMetric.averageScore
+      : null;
+    const candidateAverageScore = typeof metric.averageScore === 'number' ? metric.averageScore : null;
+    const deltaAverageScore = baselineAverageScore !== null && candidateAverageScore !== null
+      ? roundMetricValue(candidateAverageScore - baselineAverageScore)
+      : null;
+    const threshold = typeof metricThresholds[metric.key] === 'number'
+      ? metricThresholds[metric.key]
+      : null;
+    const passed = candidateAverageScore !== null && (threshold === null || candidateAverageScore >= threshold);
+    const weight = typeof metricWeights[metric.key] === 'number' ? metricWeights[metric.key] : null;
+    return {
+      key: metric.key,
+      baselineAverageScore,
+      candidateAverageScore,
+      deltaAverageScore,
+      threshold,
+      passed,
+      weight,
+    } satisfies LangSmithEvaluationScorecardMetricDelta;
+  });
+
+  const weightedMetricEntries = metrics
+    .map((metric) => {
+      const average = typeof metric.averageScore === 'number' ? metric.averageScore : null;
+      const weight = typeof metricWeights[metric.key] === 'number' ? metricWeights[metric.key] : 1;
+      return average === null ? null : { average, weight };
+    })
+    .filter(Boolean) as Array<{ average: number; weight: number }>;
+  const totalMetricWeight = weightedMetricEntries.reduce((sum, entry) => sum + entry.weight, 0);
+  const weightedAverageScore = totalMetricWeight > 0
+    ? roundMetricValue(weightedMetricEntries.reduce((sum, entry) => sum + (entry.average * entry.weight), 0) / totalMetricWeight)
+    : null;
+  const minimumWeightedScore = typeof evaluationOptions.minimumWeightedScore === 'number' && Number.isFinite(evaluationOptions.minimumWeightedScore)
+    ? evaluationOptions.minimumWeightedScore
+    : null;
+  const failingMetricKeys = metricDeltas
+    .filter((metric) => {
+      const isTracked = requiredMetricKeys.includes(metric.key) || metric.threshold !== null;
+      return isTracked && metric.passed === false;
+    })
+    .map((metric) => metric.key);
+  if (
+    evaluationOptions.aggregationMode === 'weighted'
+    && weightedAverageScore !== null
+    && minimumWeightedScore !== null
+    && weightedAverageScore < minimumWeightedScore
+  ) {
+    failingMetricKeys.push(`weighted_score<${minimumWeightedScore}`);
+  }
+  const scorecardStatus: LangSmithEvaluationScorecard['status'] = metrics.length === 0
+    ? 'not-evaluated'
+    : failingMetricKeys.length > 0
+      ? 'failed'
+      : 'passed';
+  const scorecard = metrics.length > 0
+    ? {
+        name: String(evaluationOptions.scorecardName || 'control-plane-scorecard').trim() || 'control-plane-scorecard',
+        status: scorecardStatus,
+        aggregationMode: evaluationOptions.aggregationMode || 'all',
+        weightedAverageScore,
+        minimumWeightedScore,
+        passingMetricCount: metricDeltas.filter((metric) => metric.passed === true).length,
+        failingMetricKeys: Array.from(new Set(failingMetricKeys)),
+        baselineExperimentName: coerceOptionalString(evaluationOptions.baselineExperimentName || evaluationOptions.baselineEvaluation?.experimentName),
+        baselineExperimentId: coerceOptionalString(evaluationOptions.baselineExperimentId || evaluationOptions.baselineEvaluation?.experimentId),
+        comparisonUrl: coerceOptionalString(evaluationOptions.comparisonUrl),
+        metricDeltas,
+      } satisfies LangSmithEvaluationScorecard
+    : undefined;
 
   return {
     datasetName,
     experimentName: String((results as any).experimentName || (results as any).experiment_name || experimentPrefix || '').trim(),
+    experimentId: coerceOptionalString((results as any).experimentId || (results as any).experiment_id || (results as any).experiment?.id),
+    experimentUrl: coerceOptionalString((results as any).url || (results as any).experimentUrl || (results as any).experiment_url || (results as any).experiment?.url),
     resultCount,
     averageScore,
     metrics,
+    metadata: coerceOptionalRecord(evaluationOptions.metadata),
+    scorecard,
   };
 }
 
@@ -1330,6 +1637,17 @@ export async function collectLangSmithGovernanceSnapshot(
 
   const runFailures = snapshot.recentRuns.filter((run) => isRunFailure(run)).length;
   const runPending = snapshot.recentRuns.filter((run) => isRunPending(run)).length;
+  const evaluations = (options?.evaluations || []).map((evaluation) => ({
+    ...evaluation,
+    metrics: (evaluation.metrics || []).map((metric) => ({ ...metric })),
+  }));
+  const evaluationResults = evaluations.reduce((total, evaluation) => total + Math.max(0, evaluation.resultCount || 0), 0);
+  const successfulEvaluations = evaluations.filter((evaluation) => {
+    if (evaluation.scorecard?.status) {
+      return evaluation.scorecard.status === 'passed';
+    }
+    return typeof evaluation.averageScore === 'number' && Number.isFinite(evaluation.averageScore);
+  }).length;
   const explicitQueueBacklog = snapshot.annotationQueues.reduce((total, queue) => total + (typeof queue.itemCount === 'number' ? queue.itemCount : 0), 0);
   const annotationQueueBacklog = explicitQueueBacklog > 0 ? explicitQueueBacklog : snapshot.annotationQueueItems.length;
   const counts: LangSmithGovernanceCounts = {
@@ -1340,6 +1658,8 @@ export async function collectLangSmithGovernanceSnapshot(
     runPending,
     datasets: snapshot.datasets.length,
     prompts: snapshot.prompts.length,
+    evaluations: evaluations.length,
+    evaluationResults,
     annotationQueues: snapshot.annotationQueues.length,
     annotationQueueItems: snapshot.annotationQueueItems.length,
     annotationQueueBacklog,
@@ -1348,6 +1668,11 @@ export async function collectLangSmithGovernanceSnapshot(
   };
 
   const queueBacklogWarnThreshold = Math.max(1, Math.min(100, Math.floor(options?.queueBacklogWarnThreshold ?? 10)));
+  const minimumFeedbackCount = Math.max(0, Math.floor(options?.minimumFeedbackCount ?? 0));
+  const minimumEvaluationResults = Math.max(0, Math.floor(options?.minimumEvaluationResults ?? 0));
+  const minimumSuccessfulEvaluations = Math.max(0, Math.floor(options?.minimumSuccessfulEvaluations ?? 0));
+  const blockOnWarn = options?.blockOnWarn === true;
+  const requirePromptCommit = options?.requirePromptCommit === true;
   const requiredProjectMetadata = coerceOptionalRecord(options?.requiredProjectMetadata);
   const expectedDatasetNames = uniqueStrings(options?.expectedDatasetNames || []);
   const promptIdentifier = String(options?.promptIdentifier || '').trim();
@@ -1459,7 +1784,8 @@ export async function collectLangSmithGovernanceSnapshot(
   }
 
   if (promptIdentifier) {
-    const promptPresent = snapshot.prompts.some((prompt) => prompt.identifier === promptIdentifier || prompt.identifier.startsWith(`${promptIdentifier}:`));
+    const promptSummary = snapshot.prompts.find((prompt) => prompt.identifier === promptIdentifier || prompt.identifier.startsWith(`${promptIdentifier}:`));
+    const promptPresent = Boolean(promptSummary);
     flags.push({
       key: 'control-plane-prompt',
       status: promptPresent ? 'pass' : 'warn',
@@ -1467,6 +1793,16 @@ export async function collectLangSmithGovernanceSnapshot(
         ? `Prompt identifier ${promptIdentifier} is visible to the control plane.`
         : `Prompt identifier ${promptIdentifier} was not visible in the sampled LangSmith prompt list.`,
     });
+
+    if (promptPresent && requirePromptCommit) {
+      flags.push({
+        key: 'control-plane-prompt-commit',
+        status: promptSummary?.commitHash ? 'pass' : 'warn',
+        summary: promptSummary?.commitHash
+          ? `Prompt identifier ${promptIdentifier} exposes commit hash ${promptSummary.commitHash} for rollback-friendly promotion.`
+          : `Prompt identifier ${promptIdentifier} did not expose a commit hash for rollback-friendly prompt promotion.`,
+      });
+    }
   }
 
   if (snapshot.recentRuns.length === 0) {
@@ -1505,6 +1841,28 @@ export async function collectLangSmithGovernanceSnapshot(
       : 'No sampled feedback items were available for governance signal inspection.',
   });
 
+  if (minimumFeedbackCount > 0) {
+    flags.push({
+      key: 'feedback-coverage',
+      status: snapshot.feedback.length >= minimumFeedbackCount ? 'pass' : 'warn',
+      summary: snapshot.feedback.length >= minimumFeedbackCount
+        ? `Feedback coverage requirement met with ${snapshot.feedback.length} item(s) against a minimum of ${minimumFeedbackCount}.`
+        : `Feedback coverage below requirement: ${snapshot.feedback.length} item(s) sampled, minimum is ${minimumFeedbackCount}.`,
+    });
+  }
+
+  if (minimumEvaluationResults > 0 || minimumSuccessfulEvaluations > 0) {
+    const evaluationStatus = evaluationResults >= minimumEvaluationResults
+      && successfulEvaluations >= minimumSuccessfulEvaluations;
+    flags.push({
+      key: 'evaluation-coverage',
+      status: evaluationStatus ? 'pass' : 'warn',
+      summary: evaluationStatus
+        ? `Evaluation coverage requirement met with ${evaluationResults} result(s) across ${successfulEvaluations} successful evaluation run(s).`
+        : `Evaluation coverage below requirement: ${evaluationResults} result(s) and ${successfulEvaluations} successful evaluation run(s) were sampled.`,
+    });
+  }
+
   if (mutations.some((mutation) => mutation.status === 'failed')) {
     flags.push({
       key: 'governance-mutations',
@@ -1518,6 +1876,16 @@ export async function collectLangSmithGovernanceSnapshot(
       summary: `Bounded governance mutation hooks completed with statuses: ${mutations.map((mutation) => `${mutation.key}=${mutation.status}`).join(', ')}.`,
     });
   }
+
+  const actionableFlags = flags.filter((flag) => flag.status !== 'pass');
+  const failedFlags = flags.filter((flag) => flag.status === 'fail');
+  flags.push({
+    key: 'autonomous-governance-readiness',
+    status: failedFlags.length > 0 || (blockOnWarn && actionableFlags.length > 0) ? 'fail' : 'pass',
+    summary: failedFlags.length > 0 || (blockOnWarn && actionableFlags.length > 0)
+      ? `Governance profile blocks autonomous changes with ${failedFlags.length} fail flag(s) and ${actionableFlags.length} actionable flag(s).`
+      : 'Governance profile leaves autonomous changes available under the current sampled LangSmith signals.',
+  });
 
   return {
     counts,
