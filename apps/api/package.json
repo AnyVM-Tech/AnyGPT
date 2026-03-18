@@ -52,7 +52,7 @@
 		"@types/node": "^20.19.35",
 		"@types/ws": "^8.18.1",
 		"@typescript/native-preview": "7.0.0-dev.20260213.1",
-		"concurrently": "^8.2.2",
+		"concurrently": "^9.2.1",
 		"eslint": "^8.57.1",
 		"jest": "^27.5.1",
 		"rimraf": "^5.0.10",
