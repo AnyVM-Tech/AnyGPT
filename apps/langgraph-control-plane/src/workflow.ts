@@ -16,6 +16,7 @@ import {
   AutonomousEditSessionManifestSchema,
   applyAutonomousEditsWithManifest,
   buildAutonomousEditCandidatePaths,
+  checkAutonomousEditPath,
   readAutonomousEditContext,
   rollbackAutonomousEditSession,
 } from './autonomousEdits.js';
@@ -1429,6 +1430,7 @@ const AI_CODE_EDIT_CANDIDATE_FILE_LIMIT = parsePositiveIntegerEnv('CONTROL_PLANE
 const AI_CODE_EDIT_CANDIDATE_PATH_LIMIT = parsePositiveIntegerEnv('CONTROL_PLANE_AI_CANDIDATE_PATH_LIMIT', 10, 4);
 const AI_CODE_EDIT_CANDIDATE_FILE_MAX_CHARS = parsePositiveIntegerEnv('CONTROL_PLANE_AI_CANDIDATE_FILE_MAX_CHARS', 1_400, 400);
 const AI_CODE_EDIT_PAYLOAD_STRING_MAX_CHARS = parsePositiveIntegerEnv('CONTROL_PLANE_AI_CODE_EDIT_MAX_STRING_CHARS', 1_600, 400);
+const CONTROL_PLANE_NOTE_HISTORY_LIMIT = parsePositiveIntegerEnv('CONTROL_PLANE_NOTE_HISTORY_LIMIT', 120, 20);
 const CONTROL_PLANE_TYPECHECK_COMMAND = 'bash ./bun.sh run -F anygpt-langgraph-control-plane typecheck';
 const REPAIR_SMOKE_JOB_LIMIT = 2;
 const REPAIR_SMOKE_TIMEOUT_MS = parsePositiveIntegerEnv('CONTROL_PLANE_REPAIR_SMOKE_TIMEOUT_MS', 120_000, 5_000);
@@ -1676,7 +1678,7 @@ function appendUniqueNotes(existingNotes: string[], additionalNotes: string[]): 
     merged.push(trimmed);
   }
 
-  return merged;
+  return merged.slice(-CONTROL_PLANE_NOTE_HISTORY_LIMIT);
 }
 
 function resolveApprovalDecision(decision: unknown): { approved: boolean; message: string } {
@@ -2507,6 +2509,10 @@ async function callAiCodeEditAgent(
                 ? `You are operating in repair mode with ${repairSignalCount} actionable repair signal(s). Prefer a minimal bounded replace edit whenever a safe fix is possible. When the safest direct repair is still ambiguous but the signals point at a hot path, propose the smallest resilience or observability improvement in that path instead of returning an empty plan. Empty edits are only acceptable when no safe bounded change fits the allowlist or available context, and then the summary must explain why.`
                 : `You are operating in improvement mode with ${improvementSignalCount} improvement signal(s). On experimental scope, default to proposing at least one small hot-path throughput, routing, resilience, or observability improvement that can be validated quickly. Return an empty edits array only when the candidate context is too weak or every plausible change would violate path or safety rules, and then the summary must explain why.`,
               'Prefer the smallest safe replace edit over rewriting entire files.',
+              'If previous failed edits are provided, do not repeat the same stale replace block or reuse the same find string unchanged.',
+              'When a previous replace failed because the target text was not found, refresh the exact current block from the provided candidate file excerpts before proposing another replace edit.',
+              'Use the dedicated failed-edit refresh contexts when present; they contain the current live block for the previously failing file path.',
+              'Only propose replace edits for files that already exist in the provided candidate contexts. Do not invent new replace-target paths.',
               'When the provided signals mention a file family or subsystem, bias the proposal toward the most relevant candidate file instead of returning a no-op.',
               'Only modify explicitly allowed paths and never modify denied paths, secrets, key files, environment files, lockfiles, node_modules, or generated outputs.',
               'If you return an empty edits array, the summary must name the blocking constraint, missing context, or safety reason.',
@@ -2517,7 +2523,7 @@ async function callAiCodeEditAgent(
           {
             role: 'user',
             content: JSON.stringify(compactUnknownForAi(payload, {
-              maxStringChars: AI_CODE_EDIT_PAYLOAD_STRING_MAX_CHARS,
+              maxStringChars: Math.max(AI_CODE_EDIT_PAYLOAD_STRING_MAX_CHARS, AI_CODE_EDIT_CANDIDATE_FILE_MAX_CHARS * 2, 3_200),
               maxArrayItems: Math.max(AI_CODE_EDIT_CANDIDATE_FILE_LIMIT, AI_AGENT_PAYLOAD_ARRAY_LIMIT),
               maxObjectKeys: AI_AGENT_PAYLOAD_OBJECT_KEY_LIMIT,
               maxDepth: 4,
@@ -2778,6 +2784,152 @@ function resolveLogInsights(state: ControlPlaneState): LogInsight[] {
     .map((filePath) => ({ file: path.relative(state.repoRoot, filePath), lines: readTailLines(filePath, DEFAULT_LOG_TAIL_LINE_COUNT) }))
     .filter((entry) => entry.lines.length > 0)
     .map((entry) => LogInsightSchema.parse(entry));
+}
+
+function buildRecentFailedAutonomousEditsPayload(state: ControlPlaneState): Array<Record<string, unknown>> {
+  return state.appliedEdits
+    .filter((edit) => edit.status === 'failed')
+    .slice(-3)
+    .map((edit) => ({
+      type: edit.type,
+      path: edit.path,
+      reason: edit.reason,
+      message: redactSensitiveText(edit.message),
+      find: typeof edit.find === 'string'
+        ? truncateTextMiddle(edit.find, Math.min(1200, AI_CODE_EDIT_CANDIDATE_FILE_MAX_CHARS))
+        : undefined,
+      replace: typeof edit.replace === 'string'
+        ? truncateTextMiddle(edit.replace, Math.min(1200, AI_CODE_EDIT_CANDIDATE_FILE_MAX_CHARS))
+        : undefined,
+      content: typeof (edit as any).content === 'string'
+        ? truncateTextMiddle((edit as any).content, Math.min(1200, AI_CODE_EDIT_CANDIDATE_FILE_MAX_CHARS))
+        : undefined,
+    }));
+}
+
+function extractMeaningfulAnchorLines(text: string, maxCount: number = 4): string[] {
+  return String(text || '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length >= 12)
+    .slice(0, maxCount);
+}
+
+function buildFailedAutonomousEditAnchorHints(state: ControlPlaneState): Record<string, string[]> {
+  const hints: Record<string, string[]> = {};
+  for (const edit of state.appliedEdits.filter((entry) => entry.status === 'failed').slice(-4)) {
+    const normalizedPath = String(edit.path || '').trim();
+    if (!normalizedPath) continue;
+    const nextHints = [
+      ...(hints[normalizedPath] || []),
+      ...(typeof edit.find === 'string' ? extractMeaningfulAnchorLines(edit.find, 4) : []),
+    ];
+    const message = String(edit.message || '');
+    const firstAnchorMatch = message.match(/First anchor fragment:\s*(.+)$/s);
+    if (firstAnchorMatch) {
+      nextHints.push(String(firstAnchorMatch[1] || '').split('\n')[0].trim());
+    }
+    const excerptMatch = message.match(/Closest anchor match around line \d+:\n([\s\S]*)$/);
+    if (excerptMatch) {
+      nextHints.push(...extractMeaningfulAnchorLines(String(excerptMatch[1] || ''), 4));
+    }
+    hints[normalizedPath] = uniqueNormalizedStrings(nextHints).slice(0, 8);
+  }
+  return hints;
+}
+
+function buildFailedAutonomousEditRefreshContexts(
+  state: ControlPlaneState,
+  preferredAnchorsByPath: Record<string, string[]>,
+): Array<{ path: string; content: string; truncated: boolean }> {
+  const failedPaths = Array.from(new Set(
+    state.appliedEdits
+      .filter((edit) => edit.status === 'failed')
+      .map((edit) => String(edit.path || '').trim())
+      .filter(Boolean),
+  ));
+  if (failedPaths.length === 0) return [];
+
+  return readAutonomousEditContext(
+    state.repoRoot,
+    uniqueScopes(state.scopes),
+    state.editAllowlist,
+    state.editDenylist,
+    {
+      maxCharsPerFile: Math.max(12_000, AI_CODE_EDIT_CANDIDATE_FILE_MAX_CHARS * 4),
+      preferredAnchorsByPath,
+      preferredPaths: failedPaths,
+      maxFiles: failedPaths.length,
+    },
+  ).map((file) => ({
+    ...file,
+    content: truncateTextMiddle(file.content, Math.max(AI_CODE_EDIT_CANDIDATE_FILE_MAX_CHARS * 2, 3_200)),
+  }));
+}
+
+function isRepeatedFailedEditProposal(
+  edit: AutonomousEditAction,
+  recentFailedEdits: Array<Record<string, unknown>>,
+): boolean {
+  const normalizedPath = String(edit.path || '').trim();
+  const normalizedType = String(edit.type || '').trim();
+  if (!normalizedPath || !normalizedType) return false;
+
+  return recentFailedEdits.some((failedEdit) => {
+    if (String(failedEdit.path || '').trim() !== normalizedPath) return false;
+    if (String(failedEdit.type || '').trim() !== normalizedType) return false;
+
+    if (normalizedType === 'replace') {
+      return String(failedEdit.find || '').trim() === String(edit.find || '').trim();
+    }
+
+    if (normalizedType === 'write') {
+      return String(failedEdit.content || '').trim() === String((edit as any).content || '').trim();
+    }
+
+    return false;
+  });
+}
+
+function filterInvalidAutonomousEditProposals(
+  state: ControlPlaneState,
+  edits: AutonomousEditAction[],
+  existingCandidatePaths: Set<string>,
+): { accepted: AutonomousEditAction[]; notes: string[] } {
+  const accepted: AutonomousEditAction[] = [];
+  const notes: string[] = [];
+
+  for (const edit of edits) {
+    const check = checkAutonomousEditPath(
+      state.repoRoot,
+      edit.path,
+      state.editAllowlist,
+      state.editDenylist,
+    );
+    if (!check.allowed) {
+      notes.push(`Skipped autonomous edit proposal for ${edit.path}: ${check.reason}`);
+      continue;
+    }
+
+    if (edit.type === 'replace') {
+      if (!existingCandidatePaths.has(check.normalizedPath)) {
+        notes.push(`Skipped autonomous replace proposal for ${check.normalizedPath}: replace edits must target an existing candidate file from the current context.`);
+        continue;
+      }
+      const absolutePath = path.resolve(state.repoRoot, check.normalizedPath);
+      if (!fs.existsSync(absolutePath)) {
+        notes.push(`Skipped autonomous replace proposal for ${check.normalizedPath}: target file does not exist.`);
+        continue;
+      }
+    }
+
+    accepted.push({
+      ...edit,
+      path: check.normalizedPath,
+    });
+  }
+
+  return { accepted, notes };
 }
 
 function buildRedisConnectionUrl(db: string): string {
@@ -3633,12 +3785,19 @@ async function autonomousEditPlannerNode(state: ControlPlaneState): Promise<Part
   }
 
   const candidatePaths = buildAutonomousEditCandidatePaths(uniqueScopes(state.scopes));
+  const failedEditAnchorHints = buildFailedAutonomousEditAnchorHints(state);
+  const recentFailedEdits = buildRecentFailedAutonomousEditsPayload(state);
   const candidateFiles = readAutonomousEditContext(
     state.repoRoot,
     uniqueScopes(state.scopes),
     state.editAllowlist,
     state.editDenylist,
+    {
+      preferredAnchorsByPath: failedEditAnchorHints,
+    },
   );
+  const failedRefreshContexts = buildFailedAutonomousEditRefreshContexts(state, failedEditAnchorHints);
+  const failedPaths = new Set(Object.keys(failedEditAnchorHints));
   const candidatePrioritySources = [
     ...state.repairSignals,
     ...state.improvementSignals,
@@ -3656,6 +3815,7 @@ async function autonomousEditPlannerNode(state: ControlPlaneState): Promise<Part
   const prioritizedCandidateFiles = [...candidateFiles]
     .sort((left, right) => {
       const rank = (candidatePath: string): number => {
+        if (failedPaths.has(candidatePath)) return -10;
         if (referencedCandidatePaths.has(candidatePath)) return 0;
         const hotPathIndex = [
           'apps/api/providers/handler.ts',
@@ -3678,8 +3838,14 @@ async function autonomousEditPlannerNode(state: ControlPlaneState): Promise<Part
     .slice(0, AI_CODE_EDIT_CANDIDATE_FILE_LIMIT)
     .map((file) => ({
       ...file,
-      content: truncateTextMiddle(file.content, AI_CODE_EDIT_CANDIDATE_FILE_MAX_CHARS),
+      content: truncateTextMiddle(
+        file.content,
+        failedPaths.has(file.path)
+          ? Math.max(AI_CODE_EDIT_CANDIDATE_FILE_MAX_CHARS * 2, 3_200)
+          : AI_CODE_EDIT_CANDIDATE_FILE_MAX_CHARS,
+      ),
     }));
+  const existingCandidatePathSet = new Set(prioritizedCandidateFiles.map((file) => file.path));
 
   if (candidateFiles.length === 0) {
     const notes = ['AI autonomous edit agent: no allowed candidate files were available for autonomous code changes.'];
@@ -3721,7 +3887,16 @@ async function autonomousEditPlannerNode(state: ControlPlaneState): Promise<Part
           summary: truncateTextMiddle(state.improvementIntentSummary, AI_AGENT_PAYLOAD_STRING_MAX_CHARS),
           signals: compactStringArrayForAi(state.improvementSignals, AI_AGENT_SIGNAL_PAYLOAD_LIMIT),
         },
-        autonomousCandidatePaths: candidatePaths.slice(0, AI_CODE_EDIT_CANDIDATE_PATH_LIMIT),
+        previousRepairStatus: state.repairStatus,
+        previousRepairDecisionReason: truncateTextMiddle(state.repairDecisionReason, AI_AGENT_PAYLOAD_STRING_MAX_CHARS),
+        previousAutonomousEditNotes: compactStringArrayForAi(
+          state.autonomousEditNotes.filter((note) => /autonomous edit failed|replace target text was not found|matched \d+ times/i.test(note)),
+          8,
+        ),
+        previousFailedEdits: recentFailedEdits,
+        previousFailedEditAnchorHints: failedEditAnchorHints,
+        failedEditRefreshContexts: failedRefreshContexts,
+        autonomousCandidatePaths: Array.from(existingCandidatePathSet).slice(0, AI_CODE_EDIT_CANDIDATE_PATH_LIMIT),
         autonomousCandidateFiles: prioritizedCandidateFiles,
         sharedPayload: buildSharedAiAgentPayload(state),
       });
@@ -3749,9 +3924,19 @@ async function autonomousEditPlannerNode(state: ControlPlaneState): Promise<Part
 
   const dedupedPlannedEdits: AutonomousEditAction[] = [];
   const seenEditPaths = new Set<string>();
-  for (const edit of (deterministicFallbackPlan?.edits || aiEditPlan.edits)) {
+  const filteredPlan = filterInvalidAutonomousEditProposals(
+    state,
+    deterministicFallbackPlan?.edits || aiEditPlan.edits,
+    existingCandidatePathSet,
+  );
+  notes.push(...filteredPlan.notes);
+  for (const edit of filteredPlan.accepted) {
     const normalizedEditPath = String(edit?.path || '').trim();
     if (!normalizedEditPath) continue;
+    if (isRepeatedFailedEditProposal(edit, recentFailedEdits)) {
+      notes.push(`Skipped repeated failed autonomous edit proposal for ${normalizedEditPath}; waiting for a refreshed block proposal.`);
+      continue;
+    }
     if (seenEditPaths.has(normalizedEditPath)) continue;
     seenEditPaths.add(normalizedEditPath);
     dedupedPlannedEdits.push(edit);
@@ -4690,7 +4875,10 @@ export async function createControlPlaneGraph(options: { repoRoot: string; check
   const checkpointPath = resolveControlPlaneCheckpointPath(options.repoRoot, options.checkpointPath);
   const checkpointer = new FileMemorySaver(checkpointPath);
   await checkpointer.setup();
-  return buildControlPlaneGraph(checkpointer);
+  return {
+    graph: buildControlPlaneGraph(checkpointer),
+    checkpointer,
+  };
 }
 
 export const controlPlaneGraph = buildControlPlaneGraph(new MemorySaver());

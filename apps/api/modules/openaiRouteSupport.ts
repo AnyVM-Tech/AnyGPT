@@ -47,6 +47,10 @@ export function getServiceTierForUserTier(userTier?: string): string {
 }
 
 export async function authAndUsageMiddleware(request: Request, response: Response, next: () => void) {
+  if (String(request.path || '').includes('/generated-images/')) {
+    next();
+    return true;
+  }
   logger.debug(`[AuthMiddleware] Request received at ${request.path} with method ${request.method}`);
   logger.debug(`[AuthMiddleware] Authorization header: ${redactAuthorizationHeader(request.headers['authorization'] as string | undefined) || 'None'}`);
   logger.debug(`[AuthMiddleware] x-api-key header: ${redactToken(request.headers['x-api-key'] as string | undefined) || 'None'}`);

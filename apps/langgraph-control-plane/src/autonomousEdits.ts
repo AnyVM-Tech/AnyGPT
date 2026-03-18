@@ -59,6 +59,13 @@ export type AutonomousEditContextFile = {
   truncated: boolean;
 };
 
+export type ReadAutonomousEditContextOptions = {
+  maxCharsPerFile?: number;
+  preferredAnchorsByPath?: Record<string, string[]>;
+  preferredPaths?: string[];
+  maxFiles?: number;
+};
+
 const DEFAULT_AUTONOMOUS_EDIT_ALLOWLIST = [
   'apps/langgraph-control-plane',
   'apps/api',
@@ -104,7 +111,12 @@ const LARGE_FILE_AUTONOMOUS_CONTEXT_ANCHORS: Record<string, string[]> = {
     'buildOpenAIChatPayload',
   ],
   'apps/api/providers/gemini.ts': [
-    'export async function',
+    'function isLikelyFetchableRemoteMediaUrl(',
+    'async function assertGeminiRemoteMediaAccessible(',
+    'function isLikelyUnsupportedRemoteMediaUrl(',
+    'function isGeminiCatalogAuthFailure(',
+    'function getCachedGeminiCatalogAuthFailure(',
+    'private async getModelCatalog(',
     'function mapGemini',
   ],
   'apps/api/providers/handler.ts': [
@@ -162,8 +174,28 @@ function buildHeadTailExcerpt(raw: string, maxCharsPerFile: number): string {
   return `${raw.slice(0, headChars)}${gapMarker}${raw.slice(Math.max(0, raw.length - tailChars))}${suffix}`;
 }
 
-function buildAnchoredExcerpt(raw: string, candidatePath: string, maxCharsPerFile: number): string {
-  const anchors = LARGE_FILE_AUTONOMOUS_CONTEXT_ANCHORS[candidatePath] || [];
+function uniqueAnchors(anchors: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const anchor of anchors) {
+    const trimmed = String(anchor || '').trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    result.push(trimmed);
+  }
+  return result;
+}
+
+function buildAnchoredExcerpt(
+  raw: string,
+  candidatePath: string,
+  maxCharsPerFile: number,
+  preferredAnchors: string[] = [],
+): string {
+  const anchors = uniqueAnchors([
+    ...preferredAnchors,
+    ...(LARGE_FILE_AUTONOMOUS_CONTEXT_ANCHORS[candidatePath] || []),
+  ]);
   if (anchors.length === 0) {
     return buildHeadTailExcerpt(raw, maxCharsPerFile);
   }
@@ -196,9 +228,14 @@ function buildAnchoredExcerpt(raw: string, candidatePath: string, maxCharsPerFil
   return `${excerpts.join('\n\n/* [excerpt gap] */\n\n')}\n\n/* [truncated original_length=${raw.length}] */`;
 }
 
-function buildAutonomousEditContextContent(raw: string, candidatePath: string, maxCharsPerFile: number): string {
+function buildAutonomousEditContextContent(
+  raw: string,
+  candidatePath: string,
+  maxCharsPerFile: number,
+  preferredAnchors: string[] = [],
+): string {
   if (raw.length <= maxCharsPerFile) return raw;
-  return buildAnchoredExcerpt(raw, candidatePath, maxCharsPerFile);
+  return buildAnchoredExcerpt(raw, candidatePath, maxCharsPerFile, preferredAnchors);
 }
 
 function countOccurrences(haystack: string, needle: string): number {
@@ -233,6 +270,202 @@ function buildReplaceFailureDiagnostic(current: string, find: string): string {
   }
 
   return `Replace target text was not found in the file. First anchor fragment: ${anchorLine.slice(0, 160)}`;
+}
+
+function normalizeLineEndings(text: string): string {
+  return String(text || '').replace(/\r\n/g, '\n');
+}
+
+function trimBoundaryBlankLines(lines: string[]): string[] {
+  const trimmed = [...lines];
+  while (trimmed.length > 0 && trimmed[0].trim().length === 0) trimmed.shift();
+  while (trimmed.length > 0 && trimmed[trimmed.length - 1].trim().length === 0) trimmed.pop();
+  return trimmed;
+}
+
+function getCommonIndentLength(lines: string[]): number {
+  const nonEmpty = lines.filter((line) => line.trim().length > 0);
+  if (nonEmpty.length === 0) return 0;
+  return Math.min(...nonEmpty.map((line) => {
+    const match = line.match(/^[ \t]*/);
+    return match ? match[0].length : 0;
+  }));
+}
+
+function dedentLines(lines: string[]): string[] {
+  const commonIndent = getCommonIndentLength(lines);
+  if (commonIndent <= 0) return [...lines];
+  return lines.map((line) => line.trim().length > 0 ? line.slice(commonIndent) : '');
+}
+
+function normalizeLinesForBlockComparison(lines: string[]): string {
+  return dedentLines(trimBoundaryBlankLines(lines))
+    .map((line) => line.replace(/[ \t]+$/g, ''))
+    .join('\n');
+}
+
+function getLineStartOffsets(text: string): number[] {
+  const offsets = [0];
+  for (let index = 0; index < text.length; index += 1) {
+    if (text[index] === '\n') offsets.push(index + 1);
+  }
+  return offsets;
+}
+
+function detectWindowIndent(lines: string[]): string {
+  const firstNonEmpty = lines.find((line) => line.trim().length > 0);
+  const match = firstNonEmpty?.match(/^[ \t]*/);
+  return match ? match[0] : '';
+}
+
+function reindentBlock(text: string, indent: string): string {
+  const dedented = dedentLines(normalizeLineEndings(text).split('\n'));
+  return dedented.map((line) => line.trim().length > 0 ? `${indent}${line}` : line).join('\n');
+}
+
+type ReplaceAnchorCandidate = {
+  text: string;
+  relativeLine: number;
+};
+
+type AnchorFragmentReplaceWindowResult =
+  | { kind: 'unique'; start: number; end: number; indent: string; anchorCount: number }
+  | { kind: 'multiple'; count: number }
+  | { kind: 'none' };
+
+function buildReplaceAnchorCandidates(find: string, maxCount: number = 6): ReplaceAnchorCandidate[] {
+  const findLines = trimBoundaryBlankLines(normalizeLineEndings(find).split('\n'));
+  const candidates = findLines
+    .map((line, relativeLine) => ({
+      text: line.trim(),
+      relativeLine,
+    }))
+    .filter((entry) => entry.text.length > 0);
+
+  if (candidates.length === 0) return [];
+
+  const meaningful = candidates.filter((entry) => entry.text.length >= 12 || /[()[\]{}.:=><'"`]/.test(entry.text));
+  const prioritized = meaningful.length >= 2
+    ? meaningful
+    : [...candidates]
+        .sort((left, right) => right.text.length - left.text.length)
+        .slice(0, Math.min(3, candidates.length))
+        .sort((left, right) => left.relativeLine - right.relativeLine);
+
+  const seen = new Set<string>();
+  const unique: ReplaceAnchorCandidate[] = [];
+  for (const candidate of prioritized) {
+    if (seen.has(candidate.text)) continue;
+    seen.add(candidate.text);
+    unique.push(candidate);
+    if (unique.length >= maxCount) break;
+  }
+
+  return unique;
+}
+
+function findIndentationInsensitiveReplaceWindow(
+  current: string,
+  find: string,
+): { kind: 'unique'; start: number; end: number; indent: string } | { kind: 'multiple'; count: number } | { kind: 'none' } {
+  const currentLines = normalizeLineEndings(current).split('\n');
+  const findLines = trimBoundaryBlankLines(normalizeLineEndings(find).split('\n'));
+  if (findLines.length === 0) return { kind: 'none' };
+
+  const target = normalizeLinesForBlockComparison(findLines);
+  if (!target) return { kind: 'none' };
+
+  const lineOffsets = getLineStartOffsets(current);
+  const matches: Array<{ start: number; end: number; indent: string }> = [];
+  for (let startLine = 0; startLine <= currentLines.length - findLines.length; startLine += 1) {
+    const windowLines = currentLines.slice(startLine, startLine + findLines.length);
+    if (normalizeLinesForBlockComparison(windowLines) !== target) continue;
+    const start = lineOffsets[startLine] ?? 0;
+    const end = startLine + findLines.length < lineOffsets.length
+      ? lineOffsets[startLine + findLines.length]
+      : current.length;
+    matches.push({
+      start,
+      end,
+      indent: detectWindowIndent(windowLines),
+    });
+    if (matches.length > 1) break;
+  }
+
+  if (matches.length === 0) return { kind: 'none' };
+  if (matches.length > 1) return { kind: 'multiple', count: matches.length };
+  return { kind: 'unique', ...matches[0] };
+}
+
+function findAnchorFragmentReplaceWindow(
+  current: string,
+  find: string,
+): AnchorFragmentReplaceWindowResult {
+  const currentLines = normalizeLineEndings(current).split('\n');
+  const findLines = trimBoundaryBlankLines(normalizeLineEndings(find).split('\n'));
+  const anchors = buildReplaceAnchorCandidates(find);
+  if (findLines.length === 0 || anchors.length < 2) return { kind: 'none' };
+
+  const firstAnchor = anchors[0];
+  const lastAnchor = anchors[anchors.length - 1];
+  const searchWindowLineLimit = Math.max(
+    findLines.length + 8,
+    Math.ceil(findLines.length * 2.5),
+    (lastAnchor.relativeLine - firstAnchor.relativeLine) + 4,
+  );
+  const lineOffsets = getLineStartOffsets(current);
+  const matches: Array<{ start: number; end: number; indent: string }> = [];
+
+  for (let startLine = 0; startLine < currentLines.length; startLine += 1) {
+    if (!currentLines[startLine].includes(firstAnchor.text)) continue;
+
+    const expectedStartLine = Math.max(0, startLine - firstAnchor.relativeLine);
+    const searchEndLineExclusive = Math.min(
+      currentLines.length,
+      expectedStartLine + Math.max(findLines.length, searchWindowLineLimit),
+    );
+    const matchedAnchorLines = [startLine];
+    let cursor = startLine + 1;
+    let matched = true;
+
+    for (const anchor of anchors.slice(1)) {
+      let foundLine = -1;
+      for (let lineIndex = cursor; lineIndex < searchEndLineExclusive; lineIndex += 1) {
+        if (currentLines[lineIndex].includes(anchor.text)) {
+          foundLine = lineIndex;
+          break;
+        }
+      }
+      if (foundLine < 0) {
+        matched = false;
+        break;
+      }
+      matchedAnchorLines.push(foundLine);
+      cursor = foundLine + 1;
+    }
+
+    if (!matched) continue;
+
+    const expectedEndLineExclusive = Math.min(
+      currentLines.length,
+      matchedAnchorLines[matchedAnchorLines.length - 1] + (findLines.length - lastAnchor.relativeLine),
+    );
+    const windowLineCount = expectedEndLineExclusive - expectedStartLine;
+    if (windowLineCount < 1) continue;
+    if (windowLineCount > Math.max(findLines.length * 4, findLines.length + 20)) continue;
+
+    const start = lineOffsets[expectedStartLine] ?? 0;
+    const end = expectedEndLineExclusive < lineOffsets.length
+      ? lineOffsets[expectedEndLineExclusive]
+      : current.length;
+    const indent = detectWindowIndent(currentLines.slice(expectedStartLine, expectedEndLineExclusive));
+    matches.push({ start, end, indent });
+    if (matches.length > 1) break;
+  }
+
+  if (matches.length === 0) return { kind: 'none' };
+  if (matches.length > 1) return { kind: 'multiple', count: matches.length };
+  return { kind: 'unique', ...matches[0], anchorCount: anchors.length };
 }
 
 export function resolveAutonomousEditAllowlist(value?: string): string[] {
@@ -324,13 +557,25 @@ export function readAutonomousEditContext(
   scopes: string[],
   allowlist: string[],
   denylist: string[],
-  maxCharsPerFile: number = 12000,
+  options: ReadAutonomousEditContextOptions = {},
 ): AutonomousEditContextFile[] {
+  const maxCharsPerFile = options.maxCharsPerFile ?? 12000;
+  const preferredAnchorsByPath = options.preferredAnchorsByPath || {};
+  const preferredPaths = (options.preferredPaths || [])
+    .map((entry) => normalizeRepoRelativePath(entry))
+    .filter(Boolean);
+  const maxFiles = typeof options.maxFiles === 'number' && Number.isFinite(options.maxFiles)
+    ? Math.max(1, Math.floor(options.maxFiles))
+    : Number.POSITIVE_INFINITY;
   const files: AutonomousEditContextFile[] = [];
+  const candidatePaths = preferredPaths.length > 0
+    ? Array.from(new Set([...preferredPaths, ...buildAutonomousEditCandidatePaths(scopes)]))
+    : buildAutonomousEditCandidatePaths(scopes);
 
-  for (const candidatePath of buildAutonomousEditCandidatePaths(scopes)) {
+  for (const candidatePath of candidatePaths) {
     const check = checkAutonomousEditPath(repoRoot, candidatePath, allowlist, denylist);
     if (!check.allowed) continue;
+    if (preferredPaths.length > 0 && !preferredPaths.includes(check.normalizedPath)) continue;
 
     const absolutePath = path.resolve(repoRoot, check.normalizedPath);
     if (!fs.existsSync(absolutePath)) continue;
@@ -340,9 +585,15 @@ export function readAutonomousEditContext(
       const truncated = raw.length > maxCharsPerFile;
       files.push({
         path: check.normalizedPath,
-        content: buildAutonomousEditContextContent(raw, check.normalizedPath, maxCharsPerFile),
+        content: buildAutonomousEditContextContent(
+          raw,
+          check.normalizedPath,
+          maxCharsPerFile,
+          preferredAnchorsByPath[check.normalizedPath] || [],
+        ),
         truncated,
       });
+      if (files.length >= maxFiles) break;
     } catch {
       continue;
     }
@@ -380,6 +631,66 @@ function captureTouchedFileSnapshot(repoRoot: string, normalizedPath: string): A
   });
 }
 
+function buildNormalizedFailedEdit(action: AutonomousEditAction, normalizedPath: string, message: string): AppliedAutonomousEdit {
+  return AppliedAutonomousEditSchema.parse({
+    ...action,
+    path: normalizedPath || normalizeRepoRelativePath(action.path),
+    status: 'failed',
+    message,
+  });
+}
+
+function preflightAutonomousEditAction(
+  repoRoot: string,
+  action: AutonomousEditAction,
+  allowlist: string[],
+  denylist: string[],
+): AppliedAutonomousEdit | null {
+  const check = checkAutonomousEditPath(repoRoot, action.path, allowlist, denylist);
+  if (!check.allowed) {
+    return buildNormalizedFailedEdit(action, check.normalizedPath, check.reason);
+  }
+
+  const absolutePath = path.resolve(repoRoot, check.normalizedPath);
+  if (action.type === 'replace') {
+    const find = typeof action.find === 'string' ? action.find : '';
+    if (!find) {
+      return buildNormalizedFailedEdit(action, check.normalizedPath, 'Replace action is missing a find string.');
+    }
+    if (!fs.existsSync(absolutePath)) {
+      return buildNormalizedFailedEdit(action, check.normalizedPath, 'Replace target file does not exist.');
+    }
+
+    const current = fs.readFileSync(absolutePath, 'utf8');
+    const matchCount = countOccurrences(current, find);
+    if (matchCount > 1) {
+      return buildNormalizedFailedEdit(action, check.normalizedPath, `Replace target text matched ${matchCount} times in the file; provide a more specific anchored block.`);
+    }
+    if (matchCount === 0) {
+      const indentationInsensitiveMatch = findIndentationInsensitiveReplaceWindow(current, find);
+      if (indentationInsensitiveMatch.kind === 'multiple') {
+        return buildNormalizedFailedEdit(action, check.normalizedPath, `Replace target text was not found exactly and indentation-insensitive matching found ${indentationInsensitiveMatch.count} candidate blocks; provide a more specific anchored block.`);
+      }
+      if (indentationInsensitiveMatch.kind === 'none') {
+        const anchorFragmentMatch = findAnchorFragmentReplaceWindow(current, find);
+        if (anchorFragmentMatch.kind === 'multiple') {
+          return buildNormalizedFailedEdit(action, check.normalizedPath, `Replace target text was not found exactly and anchor-fragment matching found ${anchorFragmentMatch.count} candidate blocks; provide a more specific anchored block.`);
+        }
+        if (anchorFragmentMatch.kind === 'none') {
+          return buildNormalizedFailedEdit(action, check.normalizedPath, buildReplaceFailureDiagnostic(current, find));
+        }
+      }
+    }
+    return null;
+  }
+
+  const content = typeof action.content === 'string' ? action.content : '';
+  if (!content) {
+    return buildNormalizedFailedEdit(action, check.normalizedPath, 'Write action is missing content.');
+  }
+  return null;
+}
+
 export function applyAutonomousEditsWithManifest(
   repoRoot: string,
   actions: AutonomousEditAction[],
@@ -390,6 +701,31 @@ export function applyAutonomousEditsWithManifest(
   const requestedActions = actions.map((action) => AutonomousEditActionSchema.parse(action));
   const manifest = buildAutonomousEditSessionManifest(requestedActions);
   const touchedFiles = new Map<string, AutonomousEditTouchedFile>();
+  const preflightFailures = requestedActions
+    .map((action) => preflightAutonomousEditAction(repoRoot, action, allowlist, denylist))
+    .filter((result): result is AppliedAutonomousEdit => Boolean(result));
+
+  if (preflightFailures.length > 0) {
+    const failedPaths = new Set(preflightFailures.map((edit) => String(edit.path || '').trim()).filter(Boolean));
+    const skipped = requestedActions
+      .filter((action) => !failedPaths.has(normalizeRepoRelativePath(action.path)))
+      .map((action) => AppliedAutonomousEditSchema.parse({
+        ...action,
+        path: normalizeRepoRelativePath(action.path),
+        status: 'skipped',
+        message: 'Autonomous edit batch was not applied because another edit failed preflight validation.',
+      }));
+
+    return {
+      appliedEdits: [...preflightFailures, ...skipped],
+      sessionManifest: AutonomousEditSessionManifestSchema.parse({
+        ...manifest,
+        appliedEdits: [...preflightFailures, ...skipped],
+        touchedFiles: [],
+        rollbackStatus: 'not-required',
+      }),
+    };
+  }
 
   for (const action of requestedActions) {
     const check = checkAutonomousEditPath(repoRoot, action.path, allowlist, denylist);
@@ -431,12 +767,80 @@ export function applyAutonomousEditsWithManifest(
         const current = fs.readFileSync(absolutePath, 'utf8');
         const matchCount = countOccurrences(current, find);
         if (matchCount === 0) {
+          const indentationInsensitiveMatch = findIndentationInsensitiveReplaceWindow(current, find);
+          if (indentationInsensitiveMatch.kind === 'multiple') {
+            results.push(AppliedAutonomousEditSchema.parse({
+              ...action,
+              path: check.normalizedPath,
+              status: 'failed',
+              message: `Replace target text was not found exactly and indentation-insensitive matching found ${indentationInsensitiveMatch.count} candidate blocks; provide a more specific anchored block.`,
+            }));
+            continue;
+          }
+
+          if (indentationInsensitiveMatch.kind === 'unique') {
+            const replacement = reindentBlock(replace, indentationInsensitiveMatch.indent);
+            const next = `${current.slice(0, indentationInsensitiveMatch.start)}${replacement}${current.slice(indentationInsensitiveMatch.end)}`;
+            if (next === current) {
+              results.push(AppliedAutonomousEditSchema.parse({
+                ...action,
+                path: check.normalizedPath,
+                status: 'skipped',
+                message: 'No content change was produced by the indentation-insensitive replace action.',
+              }));
+              continue;
+            }
+
+            if (!touchedFiles.has(check.normalizedPath)) {
+              touchedFiles.set(check.normalizedPath, captureTouchedFileSnapshot(repoRoot, check.normalizedPath));
+            }
+            fs.writeFileSync(absolutePath, next, 'utf8');
+            results.push(AppliedAutonomousEditSchema.parse({
+              ...action,
+              path: check.normalizedPath,
+              status: 'applied',
+              message: 'Replace action applied successfully using indentation-insensitive block matching.',
+            }));
+            continue;
+          }
+
           results.push(AppliedAutonomousEditSchema.parse({
             ...action,
             path: check.normalizedPath,
             status: 'failed',
             message: buildReplaceFailureDiagnostic(current, find),
           }));
+          const anchorFragmentMatch = findAnchorFragmentReplaceWindow(current, find);
+          if (anchorFragmentMatch.kind === 'multiple') {
+            results[results.length - 1] = AppliedAutonomousEditSchema.parse({
+              ...action,
+              path: check.normalizedPath,
+              status: 'failed',
+              message: `Replace target text was not found exactly and anchor-fragment matching found ${anchorFragmentMatch.count} candidate blocks; provide a more specific anchored block.`,
+            });
+          } else if (anchorFragmentMatch.kind === 'unique') {
+            const replacement = reindentBlock(replace, anchorFragmentMatch.indent);
+            const next = `${current.slice(0, anchorFragmentMatch.start)}${replacement}${current.slice(anchorFragmentMatch.end)}`;
+            if (next === current) {
+              results[results.length - 1] = AppliedAutonomousEditSchema.parse({
+                ...action,
+                path: check.normalizedPath,
+                status: 'skipped',
+                message: 'No content change was produced by the anchor-fragment replace action.',
+              });
+            } else {
+              if (!touchedFiles.has(check.normalizedPath)) {
+                touchedFiles.set(check.normalizedPath, captureTouchedFileSnapshot(repoRoot, check.normalizedPath));
+              }
+              fs.writeFileSync(absolutePath, next, 'utf8');
+              results[results.length - 1] = AppliedAutonomousEditSchema.parse({
+                ...action,
+                path: check.normalizedPath,
+                status: 'applied',
+                message: `Replace action applied successfully using anchor-fragment block matching (${anchorFragmentMatch.anchorCount} anchor lines).`,
+              });
+            }
+          }
           continue;
         }
 

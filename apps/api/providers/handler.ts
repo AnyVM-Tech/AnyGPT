@@ -38,6 +38,7 @@ import { isExcludedError } from '../modules/errorExclusion.js';
 import redis from '../modules/db.js';
 import { hashToken } from '../modules/redaction.js';
 import { logUniqueProviderError } from '../modules/errorLogger.js';
+import { logMemoryProfile } from '../modules/requestIntake.js';
 import {
     readEnvNumber,
     type TokenBreakdown,
@@ -2118,6 +2119,15 @@ export class MessageHandler {
             if (!shouldRetryAfterCooldown) {
                 break;
             }
+            const cooldownWaitStartedAt = Date.now();
+            logMemoryProfile('provider-cooldown-wait:start', {
+                requestId,
+                modelId,
+                stream: false,
+                cooldownMs: nextCooldownMs,
+                earlyWakeMs: nextCooldownEarlyWakeMs,
+                requestAgeMs: cooldownWaitStartedAt - requestStartTime,
+            });
             const waited = await waitForCooldownOrDeadline(
                 nextCooldownMs,
                 requestStartTime,
@@ -2125,6 +2135,16 @@ export class MessageHandler {
                 true,
                 nextCooldownEarlyWakeMs
             );
+            logMemoryProfile('provider-cooldown-wait:end', {
+                requestId,
+                modelId,
+                stream: false,
+                cooldownMs: nextCooldownMs,
+                earlyWakeMs: nextCooldownEarlyWakeMs,
+                waited,
+                waitElapsedMs: Date.now() - cooldownWaitStartedAt,
+                requestAgeMs: Date.now() - requestStartTime,
+            });
             if (!waited) break;
             if (shouldReuseProviderOrder) {
                 triedProviderIds.clear();
@@ -2593,6 +2613,15 @@ export class MessageHandler {
             if (!shouldRetryAfterCooldown) {
                 break;
             }
+            const cooldownWaitStartedAt = Date.now();
+            logMemoryProfile('provider-cooldown-wait:start', {
+                requestId: options?.requestId,
+                modelId,
+                stream: true,
+                cooldownMs: nextCooldownMs,
+                earlyWakeMs: nextCooldownEarlyWakeMs,
+                requestAgeMs: cooldownWaitStartedAt - requestStartTime,
+            });
             const waited = await waitForCooldownOrDeadline(
                 nextCooldownMs,
                 requestStartTime,
@@ -2600,6 +2629,16 @@ export class MessageHandler {
                 true,
                 nextCooldownEarlyWakeMs
             );
+            logMemoryProfile('provider-cooldown-wait:end', {
+                requestId: options?.requestId,
+                modelId,
+                stream: true,
+                cooldownMs: nextCooldownMs,
+                earlyWakeMs: nextCooldownEarlyWakeMs,
+                waited,
+                waitElapsedMs: Date.now() - cooldownWaitStartedAt,
+                requestAgeMs: Date.now() - requestStartTime,
+            });
             if (!waited) break;
             if (shouldReuseProviderOrder) {
                 triedProviderIds.clear();

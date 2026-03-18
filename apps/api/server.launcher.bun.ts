@@ -1,4 +1,6 @@
 import { fileURLToPath } from 'node:url';
+import { pathToFileURL } from 'node:url';
+import fs from 'node:fs';
 import path from 'node:path';
 
 declare const Bun: any;
@@ -32,9 +34,14 @@ const SHUTDOWN_TIMEOUT_MS = (() => {
 })();
 const PORT_STRIDE = Math.max(0, Number(process.env.CLUSTER_PORT_STRIDE || 0));
 const BASE_PORT = Number(process.env.PORT || 3000) || 3000;
-const SCRIPT_PATH = fileURLToPath(new URL('./server.bun.ts', import.meta.url));
-const SERVER_MODULE_URL = new URL('./server.bun.ts', import.meta.url).href;
-const SCRIPT_DIR = path.dirname(SCRIPT_PATH);
+const SOURCE_SCRIPT_PATH = fileURLToPath(new URL('./server.bun.ts', import.meta.url));
+const SCRIPT_DIR = path.dirname(SOURCE_SCRIPT_PATH);
+const DIST_DIR = String(process.env.API_DIST_DIR || '').trim();
+const DIST_SERVER_PATH = DIST_DIR ? path.resolve(SCRIPT_DIR, DIST_DIR, 'server.js') : '';
+const SCRIPT_PATH = DIST_SERVER_PATH && fs.existsSync(DIST_SERVER_PATH)
+  ? DIST_SERVER_PATH
+  : SOURCE_SCRIPT_PATH;
+const SERVER_MODULE_URL = pathToFileURL(SCRIPT_PATH).href;
 const BUN_BIN = process.execPath;
 
 type WorkerProcess = any;

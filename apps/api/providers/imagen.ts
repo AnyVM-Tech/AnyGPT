@@ -156,11 +156,18 @@ export class ImagenAI implements IAIProvider {
   }
 
   private pickImageGenerateContentModel(catalog: ModelCatalogItem[]): string | null {
-    const preferred = catalog.find((m) => m.id.toLowerCase().includes('flash-image') && m.supportedMethods.has('generatecontent'));
-    if (preferred) return preferred.id;
+    const requested = this.modelId.toLowerCase();
+    const direct = catalog.find((m) => m.id.toLowerCase() === requested && m.supportedMethods.has('generatecontent'));
+    if (direct) return direct.id;
+
+    const requestedFamily = catalog.find((m) => m.id.toLowerCase().startsWith(requested) && m.supportedMethods.has('generatecontent'));
+    if (requestedFamily) return requestedFamily.id;
 
     const nanoBanana = catalog.find((m) => m.id.toLowerCase().includes('nano-banana') && m.supportedMethods.has('generatecontent'));
     if (nanoBanana) return nanoBanana.id;
+
+    const preferred = catalog.find((m) => m.id.toLowerCase().includes('flash-image') && m.supportedMethods.has('generatecontent'));
+    if (preferred) return preferred.id;
 
     const genericImageModel = catalog.find((m) => m.id.toLowerCase().includes('image') && m.supportedMethods.has('generatecontent'));
     if (genericImageModel) return genericImageModel.id;

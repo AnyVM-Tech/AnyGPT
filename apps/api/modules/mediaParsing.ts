@@ -56,8 +56,8 @@ export function isLikelyBase64(buffer: Buffer): boolean {
   return true;
 }
 
-export function parseMultipartBody(buffer: Buffer, boundary: string): { fields: Record<string, string>; files: { name: string; type: string; data: Buffer }[] } {
-  const result = { fields: {} as Record<string, string>, files: [] as { name: string; type: string; data: Buffer }[] };
+export function parseMultipartBody(buffer: Buffer, boundary: string): { fields: Record<string, string>; files: { fieldName: string; name: string; type: string; data: Buffer }[] } {
+  const result = { fields: {} as Record<string, string>, files: [] as { fieldName: string; name: string; type: string; data: Buffer }[] };
   const delimiter = Buffer.from(`--${boundary}`);
   let start = 0;
 
@@ -107,6 +107,7 @@ export function parseMultipartBody(buffer: Buffer, boundary: string): { fields: 
         }
 
         result.files.push({
+          fieldName: nameMatch ? nameMatch[1] : '',
           name: filenameMatch[1],
           type: contentType,
           data: fileData,

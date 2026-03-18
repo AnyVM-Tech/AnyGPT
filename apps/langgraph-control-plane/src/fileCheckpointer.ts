@@ -16,6 +16,24 @@ type PersistedMemorySnapshot = {
   writes: PersistedWrites;
 };
 
+const FILE_CHECKPOINTER_MAX_THREADS = (() => {
+  const raw = Number(process.env.CONTROL_PLANE_MAX_CHECKPOINT_THREADS ?? 8);
+  if (!Number.isFinite(raw) || raw < 1) return 8;
+  return Math.max(1, Math.floor(raw));
+})();
+
+const FILE_CHECKPOINTER_MAX_CHECKPOINTS_PER_NAMESPACE = (() => {
+  const raw = Number(process.env.CONTROL_PLANE_MAX_CHECKPOINTS_PER_NAMESPACE ?? 12);
+  if (!Number.isFinite(raw) || raw < 1) return 12;
+  return Math.max(1, Math.floor(raw));
+})();
+
+const FILE_CHECKPOINTER_MAX_WRITE_GROUPS = (() => {
+  const raw = Number(process.env.CONTROL_PLANE_MAX_CHECKPOINT_WRITE_GROUPS ?? 256);
+  if (!Number.isFinite(raw) || raw < 1) return 256;
+  return Math.max(1, Math.floor(raw));
+})();
+
 function encodeBytes(value: Uint8Array): string {
   return Buffer.from(value).toString('base64');
 }
@@ -90,6 +108,49 @@ function restoreWrites(writes: PersistedWrites | undefined): InMemoryWrites {
   );
 }
 
+function readCheckpointTimestamp(value: Uint8Array): number {
+  try {
+    const parsed = JSON.parse(Buffer.from(value).toString('utf8')) as { ts?: string };
+    const timestamp = Date.parse(String(parsed?.ts || ''));
+    return Number.isFinite(timestamp) ? timestamp : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function compactStorage(storage: InMemoryStorage): InMemoryStorage {
+  const threadEntries = Object.entries(storage || {}).map(([threadId, namespaces]) => {
+    const compactedNamespaces = Object.fromEntries(
+      Object.entries(namespaces || {}).map(([namespace, checkpoints]) => {
+        const sortedCheckpoints = Object.entries(checkpoints || {})
+          .sort((left, right) => readCheckpointTimestamp(right[1][0]) - readCheckpointTimestamp(left[1][0]))
+          .slice(0, FILE_CHECKPOINTER_MAX_CHECKPOINTS_PER_NAMESPACE);
+        return [namespace, Object.fromEntries(sortedCheckpoints)];
+      }),
+    );
+    const latestTimestamp = Object.values(compactedNamespaces).reduce((maxTimestamp, checkpoints) => {
+      for (const entry of Object.values(checkpoints || {})) {
+        maxTimestamp = Math.max(maxTimestamp, readCheckpointTimestamp(entry[0]));
+      }
+      return maxTimestamp;
+    }, 0);
+    return [threadId, compactedNamespaces, latestTimestamp] as const;
+  });
+
+  return Object.fromEntries(
+    threadEntries
+      .sort((left, right) => right[2] - left[2])
+      .slice(0, FILE_CHECKPOINTER_MAX_THREADS)
+      .map(([threadId, namespaces]) => [threadId, namespaces]),
+  );
+}
+
+function compactWrites(writes: InMemoryWrites): InMemoryWrites {
+  const entries = Object.entries(writes || {});
+  if (entries.length <= FILE_CHECKPOINTER_MAX_WRITE_GROUPS) return writes;
+  return Object.fromEntries(entries.slice(-FILE_CHECKPOINTER_MAX_WRITE_GROUPS));
+}
+
 export class FileMemorySaver extends MemorySaver {
   readonly filePath: string;
   private loaded = false;
@@ -117,6 +178,8 @@ export class FileMemorySaver extends MemorySaver {
   }
 
   private buildSnapshot(): PersistedMemorySnapshot {
+    this.storage = compactStorage(this.storage as InMemoryStorage);
+    this.writes = compactWrites(this.writes as InMemoryWrites);
     return {
       version: 1,
       storage: serializeStorage(this.storage as InMemoryStorage),
@@ -127,7 +190,7 @@ export class FileMemorySaver extends MemorySaver {
   private async persist(): Promise<void> {
     fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
     const tempPath = `${this.filePath}.tmp`;
-    fs.writeFileSync(tempPath, JSON.stringify(this.buildSnapshot(), null, 2), 'utf8');
+    fs.writeFileSync(tempPath, JSON.stringify(this.buildSnapshot()), 'utf8');
     fs.renameSync(tempPath, this.filePath);
   }
 
@@ -137,11 +200,10 @@ export class FileMemorySaver extends MemorySaver {
     const snapshot = this.readSnapshot();
     this.storage = restoreStorage(snapshot?.storage);
     this.writes = restoreWrites(snapshot?.writes);
+    this.storage = compactStorage(this.storage as InMemoryStorage);
+    this.writes = compactWrites(this.writes as InMemoryWrites);
     this.loaded = true;
-
-    if (!snapshot) {
-      await this.persist();
-    }
+    await this.persist();
   }
 
   async getTuple(config: any): Promise<any> {

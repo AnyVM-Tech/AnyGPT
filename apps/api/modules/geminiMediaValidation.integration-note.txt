@@ -1,0 +1,4 @@
+Intended integration point:
+- In the /v1/chat/completions request path, before provider selection/execution for Gemini-routed requests, call validateGeminiRemoteMediaRequest(requestBody).
+- If it returns a result, throw/return a 400 using that exact shape in errorDetails.
+- This avoids queue churn and futile provider retries for Gemini remote media URL fetch failures.

@@ -7,7 +7,9 @@ Type=simple
 WorkingDirectory=/home/skullcmd/AnyGPT/apps/api
 Environment=NODE_ENV=production
 Environment=API_DIST_DIR=dist/production
-Environment=CLUSTER_WORKERS=2
+Environment=PORT=3000
+Environment=CLUSTER_WORKERS=1
+Environment=PORT_RETRY_COUNT=0
 ExecStartPre=/usr/bin/bash -lc '/home/skullcmd/.bun/bin/bun run build'
 ExecStart=/usr/bin/bash -lc '/home/skullcmd/.bun/bin/bun run start'
 Restart=always

@@ -1,3 +1,44 @@
+import { rewriteGeneratedImageContent } from './generatedImageStore.js';
+
+const SORA_VIDEO_DEFAULTS: Record<string, { providerModelId: string; defaultSize?: string }> = {
+  sora: { providerModelId: 'sora-2', defaultSize: '1280x720' },
+  'sora-2': { providerModelId: 'sora-2', defaultSize: '1280x720' },
+  'sora-2l': { providerModelId: 'sora-2', defaultSize: '1280x720' },
+  'sora-2p': { providerModelId: 'sora-2', defaultSize: '720x1280' },
+  'sora-2-pro': { providerModelId: 'sora-2-pro', defaultSize: '1792x1024' },
+  'sora-2l-pro': { providerModelId: 'sora-2-pro', defaultSize: '1792x1024' },
+  'sora-2p-pro': { providerModelId: 'sora-2-pro', defaultSize: '1024x1792' },
+};
+
+function collectModelIdCandidates(modelId: string): string[] {
+  const normalized = String(modelId || '').toLowerCase().trim();
+  if (!normalized) return [];
+
+  const candidates = new Set<string>([normalized]);
+  const slashTail = normalized.includes('/') ? normalized.slice(normalized.lastIndexOf('/') + 1) : normalized;
+  candidates.add(slashTail);
+
+  const dotTail = normalized.includes('.') ? normalized.slice(normalized.lastIndexOf('.') + 1) : normalized;
+  if (dotTail.startsWith('sora')) {
+    candidates.add(dotTail);
+  }
+
+  return Array.from(candidates);
+}
+
+export function resolveSoraVideoModelId(modelId: string): { providerModelId: string; defaultSize?: string } | null {
+  for (const candidate of collectModelIdCandidates(modelId)) {
+    const mapped = SORA_VIDEO_DEFAULTS[candidate];
+    if (mapped) {
+      return { ...mapped };
+    }
+    if (candidate.startsWith('sora')) {
+      return { providerModelId: candidate };
+    }
+  }
+  return null;
+}
+
 export function isImageModelId(modelId: string): boolean {
   const normalized = String(modelId || '').toLowerCase();
   if (!normalized) return false;
@@ -8,6 +49,21 @@ export function isImageModelId(modelId: string): boolean {
 export function isNanoBananaModel(modelId: string): boolean {
   const normalized = String(modelId || '').toLowerCase();
   return normalized.includes('nano-banana');
+}
+
+export function isGptImageModelId(modelId: string): boolean {
+  const normalized = String(modelId || '').toLowerCase();
+  return normalized.startsWith('gpt-image')
+    || normalized.includes('gpt-image')
+    || normalized.includes('chatgpt-image');
+}
+
+export function isSoraVideoModelId(modelId: string): boolean {
+  const normalized = String(modelId || '').toLowerCase();
+  return Boolean(resolveSoraVideoModelId(modelId))
+    || normalized.startsWith('veo-')
+    || normalized.includes('grok-imagine-video')
+    || normalized.includes('imagine-video');
 }
 
 export function ensureNanoBananaModalities(modalities: any): string[] {
@@ -23,12 +79,10 @@ export function isNonChatModel(modelId: string): 'tts' | 'stt' | 'image-gen' | '
   const n = String(modelId || '').toLowerCase();
   if (n.startsWith('tts-') || n.includes('-tts')) return 'tts';
   if (n.startsWith('whisper') || n.includes('transcribe')) return 'stt';
-  if (n.includes('grok-imagine-video') || n.includes('imagine-video')) return 'video-gen';
+  if (isSoraVideoModelId(n)) return 'video-gen';
   if (
     n.startsWith('dall-e') ||
-    n.startsWith('gpt-image') ||
-    n.includes('gpt-image') ||
-    n.includes('chatgpt-image') ||
+    isGptImageModelId(n) ||
     n.includes('image-gen') ||
     n.includes('imagegen') ||
     n.startsWith('imagen') ||
@@ -41,10 +95,11 @@ export function isNonChatModel(modelId: string): 'tts' | 'stt' | 'image-gen' | '
   return false;
 }
 
-export function formatAssistantContent(raw: string): string {
+export function formatAssistantContent(raw: string, headers?: Record<string, string>): string {
   if (typeof raw !== 'string') return '';
-  if (raw.startsWith('data:image/')) {
-    return `![generated image](${raw})`;
+  const rewrittenImageContent = rewriteGeneratedImageContent(raw, headers);
+  if (rewrittenImageContent !== raw) {
+    return rewrittenImageContent;
   }
   const trimmed = raw.trim();
   if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
@@ -80,8 +135,8 @@ export function formatReasoningBlock(raw: string | undefined): string {
   return `<think>${trimmed}</think>`;
 }
 
-export function composeAssistantContent(rawResponse: string, rawReasoning?: string): string {
-  const response = formatAssistantContent(rawResponse);
+export function composeAssistantContent(rawResponse: string, rawReasoning?: string, headers?: Record<string, string>): string {
+  const response = formatAssistantContent(rawResponse, headers);
   const reasoningBlock = formatReasoningBlock(rawReasoning);
   if (!reasoningBlock) return response;
   if (!response) return reasoningBlock;

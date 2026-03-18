@@ -2,6 +2,7 @@ import { dataManager, LoadedProviders, ModelsFileStructure } from './dataManager
 import { notifyNewModelsDiscovered } from './adminKeySync.js';
 import * as fs from 'fs';
 import * as path from 'path';
+import { isNonChatModel } from './openaiRouteUtils.js';
 
 // --- Dynamic Pricing ---
 // Loads base pricing from pricing.json and adjusts based on provider count
@@ -47,6 +48,7 @@ function extractTokenSpeed(modelData: any): number | null {
 }
 
 let basePricingCache: Record<string, BasePricing> | null = null;
+let supplementalPricingCache: Record<string, BasePricing> | null = null;
 let competitorMultsCache: Record<string, number> | null = null;
 
 type CapabilitiesCache = Record<string, string[]>;
@@ -58,7 +60,11 @@ type ProbeTestedFile = {
     capability_skips?: Record<string, Record<string, string>>;
 };
 
+type PricingCache = Record<string, Record<string, any>>;
+
 const CAPABILITY_ORDER = ['text', 'image_input', 'image_output', 'audio_input', 'audio_output', 'tool_calling'] as const;
+const PRICING_CACHE_PATH = path.resolve('logs', 'model-pricing.json');
+const ROUTER_MODELS_PRICING_PATH = path.resolve('dev', 'routermodels.json');
 
 function normalizeCapabilities(caps: Iterable<string>): string[] {
     const unique = new Set<string>();
@@ -77,6 +83,29 @@ function normalizeCapabilities(caps: Iterable<string>): string[] {
 function inferCapabilitiesFromStoredResults(entry?: Record<string, string>): string[] {
     if (!entry) return [];
     return CAPABILITY_ORDER.filter((cap) => typeof entry[cap] === 'string' && entry[cap]!.toLowerCase().startsWith('ok'));
+}
+
+function shouldCountProviderModel(modelId: string, modelData: any): boolean {
+    if (!modelData || typeof modelData !== 'object') return false;
+    if (modelData.disabled === true) return false;
+
+    const skips = modelData.capability_skips && typeof modelData.capability_skips === 'object'
+        ? modelData.capability_skips as Record<string, string>
+        : {};
+    const nonChatType = isNonChatModel(modelId);
+    if (nonChatType === 'image-gen' && typeof skips.image_output === 'string' && skips.image_output.trim()) {
+        return false;
+    }
+    if (nonChatType === 'video-gen' && typeof skips.image_output === 'string' && skips.image_output.trim()) {
+        return false;
+    }
+    if (nonChatType === 'tts' && typeof skips.audio_output === 'string' && skips.audio_output.trim()) {
+        return false;
+    }
+    if (nonChatType === 'stt' && typeof skips.audio_input === 'string' && skips.audio_input.trim()) {
+        return false;
+    }
+    return true;
 }
 
 function getRememberedCapabilities(
@@ -155,10 +184,98 @@ function loadBasePricing(): Record<string, BasePricing> {
     try {
         const raw = fs.readFileSync(path.resolve('pricing.json'), 'utf8');
         const parsed = JSON.parse(raw);
-        basePricingCache = parsed.models || {};
+        basePricingCache = {
+            ...loadSupplementalRouterPricing(),
+            ...(parsed.models || {}),
+        };
         return basePricingCache!;
     } catch {
+        return loadSupplementalRouterPricing();
+    }
+}
+
+function normalizeRouterPricing(entry: any): BasePricing | null {
+    if (!entry || typeof entry !== 'object') return null;
+    const prompt = Number.parseFloat(String(entry.prompt ?? '0'));
+    const completion = Number.parseFloat(String(entry.completion ?? '0'));
+    const image = Number.parseFloat(String(entry.image ?? '0'));
+    const request = Number.parseFloat(String(entry.request ?? '0'));
+    const MARKUP = 0.95;
+
+    if (!(prompt > 0 || completion > 0 || image > 0 || request > 0)) {
+        return null;
+    }
+
+    const normalized: BasePricing = {
+        input: Number.isFinite(prompt) && prompt > 0 ? Number.parseFloat((prompt * 1e6 * MARKUP).toFixed(6)) : 0,
+        output: Number.isFinite(completion) && completion > 0 ? Number.parseFloat((completion * 1e6 * MARKUP).toFixed(6)) : 0,
+    };
+    if (Number.isFinite(image) && image > 0) {
+        normalized.per_image = Number.parseFloat((image * MARKUP).toFixed(8));
+    }
+    if (Number.isFinite(request) && request > 0) {
+        normalized.per_request = Number.parseFloat((request * MARKUP).toFixed(8));
+    }
+    return normalized;
+}
+
+function loadSupplementalRouterPricing(): Record<string, BasePricing> {
+    if (supplementalPricingCache) return supplementalPricingCache;
+    const next: Record<string, BasePricing> = {};
+    try {
+        if (!fs.existsSync(ROUTER_MODELS_PRICING_PATH)) {
+            supplementalPricingCache = next;
+            return next;
+        }
+        const raw = fs.readFileSync(ROUTER_MODELS_PRICING_PATH, 'utf8');
+        const parsed = JSON.parse(raw);
+        const rows = Array.isArray(parsed?.data) ? parsed.data : [];
+        for (const row of rows) {
+            const slug = typeof row?.slug === 'string' ? row.slug : '';
+            if (!slug) continue;
+            const pricing = normalizeRouterPricing(row?.endpoint?.pricing || row?.pricing);
+            if (!pricing) continue;
+            next[slug] = pricing;
+        }
+    } catch {
+        // Ignore supplemental pricing failures and keep the primary pricing source usable.
+    }
+    supplementalPricingCache = next;
+    return next;
+}
+
+function isPricingRecord(value: unknown): value is Record<string, any> {
+    return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function clonePricingRecord(value: Record<string, any>): Record<string, any> {
+    return JSON.parse(JSON.stringify(value));
+}
+
+function loadPricingCache(): PricingCache {
+    try {
+        if (!fs.existsSync(PRICING_CACHE_PATH)) return {};
+        const raw = fs.readFileSync(PRICING_CACHE_PATH, 'utf8');
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object') return {};
+        const next: PricingCache = {};
+        for (const [modelId, pricing] of Object.entries(parsed as Record<string, unknown>)) {
+            if (typeof modelId === 'string' && isPricingRecord(pricing)) {
+                next[modelId] = clonePricingRecord(pricing);
+            }
+        }
+        return next;
+    } catch {
         return {};
+    }
+}
+
+function savePricingCache(cache: PricingCache): void {
+    try {
+        fs.mkdirSync(path.dirname(PRICING_CACHE_PATH), { recursive: true });
+        fs.writeFileSync(PRICING_CACHE_PATH, JSON.stringify(cache, null, 2), 'utf8');
+    } catch {
+        // Pricing cache write failures should not block model sync.
     }
 }
 
@@ -203,7 +320,51 @@ function buildPricingCandidates(modelId: string): string[] {
         add(instructVariant.includes('/') ? instructVariant.split('/').pop()! : instructVariant);
     }
 
+    const bare = stripped;
+    const namespace = modelId.includes('/') ? `${modelId.split('/')[0]}/` : '';
+    const withoutDateSuffix = bare.replace(/-\d{4}-\d{2}-\d{2}$/, '');
+    add(withoutDateSuffix);
+    if (namespace) add(`${namespace}${withoutDateSuffix}`);
+
+    const gpt5Match = withoutDateSuffix.match(/^gpt-5(?:\.\d+)?(?:-(pro|mini|nano|chat(?:-latest)?|chat|codex(?:-mini|-max)?|codex))?$/);
+    if (gpt5Match) {
+        const variant = gpt5Match[1];
+        const canonical = variant ? `gpt-5-${variant}` : 'gpt-5';
+        add(canonical);
+        if (namespace) add(`${namespace}${canonical}`);
+        if (!variant || variant === 'chat' || variant === 'chat-latest') {
+            add('gpt-5');
+            if (namespace) add(`${namespace}gpt-5`);
+        }
+    }
+
+    if (withoutDateSuffix === 'omni-moderation-latest') {
+        add('omni-moderation-2024-09-26');
+    }
+
+    if (/^gpt-4o-mini-transcribe(?:-\d{4}-\d{2}-\d{2})?$/i.test(withoutDateSuffix)) {
+        add('gpt-4o-mini-transcribe');
+    }
+    if (/^gpt-4o-transcribe(?:-\d{4}-\d{2}-\d{2})?$/i.test(withoutDateSuffix)) {
+        add('gpt-4o-transcribe');
+    }
+    if (/^gpt-4o-mini-tts(?:-\d{4}-\d{2}-\d{2})?$/i.test(withoutDateSuffix)) {
+        add('gpt-4o-mini-tts');
+    }
+    if (/^gpt-audio(?:-mini)?(?:-\d{4}-\d{2}-\d{2})?$/i.test(withoutDateSuffix)) {
+        const audioMatch = withoutDateSuffix.match(/^(gpt-audio(?:-mini)?)/i);
+        if (audioMatch?.[1]) add(audioMatch[1].toLowerCase());
+    }
+
     return Array.from(candidates);
+}
+
+function buildZeroPricing(): Record<string, any> {
+    return {
+        input: 0,
+        output: 0,
+        unit: 'per_million_tokens',
+    };
 }
 
 function resolveBasePricing(modelId: string, basePricing: Record<string, BasePricing>): BasePricing | null {
@@ -300,6 +461,12 @@ export function calculateDynamicPricing(modelId: string, providerCount: number):
         }
     }
 
+    if (shown.input === undefined) {
+        shown.input = 0;
+    }
+    if (shown.output === undefined) {
+        shown.output = 0;
+    }
     shown.unit = 'per_million_tokens';
     return shown;
 }
@@ -459,6 +626,7 @@ export async function refreshProviderCountsInModelsFile(options: { notifyProbes?
         }
 
         const capabilitiesCache = loadCapabilitiesCache();
+        const pricingCache = loadPricingCache();
         const probeTested = loadProbeTested();
         const probeData = probeTested.data || {};
         const probeSkips = probeTested.capability_skips || {};
@@ -475,6 +643,10 @@ export async function refreshProviderCountsInModelsFile(options: { notifyProbes?
         for (const provider of providersData) {
             if (!provider.models) continue;
             for (const modelId in provider.models) {
+                const modelData = provider.models[modelId] as any;
+                if (!shouldCountProviderModel(modelId, modelData)) {
+                    continue;
+                }
                 knownProviderCounts[modelId] = (knownProviderCounts[modelId] || 0) + 1;
 
                 if (!provider.disabled) { // Consider a provider active if 'disabled' is false or undefined
@@ -482,7 +654,6 @@ export async function refreshProviderCountsInModelsFile(options: { notifyProbes?
                     availableModelIds.add(modelId);
 
                     // Collect TPS data for throughput calculation
-                    const modelData = provider.models[modelId] as any;
                     const tps = extractTokenSpeed(modelData);
                     if (tps !== null && tps > 0.1 && tps < 5000) { // Filter outliers
                         if (!modelTpsSamples[modelId]) modelTpsSamples[modelId] = [];
@@ -512,6 +683,9 @@ export async function refreshProviderCountsInModelsFile(options: { notifyProbes?
             const newProviderCount = activeProviderCounts[model.id] || 0;
             const knownProviderCount = knownProviderCounts[model.id] || 0;
             const rememberedCaps = getRememberedCapabilities(model.id, model.capabilities, capabilitiesCache, probeData);
+            if (isPricingRecord((model as any).pricing)) {
+                pricingCache[model.id] = clonePricingRecord((model as any).pricing);
+            }
 
             if (rememberedCaps.length > 0) {
                 const currentCaps = Array.isArray(model.capabilities)
@@ -544,10 +718,15 @@ export async function refreshProviderCountsInModelsFile(options: { notifyProbes?
                 }
                 // Dynamic pricing based on provider availability
                 const dynamicPrice = calculateDynamicPricing(model.id, Math.max(newProviderCount, knownProviderCount));
-                if (dynamicPrice && JSON.stringify((model as any).pricing || null) !== JSON.stringify(dynamicPrice)) {
-                    (model as any).pricing = dynamicPrice;
+                const rememberedPricing = isPricingRecord(pricingCache[model.id]) ? pricingCache[model.id] : null;
+                const nextPricing = dynamicPrice
+                    ? clonePricingRecord(dynamicPrice)
+                    : (rememberedPricing ? clonePricingRecord(rememberedPricing) : buildZeroPricing());
+                if (JSON.stringify((model as any).pricing || null) !== JSON.stringify(nextPricing)) {
+                    (model as any).pricing = nextPricing;
                     changesMade = true;
                 }
+                pricingCache[model.id] = clonePricingRecord((model as any).pricing);
                 // Update throughput from real provider TPS data
                 const realThroughput = modelThroughput[model.id];
                 if (realThroughput && realThroughput > 0) {
@@ -594,9 +773,11 @@ export async function refreshProviderCountsInModelsFile(options: { notifyProbes?
                     }
                 }
                 const dynamicPrice = calculateDynamicPricing(modelId, Math.max(providerCount, knownProviderCount));
-                if (dynamicPrice) {
-                    newModel.pricing = dynamicPrice;
-                }
+                const rememberedPricing = isPricingRecord(pricingCache[modelId]) ? pricingCache[modelId] : null;
+                newModel.pricing = dynamicPrice
+                    ? clonePricingRecord(dynamicPrice)
+                    : (rememberedPricing ? clonePricingRecord(rememberedPricing) : buildZeroPricing());
+                pricingCache[modelId] = clonePricingRecord(newModel.pricing);
                 updatedModels.push(newModel);
                 if (!Array.isArray(newModel.capabilities) || newModel.capabilities.length === 0) {
                     newModelsWithoutCaps.push(modelId);
@@ -651,6 +832,9 @@ export async function refreshProviderCountsInModelsFile(options: { notifyProbes?
 
         if (Object.keys(capabilitiesCache).length > 0) {
             saveCapabilitiesCache(capabilitiesCache);
+        }
+        if (Object.keys(pricingCache).length > 0) {
+            savePricingCache(pricingCache);
         }
 
         // Trigger capability probing for models without capabilities

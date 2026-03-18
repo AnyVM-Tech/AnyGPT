@@ -7,7 +7,9 @@ import { logError } from '../modules/errorLogger.js';
 import redis from '../modules/db.js';
 import { incrementSharedRateLimitCounters } from '../modules/rateLimitRedis.js';
 import { estimateTokensFromText } from '../modules/tokenEstimation.js';
-import { composeAssistantContent } from '../modules/openaiRouteUtils.js';
+import { extractImageUrlFromMessages, extractTextFromMessages } from '../modules/contentExtraction.js';
+import { buildVideoGenerationStartedContent, requestImageEditFromReference, requestImageGeneration, requestVideoGeneration } from '../modules/openaiFallbacks.js';
+import { composeAssistantContent, isNanoBananaModel, isNonChatModel } from '../modules/openaiRouteUtils.js';
 
 // Lightweight structures for WebSocket JSON protocol
 // Incoming message shapes
@@ -222,6 +224,7 @@ type OutgoingResponse =
 
 const wsClients = new Set<WSWrapper>();
 const WS_RATE_PREFIX = 'ws:ratelimit:';
+const WS_UPSTREAM_TIMEOUT_MS = Math.max(1000, Number(process.env.UPSTREAM_TIMEOUT_MS ?? 120_000));
 const UNAUTH_RPS = 1;
 const UNAUTH_RPM = 5;
 const UNAUTH_RPD = 50;
@@ -502,6 +505,137 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
           const started = Date.now();
           send({ type: 'chat.start', requestId });
 
+          const nonChatType = isNonChatModel(model);
+          if (nonChatType === 'image-gen' && !isNanoBananaModel(model)) {
+            const prompt = extractTextFromMessages(formattedMessages as any);
+            const imageUrl = extractImageUrlFromMessages(formattedMessages as any);
+            if (!prompt) {
+              return send({ type: 'error', code: 'bad_request', message: 'prompt is required for image generation', requestId });
+            }
+            try {
+              const imageResult = imageUrl
+                ? await requestImageEditFromReference({
+                  modelId: model,
+                  prompt,
+                  imageUrl,
+                  requestBody: payload,
+                  upstreamTimeoutMs: WS_UPSTREAM_TIMEOUT_MS,
+                })
+                : await requestImageGeneration({
+                  modelId: model,
+                  prompt,
+                  requestBody: payload,
+                  upstreamTimeoutMs: WS_UPSTREAM_TIMEOUT_MS,
+                  userApiKey: ctx.apiKey,
+                  requestId,
+                });
+              const contentText = composeAssistantContent(imageResult.imageRef || '', undefined, req.headers) || 'Image generation completed.';
+              const tokenEstimate = Math.ceil(prompt.length / 4) + 500;
+              await updateUserTokenUsage(tokenEstimate, ctx.apiKey);
+
+              if (stream) {
+                const chunkId = `chatcmpl-${requestId || Date.now()}`;
+                const created = Math.floor(started / 1000);
+                send({
+                  id: chunkId,
+                  object: 'chat.completion.chunk',
+                  created,
+                  model,
+                  choices: [{ index: 0, delta: { content: contentText }, finish_reason: null }],
+                });
+                send({
+                  id: chunkId,
+                  object: 'chat.completion.chunk',
+                  created,
+                  model,
+                  choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+                });
+              }
+
+              return send({
+                type: 'chat.complete',
+                requestId,
+                response: {
+                  id: `chatcmpl-${requestId || Date.now()}`,
+                  object: 'chat.completion',
+                  created: Math.floor(Date.now() / 1000),
+                  model,
+                  choices: [{
+                    index: 0,
+                    message: { role: 'assistant', content: contentText },
+                    finish_reason: 'stop',
+                  }],
+                  usage: { total_tokens: tokenEstimate },
+                },
+                latencyMs: Date.now() - started,
+              });
+            } catch (err) {
+              const error = err as Error;
+              await logError({ message: 'WS image generation error', errorMessage: error.message, errorStack: error.stack });
+              return send({ type: 'error', code: 'image_generation_error', message: error.message || 'Image generation failed', requestId });
+            }
+          }
+
+          if (nonChatType === 'video-gen') {
+            const prompt = extractTextFromMessages(formattedMessages as any);
+            if (!prompt) {
+              return send({ type: 'error', code: 'bad_request', message: 'prompt is required for video generation', requestId });
+            }
+            try {
+              const videoResult = await requestVideoGeneration({
+                modelId: model,
+                prompt,
+                imageUrl: extractImageUrlFromMessages(formattedMessages as any),
+                requestBody: payload,
+                upstreamTimeoutMs: WS_UPSTREAM_TIMEOUT_MS,
+              });
+              const contentText = buildVideoGenerationStartedContent(videoResult.requestId);
+              const tokenEstimate = Math.ceil(prompt.length / 4) + 500;
+              await updateUserTokenUsage(tokenEstimate, ctx.apiKey);
+
+              if (stream) {
+                const chunkId = `chatcmpl-${requestId || Date.now()}`;
+                const created = Math.floor(started / 1000);
+                send({
+                  id: chunkId,
+                  object: 'chat.completion.chunk',
+                  created,
+                  model,
+                  choices: [{ index: 0, delta: { content: contentText }, finish_reason: null }],
+                });
+                send({
+                  id: chunkId,
+                  object: 'chat.completion.chunk',
+                  created,
+                  model,
+                  choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+                });
+              }
+
+              return send({
+                type: 'chat.complete',
+                requestId,
+                response: {
+                  id: `chatcmpl-${requestId || Date.now()}`,
+                  object: 'chat.completion',
+                  created: Math.floor(Date.now() / 1000),
+                  model,
+                  choices: [{
+                    index: 0,
+                    message: { role: 'assistant', content: contentText },
+                    finish_reason: 'stop',
+                  }],
+                  usage: { total_tokens: tokenEstimate },
+                },
+                latencyMs: Date.now() - started,
+              });
+            } catch (err) {
+              const error = err as Error;
+              await logError({ message: 'WS video generation error', errorMessage: error.message, errorStack: error.stack });
+              return send({ type: 'error', code: 'video_generation_error', message: error.message || 'Video generation failed', requestId });
+            }
+          }
+
           if (stream) {
             try {
               const streamHandler: AsyncIterable<StreamResult> = messageHandler.handleStreamingMessages(
@@ -529,7 +663,7 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
                   const hasToolCallChunk = Array.isArray(result.tool_calls) && result.tool_calls.length > 0;
                   let visibleChunk = hasToolCallChunk ? '' : (result.chunk || '');
                   if (visibleChunk && pendingReasoningText) {
-                    visibleChunk = composeAssistantContent(visibleChunk, pendingReasoningText);
+                    visibleChunk = composeAssistantContent(visibleChunk, pendingReasoningText, req.headers);
                     pendingReasoningText = '';
                   }
                   if (hasToolCallChunk) {
@@ -568,8 +702,9 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
                 }
               }
 
-              if (pendingReasoningText && (!accumulatedToolCalls || accumulatedToolCalls.length === 0)) {
-                fullContent = composeAssistantContent(fullContent, pendingReasoningText);
+              if (!accumulatedToolCalls || accumulatedToolCalls.length === 0) {
+                fullContent = composeAssistantContent(fullContent, pendingReasoningText, req.headers);
+                pendingReasoningText = '';
               }
 
               totalTokenUsage = computeTokenUsage(explicitTokenUsage, fullContent);
@@ -653,7 +788,7 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
                 index: 0,
                 message: {
                   role: 'assistant',
-                  content: result.tool_calls && result.tool_calls.length > 0 ? '' : composeAssistantContent(result.response, result.reasoning),
+                  content: result.tool_calls && result.tool_calls.length > 0 ? '' : composeAssistantContent(result.response, result.reasoning, req.headers),
                   ...(result.tool_calls && result.tool_calls.length > 0 ? { tool_calls: result.tool_calls } : {}),
                 },
                 finish_reason: result.finish_reason || (result.tool_calls?.length ? 'tool_calls' : 'stop'),

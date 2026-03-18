@@ -77,6 +77,12 @@ import { redactAuthorizationHeader, redactToken, hashToken } from '../modules/re
 import { fetchWithTimeout } from '../modules/http.js';
 import { RequestQueue, QueueOverloadedError, requestQueue } from '../modules/requestQueue.js';
 import {
+    getBackpressureRetryAfterSeconds,
+    readJsonRequestBody,
+    withBufferedRequestBody,
+} from '../modules/requestIntake.js';
+import { getCachedGeneratedImage, getGeneratedImageCacheControlHeader } from '../modules/generatedImageStore.js';
+import {
     getHeaderValue,
     normalizeImageFetchReferer,
     extractUsageTokens,
@@ -92,13 +98,13 @@ import {
 } from '../modules/openaiRouteSupport.js';
 import {
     enforceModelCapabilities,
+    listAnyVideoProviders,
+    listVideoGenProviders,
+    pickEmbeddingProviderKey,
     pickOpenAIProviderKey,
-    pickImageGenProviderKey,
-    pickVideoGenProviderKey,
-    pickAnyXaiProviderKey,
 } from '../modules/openaiProviderSelection.js';
 import { AUDIO_CONTENT_TYPES, forwardTtsToOpenAI, forwardSttToOpenAI } from '../modules/openaiAudio.js';
-import { handleImageGenFallbackFromChatOrResponses, handleVideoGenFallbackFromChatOrResponses } from '../modules/openaiFallbacks.js';
+import { handleImageGenFallbackFromChatOrResponses, handleVideoGenFallbackFromChatOrResponses, requestImageEdit, requestImageGeneration, requestVideoGeneration, requestVideoGenerationMultipart } from '../modules/openaiFallbacks.js';
 import {
     createInteractionToken,
     executeGeminiInteraction,
@@ -140,10 +146,67 @@ const openaiRouter = new HyperExpress.Router();
 const requestTimestamps: RequestTimestampStore = {};
 const INTERACTIONS_TOKEN_TTL_SECONDS = 15 * 60;
 const rateLimitMiddleware = createRateLimitMiddleware(requestTimestamps);
+const CHAT_COMPLETIONS_INTAKE_LABEL = 'chat-completions:intake';
+const RESPONSES_INTAKE_LABEL = 'responses:intake';
+const AZURE_CHAT_COMPLETIONS_INTAKE_LABEL = 'azure-chat-completions:intake';
 
 function writeResponsesSseEvent(response: Response, payload: Record<string, any>): void {
     response.write(`event: ${payload.type}\n`);
     response.write(`data: ${JSON.stringify(payload)}\n\n`);
+}
+
+function encodeEmbeddingBase64(values: number[]): string {
+    const buffer = Buffer.alloc(values.length * 4);
+    for (let index = 0; index < values.length; index += 1) {
+        buffer.writeFloatLE(values[index] ?? 0, index * 4);
+    }
+    return buffer.toString('base64');
+}
+
+function formatEmbeddingVector(values: number[], encodingFormat?: string): number[] | string {
+    const normalizedEncoding = typeof encodingFormat === 'string'
+        ? encodingFormat.trim().toLowerCase()
+        : 'float';
+    if (normalizedEncoding === 'base64') {
+        return encodeEmbeddingBase64(values);
+    }
+    return values;
+}
+
+function buildOpenAIEmbeddingResponse(
+    model: string,
+    vectors: number[][],
+    tokensUsed: number,
+    encodingFormat?: string,
+): Record<string, any> {
+    return {
+        object: 'list',
+        data: vectors.map((values, index) => ({
+            object: 'embedding',
+            embedding: formatEmbeddingVector(values, encodingFormat),
+            index,
+        })),
+        model,
+        usage: {
+            prompt_tokens: tokensUsed,
+            total_tokens: tokensUsed,
+        },
+    };
+}
+
+function toGeminiEmbeddingModelPath(model: string): string {
+    return model.startsWith('models/') ? model : `models/${model}`;
+}
+
+function normalizeGeminiEmbeddingInput(input: unknown): string[] | null {
+    if (typeof input === 'string') return [input];
+    if (!Array.isArray(input)) return null;
+    const values: string[] = [];
+    for (const entry of input) {
+        if (typeof entry !== 'string') return null;
+        values.push(entry);
+    }
+    return values;
 }
 
 function normalizeToolCallsForStream(toolCalls: any[] | undefined): any[] | undefined {
@@ -160,6 +223,135 @@ function normalizeToolCallsForStream(toolCalls: any[] | undefined): any[] | unde
             };
         }
         return normalizedCall;
+    });
+}
+
+async function parseChatCompletionsRequestBody(request: Request, response: Response): Promise<any | null> {
+    return withBufferedRequestBody(request, {
+        label: CHAT_COMPLETIONS_INTAKE_LABEL,
+        extra: { route: '/v1/chat/completions' },
+    }, async (rawBuffer) => {
+        try {
+            return JSON.parse(rawBuffer.toString('utf8'));
+        } catch (parseError) {
+            const contentType = String(request.headers['content-type'] || '');
+            if (contentType.includes('multipart/form-data')) {
+                const boundary = contentType.split('boundary=')[1]?.trim();
+                if (boundary) {
+                    const parsed = parseMultipartBody(rawBuffer, boundary);
+
+                    const requestBody: Record<string, any> = {};
+                    if (parsed.fields.model) requestBody.model = parsed.fields.model;
+                    if (parsed.fields.messages) {
+                        try { requestBody.messages = JSON.parse(parsed.fields.messages); } catch {}
+                    }
+                    if (parsed.fields.stream) requestBody.stream = parsed.fields.stream === 'true';
+
+                    if (parsed.files.length > 0 && Array.isArray(requestBody.messages)) {
+                        const lastMsg = requestBody.messages[requestBody.messages.length - 1];
+                        if (lastMsg && lastMsg.role === 'user') {
+                            if (typeof lastMsg.content === 'string') {
+                                lastMsg.content = [{ type: 'text', text: lastMsg.content }];
+                            }
+                            if (Array.isArray(lastMsg.content)) {
+                                parsed.files.forEach((file) => {
+                                    const base64Data = file.data.toString('base64');
+                                    console.log(`[Multipart] Injecting image. Type: ${file.type}, Size: ${file.data.length}`);
+                                    lastMsg.content.push({
+                                        type: 'image_url',
+                                        image_url: { url: `data:${file.type};base64,${base64Data}` }
+                                    });
+                                });
+                            }
+                        }
+                    }
+                    if (!requestBody.model) {
+                        if (!response.completed) {
+                            response.status(400).json({
+                                error: 'Bad Request: Model field is required for multipart uploads.',
+                                timestamp: new Date().toISOString(),
+                            });
+                        }
+                        return null;
+                    }
+                    if (!requestBody.messages) {
+                        requestBody.messages = [{ role: 'user', content: 'Image uploaded' }];
+                    }
+                    return requestBody;
+                }
+            }
+
+            console.log(`[RawFallback] Buffer size: ${rawBuffer.length}`);
+            if (rawBuffer.length <= 10) {
+                throw parseError;
+            }
+
+            const firstChar = rawBuffer[0];
+            if (firstChar === 123 || firstChar === 91) {
+                throw parseError;
+            }
+
+            const isBase64 = isLikelyBase64(rawBuffer);
+            let mimeType = 'image/jpeg';
+            let base64Data = '';
+            const utf8Text = rawBuffer.toString('utf8');
+
+            if (utf8Text.startsWith('data:image')) {
+                console.log('[RawFallback] Detected Data URI body.');
+                const commaIdx = utf8Text.indexOf(',');
+                if (commaIdx !== -1) {
+                    base64Data = utf8Text.slice(commaIdx + 1).replace(/\s+/g, '');
+                    const detectedMime = detectMimeTypeFromBase64(base64Data);
+
+                    if (detectedMime) {
+                        mimeType = detectedMime;
+                    } else {
+                        const prefix = utf8Text.slice(0, commaIdx);
+                        const mimeMatch = prefix.match(/data:([^;]+)/);
+                        mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+                    }
+                }
+            } else if (isBase64) {
+                console.log('[RawFallback] Detected Base64 text body.');
+                try {
+                    base64Data = Buffer.from(utf8Text, 'base64').toString('base64');
+                } catch {
+                    base64Data = utf8Text.replace(/\s+/g, '');
+                }
+                mimeType = detectMimeTypeFromBase64(base64Data) || 'image/jpeg';
+            } else {
+                console.log('[RawFallback] Detected Binary body.');
+                base64Data = rawBuffer.toString('base64');
+                mimeType = detectMimeTypeFromBuffer(rawBuffer) || 'image/jpeg';
+            }
+
+            console.log(`[RawFallback] Type: ${mimeType}, Base64Len: ${base64Data.length}`);
+
+            const queryModel = (request.query && typeof request.query.model === 'string' && request.query.model)
+                ? request.query.model
+                : null;
+
+            if (!queryModel) {
+                if (!response.completed) {
+                    response.status(400).json({
+                        error: 'Bad Request: Model parameter is required for raw uploads.',
+                        timestamp: new Date().toISOString(),
+                    });
+                }
+                return null;
+            }
+
+            return {
+                model: queryModel,
+                messages: [{
+                    role: 'user',
+                    content: [
+                        { type: 'text', text: 'Analyze this image.' },
+                        { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64Data}` } }
+                    ]
+                }]
+            };
+        }
     });
 }
 
@@ -323,6 +515,11 @@ function setVideoRequestCache(requestId: string, provider: { apiKey: string; bas
     videoRequestCache.set(requestId, { ...provider, expiresAt });
 }
 
+function deleteVideoRequestCache(requestId: string) {
+    if (!requestId) return;
+    videoRequestCache.delete(requestId);
+}
+
 function getVideoRequestCache(requestId: string): { apiKey: string; baseUrl: string } | null {
     const entry = videoRequestCache.get(requestId);
     if (!entry) return null;
@@ -331,6 +528,170 @@ function getVideoRequestCache(requestId: string): { apiKey: string; baseUrl: str
         return null;
     }
     return { apiKey: entry.apiKey, baseUrl: entry.baseUrl };
+}
+
+type ParsedVideoForwardBody = {
+    contentType: string;
+    body: BodyInit;
+    jsonBody?: any;
+    multipart?: ReturnType<typeof parseMultipartBody>;
+};
+
+function buildForwardedQueryString(rawQuery: Record<string, any> | undefined): string {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(rawQuery || {})) {
+        if (value === undefined || value === null) continue;
+        if (Array.isArray(value)) {
+            for (const item of value) {
+                if (item !== undefined && item !== null && typeof item !== 'object') {
+                    params.append(key, String(item));
+                }
+            }
+            continue;
+        }
+        if (typeof value !== 'object') {
+            params.append(key, String(value));
+        }
+    }
+    const query = params.toString();
+    return query ? `?${query}` : '';
+}
+
+function dedupeVideoProviders(providers: Array<{ apiKey: string; baseUrl: string }>): Array<{ apiKey: string; baseUrl: string }> {
+    const seen = new Set<string>();
+    const next: Array<{ apiKey: string; baseUrl: string }> = [];
+    for (const provider of providers) {
+        const signature = `${provider.baseUrl}\u0000${provider.apiKey}`;
+        if (seen.has(signature)) continue;
+        seen.add(signature);
+        next.push(provider);
+    }
+    return next;
+}
+
+async function getOpenAIVideoProvidersToTry(options: { resourceId?: string; modelId?: string } = {}): Promise<Array<{ apiKey: string; baseUrl: string }>> {
+    const next: Array<{ apiKey: string; baseUrl: string }> = [];
+    if (options.resourceId) {
+        const cached = getVideoRequestCache(options.resourceId);
+        if (cached) next.push(cached);
+    }
+    if (options.modelId) {
+        const modelProviders = (await listVideoGenProviders(options.modelId))
+            .filter((provider) => provider.kind === 'openai')
+            .map((provider) => ({ apiKey: provider.apiKey, baseUrl: provider.baseUrl }));
+        next.push(...modelProviders);
+    }
+    const fallbackProviders = (await listAnyVideoProviders())
+        .filter((provider) => provider.kind === 'openai')
+        .map((provider) => ({ apiKey: provider.apiKey, baseUrl: provider.baseUrl }));
+    next.push(...fallbackProviders);
+    return dedupeVideoProviders(next);
+}
+
+async function forwardVideoRequestToProviders(params: {
+    providersToTry: Array<{ apiKey: string; baseUrl: string }>;
+    pathname: string;
+    method: 'GET' | 'POST' | 'DELETE';
+    upstreamTimeoutMs: number;
+    body?: BodyInit;
+    contentType?: string;
+    rawQuery?: Record<string, any>;
+    label: string;
+    retryableStatusCodes?: number[];
+}): Promise<{ provider: { apiKey: string; baseUrl: string }; upstreamRes: globalThis.Response }> {
+    const { providersToTry, pathname, method, upstreamTimeoutMs, body, contentType, rawQuery, label } = params;
+    const retryableStatusCodes = params.retryableStatusCodes || [401, 402, 403, 404, 405, 408, 409, 423, 425, 429, 500, 501, 502, 503, 504];
+    if (providersToTry.length === 0) {
+        const error = new Error(`No available provider for ${label.toLowerCase()}`);
+        (error as any).statusCode = 503;
+        throw error;
+    }
+
+    const forwardedQuery = buildForwardedQueryString(rawQuery);
+    let lastStatus = 503;
+    let lastErrorText = `No available provider for ${label.toLowerCase()}`;
+    for (const provider of providersToTry) {
+        const headers: Record<string, string> = {
+            'Authorization': `Bearer ${provider.apiKey}`,
+        };
+        if (contentType) headers['Content-Type'] = contentType;
+        const upstreamUrl = `${provider.baseUrl}/v1${pathname}${forwardedQuery}`;
+        const upstreamRes = await fetchWithTimeout(upstreamUrl, {
+            method,
+            headers,
+            body,
+        }, upstreamTimeoutMs);
+
+        if (upstreamRes.ok) {
+            return { provider, upstreamRes };
+        }
+
+        lastStatus = upstreamRes.status;
+        lastErrorText = await upstreamRes.text().catch(() => upstreamRes.statusText || lastErrorText);
+        if (!retryableStatusCodes.includes(upstreamRes.status)) {
+            break;
+        }
+    }
+
+    const error = new Error(`${label} upstream error: ${lastErrorText}`);
+    (error as any).statusCode = lastStatus;
+    throw error;
+}
+
+async function parseVideoForwardBody(request: Request, options: { multipartOnly?: boolean } = {}): Promise<ParsedVideoForwardBody> {
+    const contentType = String(request.headers['content-type'] || '');
+    if (contentType.includes('multipart/form-data')) {
+        const rawBody = await request.buffer();
+        const boundary = contentType.split('boundary=')[1]?.trim();
+        if (!boundary) {
+            const error = new Error('Bad Request: boundary missing');
+            (error as any).statusCode = 400;
+            throw error;
+        }
+        return {
+            contentType,
+            body: rawBody as any,
+            multipart: parseMultipartBody(rawBody, boundary),
+        };
+    }
+
+    if (options.multipartOnly) {
+        const error = new Error('Bad Request: multipart/form-data required');
+        (error as any).statusCode = 400;
+        throw error;
+    }
+
+    let jsonBody: any;
+    try {
+        jsonBody = await request.json();
+    } catch {
+        const error = new Error('Bad Request: application/json or multipart/form-data required');
+        (error as any).statusCode = 400;
+        throw error;
+    }
+
+    return {
+        contentType: 'application/json',
+        body: JSON.stringify(jsonBody),
+        jsonBody,
+    };
+}
+
+function extractParsedVideoField(parsedBody: ParsedVideoForwardBody, fieldName: string): string {
+    if (typeof parsedBody.jsonBody?.[fieldName] === 'string') {
+        return parsedBody.jsonBody[fieldName];
+    }
+    if (typeof parsedBody.multipart?.fields?.[fieldName] === 'string') {
+        return parsedBody.multipart.fields[fieldName];
+    }
+    return '';
+}
+
+function getVideoResourceRetryableStatusCodes(resourceId: string | undefined): number[] {
+    if (resourceId && getVideoRequestCache(resourceId)) {
+        return [401, 402, 403, 404, 405, 408, 409, 423, 425, 429, 500, 501, 502, 503, 504];
+    }
+    return [401, 402, 403, 405, 408, 409, 423, 425, 429, 500, 501, 502, 503, 504];
 }
 
 // estimateTokensFromBase64Payload, estimateTokensFromDataUrl, estimateTokensFromText,
@@ -406,6 +767,25 @@ openaiRouter.post('/generate_key', authAndUsageMiddleware, rateLimitMiddleware, 
 
  
 // Key Details Route (no token-usage enforcement)
+openaiRouter.get('/generated-images/:imageId', async (request: Request, response: Response) => {
+    try {
+        const imageId = typeof request.params?.imageId === 'string' ? request.params.imageId : '';
+        const asset = getCachedGeneratedImage(imageId);
+        if (!asset) {
+            return response.status(404).json({ error: 'Generated image not found', timestamp: new Date().toISOString() });
+        }
+
+        response.setHeader('Content-Type', asset.mimeType);
+        response.setHeader('Cache-Control', getGeneratedImageCacheControlHeader());
+        response.end(asset.data);
+    } catch (error: any) {
+        await logError({ message: 'Generated image asset route failed', errorMessage: error?.message, imageId: request.params?.imageId }, request);
+        if (!response.completed) {
+            response.status(500).json({ error: 'Internal Server Error', timestamp: new Date().toISOString() });
+        }
+    }
+});
+
 openaiRouter.get('/keys/me', authKeyOnlyMiddleware, rateLimitMiddleware, async (request: Request, response: Response) => {
     try {
         const apiKey = request.apiKey;
@@ -491,132 +871,8 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
     const tierLimits = request.tierLimits!; 
     
     let requestBody: any;
-    try {
-        requestBody = await request.json();
-    } catch (parseError) {
-        // Recover from non-JSON payloads (e.g. multipart with images)
-        const contentType = request.headers['content-type'] || '';
-        if (contentType.includes('multipart/form-data')) {
-            const boundary = contentType.split('boundary=')[1]?.trim();
-            if (boundary) {
-                const rawBuffer = await request.buffer();
-                const parsed = parseMultipartBody(rawBuffer, boundary);
-                
-                // Reconstruct a valid chat request
-                requestBody = {};
-                if (parsed.fields.model) requestBody.model = parsed.fields.model;
-                if (parsed.fields.messages) {
-                    try { requestBody.messages = JSON.parse(parsed.fields.messages); } catch {}
-                }
-                if (parsed.fields.stream) requestBody.stream = parsed.fields.stream === 'true';
-
-                // Inject files into the last user message
-                if (parsed.files.length > 0 && requestBody.messages && Array.isArray(requestBody.messages)) {
-                    const lastMsg = requestBody.messages[requestBody.messages.length - 1];
-                    if (lastMsg && lastMsg.role === 'user') {
-                        if (typeof lastMsg.content === 'string') {
-                            lastMsg.content = [{ type: 'text', text: lastMsg.content }];
-                        }
-                        if (Array.isArray(lastMsg.content)) {
-                            parsed.files.forEach(f => {
-                                const base64Data = f.data.toString('base64');
-                                console.log(`[Multipart] Injecting image. Type: ${f.type}, Size: ${f.data.length}`);
-                                lastMsg.content.push({
-                                    type: 'image_url',
-                                    image_url: { url: `data:${f.type};base64,${base64Data}` }
-                                });
-                            });
-                        }
-                    }
-                }
-                if (!requestBody.model) {
-                    if (!response.completed) return response.status(400).json({ error: 'Bad Request: Model field is required for multipart uploads.', timestamp: new Date().toISOString() });
-                    return;
-                }
-                if (!requestBody.messages) requestBody.messages = [{ role: 'user', content: 'Image uploaded' }]; // Fallback
-            }
-        } else {
-            // Check if it's raw base64 or raw binary
-            try {
-                const rawBuffer = await request.buffer();
-                console.log(`[RawFallback] Buffer size: ${rawBuffer.length}`);
-                if (rawBuffer.length > 10) {
-                    const firstChar = rawBuffer[0];
-                    // Check if JSON-like start ({ or [)
-                    if (firstChar === 123 || firstChar === 91) {
-                        throw parseError; // Likely malformed JSON, let it fail
-                    }
-
-                    // Check if strictly base64 text
-                    let isBase64 = isLikelyBase64(rawBuffer);
-                    
-                    let mimeType = 'image/jpeg';
-                    let base64Data = '';
-                    const utf8Text = rawBuffer.toString('utf8');
-
-                    if (utf8Text.startsWith('data:image')) {
-                        console.log('[RawFallback] Detected Data URI body.');
-                        // Handle raw body as Data URI
-                        const commaIdx = utf8Text.indexOf(',');
-                        if (commaIdx !== -1) {
-                            base64Data = utf8Text.slice(commaIdx + 1).replace(/\s+/g, '');
-                            const detectedMime = detectMimeTypeFromBase64(base64Data);
-                            
-                            if (detectedMime) {
-                                mimeType = detectedMime;
-                            } else {
-                                const prefix = utf8Text.slice(0, commaIdx);
-                                const mimeMatch = prefix.match(/data:([^;]+)/);
-                                mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
-                            }
-                        }
-                    } else if (isBase64) {
-                        console.log('[RawFallback] Detected Base64 text body.');
-                        // Decode raw text to binary and re-encode to standard base64 to ensure validity
-                        try {
-                            base64Data = Buffer.from(utf8Text, 'base64').toString('base64');
-                        } catch {
-                            base64Data = utf8Text.replace(/\s+/g, '');
-                        }
-                        mimeType = detectMimeTypeFromBase64(base64Data) || 'image/jpeg';
-                    } else {
-                        console.log('[RawFallback] Detected Binary body.');
-                        // Treat as raw binary
-                        base64Data = rawBuffer.toString('base64');
-                        mimeType = detectMimeTypeFromBuffer(rawBuffer) || 'image/jpeg';
-                    }
-
-                    console.log(`[RawFallback] Type: ${mimeType}, Base64Len: ${base64Data.length}`);
-
-                    // Use model from query if available, otherwise fail
-                    const queryModel = (request.query && typeof request.query.model === 'string' && request.query.model) 
-                        ? request.query.model 
-                        : null;
-                    
-                    if (!queryModel) {
-                        if (!response.completed) response.status(400).json({ error: 'Bad Request: Model parameter is required for raw uploads.', timestamp: new Date().toISOString() });
-                        return;
-                    }
-                    
-                    requestBody = {
-                        model: queryModel,
-                        messages: [{
-                            role: 'user',
-                            content: [
-                                { type: 'text', text: 'Analyze this image.' },
-                                { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64Data}` } }
-                            ]
-                        }]
-                    };
-                } else {
-                    throw parseError;
-                }
-            } catch {
-                throw parseError;
-            }
-        }
-        if (!requestBody) throw parseError;
-    }
+    requestBody = await parseChatCompletionsRequestBody(request, response);
+    if (requestBody === null) return;
 
     const modelHint = typeof requestBody?.model === 'string' ? requestBody.model : '';
     if (
@@ -773,9 +1029,11 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
             const prompt = typeof requestBody?.prompt === 'string'
                 ? requestBody.prompt
                 : extractTextFromMessages(rawMessages);
+            const imageUrl = extractImageUrlFromMessages(rawMessages);
             await handleImageGenFallbackFromChatOrResponses({
                 modelId,
                 prompt,
+                imageUrl,
                 requestBody,
                 request,
                 response,
@@ -872,7 +1130,7 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
             const effectiveToolCalls = (result.tool_calls && result.tool_calls.length > 0)
                 ? result.tool_calls
                 : inferredToolCalls;
-            const assistantContent = effectiveToolCalls?.length ? null : composeAssistantContent(result.response, result.reasoning);
+            const assistantContent = effectiveToolCalls?.length ? null : composeAssistantContent(result.response, result.reasoning, request.headers);
             if ((!effectiveToolCalls || effectiveToolCalls.length === 0) && (!assistantContent || assistantContent.trim().length === 0)) {
                 throw new Error('Empty chat completion output from provider.');
             }
@@ -1028,7 +1286,7 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
                     ? ''
                     : (typeof result.chunk === 'string' ? result.chunk : '');
                 if (chunkContent && pendingReasoningText) {
-                    chunkContent = composeAssistantContent(chunkContent, pendingReasoningText);
+                    chunkContent = composeAssistantContent(chunkContent, pendingReasoningText, request.headers);
                     pendingReasoningText = '';
                 }
                 if (hasToolCallChunk) toolCallsFromStream = result.tool_calls;
@@ -1103,7 +1361,7 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
                         ? ''
                         : (typeof fallbackResult.chunk === 'string' ? fallbackResult.chunk : '');
                     if (fallbackChunkContent && pendingReasoningText) {
-                        fallbackChunkContent = composeAssistantContent(fallbackChunkContent, pendingReasoningText);
+                        fallbackChunkContent = composeAssistantContent(fallbackChunkContent, pendingReasoningText, request.headers);
                         pendingReasoningText = '';
                     }
                     if (hasFallbackToolCallChunk) toolCallsFromStream = fallbackResult.tool_calls;
@@ -1182,7 +1440,7 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
                 response.write(`data: ${JSON.stringify(roleChunk)}\n\n`);
                 sentAssistantRoleChunk = true;
             }
-            const bufferedReasoningContent = composeAssistantContent('', pendingReasoningText);
+            const bufferedReasoningContent = composeAssistantContent('', pendingReasoningText, request.headers);
             streamOutputText += bufferedReasoningContent;
             response.write(`data: ${JSON.stringify({
                 id: requestId,
@@ -1196,6 +1454,10 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
                 }]
             })}\n\n`);
             pendingReasoningText = '';
+        }
+
+        if ((!toolCallsFromStream || toolCallsFromStream.length === 0) && streamOutputText) {
+            streamOutputText = composeAssistantContent(streamOutputText, undefined, request.headers);
         }
 
         if (passthroughHandled) {
@@ -1296,7 +1558,7 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
         const effectiveToolCalls = (result.tool_calls && result.tool_calls.length > 0)
             ? result.tool_calls
             : inferredToolCalls;
-        const assistantContent = effectiveToolCalls?.length ? null : composeAssistantContent(result.response, result.reasoning);
+        const assistantContent = effectiveToolCalls?.length ? null : composeAssistantContent(result.response, result.reasoning, request.headers);
         if ((!effectiveToolCalls || effectiveToolCalls.length === 0) && (!assistantContent || assistantContent.trim().length === 0)) {
             throw new Error('Empty chat completion output from provider.');
         }
@@ -1352,12 +1614,19 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
     let clientReference = 'An unexpected error occurred while processing your chat request.';
     const errorMeta = error as any;
     const retryAfterSeconds = extractRetryAfterSeconds(errorText);
+    const backpressureRetryAfterSeconds = getBackpressureRetryAfterSeconds(error);
     const rateLimitMessage = formatRateLimitMessage(retryAfterSeconds);
     const isFreeTierZeroQuota = isGeminiFreeTierZeroQuota(errorText);
     const errorModelId = errorMeta?.modelId;
 
     // All providers rate-limited — return 429 with Retry-After
-    if (typeof errorMeta?.statusCode === 'number' && errorMeta.statusCode >= 400 && errorMeta.statusCode < 600) {
+    if (errorMeta?.code === 'MEMORY_PRESSURE') {
+        statusCode = 503;
+        clientMessage = 'Service temporarily unavailable: server is under memory pressure. Retry in a few seconds.';
+    } else if (errorMeta?.code === 'QUEUE_OVERLOADED' || errorMeta?.code === 'QUEUE_WAIT_TIMEOUT') {
+        statusCode = 503;
+        clientMessage = 'Service temporarily unavailable: request queue is busy. Retry in a few seconds.';
+    } else if (typeof errorMeta?.statusCode === 'number' && errorMeta.statusCode >= 400 && errorMeta.statusCode < 600) {
         statusCode = errorMeta.statusCode;
         clientMessage = errorText || clientMessage;
     } else if (isFreeTierZeroQuota) {
@@ -1422,12 +1691,18 @@ openaiRouter.post('/chat/completions', async (request: Request, response: Respon
        if (statusCode === 429 && retryAfterSeconds) {
            response.setHeader('Retry-After', String(retryAfterSeconds));
        }
+       if (statusCode === 503 && backpressureRetryAfterSeconds) {
+           response.setHeader('Retry-After', String(backpressureRetryAfterSeconds));
+       }
        if (statusCode === 500) {
             response.status(statusCode).json({ error: clientMessage, reference: clientReference, timestamp });
        } else {
             const payload: Record<string, any> = { error: clientMessage, timestamp };
             if (statusCode === 429 && retryAfterSeconds) {
                 payload.retry_after_seconds = retryAfterSeconds;
+            }
+            if (statusCode === 503 && backpressureRetryAfterSeconds) {
+                payload.retry_after_seconds = backpressureRetryAfterSeconds;
             }
             response.status(statusCode).json(payload);
        }
@@ -1444,7 +1719,10 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
     }
 
     try {
-        const requestBody = await request.json();
+        const requestBody = await readJsonRequestBody(request, {
+            label: RESPONSES_INTAKE_LABEL,
+            extra: { route: '/v1/responses' },
+        });
         const userApiKey = request.apiKey!;
 
     if (requestBody?.reasoning === undefined && requestBody?.reasoning_effort !== undefined) {
@@ -1533,9 +1811,11 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
                 const prompt = typeof requestBody?.prompt === 'string'
                     ? requestBody.prompt
                     : extractTextFromResponsesInput(requestBody?.input);
+                const imageUrl = extractImageUrlFromResponsesInput(requestBody?.input);
                 await handleImageGenFallbackFromChatOrResponses({
                     modelId,
                     prompt,
+                    imageUrl,
                     requestBody,
                     request,
                     response,
@@ -2109,12 +2389,19 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
         let clientReference = 'An unexpected error occurred while processing your responses request.';
         const errorMeta = error as any;
         const retryAfterSeconds = extractRetryAfterSeconds(errorText);
+        const backpressureRetryAfterSeconds = getBackpressureRetryAfterSeconds(error);
         const rateLimitMessage = formatRateLimitMessage(retryAfterSeconds);
         const isFreeTierZeroQuota = isGeminiFreeTierZeroQuota(errorText);
         const errorModelId = errorMeta?.modelId;
 
         // All providers rate-limited — return 429 with Retry-After
-        if (typeof errorMeta?.statusCode === 'number' && errorMeta.statusCode >= 400 && errorMeta.statusCode < 600) {
+        if (errorMeta?.code === 'MEMORY_PRESSURE') {
+            statusCode = 503;
+            clientMessage = 'Service temporarily unavailable: server is under memory pressure. Retry in a few seconds.';
+        } else if (errorMeta?.code === 'QUEUE_OVERLOADED' || errorMeta?.code === 'QUEUE_WAIT_TIMEOUT') {
+            statusCode = 503;
+            clientMessage = 'Service temporarily unavailable: request queue is busy. Retry in a few seconds.';
+        } else if (typeof errorMeta?.statusCode === 'number' && errorMeta.statusCode >= 400 && errorMeta.statusCode < 600) {
             statusCode = errorMeta.statusCode;
             clientMessage = errorText || clientMessage;
         } else if (isFreeTierZeroQuota) {
@@ -2173,12 +2460,18 @@ openaiRouter.post('/responses', async (request: Request, response: Response) => 
             if (statusCode === 429 && retryAfterSeconds) {
                 response.setHeader('Retry-After', String(retryAfterSeconds));
             }
+            if (statusCode === 503 && backpressureRetryAfterSeconds) {
+                response.setHeader('Retry-After', String(backpressureRetryAfterSeconds));
+            }
             if (statusCode === 500) {
                 response.status(statusCode).json({ error: clientMessage, reference: clientReference, timestamp });
             } else {
                 const payload: Record<string, any> = { error: clientMessage, timestamp };
                 if (statusCode === 429 && retryAfterSeconds) {
                     payload.retry_after_seconds = retryAfterSeconds;
+                }
+                if (statusCode === 503 && backpressureRetryAfterSeconds) {
+                    payload.retry_after_seconds = backpressureRetryAfterSeconds;
                 }
                 response.status(statusCode).json(payload);
             }
@@ -2308,7 +2601,10 @@ openaiRouter.post('/deployments/:deploymentId/chat/completions', authAndUsageMid
 
     try {
         // Extract messages using the same logic as the standard route
-        const requestBody = await request.json();
+        const requestBody = await readJsonRequestBody(request, {
+            label: AZURE_CHAT_COMPLETIONS_INTAKE_LABEL,
+            extra: { route: '/v1/deployments/:deploymentId/chat/completions' },
+        });
         let { messages: rawMessages } = extractMessageFromRequestBody(requestBody); 
         rawMessages = filterValidChatMessages(rawMessages);
         if (rawMessages.length === 0) {
@@ -2370,8 +2666,15 @@ openaiRouter.post('/deployments/:deploymentId/chat/completions', authAndUsageMid
         let clientMessage = 'Internal Server Error';
         let clientReference = 'An unexpected error occurred while processing your Azure chat request.';
         const explicitStatusCode = typeof (error as any)?.statusCode === 'number' ? (error as any).statusCode : null;
+        const backpressureRetryAfterSeconds = getBackpressureRetryAfterSeconds(error);
 
-        if (explicitStatusCode && explicitStatusCode >= 400 && explicitStatusCode < 600) {
+        if ((error as any)?.code === 'MEMORY_PRESSURE') {
+            statusCode = 503;
+            clientMessage = 'Service temporarily unavailable: server is under memory pressure. Retry in a few seconds.';
+        } else if ((error as any)?.code === 'QUEUE_OVERLOADED' || (error as any)?.code === 'QUEUE_WAIT_TIMEOUT') {
+            statusCode = 503;
+            clientMessage = 'Service temporarily unavailable: request queue is busy. Retry in a few seconds.';
+        } else if (explicitStatusCode && explicitStatusCode >= 400 && explicitStatusCode < 600) {
             statusCode = explicitStatusCode;
             clientMessage = error.message || clientMessage;
         } else if (error.message.startsWith('Invalid request') || error.message.startsWith('Failed to parse')) {
@@ -2395,10 +2698,17 @@ openaiRouter.post('/deployments/:deploymentId/chat/completions', authAndUsageMid
         }
         
         if (!response.completed) {
+            if (statusCode === 503 && backpressureRetryAfterSeconds) {
+                response.setHeader('Retry-After', String(backpressureRetryAfterSeconds));
+            }
             if (statusCode === 500) {
                 response.status(statusCode).json({ error: clientMessage, reference: clientReference, timestamp });
             } else {
-                response.status(statusCode).json({ error: clientMessage, timestamp });
+                const payload: Record<string, any> = { error: clientMessage, timestamp };
+                if (statusCode === 503 && backpressureRetryAfterSeconds) {
+                    payload.retry_after_seconds = backpressureRetryAfterSeconds;
+                }
+                response.status(statusCode).json(payload);
             }
         } else { return; }
     }
@@ -2582,57 +2892,68 @@ openaiRouter.post('/images/generations', async (request: Request, response: Resp
 
         const capsOk = await enforceModelCapabilities(model, ['image_output'], response);
         if (!capsOk) return;
-
-        const provider = await pickImageGenProviderKey(model, ['image_output']);
-        if (!provider) {
-            if (!response.completed) return response.status(503).json({ error: 'No available provider for image generation', timestamp: new Date().toISOString() });
-            return;
-        }
-
-        const upstreamUrl = `${provider.baseUrl}/v1/images/generations`;
-        const upstreamRes = await fetchWithTimeout(upstreamUrl, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${provider.apiKey}`,
-            },
-            body: JSON.stringify({
-                model,
-                prompt,
-                n: typeof body?.n === 'number' ? body.n : 1,
-                size: typeof body?.size === 'string' ? body.size : '1024x1024',
-                quality: typeof body?.quality === 'string' ? body.quality : undefined,
-                style: typeof body?.style === 'string' ? body.style : undefined,
-                response_format: typeof body?.response_format === 'string' ? body.response_format : undefined,
-            }),
-        }, UPSTREAM_TIMEOUT_MS);
-
-        if (!upstreamRes.ok) {
-            const errText = await upstreamRes.text().catch(() => '');
-            if (!response.completed) return response.status(upstreamRes.status).json({ error: `Image generation upstream error: ${errText || upstreamRes.statusText}`, timestamp: new Date().toISOString() });
-            return;
-        }
-
-        const resJson = await upstreamRes.json();
-        response.json(resJson);
+        const { responseJson } = await requestImageGeneration({
+            modelId: model,
+            prompt,
+            requestBody: body,
+            upstreamTimeoutMs: UPSTREAM_TIMEOUT_MS,
+            userApiKey: request.apiKey || undefined,
+            requestId: request.requestId,
+        });
+        response.json(responseJson);
 
         const tokenEstimate = Math.ceil(prompt.length / 4) + 500; // prompt + generation cost estimate
         await updateUserTokenUsage(tokenEstimate, request.apiKey!);
     } catch (error: any) {
         await logError(error, request);
         console.error('Image generation route error:', error.message);
-        if (!response.completed) response.status(500).json({ error: 'Internal Server Error', timestamp: new Date().toISOString() });
+        const statusCode = typeof error?.statusCode === 'number' && error.statusCode >= 400 && error.statusCode < 600
+            ? error.statusCode
+            : (String(error?.message || '').includes('No available provider for image generation') ? 503 : 500);
+        if (!response.completed) {
+            response.status(statusCode).json({
+                error: statusCode === 500 ? 'Internal Server Error' : (error?.message || 'Image generation failed'),
+                timestamp: new Date().toISOString(),
+            });
+        }
     }
 });
 
-// --- Video Generation: /v1/videos/generations ---
-openaiRouter.post('/videos/generations', async (request: Request, response: Response) => {
+// --- Video Generation: /v1/videos/generations and /v1/videos ---
+const handleVideoGenerationRequest = async (request: Request, response: Response) => {
     try {
-        const body = await request.json();
-        const model = typeof body?.model === 'string' ? body.model : '';
-        const prompt = typeof body?.prompt === 'string'
-            ? body.prompt
-            : (typeof body?.input === 'string' ? body.input : '');
+        const contentType = String(request.headers['content-type'] || '');
+        let body: any = {};
+        let model = '';
+        let prompt = '';
+        let isMultipart = false;
+        let multipartBody: Buffer | null = null;
+
+        if (contentType.includes('multipart/form-data')) {
+            isMultipart = true;
+            multipartBody = await request.buffer();
+            const boundary = contentType.split('boundary=')[1]?.trim();
+            if (!boundary) {
+                if (!response.completed) return response.status(400).json({ error: 'Bad Request: boundary missing', timestamp: new Date().toISOString() });
+                return;
+            }
+            const parsed = parseMultipartBody(multipartBody, boundary);
+            model = typeof parsed.fields.model === 'string' ? parsed.fields.model : '';
+            prompt = typeof parsed.fields.prompt === 'string'
+                ? parsed.fields.prompt
+                : (typeof parsed.fields.input === 'string' ? parsed.fields.input : '');
+        } else {
+            try {
+                body = await request.json();
+            } catch {
+                if (!response.completed) return response.status(400).json({ error: 'Bad Request: invalid JSON', timestamp: new Date().toISOString() });
+                return;
+            }
+            model = typeof body?.model === 'string' ? body.model : '';
+            prompt = typeof body?.prompt === 'string'
+                ? body.prompt
+                : (typeof body?.input === 'string' ? body.input : '');
+        }
         if (!model) {
             if (!response.completed) return response.status(400).json({ error: 'Bad Request: model is required', timestamp: new Date().toISOString() });
             return;
@@ -2652,52 +2973,248 @@ openaiRouter.post('/videos/generations', async (request: Request, response: Resp
             return;
         }
 
-        const provider = await pickVideoGenProviderKey(model);
-        if (!provider) {
-            if (!response.completed) return response.status(503).json({ error: 'No available provider for video generation', timestamp: new Date().toISOString() });
-            return;
-        }
-
-        const upstreamUrl = `${provider.baseUrl}/v1/videos/generations`;
-        const payload: Record<string, any> = {
-            model,
-            prompt,
-        };
-        if (typeof body?.image_url === 'string') payload.image_url = body.image_url;
-        if (typeof body?.video_url === 'string') payload.video_url = body.video_url;
-        if (typeof body?.duration === 'number') payload.duration = body.duration;
-        if (typeof body?.aspect_ratio === 'string') payload.aspect_ratio = body.aspect_ratio;
-        if (typeof body?.resolution === 'string') payload.resolution = body.resolution;
-        if (typeof body?.seed === 'number') payload.seed = body.seed;
-
-        const upstreamRes = await fetchWithTimeout(upstreamUrl, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${provider.apiKey}`,
-            },
-            body: JSON.stringify(payload),
-        }, UPSTREAM_TIMEOUT_MS);
-
-        if (!upstreamRes.ok) {
-            const errText = await upstreamRes.text().catch(() => '');
-            if (!response.completed) return response.status(upstreamRes.status).json({ error: `Video generation upstream error: ${errText || upstreamRes.statusText}`, timestamp: new Date().toISOString() });
-            return;
-        }
-
-        const resJson = await upstreamRes.json();
-        const requestId = resJson?.request_id || resJson?.id;
+        const { responseJson, requestId, provider } = isMultipart && multipartBody
+            ? await requestVideoGenerationMultipart({
+                modelId: model,
+                contentType,
+                body: multipartBody as any,
+                upstreamTimeoutMs: UPSTREAM_TIMEOUT_MS,
+            })
+            : await requestVideoGeneration({
+                modelId: model,
+                prompt,
+                imageUrl: null,
+                requestBody: body,
+                upstreamTimeoutMs: UPSTREAM_TIMEOUT_MS,
+            });
         if (requestId) setVideoRequestCache(String(requestId), provider);
-        response.json(resJson);
+        response.json(responseJson);
 
         const tokenEstimate = Math.ceil(prompt.length / 4) + 500;
         await updateUserTokenUsage(tokenEstimate, request.apiKey!);
     } catch (error: any) {
         await logError(error, request);
         console.error('Video generation route error:', error.message);
-        if (!response.completed) response.status(500).json({ error: 'Internal Server Error', timestamp: new Date().toISOString() });
+        const statusCode = typeof error?.statusCode === 'number' && error.statusCode >= 400 && error.statusCode < 600
+            ? error.statusCode
+            : (String(error?.message || '').includes('No available provider for video generation') ? 503 : 500);
+        if (!response.completed) {
+            response.status(statusCode).json({
+                error: statusCode === 500 ? 'Internal Server Error' : (error?.message || 'Video generation failed'),
+                timestamp: new Date().toISOString(),
+            });
+        }
+    }
+};
+
+openaiRouter.get('/videos', async (request: Request, response: Response) => {
+    try {
+        const { provider, upstreamRes } = await forwardVideoRequestToProviders({
+            providersToTry: await getOpenAIVideoProvidersToTry(),
+            pathname: '/videos',
+            method: 'GET',
+            upstreamTimeoutMs: UPSTREAM_TIMEOUT_MS,
+            rawQuery: request.query as Record<string, any> | undefined,
+            label: 'Video list',
+        });
+        const resJson = await upstreamRes.json();
+        if (Array.isArray(resJson?.data)) {
+            for (const item of resJson.data) {
+                if (typeof item?.id === 'string') {
+                    setVideoRequestCache(item.id, provider);
+                }
+            }
+        }
+        response.json(resJson);
+    } catch (error: any) {
+        await logError(error, request);
+        console.error('Video list route error:', error.message);
+        const statusCode = typeof error?.statusCode === 'number' ? error.statusCode : 500;
+        if (!response.completed) response.status(statusCode).json({ error: error?.message || 'Video list failed', timestamp: new Date().toISOString() });
     }
 });
+
+openaiRouter.post('/videos/generations', handleVideoGenerationRequest);
+openaiRouter.post('/videos', handleVideoGenerationRequest);
+
+openaiRouter.post('/videos/edits', async (request: Request, response: Response) => {
+    try {
+        const parsedBody = await parseVideoForwardBody(request);
+        const model = extractParsedVideoField(parsedBody, 'model');
+        if (model) {
+            const nonChatType = isNonChatModel(model);
+            if (nonChatType !== 'video-gen') {
+                if (!response.completed) return response.status(400).json({ error: `Bad Request: '${model}' is not a video generation model.`, timestamp: new Date().toISOString() });
+                return;
+            }
+        }
+        const sourceVideoId = extractParsedVideoField(parsedBody, 'video');
+        const { provider, upstreamRes } = await forwardVideoRequestToProviders({
+            providersToTry: await getOpenAIVideoProvidersToTry({ resourceId: sourceVideoId || undefined, modelId: model || undefined }),
+            pathname: '/videos/edits',
+            method: 'POST',
+            upstreamTimeoutMs: UPSTREAM_TIMEOUT_MS,
+            contentType: parsedBody.contentType,
+            body: parsedBody.body,
+            label: 'Video edit',
+            retryableStatusCodes: getVideoResourceRetryableStatusCodes(sourceVideoId || undefined),
+        });
+        const resJson = await upstreamRes.json();
+        if (typeof resJson?.id === 'string') setVideoRequestCache(resJson.id, provider);
+        response.json(resJson);
+
+        const prompt = extractParsedVideoField(parsedBody, 'prompt');
+        if (prompt) {
+            const tokenEstimate = Math.ceil(prompt.length / 4) + 500;
+            await updateUserTokenUsage(tokenEstimate, request.apiKey!);
+        }
+    } catch (error: any) {
+        await logError(error, request);
+        console.error('Video edits route error:', error.message);
+        const statusCode = typeof error?.statusCode === 'number' ? error.statusCode : 500;
+        if (!response.completed) response.status(statusCode).json({ error: error?.message || 'Video edit failed', timestamp: new Date().toISOString() });
+    }
+});
+
+openaiRouter.post('/videos/extensions', async (request: Request, response: Response) => {
+    try {
+        const parsedBody = await parseVideoForwardBody(request);
+        const model = extractParsedVideoField(parsedBody, 'model');
+        if (model) {
+            const nonChatType = isNonChatModel(model);
+            if (nonChatType !== 'video-gen') {
+                if (!response.completed) return response.status(400).json({ error: `Bad Request: '${model}' is not a video generation model.`, timestamp: new Date().toISOString() });
+                return;
+            }
+        }
+        const sourceVideoId = extractParsedVideoField(parsedBody, 'video');
+        const { provider, upstreamRes } = await forwardVideoRequestToProviders({
+            providersToTry: await getOpenAIVideoProvidersToTry({ resourceId: sourceVideoId || undefined, modelId: model || undefined }),
+            pathname: '/videos/extensions',
+            method: 'POST',
+            upstreamTimeoutMs: UPSTREAM_TIMEOUT_MS,
+            contentType: parsedBody.contentType,
+            body: parsedBody.body,
+            label: 'Video extension',
+            retryableStatusCodes: getVideoResourceRetryableStatusCodes(sourceVideoId || undefined),
+        });
+        const resJson = await upstreamRes.json();
+        if (typeof resJson?.id === 'string') setVideoRequestCache(resJson.id, provider);
+        response.json(resJson);
+
+        const prompt = extractParsedVideoField(parsedBody, 'prompt');
+        if (prompt) {
+            const tokenEstimate = Math.ceil(prompt.length / 4) + 500;
+            await updateUserTokenUsage(tokenEstimate, request.apiKey!);
+        }
+    } catch (error: any) {
+        await logError(error, request);
+        console.error('Video extensions route error:', error.message);
+        const statusCode = typeof error?.statusCode === 'number' ? error.statusCode : 500;
+        if (!response.completed) response.status(statusCode).json({ error: error?.message || 'Video extension failed', timestamp: new Date().toISOString() });
+    }
+});
+
+openaiRouter.post('/videos/characters', async (request: Request, response: Response) => {
+    try {
+        const parsedBody = await parseVideoForwardBody(request, { multipartOnly: true });
+        const { provider, upstreamRes } = await forwardVideoRequestToProviders({
+            providersToTry: await getOpenAIVideoProvidersToTry(),
+            pathname: '/videos/characters',
+            method: 'POST',
+            upstreamTimeoutMs: UPSTREAM_TIMEOUT_MS,
+            contentType: parsedBody.contentType,
+            body: parsedBody.body,
+            label: 'Video character create',
+        });
+        const resJson = await upstreamRes.json();
+        if (typeof resJson?.id === 'string') setVideoRequestCache(resJson.id, provider);
+        response.json(resJson);
+    } catch (error: any) {
+        await logError(error, request);
+        console.error('Video characters route error:', error.message);
+        const statusCode = typeof error?.statusCode === 'number' ? error.statusCode : 500;
+        if (!response.completed) response.status(statusCode).json({ error: error?.message || 'Video character creation failed', timestamp: new Date().toISOString() });
+    }
+});
+
+openaiRouter.get('/videos/characters/:characterId', async (request: Request, response: Response) => {
+    try {
+        const characterId = typeof request.params?.characterId === 'string' ? request.params.characterId : '';
+        if (!characterId) {
+            if (!response.completed) return response.status(400).json({ error: 'Bad Request: characterId is required', timestamp: new Date().toISOString() });
+            return;
+        }
+        const { provider, upstreamRes } = await forwardVideoRequestToProviders({
+            providersToTry: await getOpenAIVideoProvidersToTry({ resourceId: characterId }),
+            pathname: `/videos/characters/${encodeURIComponent(characterId)}`,
+            method: 'GET',
+            upstreamTimeoutMs: UPSTREAM_TIMEOUT_MS,
+            label: 'Video character lookup',
+            retryableStatusCodes: getVideoResourceRetryableStatusCodes(characterId),
+        });
+        const resJson = await upstreamRes.json();
+        if (typeof resJson?.id === 'string') setVideoRequestCache(resJson.id, provider);
+        response.json(resJson);
+    } catch (error: any) {
+        await logError(error, request);
+        console.error('Video character lookup route error:', error.message);
+        const statusCode = typeof error?.statusCode === 'number' ? error.statusCode : 500;
+        if (!response.completed) response.status(statusCode).json({ error: error?.message || 'Video character lookup failed', timestamp: new Date().toISOString() });
+    }
+});
+
+openaiRouter.post('/videos/:videoId/remix', async (request: Request, response: Response) => {
+    try {
+        const videoId = typeof request.params?.videoId === 'string' ? request.params.videoId : '';
+        if (!videoId) {
+            if (!response.completed) return response.status(400).json({ error: 'Bad Request: videoId is required', timestamp: new Date().toISOString() });
+            return;
+        }
+        let body: any;
+        try {
+            body = await request.json();
+        } catch {
+            if (!response.completed) return response.status(400).json({ error: 'Bad Request: application/json required', timestamp: new Date().toISOString() });
+            return;
+        }
+        const { provider, upstreamRes } = await forwardVideoRequestToProviders({
+            providersToTry: await getOpenAIVideoProvidersToTry({ resourceId: videoId }),
+            pathname: `/videos/${encodeURIComponent(videoId)}/remix`,
+            method: 'POST',
+            upstreamTimeoutMs: UPSTREAM_TIMEOUT_MS,
+            contentType: 'application/json',
+            body: JSON.stringify(body),
+            label: 'Video remix',
+            retryableStatusCodes: getVideoResourceRetryableStatusCodes(videoId),
+        });
+        const resJson = await upstreamRes.json();
+        if (typeof resJson?.id === 'string') setVideoRequestCache(resJson.id, provider);
+        response.json(resJson);
+
+        const prompt = typeof body?.prompt === 'string' ? body.prompt : '';
+        if (prompt) {
+            const tokenEstimate = Math.ceil(prompt.length / 4) + 500;
+            await updateUserTokenUsage(tokenEstimate, request.apiKey!);
+        }
+    } catch (error: any) {
+        await logError(error, request);
+        console.error('Video remix route error:', error.message);
+        const statusCode = typeof error?.statusCode === 'number' ? error.statusCode : 500;
+        if (!response.completed) response.status(statusCode).json({ error: error?.message || 'Video remix failed', timestamp: new Date().toISOString() });
+    }
+});
+
+async function getVideoProvidersToTry(requestId: string): Promise<Array<{ apiKey: string; baseUrl: string }>> {
+    const cached = getVideoRequestCache(requestId);
+    const fallbackProviders = (await listAnyVideoProviders()).map((provider) => ({
+        apiKey: provider.apiKey,
+        baseUrl: provider.baseUrl,
+    }));
+    return cached
+        ? [cached, ...fallbackProviders.filter((provider) => provider.apiKey !== cached.apiKey || provider.baseUrl !== cached.baseUrl)]
+        : fallbackProviders;
+}
 
 // --- Video Status: /v1/videos/{requestId} ---
 openaiRouter.get('/videos/:requestId', async (request: Request, response: Response) => {
@@ -2708,32 +3225,147 @@ openaiRouter.get('/videos/:requestId', async (request: Request, response: Respon
             return;
         }
 
-        const cached = getVideoRequestCache(requestId);
-        const provider = cached ?? await pickAnyXaiProviderKey();
-        if (!provider) {
+        const providersToTry = await getVideoProvidersToTry(requestId);
+        if (providersToTry.length === 0) {
             if (!response.completed) return response.status(503).json({ error: 'No available provider for video status', timestamp: new Date().toISOString() });
             return;
         }
 
-        const upstreamUrl = `${provider.baseUrl}/v1/videos/${requestId}`;
-        const upstreamRes = await fetchWithTimeout(upstreamUrl, {
-            method: 'GET',
-            headers: {
-                'Authorization': `Bearer ${provider.apiKey}`,
-            },
-        }, UPSTREAM_TIMEOUT_MS);
+        let lastStatus = 503;
+        let lastErrorText = 'No available provider for video status';
+        for (const provider of providersToTry) {
+            const upstreamUrl = `${provider.baseUrl}/v1/videos/${requestId}`;
+            const upstreamRes = await fetchWithTimeout(upstreamUrl, {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${provider.apiKey}`,
+                },
+            }, UPSTREAM_TIMEOUT_MS);
 
-        if (!upstreamRes.ok) {
-            const errText = await upstreamRes.text().catch(() => '');
-            if (!response.completed) return response.status(upstreamRes.status).json({ error: `Video status upstream error: ${errText || upstreamRes.statusText}`, timestamp: new Date().toISOString() });
-            return;
+            if (upstreamRes.ok) {
+                const rawText = await upstreamRes.text().catch(() => '');
+                if (!rawText.trim()) {
+                    if (!response.completed) {
+                        response.status(502).json({
+                            error: 'Video status upstream error: empty response body from provider',
+                            timestamp: new Date().toISOString(),
+                        });
+                    }
+                    return;
+                }
+
+                let resJson: any;
+                try {
+                    resJson = JSON.parse(rawText);
+                } catch {
+                    if (!response.completed) {
+                        response.status(502).json({
+                            error: 'Video status upstream error: non-JSON response body from provider',
+                            timestamp: new Date().toISOString(),
+                        });
+                    }
+                    return;
+                }
+                response.json(resJson);
+                return;
+            }
+
+            lastStatus = upstreamRes.status;
+            lastErrorText = await upstreamRes.text().catch(() => upstreamRes.statusText || lastErrorText);
+            if (![401, 403, 404, 405, 409, 423, 425, 429, 500, 501, 502, 503, 504].includes(upstreamRes.status)) {
+                break;
+            }
         }
 
-        const resJson = await upstreamRes.json();
-        response.json(resJson);
+        if (!response.completed) {
+            response.status(lastStatus).json({ error: `Video status upstream error: ${lastErrorText}`, timestamp: new Date().toISOString() });
+        }
     } catch (error: any) {
         await logError(error, request);
         console.error('Video status route error:', error.message);
+        if (!response.completed) response.status(500).json({ error: 'Internal Server Error', timestamp: new Date().toISOString() });
+    }
+});
+
+openaiRouter.delete('/videos/:requestId', async (request: Request, response: Response) => {
+    try {
+        const requestId = typeof request.params?.requestId === 'string' ? request.params.requestId : '';
+        if (!requestId) {
+            if (!response.completed) return response.status(400).json({ error: 'Bad Request: requestId is required', timestamp: new Date().toISOString() });
+            return;
+        }
+        const { upstreamRes } = await forwardVideoRequestToProviders({
+            providersToTry: await getOpenAIVideoProvidersToTry({ resourceId: requestId }),
+            pathname: `/videos/${encodeURIComponent(requestId)}`,
+            method: 'DELETE',
+            upstreamTimeoutMs: UPSTREAM_TIMEOUT_MS,
+            label: 'Video delete',
+            retryableStatusCodes: getVideoResourceRetryableStatusCodes(requestId),
+        });
+        deleteVideoRequestCache(requestId);
+        const resJson = await upstreamRes.json().catch(() => ({}));
+        response.json(resJson);
+    } catch (error: any) {
+        await logError(error, request);
+        console.error('Video delete route error:', error.message);
+        const statusCode = typeof error?.statusCode === 'number' ? error.statusCode : 500;
+        if (!response.completed) response.status(statusCode).json({ error: error?.message || 'Video delete failed', timestamp: new Date().toISOString() });
+    }
+});
+
+// --- Video Content: /v1/videos/{requestId}/content ---
+openaiRouter.get('/videos/:requestId/content', async (request: Request, response: Response) => {
+    try {
+        const requestId = typeof request.params?.requestId === 'string' ? request.params.requestId : '';
+        if (!requestId) {
+            if (!response.completed) return response.status(400).json({ error: 'Bad Request: requestId is required', timestamp: new Date().toISOString() });
+            return;
+        }
+
+        const providersToTry = await getVideoProvidersToTry(requestId);
+        if (providersToTry.length === 0) {
+            if (!response.completed) return response.status(503).json({ error: 'No available provider for video content', timestamp: new Date().toISOString() });
+            return;
+        }
+
+        let lastStatus = 503;
+        let lastErrorText = 'No available provider for video content';
+        const forwardedQuery = buildForwardedQueryString(request.query as Record<string, any> | undefined);
+        for (const provider of providersToTry) {
+            const upstreamUrl = `${provider.baseUrl}/v1/videos/${requestId}/content${forwardedQuery}`;
+            const upstreamRes = await fetchWithTimeout(upstreamUrl, {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${provider.apiKey}`,
+                },
+            }, UPSTREAM_TIMEOUT_MS);
+
+            if (upstreamRes.status === 200) {
+                const contentType = upstreamRes.headers.get('content-type') || 'video/mp4';
+                const contentLength = upstreamRes.headers.get('content-length');
+                const cacheControl = upstreamRes.headers.get('cache-control');
+                response.setHeader('Content-Type', contentType);
+                if (contentLength) response.setHeader('Content-Length', contentLength);
+                if (cacheControl) response.setHeader('Cache-Control', cacheControl);
+
+                const arrayBuffer = await upstreamRes.arrayBuffer();
+                response.end(new Uint8Array(arrayBuffer));
+                return;
+            }
+
+            lastStatus = upstreamRes.status;
+            lastErrorText = await upstreamRes.text().catch(() => upstreamRes.statusText || lastErrorText);
+            if (![401, 403, 404, 405, 409, 423, 425, 429, 500, 501, 502, 503, 504].includes(upstreamRes.status)) {
+                break;
+            }
+        }
+
+        if (!response.completed) {
+            response.status(lastStatus).json({ error: `Video content upstream error: ${lastErrorText}`, timestamp: new Date().toISOString() });
+        }
+    } catch (error: any) {
+        await logError(error, request);
+        console.error('Video content route error:', error.message);
         if (!response.completed) response.status(500).json({ error: 'Internal Server Error', timestamp: new Date().toISOString() });
     }
 });
@@ -2767,17 +3399,94 @@ openaiRouter.post('/embeddings', async (request: Request, response: Response) =>
             const tokensUsed = Array.isArray(input)
                 ? input.reduce((acc: number, s: string) => acc + estimateTokensFromText(String(s), 'input'), 0)
                 : estimateTokensFromText(String(input), 'input');
+            const encodingFormat = body?.encoding_format;
 
-            const provider = await pickOpenAIProviderKey(model);
+            const provider = await pickEmbeddingProviderKey(model);
             if (!provider) {
                 if (!response.completed) return response.status(503).json({ error: 'No available provider for embeddings', timestamp: new Date().toISOString() });
                 return;
             }
 
+            if (provider.kind === 'gemini') {
+                const normalizedInputs = normalizeGeminiEmbeddingInput(input);
+                if (!normalizedInputs || normalizedInputs.length === 0) {
+                    if (!response.completed) {
+                        return response.status(400).json({
+                            error: 'Bad Request: Gemini embedding models require input as a string or array of strings.',
+                            timestamp: new Date().toISOString(),
+                        });
+                    }
+                    return;
+                }
+
+                const modelPath = toGeminiEmbeddingModelPath(model);
+                const geminiRequestBase: Record<string, any> = {};
+                if (typeof body?.dimensions === 'number' && Number.isFinite(body.dimensions) && body.dimensions > 0) {
+                    geminiRequestBase.outputDimensionality = Math.floor(body.dimensions);
+                }
+
+                body = undefined;
+                input = undefined;
+
+                const upstreamUrl = normalizedInputs.length === 1
+                    ? `${provider.baseUrl}/${modelPath}:embedContent`
+                    : `${provider.baseUrl}/${modelPath}:batchEmbedContents`;
+                const upstreamPayload = normalizedInputs.length === 1
+                    ? {
+                        model: modelPath,
+                        content: { parts: [{ text: normalizedInputs[0] }] },
+                        ...geminiRequestBase,
+                    }
+                    : {
+                        requests: normalizedInputs.map((text) => ({
+                            model: modelPath,
+                            content: { parts: [{ text }] },
+                            ...geminiRequestBase,
+                        })),
+                    };
+                const upstreamRes = await fetchWithTimeout(upstreamUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'x-goog-api-key': provider.apiKey,
+                    },
+                    body: JSON.stringify(upstreamPayload),
+                }, UPSTREAM_TIMEOUT_MS);
+
+                if (!upstreamRes.ok) {
+                    const errText = await upstreamRes.text().catch(() => '');
+                    if (!response.completed) {
+                        return response.status(upstreamRes.status).json({
+                            error: `Embeddings upstream error: ${errText || upstreamRes.statusText}`,
+                            timestamp: new Date().toISOString(),
+                        });
+                    }
+                    return;
+                }
+
+                const upstreamJson = await upstreamRes.json().catch(() => ({}));
+                const vectors = Array.isArray(upstreamJson?.embeddings)
+                    ? upstreamJson.embeddings.map((entry: any) => Array.isArray(entry?.values) ? entry.values.map((value: any) => Number(value)) : [])
+                    : (Array.isArray(upstreamJson?.embedding?.values)
+                        ? [upstreamJson.embedding.values.map((value: any) => Number(value))]
+                        : []);
+                if (vectors.length === 0) {
+                    if (!response.completed) {
+                        return response.status(502).json({
+                            error: 'Embeddings upstream error: Gemini returned no embedding vectors.',
+                            timestamp: new Date().toISOString(),
+                        });
+                    }
+                    return;
+                }
+
+                return response.json(buildOpenAIEmbeddingResponse(model, vectors, tokensUsed, encodingFormat));
+            }
+
             const upstreamPayload = JSON.stringify({
                 model,
                 input,
-                encoding_format: body.encoding_format,
+                encoding_format: encodingFormat,
                 dimensions: body.dimensions,
                 user: body.user,
             });
@@ -2833,22 +3542,42 @@ openaiRouter.post('/embeddings', async (request: Request, response: Response) =>
 openaiRouter.post('/images/edits', async (request: Request, response: Response) => {
     try {
         const contentType = request.headers['content-type'] || '';
-        if (!contentType.includes('multipart/form-data')) {
-            if (!response.completed) return response.status(400).json({ error: 'Bad Request: multipart/form-data required', timestamp: new Date().toISOString() });
+        let model = '';
+        let prompt = '';
+        let upstreamBody: any;
+        let upstreamContentType = contentType;
+        let parsedBody: any = null;
+
+        if (contentType.includes('application/json')) {
+            parsedBody = await request.json();
+            model = typeof parsedBody?.model === 'string' ? parsedBody.model : '';
+            prompt = typeof parsedBody?.prompt === 'string' ? parsedBody.prompt : '';
+            upstreamBody = JSON.stringify(parsedBody);
+            upstreamContentType = 'application/json';
+        } else if (contentType.includes('multipart/form-data')) {
+            const rawBody = await request.buffer();
+            const boundary = contentType.split('boundary=')[1]?.trim();
+            if (!boundary) {
+                if (!response.completed) return response.status(400).json({ error: 'Bad Request: boundary missing', timestamp: new Date().toISOString() });
+                return;
+            }
+
+            // Parse just to extract model/validation, but forward raw buffer
+            const parsed = parseMultipartBody(rawBody, boundary);
+            model = parsed.fields['model']; 
+            prompt = parsed.fields['prompt'];
+
+            // Check for image file
+            if (!parsed.files.some((f) => f.fieldName === 'image')) {
+                 if (!response.completed) return response.status(400).json({ error: 'Bad Request: image file is required', timestamp: new Date().toISOString() });
+                 return;
+            }
+
+            upstreamBody = rawBody as any;
+        } else {
+            if (!response.completed) return response.status(400).json({ error: 'Bad Request: application/json or multipart/form-data required', timestamp: new Date().toISOString() });
             return;
         }
-
-        const rawBody = await request.buffer();
-        const boundary = contentType.split('boundary=')[1]?.trim();
-        if (!boundary) {
-            if (!response.completed) return response.status(400).json({ error: 'Bad Request: boundary missing', timestamp: new Date().toISOString() });
-            return;
-        }
-
-        // Parse just to extract model/validation, but forward raw buffer
-        const parsed = parseMultipartBody(rawBody, boundary);
-        const model = parsed.fields['model']; 
-        const prompt = parsed.fields['prompt'];
         
         if (!model) {
             if (!response.completed) return response.status(400).json({ error: 'Bad Request: model is required', timestamp: new Date().toISOString() });
@@ -2870,40 +3599,15 @@ openaiRouter.post('/images/edits', async (request: Request, response: Response) 
              return;
         }
 
-        // Check for image file
-        if (!parsed.files.some(f => f.name === 'image')) {
-             if (!response.completed) return response.status(400).json({ error: 'Bad Request: image file is required', timestamp: new Date().toISOString() });
-             return;
-        }
-
         const capsOk = await enforceModelCapabilities(model, ['image_input', 'image_output'], response);
         if (!capsOk) return;
 
-        const provider = await pickOpenAIProviderKey(model, ['image_input', 'image_output']);
-        if (!provider) {
-            if (!response.completed) return response.status(503).json({ error: 'No available provider for image edits', timestamp: new Date().toISOString() });
-            return;
-        }
-
-        const upstreamUrl = `${provider.baseUrl}/v1/images/edits`;
-        
-        // Forward raw body directly to preserve binary integrity
-        const upstreamRes = await fetchWithTimeout(upstreamUrl, {
-            method: 'POST',
-            headers: {
-                'Content-Type': contentType, // Pass original content-type with boundary
-                'Authorization': `Bearer ${provider.apiKey}`,
-            },
-            body: rawBody as any,
-        }, UPSTREAM_TIMEOUT_MS);
-
-        if (!upstreamRes.ok) {
-            const errText = await upstreamRes.text().catch(() => '');
-            if (!response.completed) return response.status(upstreamRes.status).json({ error: `Image edits upstream error: ${errText || upstreamRes.statusText}`, timestamp: new Date().toISOString() });
-            return;
-        }
-
-        const resJson = await upstreamRes.json();
+        const resJson = await requestImageEdit({
+            modelId: model,
+            contentType: upstreamContentType,
+            body: upstreamBody,
+            upstreamTimeoutMs: UPSTREAM_TIMEOUT_MS,
+        });
         response.json(resJson);
 
         const tokenEstimate = Math.ceil(prompt.length / 4) + 500;

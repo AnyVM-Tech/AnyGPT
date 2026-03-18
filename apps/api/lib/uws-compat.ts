@@ -201,6 +201,7 @@ export class Request {
     private bodyCache?: Promise<Buffer>;
     private bodyReader: () => Promise<Buffer>;
     private maxBodyLength: number;
+    private bodyCacheReleased = false;
 
     constructor(ctx: RequestContext, maxBodyLength: number, options: RequestInitOptions) {
         this.path = ctx.path;
@@ -224,6 +225,9 @@ export class Request {
     }
 
     async buffer(): Promise<Buffer> {
+        if (this.bodyCacheReleased) {
+            throw new Error('Request body cache was released and cannot be read again.');
+        }
         if (!this.bodyCache) {
             this.bodyCache = (async () => {
                 const body = await this.bodyReader();
@@ -234,6 +238,11 @@ export class Request {
             })();
         }
         return this.bodyCache;
+    }
+
+    releaseBodyCache(): void {
+        this.bodyCacheReleased = true;
+        this.bodyCache = undefined;
     }
 }
 

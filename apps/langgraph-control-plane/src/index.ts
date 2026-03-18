@@ -946,7 +946,7 @@ function parseArgs(argv: string[]): ParsedArgs {
 
 async function runGraphOnce(
   parsedArgs: ParsedArgs,
-  controlPlaneGraph: Awaited<ReturnType<typeof createControlPlaneGraph>>,
+  controlPlaneGraph: Awaited<ReturnType<typeof createControlPlaneGraph>>['graph'],
   runnerStatus: RunnerStatus,
 ): Promise<{ result: ReturnType<typeof ControlPlaneStateSchema.parse>; sawInterrupt: boolean }> {
   const initialState = ControlPlaneStateSchema.parse(parsedArgs);
@@ -1010,7 +1010,7 @@ async function main() {
   const parsedArgs = parseArgs(process.argv.slice(2));
   loadEnvForControlPlane(parsedArgs.repoRoot);
   await configureLangSmithRuntime();
-  const controlPlaneGraph = await createControlPlaneGraph({
+  const { graph: controlPlaneGraph, checkpointer } = await createControlPlaneGraph({
     repoRoot: parsedArgs.repoRoot,
     checkpointPath: parsedArgs.checkpointPath,
   });
@@ -1349,6 +1349,10 @@ async function main() {
       if (!parsedArgs.continuous || sawInterrupt) {
         break;
       }
+
+      await checkpointer.deleteThread(parsedArgs.threadId).catch((error) => {
+        console.warn(`[langgraph-control-plane] Failed to compact completed checkpoint thread ${parsedArgs.threadId}: ${formatError(error)}`);
+      });
 
       if (parsedArgs.maxIterations !== null && iteration >= parsedArgs.maxIterations) {
         runnerStatus = mergeRunnerStatus(runnerStatus, {
