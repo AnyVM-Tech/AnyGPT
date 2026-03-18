@@ -4,7 +4,7 @@
     {
       "id": "gpt-3.5-turbo",
       "object": "model",
-      "created": 1773820378,
+      "created": 1773822267,
       "owned_by": "openai-mock",
       "providers": 1,
       "throughput": 50,
@@ -16,7 +16,7 @@
     {
       "id": "gpt-5.4",
       "object": "model",
-      "created": 1773820378,
+      "created": 1773822267,
       "owned_by": "openai-mock",
       "providers": 1,
       "throughput": 50,

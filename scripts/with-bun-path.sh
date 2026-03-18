@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 USER_HOME="$(getent passwd "$(id -un)" | cut -d: -f6 2>/dev/null || true)"
 if [[ -z "${USER_HOME}" ]]; then
 	USER_HOME="/home/$(id -un)"
@@ -13,7 +14,6 @@ elif [[ -x "${DEFAULT_BUN}" ]]; then
 	BUN_BIN="${DEFAULT_BUN}"
 else
 	echo "Bun is required but was not found in PATH or at ${DEFAULT_BUN}." >&2
-	echo "Install Bun from https://bun.sh or add its bin directory to your PATH." >&2
 	exit 1
 fi
 
@@ -23,4 +23,5 @@ case ":${PATH}:" in
 	*) export PATH="${BUN_DIR}:${PATH}" ;;
 esac
 
-exec "${BUN_BIN}" "$@"
+cd "${ROOT_DIR}"
+exec "$@"
