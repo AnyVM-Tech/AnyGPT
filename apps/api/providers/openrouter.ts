@@ -17,7 +17,57 @@ function isOpenRouterToolUseUnsupportedError(error: any): boolean {
       || error?.message
       || ''
   );
-  return status === 404 && /no endpoints found that support (tool use|the provided 'tool_choice' value)/i.test(message);
+  return status === 404 && /no endpoints found that support (tool use|the requested tool settings)/i.test(message);
+}
+
+function annotateOpenRouterCapabilityError(target: any, error: any): void {
+  if (!target || !isOpenRouterToolUseUnsupportedError(error)) return;
+  target.status = 404;
+  target.statusCode = 404;
+  target.code = 'OPENROUTER_TOOL_USE_UNSUPPORTED';
+  target.retryable = false;
+  target.providerSwitchWorthless = true;
+  target.requestRetryWorthless = true;
+}
+
+function isTransientOpenRouterError(error: any): boolean {
+  const status = Number(error?.response?.status || error?.status || 0);
+  const message = String(
+    error?.response?.data?.error?.message
+      || error?.response?.data?.message
+      || error?.message
+      || ''
+  ).toLowerCase();
+
+  if (status === 408 || status === 409 || status === 425 || status === 429) {
+    return true;
+  }
+
+  if (status >= 500 && status < 600) {
+    return true;
+  }
+
+  if (
+    status === 402 && (
+      message.includes('payment required') ||
+      message.includes('insufficient credits') ||
+      message.includes('insufficient credit') ||
+      message.includes('quota') ||
+      message.includes('balance') ||
+      message.includes('credits')
+    )
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+function stripUnsupportedToolUse(payload: Record<string, any>): Record<string, any> {
+  const next = { ...payload };
+  delete next.tools;
+  delete next.tool_choice;
+  return next;
 }
 
 function hasUsableTools(tools: any): boolean {

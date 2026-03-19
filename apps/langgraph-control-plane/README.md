@@ -57,8 +57,10 @@ bun run dev -- --goal="Release API" --scopes=api --execute --allow-deploy --depl
 The built-in workflow currently understands these scopes:
 
 - `repo`
+- `repo-surface`
 - `api`
 - `api-experimental`
+- `control-plane`
 
 Additional scopes can be added by extending the target map in [`src/workflow.ts`](src/workflow.ts).
 
@@ -362,7 +364,7 @@ bun run dev -- --goal="Continuously validate experimental API" --scopes=api-expe
 bun run dev -- --goal="Autonomous smoke run" --scopes=api-experimental --autonomous --interval-ms=5000 --max-iterations=2
 ```
 
-When `--interval-ms` is omitted, continuous and autonomous loops now default to `10000ms`. Override that default with `CONTROL_PLANE_INTERVAL_MS` when you want a different steady-state cadence.
+When `--interval-ms` is omitted, continuous and autonomous loops now default to `5000ms`. Override that default with `CONTROL_PLANE_INTERVAL_MS` when you want a different steady-state cadence.
 
 Continuous/autonomous status is persisted to [`apps/langgraph-control-plane/.control-plane/runner-status.json`](.control-plane/runner-status.json), including:
 
@@ -370,11 +372,13 @@ Continuous/autonomous status is persisted to [`apps/langgraph-control-plane/.con
 - running phase (`starting`, `streaming`, `sleeping`, `paused`, `completed`, `failed`)
 - thread ID
 - checkpoint path
+- requested/effective scopes plus any adaptive scope expansion reason
 - requested/selected prompt bundle refs plus sync/promotion outcomes
 - last summary
 - proposed/applied autonomous edit counts
 - last applied edit paths
 - current autonomous lane (`repair` vs `improvement`)
+- autonomous planner strategy, focused agent count, and focused agent summaries
 - post-repair validation/backtest outcomes
 - experimental restart status and reason
 - sampled LangSmith workspace names/count and current project admin metadata
@@ -403,11 +407,18 @@ bun run dev -- --goal="Fix control-plane issues" --scopes=control-plane --execut
 # Continuous autonomous code-editing loop
 bun run dev -- --goal="Continuously improve experimental API" --scopes=api-experimental --autonomous
 
+# Coordinated multi-runner autonomous loop
+bun run dev -- --goal="Continuously improve repo health" --scopes=repo,api-experimental,control-plane --autonomous --multi-runner
+
 # Customize write scope and action count
 bun run dev -- --goal="Control-plane self-heal" --scopes=control-plane --execute --autonomous-edits --edit-allowlist=apps/langgraph-control-plane,apps/api --max-edit-actions=2
 ```
 
 Autonomous code edits are enforced through the allowlist/denylist logic, session manifests, touched-file snapshots, and rollback helpers in [`apps/langgraph-control-plane/src/autonomousEdits.ts`](src/autonomousEdits.ts).
+
+Continuous autonomous runs now fan out up to `CONTROL_PLANE_AI_CODE_EDIT_AGENT_PARALLELISM` focused edit agents per iteration. The planner keeps one primary full-context agent and, when aggressive experimental mode is active, adds narrower API/control-plane/repo-focused edit agents so the loop stops spending every iteration on one broad no-op plan.
+
+`--multi-runner` now adds a supervisor process on top of that internal planner fanout. The coordinator writes the main status file, derives per-lane child status/checkpoint/pid/log files, and keeps child runners on locked disjoint lanes such as `api-experimental`, `control-plane`, and `repo-surface` instead of letting adaptive scope expansion collapse them back into overlap.
 
 Default allowlist:
 
@@ -455,15 +466,16 @@ Rollback is automatic when a touched repair fails smoke validation, when the eva
 Runtime speed/aggression controls are now environment-driven:
 
 ```bash
-CONTROL_PLANE_INTERVAL_MS=10000
+CONTROL_PLANE_INTERVAL_MS=5000
 CONTROL_PLANE_MCP_INSPECTION_TIMEOUT_MS=8000
 CONTROL_PLANE_AI_AGENT_TIMEOUT_MS=25000
+CONTROL_PLANE_AI_CODE_EDIT_AGENT_PARALLELISM=3
 CONTROL_PLANE_REPAIR_SMOKE_TIMEOUT_MS=120000
 CONTROL_PLANE_POST_REPAIR_VALIDATION_TIMEOUT_MS=600000
 CONTROL_PLANE_AUTO_RESTART_EXPERIMENTAL=true
 ```
 
-The runner status file at [`apps/langgraph-control-plane/.control-plane/runner-status.json`](.control-plane/runner-status.json) now surfaces the repair-loop status, intent summary, smoke result counts, promoted paths, rollback paths, and repair session metadata.
+The runner status file at [`apps/langgraph-control-plane/.control-plane/runner-status.json`](.control-plane/runner-status.json) now surfaces the repair-loop status, intent summary, planner fanout/focus metadata, smoke result counts, promoted paths, rollback paths, and repair session metadata.
 
 It also now persists the prompt lifecycle fields, governance gate state, evaluation scorecard fields, repair touched paths, and observability tags needed to correlate LangSmith runs back to a specific bounded edit session.
 

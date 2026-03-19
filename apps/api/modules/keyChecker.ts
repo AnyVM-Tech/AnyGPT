@@ -33,6 +33,7 @@ type ApiErrorInfo = {
 
 const INVALID_KEY_ERROR_PATTERNS = [
     'api_key_invalid',
+    'not_authorized_invalid_key_type',
     'api_key_http_referrer_blocked',
     'api key not found',
     'api key not valid',
@@ -41,6 +42,8 @@ const INVALID_KEY_ERROR_PATTERNS = [
     'invalid api key',
     'invalid authentication',
     'incorrect api key',
+    'does not allow user keys',
+    'permissioned key',
     'requests from referer',
     'http referrer blocked',
     'unauthorized',
@@ -235,6 +238,17 @@ export async function checkOpenAI(apiKey: string): Promise<KeyStatus> {
         }
 
         if (responsesRes.status >= 400) {
+            const invalidCredential = isInvalidKeyErrorMessage([
+                responsesErr.message,
+                responsesErr.code,
+                responsesErr.type,
+                responsesErr.status,
+            ].filter(Boolean).join(' '));
+            if (invalidCredential) {
+                status.isValid = false;
+                status.error = responsesErr.message || responsesErr.code || 'Unauthorized';
+                return status;
+            }
             if (isQuotaExhausted(responsesErr)) {
                 status.hasQuota = false;
             }

@@ -30,7 +30,11 @@ function resolveWorkerPath(): { nodeUrl?: URL; bunUrl?: string; execArgv: string
   const tsUrl = new URL('./workers/providerMetricsWorker.ts', import.meta.url);
   const jsPath = fileURLToPath(jsUrl);
   if (typeof (globalThis as any).Bun !== 'undefined') {
-    return { nodeUrl: fs.existsSync(jsPath) ? jsUrl : undefined, bunUrl: tsUrl.href, execArgv: [] };
+    return {
+      nodeUrl: fs.existsSync(jsPath) ? jsUrl : undefined,
+      bunUrl: fs.existsSync(jsPath) ? jsUrl.href : tsUrl.href,
+      execArgv: [],
+    };
   }
   if (fs.existsSync(jsPath)) {
     return { nodeUrl: jsUrl, execArgv: [] };

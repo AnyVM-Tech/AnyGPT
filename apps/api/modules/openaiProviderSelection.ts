@@ -5,7 +5,11 @@ import type { ModelCapability } from '../providers/interfaces.js';
 import { isGptImageModelId, isSoraVideoModelId, resolveSoraVideoModelId } from './openaiRouteUtils.js';
 
 const MODEL_CAPS_CACHE_MS = Math.max(1000, Number(process.env.MODEL_CAPS_CACHE_MS ?? 5000));
+const XAI_PROVIDER_KEY_CACHE_MS = Math.max(1000, Number(process.env.XAI_PROVIDER_KEY_CACHE_MS ?? 5000));
 let modelCapsCache: { expiresAt: number; map: Map<string, ModelCapability[]> } | null = null;
+let xaiProviderKeyCache:
+  | { expiresAt: number; value: { apiKey: string; baseUrl: string } | null }
+  | null = null;
 
 export function extractOrigin(urlStr: string): string {
   try {

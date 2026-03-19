@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { spawn, type ChildProcess } from 'node:child_process';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -11,6 +12,7 @@ import {
   createControlPlaneGraph,
   resolveControlPlaneCheckpointPath,
   type ControlPlaneEvaluationGatePolicy,
+  type ScopeExpansionMode,
 } from './workflow.js';
 import {
   resolveAutonomousEditAllowlist,
@@ -22,6 +24,10 @@ type ParsedArgs = {
   goal: string;
   scopes: string[];
   threadId: string;
+  multiRunner: boolean;
+  coordinatorChildId?: string;
+  coordinatorParentThreadId?: string;
+  scopeExpansionMode: ScopeExpansionMode;
   approvalMode: 'manual' | 'auto';
   continuous: boolean;
   autonomous: boolean;
@@ -53,6 +59,8 @@ type ParsedArgs = {
 type RunnerStatus = {
   goal: string;
   scopes: string[];
+  effectiveScopes?: string[];
+  scopeExpansionReason?: string;
   threadId: string;
   continuous: boolean;
   autonomous: boolean;
@@ -80,6 +88,9 @@ type RunnerStatus = {
   repairIntentSummary?: string;
   repairSignalCount?: number;
   autonomousOperationMode?: string;
+  autonomousPlannerAgentCount?: number;
+  autonomousPlannerFocuses?: string[];
+  autonomousPlannerStrategy?: string;
   improvementIntentSummary?: string;
   improvementSignalCount?: number;
   repairSessionId?: string;
@@ -162,15 +173,78 @@ type RunnerStatus = {
   repairTouchedPaths?: string[];
   observabilityTags?: string[];
   summary?: string;
+  runnerMode?: 'single-runner' | 'multi-runner-coordinator' | 'multi-runner-child';
+  coordinatorChildId?: string;
+  coordinatorParentThreadId?: string;
+  scopeExpansionMode?: ScopeExpansionMode;
+  coordinatorStrategy?: string;
+  coordinatorPollMs?: number;
+  coordinatedRunnerCount?: number;
+  coordinatedRunners?: CoordinatedRunnerStatusEntry[];
+};
+
+type CoordinatedRunnerStatusEntry = {
+  id: string;
+  label: string;
+  threadId: string;
+  scopes: string[];
+  editAllowlist: string[];
+  checkpointPath: string;
+  statusFilePath: string;
+  pidFilePath?: string;
+  logFilePath: string;
+  pid?: number;
+  running: boolean;
+  phase: string;
+  iteration: number;
+  proposedEditCount: number;
+  appliedEditCount: number;
+  repairStatus?: string;
+  lastError?: string;
+  lastUpdatedAt?: string;
+  restartedCount: number;
+  summary?: string;
+  scopeExpansionMode: ScopeExpansionMode;
+};
+
+type CoordinatorChildSpec = {
+  id: string;
+  label: string;
+  scopes: string[];
+  editAllowlist: string[];
+  checkpointPath: string;
+  statusFilePath: string;
+  pidFilePath: string;
+  logFilePath: string;
+  threadId: string;
+  scopeExpansionMode: ScopeExpansionMode;
+};
+
+type CoordinatorChildRuntime = {
+  spec: CoordinatorChildSpec;
+  process?: ChildProcess;
+  logStream?: fs.WriteStream;
+  pid?: number;
+  restartCount: number;
+  lastExitCode?: number | null;
+  lastExitSignal?: NodeJS.Signals | null;
+  nextRestartAt: number;
+  lastStatus?: Partial<RunnerStatus>;
+  lastSpawnError?: string;
 };
 
 const DEFAULT_RUNNER_STATUS_PATH = './apps/langgraph-control-plane/.control-plane/runner-status.json';
 const DEFAULT_CONTROL_PLANE_PROMPT_IDENTIFIER = 'anygpt-control-plane-agent';
 const DEFAULT_CONTROL_PLANE_PROMPT_CHANNEL = 'live';
 const DEFAULT_CONTROL_PLANE_PROMPT_SYNC_CHANNEL = 'default';
+const DEFAULT_AUTONOMOUS_FULL_COVERAGE_SCOPES = ['repo', 'api-experimental', 'control-plane'];
+const EXPANSIVE_SCOPE_ALIASES = new Set(['all', 'everything', 'adaptive', '*']);
 const DEFAULT_REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const DEFAULT_CONTROL_PLANE_EXPERIMENTAL_API_BASE_URL = 'http://127.0.0.1:3310';
 const DEFAULT_CONTROL_PLANE_EXPERIMENTAL_SERVICE = 'anygpt-experimental.service';
+const DEFAULT_CONTINUOUS_INTERVAL_MS = 5_000;
+const MULTI_RUNNER_COORDINATOR_POLL_MS = 2_000;
+const MULTI_RUNNER_RESTART_DELAY_MS = 1_500;
 
 function loadEnvForControlPlane(repoRoot: string): void {
   const candidates = [
@@ -278,6 +352,104 @@ function resolveRunnerPidPath(repoRoot: string, override?: string): string | und
   return path.resolve(repoRoot, configuredPath);
 }
 
+function replacePathExtension(filePath: string, nextExtension: string): string {
+  const normalizedExtension = nextExtension.startsWith('.') ? nextExtension : `.${nextExtension}`;
+  const currentExtension = path.extname(filePath);
+  if (!currentExtension) return `${filePath}${normalizedExtension}`;
+  return `${filePath.slice(0, -currentExtension.length)}${normalizedExtension}`;
+}
+
+function appendPathSuffix(filePath: string, suffix: string): string {
+  const currentExtension = path.extname(filePath);
+  if (!currentExtension) return `${filePath}.${suffix}`;
+  return `${filePath.slice(0, -currentExtension.length)}.${suffix}${currentExtension}`;
+}
+
+function normalizeRepoRelativePath(value: string): string {
+  return String(value || '')
+    .trim()
+    .replace(/\\/g, '/')
+    .replace(/^\.\//, '')
+    .replace(/\/+/g, '/');
+}
+
+function pathMatchesPrefix(targetPath: string, prefix: string): boolean {
+  return targetPath === prefix || targetPath.startsWith(`${prefix}/`);
+}
+
+function uniqueNormalizedPaths(entries: string[]): string[] {
+  return Array.from(new Set(entries.map((entry) => normalizeRepoRelativePath(entry)).filter(Boolean)));
+}
+
+function intersectAllowlists(parentAllowlist: string[], laneAllowlist: string[]): string[] {
+  const normalizedParent = uniqueNormalizedPaths(parentAllowlist);
+  const normalizedLane = uniqueNormalizedPaths(laneAllowlist);
+  if (normalizedLane.length === 0) return [];
+  if (normalizedParent.length === 0 || normalizedParent.includes('*')) return normalizedLane;
+
+  const intersections = new Set<string>();
+  for (const parentEntry of normalizedParent) {
+    for (const laneEntry of normalizedLane) {
+      if (parentEntry === '*') {
+        intersections.add(laneEntry);
+        continue;
+      }
+      if (parentEntry === laneEntry) {
+        intersections.add(laneEntry);
+        continue;
+      }
+      if (pathMatchesPrefix(parentEntry, laneEntry)) {
+        intersections.add(parentEntry);
+        continue;
+      }
+      if (pathMatchesPrefix(laneEntry, parentEntry)) {
+        intersections.add(laneEntry);
+      }
+    }
+  }
+
+  return Array.from(intersections);
+}
+
+function sanitizeCoordinatorId(value: string): string {
+  const normalized = String(value || '').trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+  return normalized || 'runner';
+}
+
+function parseScopeExpansionMode(value: string | undefined, fallback: ScopeExpansionMode): ScopeExpansionMode {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'locked') return 'locked';
+  if (normalized === 'adaptive') return 'adaptive';
+  return fallback;
+}
+
+function readPidFile(pidFilePath: string | undefined): number | undefined {
+  if (!pidFilePath || !fs.existsSync(pidFilePath)) return undefined;
+  const parsed = Number(fs.readFileSync(pidFilePath, 'utf8').trim());
+  if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
+  return Math.floor(parsed);
+}
+
+function isPidAlive(pid: number | undefined): boolean {
+  if (typeof pid !== 'number' || !Number.isFinite(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function readRunnerStatusSnapshot(statusFilePath: string): Partial<RunnerStatus> | undefined {
+  if (!fs.existsSync(statusFilePath)) return undefined;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(statusFilePath, 'utf8')) as Partial<RunnerStatus> | null;
+    return parsed && typeof parsed === 'object' ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function parseIntegerArg(value: string | undefined, fallback: number, minimum: number): number {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return fallback;
@@ -328,6 +500,20 @@ function parseStringArrayArg(value: string | undefined): string[] {
     .split(',')
     .map((entry) => entry.trim())
     .filter(Boolean);
+}
+
+function expandRequestedScopes(scopes: string[]): string[] {
+  const expanded: string[] = [];
+  for (const scope of scopes.map((entry) => String(entry || '').trim().toLowerCase()).filter(Boolean)) {
+    if (EXPANSIVE_SCOPE_ALIASES.has(scope)) {
+      expanded.push(...DEFAULT_AUTONOMOUS_FULL_COVERAGE_SCOPES);
+      continue;
+    }
+    expanded.push(scope);
+  }
+
+  const normalized = expanded.length > 0 ? expanded : ['repo'];
+  return Array.from(new Set(normalized));
 }
 
 function parseMetricThresholdMap(value: string | undefined): Record<string, number> {
@@ -677,7 +863,15 @@ function createBaseRunnerStatus(parsedArgs: ParsedArgs): RunnerStatus {
   return {
     goal: parsedArgs.goal,
     scopes: parsedArgs.scopes,
+    effectiveScopes: parsedArgs.scopes,
+    scopeExpansionReason: '',
+    scopeExpansionMode: parsedArgs.scopeExpansionMode,
     threadId: parsedArgs.threadId,
+    runnerMode: parsedArgs.coordinatorChildId
+      ? 'multi-runner-child'
+      : (parsedArgs.multiRunner ? 'multi-runner-coordinator' : 'single-runner'),
+    coordinatorChildId: parsedArgs.coordinatorChildId,
+    coordinatorParentThreadId: parsedArgs.coordinatorParentThreadId,
     continuous: parsedArgs.continuous,
     autonomous: parsedArgs.autonomous,
     autonomousEditEnabled: parsedArgs.autonomousEditEnabled,
@@ -723,6 +917,9 @@ function createBaseRunnerStatus(parsedArgs: ParsedArgs): RunnerStatus {
     repairIntentSummary: '',
     repairSignalCount: 0,
     autonomousOperationMode: 'idle',
+    autonomousPlannerAgentCount: 0,
+    autonomousPlannerFocuses: [],
+    autonomousPlannerStrategy: '',
     improvementIntentSummary: '',
     improvementSignalCount: 0,
     repairSessionId: '',
@@ -747,6 +944,10 @@ function createBaseRunnerStatus(parsedArgs: ParsedArgs): RunnerStatus {
     promptPromotionReason: '',
     promptPromotionBlockedReason: '',
     observabilityTags: [],
+    coordinatorStrategy: parsedArgs.multiRunner && !parsedArgs.coordinatorChildId ? 'disjoint-lane-supervisor' : undefined,
+    coordinatedRunnerCount: parsedArgs.multiRunner && !parsedArgs.coordinatorChildId ? 0 : undefined,
+    coordinatedRunners: parsedArgs.multiRunner && !parsedArgs.coordinatorChildId ? [] : undefined,
+    coordinatorPollMs: parsedArgs.multiRunner && !parsedArgs.coordinatorChildId ? MULTI_RUNNER_COORDINATOR_POLL_MS : undefined,
     ...langSmithRunnerStatusSeed,
     lastUpdatedAt: now,
     startedAt: now,
@@ -779,6 +980,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   let continuous = false;
   let autonomous = false;
   let autonomousEditEnabled = false;
+  let multiRunner = false;
 
   for (const arg of argv) {
     if (arg === '--execute') {
@@ -809,16 +1011,22 @@ function parseArgs(argv: string[]): ParsedArgs {
       autonomousEditEnabled = true;
       continue;
     }
+    if (arg === '--multi-runner') {
+      multiRunner = true;
+      continue;
+    }
     if (arg.startsWith('--') && arg.includes('=')) {
       const [key, value] = arg.slice(2).split(/=(.*)/s, 2);
       argMap.set(key, value);
     }
   }
 
-  const scopes = (argMap.get('scopes') || 'repo')
-    .split(',')
-    .map((scope) => scope.trim())
-    .filter(Boolean);
+  const scopes = expandRequestedScopes(
+    (argMap.get('scopes') || 'repo')
+      .split(',')
+      .map((scope) => scope.trim())
+      .filter(Boolean),
+  );
   const repoRoot = path.resolve(
     argMap.get('repo-root')
     || process.env.CONTROL_PLANE_REPO_ROOT
@@ -826,11 +1034,17 @@ function parseArgs(argv: string[]): ParsedArgs {
   );
   const intervalMs = parseIntegerArg(
     argMap.get('interval-ms') || process.env.CONTROL_PLANE_INTERVAL_MS,
-    continuous || autonomous ? 10_000 : 60_000,
+    continuous || autonomous ? DEFAULT_CONTINUOUS_INTERVAL_MS : 60_000,
     1_000,
   );
   const maxIterations = parseMaxIterations(argMap.get('max-iterations'));
   const maxEditActions = parseIntegerArg(argMap.get('max-edit-actions'), 5, 1);
+  const coordinatorChildId = String(argMap.get('coordinator-child') || '').trim() || undefined;
+  const coordinatorParentThreadId = String(argMap.get('coordinator-parent-thread-id') || '').trim() || undefined;
+  const scopeExpansionMode = parseScopeExpansionMode(
+    argMap.get('scope-expansion') || process.env.CONTROL_PLANE_SCOPE_EXPANSION,
+    coordinatorChildId ? 'locked' : 'adaptive',
+  );
   const promptIdentifier = String(
     argMap.get('prompt-identifier')
     || process.env.CONTROL_PLANE_PROMPT_IDENTIFIER
@@ -915,6 +1129,10 @@ function parseArgs(argv: string[]): ParsedArgs {
     goal: argMap.get('goal') || 'Build, test, and prepare deployment steps for this repository.',
     scopes,
     threadId: argMap.get('thread-id') || randomUUID(),
+    multiRunner,
+    coordinatorChildId,
+    coordinatorParentThreadId,
+    scopeExpansionMode,
     approvalMode: autoApprove ? 'auto' : 'manual',
     continuous,
     autonomous,
@@ -1006,10 +1224,467 @@ async function runGraphOnce(
   return { result, sawInterrupt };
 }
 
+function buildCoordinatorChildSpecs(parsedArgs: ParsedArgs): CoordinatorChildSpec[] {
+  const requestedScopes = new Set(parsedArgs.scopes.map((scope) => String(scope || '').trim().toLowerCase()).filter(Boolean));
+  const laneTemplates: Array<{ id: string; label: string; scopes: string[]; editAllowlist: string[] }> = [];
+
+  if (requestedScopes.has('repo') || requestedScopes.has('api') || requestedScopes.has('api-experimental')) {
+    laneTemplates.push({
+      id: 'api-experimental',
+      label: 'API Experimental',
+      scopes: ['api-experimental'],
+      editAllowlist: ['apps/api'],
+    });
+  }
+
+  if (requestedScopes.has('repo') || requestedScopes.has('control-plane')) {
+    laneTemplates.push({
+      id: 'control-plane',
+      label: 'Control Plane',
+      scopes: ['control-plane'],
+      editAllowlist: ['apps/langgraph-control-plane'],
+    });
+  }
+
+  if (requestedScopes.has('repo')) {
+    laneTemplates.push({
+      id: 'repo-surface',
+      label: 'Repo Surface',
+      scopes: ['repo-surface'],
+      editAllowlist: ['package.json', 'turbo.json', 'bun.sh', 'README.md', 'apps/homepage', 'apps/ui'],
+    });
+  }
+
+  if (laneTemplates.length === 0) {
+    laneTemplates.push({
+      id: 'primary',
+      label: 'Primary',
+      scopes: parsedArgs.scopes,
+      editAllowlist: parsedArgs.editAllowlist,
+    });
+  }
+
+  const specs: CoordinatorChildSpec[] = [];
+  for (const lane of laneTemplates) {
+    const childAllowlist = intersectAllowlists(parsedArgs.editAllowlist, lane.editAllowlist);
+    if (childAllowlist.length === 0) continue;
+    const laneId = sanitizeCoordinatorId(lane.id);
+    const statusFilePath = appendPathSuffix(parsedArgs.statusFilePath, laneId);
+    const checkpointPath = appendPathSuffix(parsedArgs.checkpointPath, laneId);
+    const pidFilePath = parsedArgs.pidFilePath
+      ? appendPathSuffix(parsedArgs.pidFilePath, laneId)
+      : replacePathExtension(statusFilePath, '.pid');
+    specs.push({
+      id: laneId,
+      label: lane.label,
+      scopes: lane.scopes,
+      editAllowlist: childAllowlist,
+      checkpointPath,
+      statusFilePath,
+      pidFilePath,
+      logFilePath: replacePathExtension(statusFilePath, '.log'),
+      threadId: `${parsedArgs.threadId}:${laneId}`,
+      scopeExpansionMode: 'locked',
+    });
+  }
+
+  if (specs.length === 0) {
+    throw new Error('Multi-runner coordinator could not derive any child lanes from the requested scopes and allowlist.');
+  }
+
+  return specs;
+}
+
+function buildCoordinatorChildArgs(parsedArgs: ParsedArgs, spec: CoordinatorChildSpec): string[] {
+  const args = [
+    './bun.sh',
+    'run',
+    './apps/langgraph-control-plane/src/index.ts',
+    `--goal=${parsedArgs.goal}`,
+    `--scopes=${spec.scopes.join(',')}`,
+    `--thread-id=${spec.threadId}`,
+    `--repo-root=${parsedArgs.repoRoot}`,
+    `--interval-ms=${parsedArgs.intervalMs}`,
+    `--max-edit-actions=${parsedArgs.maxEditActions}`,
+    `--prompt-identifier=${parsedArgs.promptIdentifier}`,
+    `--prompt-channel=${parsedArgs.promptChannel}`,
+    `--prompt-sync=${parsedArgs.promptSyncEnabled ? 'true' : 'false'}`,
+    `--prompt-sync-channel=${parsedArgs.promptSyncChannel}`,
+    `--eval-gate-mode=${parsedArgs.evaluationGatePolicy.mode}`,
+    `--eval-gate-target=${parsedArgs.evaluationGatePolicy.target}`,
+    `--eval-gate-aggregation-mode=${parsedArgs.evaluationGatePolicy.aggregationMode || 'all'}`,
+    `--eval-gate-require-evaluation=${parsedArgs.evaluationGatePolicy.requireEvaluation ? 'true' : 'false'}`,
+    `--eval-gate-min-results=${parsedArgs.evaluationGatePolicy.minResultCount}`,
+    `--eval-gate-metric=${parsedArgs.evaluationGatePolicy.metricKey}`,
+    `--eval-gate-min-score=${parsedArgs.evaluationGatePolicy.minMetricAverageScore}`,
+    `--eval-gate-min-weighted-score=${parsedArgs.evaluationGatePolicy.minimumWeightedScore ?? 0}`,
+    `--eval-gate-scorecard-name=${parsedArgs.evaluationGatePolicy.scorecardName}`,
+    `--mcp-config=${parsedArgs.mcpConfigPath}`,
+    `--checkpoint-path=${spec.checkpointPath}`,
+    `--status-file=${spec.statusFilePath}`,
+    `--pid-file=${spec.pidFilePath}`,
+    `--stream-mode=${parsedArgs.streamMode}`,
+    `--edit-allowlist=${spec.editAllowlist.join(',')}`,
+    `--scope-expansion=${spec.scopeExpansionMode}`,
+    `--coordinator-child=${spec.id}`,
+    `--coordinator-parent-thread-id=${parsedArgs.threadId}`,
+  ];
+
+  if (parsedArgs.maxIterations !== null) {
+    args.push(`--max-iterations=${parsedArgs.maxIterations}`);
+  }
+  if (parsedArgs.promptRef.trim()) {
+    args.push(`--prompt-ref=${parsedArgs.promptRef}`);
+  }
+  if (parsedArgs.promptPromoteChannel.trim()) {
+    args.push(`--prompt-promote=${parsedArgs.promptPromoteChannel}`);
+  }
+  if (parsedArgs.editDenylist.length > 0) {
+    args.push(`--edit-denylist=${parsedArgs.editDenylist.join(',')}`);
+  }
+  if (parsedArgs.evaluationGatePolicy.requiredMetricKeys.length > 0) {
+    args.push(`--eval-gate-required-metrics=${parsedArgs.evaluationGatePolicy.requiredMetricKeys.join(',')}`);
+  }
+  const metricThresholds = Object.entries(parsedArgs.evaluationGatePolicy.additionalMetricThresholds || {})
+    .map(([key, value]) => `${key}:${value}`);
+  if (metricThresholds.length > 0) {
+    args.push(`--eval-gate-metric-thresholds=${metricThresholds.join(',')}`);
+  }
+  const metricWeights = Object.entries(parsedArgs.evaluationGatePolicy.metricWeights || {})
+    .map(([key, value]) => `${key}:${value}`);
+  if (metricWeights.length > 0) {
+    args.push(`--eval-gate-metric-weights=${metricWeights.join(',')}`);
+  }
+  if (parsedArgs.evaluationGatePolicy.baselineExperimentName.trim()) {
+    args.push(`--eval-gate-baseline-experiment=${parsedArgs.evaluationGatePolicy.baselineExperimentName}`);
+  }
+  if (parsedArgs.executePlan) {
+    args.push('--execute');
+  }
+  if (parsedArgs.allowDeploy) {
+    args.push('--allow-deploy');
+  }
+  if (parsedArgs.approvalMode === 'auto') {
+    args.push('--auto-approve');
+  }
+  if (parsedArgs.continuous) {
+    args.push('--continuous');
+  }
+  if (parsedArgs.autonomous) {
+    args.push('--autonomous');
+  }
+  if (parsedArgs.autonomousEditEnabled) {
+    args.push('--autonomous-edits');
+  }
+  if (parsedArgs.deployCommand.trim()) {
+    args.push(`--deploy-command=${parsedArgs.deployCommand}`);
+  }
+
+  return args;
+}
+
+function spawnCoordinatorChild(parsedArgs: ParsedArgs, runtime: CoordinatorChildRuntime): void {
+  fs.mkdirSync(path.dirname(runtime.spec.logFilePath), { recursive: true });
+  fs.appendFileSync(
+    runtime.spec.logFilePath,
+    `\n[${new Date().toISOString()}] coordinator spawning ${runtime.spec.id} (${runtime.spec.label})\n`,
+    'utf8',
+  );
+
+  const child = spawn('bash', buildCoordinatorChildArgs(parsedArgs, runtime.spec), {
+    cwd: parsedArgs.repoRoot,
+    env: {
+      ...process.env,
+      CONTROL_PLANE_COORDINATED_RUNNER: 'true',
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  const logStream = fs.createWriteStream(runtime.spec.logFilePath, { flags: 'a' });
+  child.stdout?.pipe(logStream);
+  child.stderr?.pipe(logStream);
+
+  runtime.process = child;
+  runtime.logStream = logStream;
+  runtime.pid = typeof child.pid === 'number' ? child.pid : readPidFile(runtime.spec.pidFilePath);
+  runtime.lastSpawnError = undefined;
+  runtime.lastExitCode = undefined;
+  runtime.lastExitSignal = undefined;
+  runtime.nextRestartAt = 0;
+
+  child.on('error', (error) => {
+    runtime.lastSpawnError = formatError(error);
+    fs.appendFileSync(
+      runtime.spec.logFilePath,
+      `[${new Date().toISOString()}] coordinator child spawn error: ${runtime.lastSpawnError}\n`,
+      'utf8',
+    );
+  });
+
+  child.on('exit', (code, signal) => {
+    runtime.lastExitCode = code;
+    runtime.lastExitSignal = signal;
+    runtime.pid = readPidFile(runtime.spec.pidFilePath);
+    runtime.process = undefined;
+    runtime.nextRestartAt = Date.now() + MULTI_RUNNER_RESTART_DELAY_MS;
+    fs.appendFileSync(
+      runtime.spec.logFilePath,
+      `[${new Date().toISOString()}] coordinator observed exit code=${code ?? 'null'} signal=${signal ?? 'null'}\n`,
+      'utf8',
+    );
+    runtime.logStream?.end();
+    runtime.logStream = undefined;
+  });
+}
+
+function collectCoordinatedRunnerEntry(runtime: CoordinatorChildRuntime): CoordinatedRunnerStatusEntry {
+  const status = runtime.lastStatus || {};
+  const pidFromFile = readPidFile(runtime.spec.pidFilePath);
+  const pid = runtime.process?.pid || runtime.pid || pidFromFile;
+  const running = (runtime.process ? runtime.process.exitCode === null : false)
+    || (status.running === true)
+    || isPidAlive(pid);
+  const phase = typeof status.phase === 'string'
+    ? status.phase
+    : (running ? 'streaming' : (runtime.lastExitCode || runtime.lastSpawnError ? 'failed' : 'completed'));
+
+  return {
+    id: runtime.spec.id,
+    label: runtime.spec.label,
+    threadId: runtime.spec.threadId,
+    scopes: runtime.spec.scopes,
+    editAllowlist: runtime.spec.editAllowlist,
+    checkpointPath: runtime.spec.checkpointPath,
+    statusFilePath: runtime.spec.statusFilePath,
+    pidFilePath: runtime.spec.pidFilePath,
+    logFilePath: runtime.spec.logFilePath,
+    pid,
+    running,
+    phase,
+    iteration: typeof status.iteration === 'number' && Number.isFinite(status.iteration) ? status.iteration : 0,
+    proposedEditCount: typeof status.proposedEditCount === 'number' && Number.isFinite(status.proposedEditCount) ? status.proposedEditCount : 0,
+    appliedEditCount: typeof status.appliedEditCount === 'number' && Number.isFinite(status.appliedEditCount) ? status.appliedEditCount : 0,
+    repairStatus: typeof status.repairStatus === 'string' ? status.repairStatus : undefined,
+    lastError: typeof status.lastError === 'string' && status.lastError.trim()
+      ? status.lastError
+      : runtime.lastSpawnError,
+    lastUpdatedAt: typeof status.lastUpdatedAt === 'string' ? status.lastUpdatedAt : undefined,
+    restartedCount: runtime.restartCount,
+    summary: typeof status.summary === 'string' ? status.summary : undefined,
+    scopeExpansionMode: runtime.spec.scopeExpansionMode,
+  };
+}
+
+function summarizeCoordinatorRepairStatus(children: CoordinatedRunnerStatusEntry[]): RunnerStatus['repairStatus'] {
+  const statuses = children.map((child) => String(child.repairStatus || '').trim()).filter(Boolean);
+  if (statuses.includes('failed')) return 'failed';
+  if (statuses.includes('promoted')) return 'promoted';
+  if (statuses.includes('planned')) return 'planned';
+  if (statuses.includes('rolled-back')) return 'rolled-back';
+  if (statuses.includes('not-needed')) return 'not-needed';
+  return 'idle';
+}
+
+function buildCoordinatorSummary(parsedArgs: ParsedArgs, children: CoordinatedRunnerStatusEntry[]): string {
+  const runningChildren = children.filter((child) => child.running);
+  const failedChildren = children.filter((child) => child.phase === 'failed' || Boolean(child.lastError));
+  const lines = [
+    `Goal: ${parsedArgs.goal}`,
+    `Coordinator mode: multi-runner (${children.length} child lane(s), interval=${parsedArgs.intervalMs}ms)`,
+    `Requested scopes: ${parsedArgs.scopes.join(', ')}`,
+    `Children: ${children.map((child) => `${child.id}=${child.phase}${child.running ? '/running' : ''}`).join('; ') || 'none'}`,
+    `Autonomous edits: ${children.reduce((sum, child) => sum + child.proposedEditCount, 0)} proposed, ${children.reduce((sum, child) => sum + child.appliedEditCount, 0)} applied`,
+  ];
+
+  if (failedChildren.length > 0) {
+    lines.push(`Failures: ${failedChildren.map((child) => `${child.id}${child.lastError ? ` (${child.lastError})` : ''}`).join('; ')}`);
+  }
+  if (runningChildren.length > 0) {
+    lines.push(`Active lanes: ${runningChildren.map((child) => `${child.id}@${child.iteration}`).join(', ')}`);
+  }
+
+  return lines.join('\n');
+}
+
+async function runMultiRunnerCoordinator(parsedArgs: ParsedArgs): Promise<void> {
+  if (typeof parsedArgs.resumeValue !== 'undefined') {
+    throw new Error('Multi-runner coordinator does not support --resume; resume a child runner directly by thread id instead.');
+  }
+
+  const childSpecs = buildCoordinatorChildSpecs(parsedArgs);
+  const childRuntimes: CoordinatorChildRuntime[] = childSpecs.map((spec) => ({
+    spec,
+    restartCount: 0,
+    nextRestartAt: 0,
+  }));
+
+  let coordinatorStatus = mergeRunnerStatus(createBaseRunnerStatus(parsedArgs), {
+    running: true,
+    phase: 'starting',
+    runnerMode: 'multi-runner-coordinator',
+    coordinatorStrategy: `disjoint-lane-supervisor:${childSpecs.map((spec) => spec.id).join(',')}`,
+    coordinatedRunnerCount: childSpecs.length,
+    coordinatedRunners: childSpecs.map((spec) => ({
+      id: spec.id,
+      label: spec.label,
+      threadId: spec.threadId,
+      scopes: spec.scopes,
+      editAllowlist: spec.editAllowlist,
+      checkpointPath: spec.checkpointPath,
+      statusFilePath: spec.statusFilePath,
+      pidFilePath: spec.pidFilePath,
+      logFilePath: spec.logFilePath,
+      running: false,
+      phase: 'starting',
+      iteration: 0,
+      proposedEditCount: 0,
+      appliedEditCount: 0,
+      restartedCount: 0,
+      scopeExpansionMode: spec.scopeExpansionMode,
+    })),
+    summary: `Preparing multi-runner coordinator for ${childSpecs.length} child lane(s).`,
+  });
+  writeRunnerStatus(parsedArgs.statusFilePath, coordinatorStatus);
+  if (parsedArgs.pidFilePath) {
+    writeRunnerPidFile(parsedArgs.pidFilePath, process.pid);
+  }
+
+  let shuttingDown = false;
+  const requestShutdown = (reason: string): void => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    coordinatorStatus = mergeRunnerStatus(coordinatorStatus, {
+      running: false,
+      phase: 'completed',
+      summary: `${coordinatorStatus.summary || 'Coordinator shutting down.'}\nShutdown reason: ${reason}`,
+    });
+    for (const runtime of childRuntimes) {
+      const pid = runtime.process?.pid || runtime.pid || readPidFile(runtime.spec.pidFilePath);
+      if (typeof pid === 'number' && isPidAlive(pid)) {
+        try {
+          process.kill(pid, 'SIGTERM');
+        } catch {
+          // Ignore child shutdown errors.
+        }
+      }
+    }
+  };
+
+  const sigintHandler = () => requestShutdown('SIGINT');
+  const sigtermHandler = () => requestShutdown('SIGTERM');
+  const sighupHandler = () => requestShutdown('SIGHUP');
+  process.on('SIGINT', sigintHandler);
+  process.on('SIGTERM', sigtermHandler);
+  process.on('SIGHUP', sighupHandler);
+
+  try {
+    for (const runtime of childRuntimes) {
+      const existingPid = readPidFile(runtime.spec.pidFilePath);
+      if (isPidAlive(existingPid)) {
+        runtime.pid = existingPid;
+        runtime.lastStatus = readRunnerStatusSnapshot(runtime.spec.statusFilePath);
+        continue;
+      }
+      spawnCoordinatorChild(parsedArgs, runtime);
+    }
+
+    while (true) {
+      for (const runtime of childRuntimes) {
+        runtime.lastStatus = readRunnerStatusSnapshot(runtime.spec.statusFilePath);
+        const knownPid = runtime.process?.pid || runtime.pid || readPidFile(runtime.spec.pidFilePath);
+        if (!runtime.process && isPidAlive(knownPid)) {
+          runtime.pid = knownPid;
+        }
+
+        const canRestart = !shuttingDown
+          && parsedArgs.continuous
+          && parsedArgs.maxIterations === null
+          && (!runtime.lastStatus || runtime.lastStatus.phase !== 'paused');
+        const processAlive = runtime.process ? runtime.process.exitCode === null : false;
+        const pidAlive = isPidAlive(runtime.pid || readPidFile(runtime.spec.pidFilePath));
+        if (!processAlive && !pidAlive && canRestart && Date.now() >= runtime.nextRestartAt) {
+          runtime.restartCount += 1;
+          spawnCoordinatorChild(parsedArgs, runtime);
+        }
+      }
+
+      const coordinatedRunners = childRuntimes.map((runtime) => collectCoordinatedRunnerEntry(runtime));
+      const phase = coordinatedRunners.some((child) => child.phase === 'paused')
+        ? 'paused'
+        : coordinatedRunners.some((child) => child.running)
+          ? 'streaming'
+          : coordinatedRunners.some((child) => child.phase === 'failed')
+            ? 'failed'
+            : 'completed';
+      const iteration = coordinatedRunners.reduce((maxIteration, child) => Math.max(maxIteration, child.iteration), 0);
+      const proposedEditCount = coordinatedRunners.reduce((sum, child) => sum + child.proposedEditCount, 0);
+      const appliedEditCount = coordinatedRunners.reduce((sum, child) => sum + child.appliedEditCount, 0);
+      const lastAppliedEditPaths = Array.from(new Set(
+        childRuntimes.flatMap((runtime) => Array.isArray(runtime.lastStatus?.lastAppliedEditPaths)
+          ? runtime.lastStatus?.lastAppliedEditPaths || []
+          : []),
+      ));
+
+      coordinatorStatus = mergeRunnerStatus(coordinatorStatus, {
+        running: !shuttingDown && coordinatedRunners.some((child) => child.running),
+        phase,
+        iteration,
+        proposedEditCount,
+        appliedEditCount,
+        lastAppliedEditPaths,
+        repairStatus: summarizeCoordinatorRepairStatus(coordinatedRunners),
+        repairDecisionReason: coordinatedRunners
+          .filter((child) => child.repairStatus && child.repairStatus !== 'idle' && child.repairStatus !== 'not-needed')
+          .map((child) => `${child.id}:${child.repairStatus}`)
+          .join('; '),
+        coordinatedRunnerCount: coordinatedRunners.length,
+        coordinatedRunners,
+        summary: buildCoordinatorSummary(parsedArgs, coordinatedRunners),
+        lastRunStartedAt: coordinatedRunners
+          .map((child) => child.lastUpdatedAt || '')
+          .filter(Boolean)
+          .sort()
+          .slice(-1)[0] || coordinatorStatus.lastRunStartedAt,
+        lastRunCompletedAt: coordinatedRunners.every((child) => !child.running) ? new Date().toISOString() : coordinatorStatus.lastRunCompletedAt,
+        lastError: coordinatedRunners
+          .filter((child) => Boolean(child.lastError))
+          .map((child) => `${child.id}: ${child.lastError}`)
+          .join(' | ') || undefined,
+      });
+      writeRunnerStatus(parsedArgs.statusFilePath, coordinatorStatus);
+
+      const activeChildren = coordinatedRunners.filter((child) => child.running).length;
+      if (shuttingDown && activeChildren === 0) {
+        break;
+      }
+      if ((!parsedArgs.continuous || parsedArgs.maxIterations !== null) && activeChildren === 0) {
+        break;
+      }
+
+      await sleep(MULTI_RUNNER_COORDINATOR_POLL_MS);
+    }
+  } finally {
+    coordinatorStatus = mergeRunnerStatus(coordinatorStatus, {
+      running: false,
+      phase: coordinatorStatus.phase === 'failed' ? 'failed' : 'completed',
+    });
+    writeRunnerStatus(parsedArgs.statusFilePath, coordinatorStatus);
+    process.off('SIGINT', sigintHandler);
+    process.off('SIGTERM', sigtermHandler);
+    process.off('SIGHUP', sighupHandler);
+    if (parsedArgs.pidFilePath) {
+      removeRunnerPidFile(parsedArgs.pidFilePath, process.pid);
+    }
+  }
+}
+
 async function main() {
   const parsedArgs = parseArgs(process.argv.slice(2));
   loadEnvForControlPlane(parsedArgs.repoRoot);
   await configureLangSmithRuntime();
+  if (parsedArgs.multiRunner && !parsedArgs.coordinatorChildId) {
+    await runMultiRunnerCoordinator(parsedArgs);
+    return;
+  }
   const { graph: controlPlaneGraph, checkpointer } = await createControlPlaneGraph({
     repoRoot: parsedArgs.repoRoot,
     checkpointPath: parsedArgs.checkpointPath,
@@ -1043,6 +1718,12 @@ async function main() {
               .filter((edit: any) => edit?.status === 'applied' && typeof edit?.path === 'string')
               .map((edit: any) => edit.path)
           : [],
+        effectiveScopes: Array.isArray((result as any).effectiveScopes)
+          ? (result as any).effectiveScopes.map((scope: any) => String(scope || '').trim()).filter(Boolean)
+          : runnerStatus.effectiveScopes,
+        scopeExpansionReason: typeof (result as any).scopeExpansionReason === 'string'
+          ? (result as any).scopeExpansionReason
+          : runnerStatus.scopeExpansionReason,
         repairStatus: typeof (result as any).repairStatus === 'string'
           ? (result as any).repairStatus
           : runnerStatus.repairStatus,
@@ -1058,6 +1739,16 @@ async function main() {
         autonomousOperationMode: typeof (result as any).autonomousOperationMode === 'string'
           ? (result as any).autonomousOperationMode
           : runnerStatus.autonomousOperationMode,
+        autonomousPlannerAgentCount: typeof (result as any).autonomousPlannerAgentCount === 'number'
+          && Number.isFinite((result as any).autonomousPlannerAgentCount)
+          ? Math.max(0, Math.floor((result as any).autonomousPlannerAgentCount))
+          : runnerStatus.autonomousPlannerAgentCount,
+        autonomousPlannerFocuses: Array.isArray((result as any).autonomousPlannerFocuses)
+          ? (result as any).autonomousPlannerFocuses.map((entry: any) => String(entry || '').trim()).filter(Boolean)
+          : runnerStatus.autonomousPlannerFocuses,
+        autonomousPlannerStrategy: typeof (result as any).autonomousPlannerStrategy === 'string'
+          ? (result as any).autonomousPlannerStrategy
+          : runnerStatus.autonomousPlannerStrategy,
         improvementIntentSummary: typeof (result as any).improvementIntentSummary === 'string'
           ? (result as any).improvementIntentSummary
           : runnerStatus.improvementIntentSummary,

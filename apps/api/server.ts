@@ -274,7 +274,10 @@ async function startServer() {
     }
 
     const app = new HyperExpress.Server({
-        max_body_length: MAX_BODY_LENGTH
+        max_body_length: MAX_BODY_LENGTH,
+        idle_timeout: Number.isFinite(Number(process.env.BUN_IDLE_TIMEOUT_SECONDS))
+            ? Math.max(0, Math.floor(Number(process.env.BUN_IDLE_TIMEOUT_SECONDS)))
+            : 120
     });
 
     // Ensure JSON files and initial admin key are set up AFTER Redis check

@@ -21,6 +21,7 @@ interface MiddlewareDefinition {
 
 interface ServerOptions {
     max_body_length?: number;
+    idle_timeout?: number;
 }
 
 interface RegisteredRoute {
@@ -724,9 +725,14 @@ export class Server extends Router {
     async listen(port: number): Promise<void> {
         this.buildRegistrations();
         const BunRuntime = (globalThis as any).Bun;
+        const idleTimeout =
+            typeof this.serverOptions.idle_timeout === 'number'
+                ? Math.max(0, Math.floor(this.serverOptions.idle_timeout))
+                : 120;
         this.bunServer = BunRuntime.serve({
             port,
             reusePort: process.env.BUN_REUSE_PORT === '1',
+            idleTimeout,
             fetch: (request: globalThis.Request, server: any) => this.handleRequest(request, server),
             websocket: {
                 open: (ws: any) => {

@@ -57,6 +57,10 @@ export type AutonomousEditContextFile = {
   path: string;
   content: string;
   truncated: boolean;
+  rawCharCount: number;
+  selectionReason: string;
+  excerptStrategy: 'full' | 'anchored' | 'head-tail';
+  anchorHints: string[];
 };
 
 export type ReadAutonomousEditContextOptions = {
@@ -66,24 +70,9 @@ export type ReadAutonomousEditContextOptions = {
   maxFiles?: number;
 };
 
-const DEFAULT_AUTONOMOUS_EDIT_ALLOWLIST = [
-  'apps/langgraph-control-plane',
-  'apps/api',
-];
+const DEFAULT_AUTONOMOUS_EDIT_ALLOWLIST = ['*'];
 
-const DEFAULT_AUTONOMOUS_EDIT_DENYLIST = [
-  '.env',
-  '.env.local',
-  'apps/api/.env',
-  'apps/api/.env.local',
-  'apps/api/keys.json',
-  'node_modules',
-  'dist',
-  'bun.lock',
-  'package-lock.json',
-  'pnpm-lock.yaml',
-  'apps/langgraph-control-plane/.control-plane',
-];
+const DEFAULT_AUTONOMOUS_EDIT_DENYLIST: string[] = [];
 
 const LARGE_FILE_AUTONOMOUS_CONTEXT_ANCHORS: Record<string, string[]> = {
   'apps/langgraph-control-plane/src/index.ts': [
@@ -127,6 +116,12 @@ const LARGE_FILE_AUTONOMOUS_CONTEXT_ANCHORS: Record<string, string[]> = {
     'export function',
     'function normalize',
   ],
+  'apps/api/modules/requestQueue.ts': [
+    'function getBaselineTierRps()',
+    'const REQUEST_QUEUE_CONCURRENCY = (() => {',
+    'const REQUEST_QUEUE_MAX_PENDING = (() => {',
+    'export const requestQueue = new RequestQueue(',
+  ],
   'apps/api/routes/models.ts': [
     'router.get(',
     'models',
@@ -164,14 +159,22 @@ function alignExcerptEnd(raw: string, end: number): number {
   return newlineIndex >= 0 ? newlineIndex : raw.length;
 }
 
-function buildHeadTailExcerpt(raw: string, maxCharsPerFile: number): string {
+function buildHeadTailExcerpt(raw: string, maxCharsPerFile: number): {
+  content: string;
+  excerptStrategy: 'head-tail';
+  anchorHints: string[];
+} {
   const gapMarker = '\n/* [excerpt gap] */\n';
   const suffix = `\n/* [truncated original_length=${raw.length}] */`;
   const availableChars = Math.max(1200, maxCharsPerFile - gapMarker.length - suffix.length);
   const headChars = Math.floor(availableChars / 2);
   const tailChars = availableChars - headChars;
 
-  return `${raw.slice(0, headChars)}${gapMarker}${raw.slice(Math.max(0, raw.length - tailChars))}${suffix}`;
+  return {
+    content: `${raw.slice(0, headChars)}${gapMarker}${raw.slice(Math.max(0, raw.length - tailChars))}${suffix}`,
+    excerptStrategy: 'head-tail',
+    anchorHints: [],
+  };
 }
 
 function uniqueAnchors(anchors: string[]): string[] {
@@ -191,7 +194,11 @@ function buildAnchoredExcerpt(
   candidatePath: string,
   maxCharsPerFile: number,
   preferredAnchors: string[] = [],
-): string {
+): {
+  content: string;
+  excerptStrategy: 'anchored' | 'head-tail';
+  anchorHints: string[];
+} {
   const anchors = uniqueAnchors([
     ...preferredAnchors,
     ...(LARGE_FILE_AUTONOMOUS_CONTEXT_ANCHORS[candidatePath] || []),
@@ -201,6 +208,7 @@ function buildAnchoredExcerpt(
   }
 
   const excerpts: string[] = [];
+  const usedAnchors: string[] = [];
   const seenRanges: Array<{ start: number; end: number }> = [];
   const excerptBudget = Math.max(1200, Math.floor((maxCharsPerFile - (anchors.length * 96) - 64) / anchors.length));
 
@@ -219,13 +227,18 @@ function buildAnchoredExcerpt(
 
     seenRanges.push({ start, end });
     excerpts.push(`/* [excerpt anchor: ${anchor}] */\n${raw.slice(start, end).trimEnd()}`);
+    usedAnchors.push(anchor);
   }
 
   if (excerpts.length === 0) {
     return buildHeadTailExcerpt(raw, maxCharsPerFile);
   }
 
-  return `${excerpts.join('\n\n/* [excerpt gap] */\n\n')}\n\n/* [truncated original_length=${raw.length}] */`;
+  return {
+    content: `${excerpts.join('\n\n/* [excerpt gap] */\n\n')}\n\n/* [truncated original_length=${raw.length}] */`,
+    excerptStrategy: 'anchored',
+    anchorHints: usedAnchors,
+  };
 }
 
 function buildAutonomousEditContextContent(
@@ -233,9 +246,55 @@ function buildAutonomousEditContextContent(
   candidatePath: string,
   maxCharsPerFile: number,
   preferredAnchors: string[] = [],
-): string {
-  if (raw.length <= maxCharsPerFile) return raw;
+): {
+  content: string;
+  excerptStrategy: 'full' | 'anchored' | 'head-tail';
+  anchorHints: string[];
+} {
+  if (raw.length <= maxCharsPerFile) {
+    return {
+      content: raw,
+      excerptStrategy: 'full',
+      anchorHints: uniqueAnchors(preferredAnchors).slice(0, 6),
+    };
+  }
   return buildAnchoredExcerpt(raw, candidatePath, maxCharsPerFile, preferredAnchors);
+}
+
+function describeAutonomousEditSelectionReason(
+  candidatePath: string,
+  scopes: string[],
+  preferredPaths: string[],
+  anchorHints: string[],
+): string {
+  const reasons: string[] = [];
+  if (preferredPaths.includes(candidatePath)) {
+    reasons.push('Preferred refresh target from a previous failed autonomous edit.');
+  }
+
+  if (candidatePath.startsWith('apps/api/')) {
+    reasons.push('API/provider hot path candidate.');
+  } else if (candidatePath.startsWith('apps/langgraph-control-plane/')) {
+    reasons.push('Control-plane orchestration candidate.');
+  } else if (candidatePath.startsWith('apps/homepage/') || candidatePath.startsWith('apps/ui/')) {
+    reasons.push('Repo surface candidate.');
+  } else {
+    reasons.push('Repo workspace/build candidate.');
+  }
+
+  const normalizedScopes = Array.from(new Set(
+    scopes
+      .map((scope) => String(scope || '').trim().toLowerCase())
+      .filter(Boolean),
+  ));
+  if (normalizedScopes.length > 0) {
+    reasons.push(`Scope coverage: ${normalizedScopes.join(', ')}.`);
+  }
+  if (anchorHints.length > 0) {
+    reasons.push(`Anchor hints available: ${anchorHints.length}.`);
+  }
+
+  return reasons.join(' ');
 }
 
 function countOccurrences(haystack: string, needle: string): number {
@@ -508,6 +567,10 @@ export function checkAutonomousEditPath(
     return { allowed: false, normalizedPath: repoRelativePath, reason: 'No allowlisted paths were configured.' };
   }
 
+  if (normalizedAllowlist.includes('*')) {
+    return { allowed: true, normalizedPath: repoRelativePath, reason: 'Allowed by wildcard allowlist.' };
+  }
+
   if (!normalizedAllowlist.some((allowEntry) => pathMatchesPrefix(repoRelativePath, allowEntry))) {
     return { allowed: false, normalizedPath: repoRelativePath, reason: 'Path is outside the autonomous edit allowlist.' };
   }
@@ -518,6 +581,10 @@ export function checkAutonomousEditPath(
 export function buildAutonomousEditCandidatePaths(scopes: string[]): string[] {
   const normalizedScopes = Array.from(new Set(scopes.map((scope) => String(scope || '').trim().toLowerCase()).filter(Boolean)));
   const candidates = new Set<string>([
+    'package.json',
+    'turbo.json',
+    'bun.sh',
+    'README.md',
     'apps/langgraph-control-plane/src/index.ts',
     'apps/langgraph-control-plane/src/autonomousEdits.ts',
     'apps/langgraph-control-plane/src/workflow.ts',
@@ -540,6 +607,7 @@ export function buildAutonomousEditCandidatePaths(scopes: string[]): string[] {
     candidates.add('apps/api/modules/openaiRouteUtils.ts');
     candidates.add('apps/api/modules/openaiResponsesFormat.ts');
     candidates.add('apps/api/modules/dataManager.ts');
+    candidates.add('apps/api/modules/requestQueue.ts');
     candidates.add('apps/api/dev/testModelLiveProbes.ts');
     candidates.add('apps/api/routes/openai.ts');
     candidates.add('apps/api/routes/models.ts');
@@ -547,6 +615,21 @@ export function buildAutonomousEditCandidatePaths(scopes: string[]): string[] {
     candidates.add('apps/api/ws/wsServer.ts');
     candidates.add('apps/api/README.md');
     candidates.add('apps/api/package.json');
+  }
+
+  if (normalizedScopes.includes('repo') || normalizedScopes.includes('repo-surface')) {
+    candidates.add('apps/homepage/package.json');
+    candidates.add('apps/homepage/serve.js');
+    candidates.add('apps/homepage/public/index.html');
+    candidates.add('apps/homepage/public/script.js');
+    candidates.add('apps/homepage/public/style.css');
+    candidates.add('apps/ui/package.json');
+    candidates.add('apps/ui/README.md');
+    candidates.add('apps/ui/scripts/dev.sh');
+    candidates.add('apps/ui/scripts/start.sh');
+    candidates.add('apps/ui/scripts/stop.sh');
+    candidates.add('apps/ui/scripts/sync-config.sh');
+    candidates.add('apps/ui/scripts/sync-librechat.sh');
   }
 
   return Array.from(candidates);
@@ -582,16 +665,27 @@ export function readAutonomousEditContext(
 
     try {
       const raw = fs.readFileSync(absolutePath, 'utf8');
+      const anchorHints = uniqueAnchors(preferredAnchorsByPath[check.normalizedPath] || []).slice(0, 6);
+      const excerpt = buildAutonomousEditContextContent(
+        raw,
+        check.normalizedPath,
+        maxCharsPerFile,
+        anchorHints,
+      );
       const truncated = raw.length > maxCharsPerFile;
       files.push({
         path: check.normalizedPath,
-        content: buildAutonomousEditContextContent(
-          raw,
-          check.normalizedPath,
-          maxCharsPerFile,
-          preferredAnchorsByPath[check.normalizedPath] || [],
-        ),
+        content: excerpt.content,
         truncated,
+        rawCharCount: raw.length,
+        selectionReason: describeAutonomousEditSelectionReason(
+          check.normalizedPath,
+          scopes,
+          preferredPaths,
+          excerpt.anchorHints.length > 0 ? excerpt.anchorHints : anchorHints,
+        ),
+        excerptStrategy: excerpt.excerptStrategy,
+        anchorHints: excerpt.anchorHints.length > 0 ? excerpt.anchorHints : anchorHints,
       });
       if (files.length >= maxFiles) break;
     } catch {

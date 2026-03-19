@@ -76,6 +76,7 @@ export interface ProviderStreamChunk {
   latency: number;
   response: string;
   anystream: any;
+  response_id?: string;
   passthrough?: ProviderStreamPassthrough;
   tool_calls?: any[];
   finish_reason?: string;
@@ -91,6 +92,7 @@ export interface ProviderUsage {
 export interface ProviderResponse {
   response: string;
   latency: number;
+  response_id?: string;
   usage?: ProviderUsage;
   tool_calls?: any[];
   finish_reason?: string;

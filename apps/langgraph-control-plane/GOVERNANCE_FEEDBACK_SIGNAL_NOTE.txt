@@ -1,0 +1,9 @@
+LangSmith governance feedback-signal repair note
+
+Active repair signal:
+- No sampled feedback items were available for governance signal inspection.
+
+Recommended runtime check before rollout:
+- Confirm the control-plane process is healthy and not exiting after persistent storage flush.
+- Verify governance feedback sampling is configured and returning non-empty samples.
+- Treat empty sampled feedback as a degraded observability condition and gate experimental rollout until confirmed.
