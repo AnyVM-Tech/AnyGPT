@@ -451,6 +451,35 @@
         }
       }
     },
+    "/v1/responses/compact": {
+      "post": {
+        "summary": "Responses compaction",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyHeader": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Response compaction"
+          }
+        }
+      }
+    },
     "/v1/embeddings": {
       "post": {
         "summary": "Embeddings",

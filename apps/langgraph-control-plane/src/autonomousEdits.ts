@@ -90,6 +90,8 @@ const LARGE_FILE_AUTONOMOUS_CONTEXT_ANCHORS: Record<string, string[]> = {
     'export async function syncLangSmithProjectGovernance(',
   ],
   'apps/langgraph-control-plane/src/workflow.ts': [
+    'const DEFAULT_CONTROL_PLANE_AUTONOMOUS_EDIT_PROMPT = [',
+    'const DEFAULT_CONTROL_PLANE_PROMPT_BUNDLE = ControlPlanePromptBundleSchema.parse({',
     'function buildControlPlaneLangSmithProjectMetadata(',
     'async function callAiCodeEditAgent(',
     'async function autonomousEditPlannerNode(',
@@ -121,6 +123,22 @@ const LARGE_FILE_AUTONOMOUS_CONTEXT_ANCHORS: Record<string, string[]> = {
     'const REQUEST_QUEUE_CONCURRENCY = (() => {',
     'const REQUEST_QUEUE_MAX_PENDING = (() => {',
     'export const requestQueue = new RequestQueue(',
+  ],
+  'apps/api/modules/modelUpdater.ts': [
+    'function loadBasePricing()',
+    'function loadPricingCache()',
+    'function normalizeResolvedPricing(',
+    'refreshProviderCountsInModelsFile',
+  ],
+  'apps/api/modules/responsesHistory.ts': [
+    'export async function loadResponsesHistoryEntry(',
+    'export async function saveResponsesHistoryEntry(',
+    'export async function mergeResponsesHistoryInput(',
+  ],
+  'apps/api/dev/fetchPricing.ts': [
+    'function resolveOfficialPricing(',
+    'function resolveOpenRouterPricing(',
+    'const OFFICIAL_PRICES:',
   ],
   'apps/api/routes/models.ts': [
     'router.get(',
@@ -599,25 +617,66 @@ export function buildAutonomousEditCandidatePaths(scopes: string[]): string[] {
     candidates.add('apps/api/providers/openai.ts');
     candidates.add('apps/api/providers/gemini.ts');
     candidates.add('apps/api/providers/deepseek.ts');
+    candidates.add('apps/api/providers/imagen.ts');
     candidates.add('apps/api/providers/interfaces.ts');
     candidates.add('apps/api/providers/openrouter.ts');
     candidates.add('apps/api/providers/handler.ts');
+    candidates.add('apps/api/modules/adminKeySync.ts');
+    candidates.add('apps/api/modules/dataManager.ts');
+    candidates.add('apps/api/modules/db.ts');
+    candidates.add('apps/api/modules/errorClassification.ts');
+    candidates.add('apps/api/modules/errorLogger.ts');
+    candidates.add('apps/api/modules/geminiMediaValidation.ts');
+    candidates.add('apps/api/modules/keyChecker.ts');
+    candidates.add('apps/api/modules/middlewareFactory.ts');
+    candidates.add('apps/api/modules/modelUpdater.ts');
+    candidates.add('apps/api/modules/openaiFallbacks.ts');
     candidates.add('apps/api/modules/openaiProviderSelection.ts');
     candidates.add('apps/api/modules/openaiRequestSupport.ts');
+    candidates.add('apps/api/modules/openaiRouteSupport.ts');
     candidates.add('apps/api/modules/openaiRouteUtils.ts');
     candidates.add('apps/api/modules/openaiResponsesFormat.ts');
-    candidates.add('apps/api/modules/dataManager.ts');
+    candidates.add('apps/api/modules/rateLimit.ts');
+    candidates.add('apps/api/modules/rateLimitRedis.ts');
+    candidates.add('apps/api/modules/requestIntake.ts');
     candidates.add('apps/api/modules/requestQueue.ts');
+    candidates.add('apps/api/modules/responsesHistory.ts');
+    candidates.add('apps/api/modules/tokenEstimation.ts');
+    candidates.add('apps/api/modules/userData.ts');
+    candidates.add('apps/api/dev/applyProbeCapabilities.ts');
+    candidates.add('apps/api/dev/checkModelCapabilities.ts');
+    candidates.add('apps/api/dev/fetchPricing.ts');
+    candidates.add('apps/api/dev/models.ts');
+    candidates.add('apps/api/dev/refreshModels.ts');
     candidates.add('apps/api/dev/testModelLiveProbes.ts');
+    candidates.add('apps/api/dev/updatemodels.ts');
+    candidates.add('apps/api/dev/updateproviders.ts');
     candidates.add('apps/api/routes/openai.ts');
     candidates.add('apps/api/routes/models.ts');
     candidates.add('apps/api/server.ts');
-    candidates.add('apps/api/ws/wsServer.ts');
+    candidates.add('apps/api/server.launcher.bun.ts');
+    candidates.add('apps/api/anygpt-api.service');
+    candidates.add('apps/api/anygpt-experimental.service');
+    candidates.add('apps/api/models.json');
+    candidates.add('apps/api/pricing.json');
     candidates.add('apps/api/README.md');
     candidates.add('apps/api/package.json');
+    candidates.add('apps/api/ws/wsServer.ts');
+  }
+
+  if (normalizedScopes.includes('repo') || normalizedScopes.includes('control-plane')) {
+    candidates.add('apps/langgraph-control-plane/langgraph.json');
+    candidates.add('apps/langgraph-control-plane/governance-profiles.json');
+    candidates.add('apps/langgraph-control-plane/src/langsmithClient.ts');
+    candidates.add('apps/langgraph-control-plane/src/studioGraph.ts');
   }
 
   if (normalizedScopes.includes('repo') || normalizedScopes.includes('repo-surface')) {
+    candidates.add('tsconfig.json');
+    candidates.add('pnpm-workspace.yaml');
+    candidates.add('SETUP.md');
+    candidates.add('scripts/run-frontend-stack.sh');
+    candidates.add('scripts/with-bun-path.sh');
     candidates.add('apps/homepage/package.json');
     candidates.add('apps/homepage/serve.js');
     candidates.add('apps/homepage/public/index.html');
@@ -734,7 +793,16 @@ function buildNormalizedFailedEdit(action: AutonomousEditAction, normalizedPath:
   });
 }
 
-function preflightAutonomousEditAction(
+function buildNormalizedSkippedEdit(action: AutonomousEditAction, normalizedPath: string, message: string): AppliedAutonomousEdit {
+  return AppliedAutonomousEditSchema.parse({
+    ...action,
+    path: normalizedPath || normalizeRepoRelativePath(action.path),
+    status: 'skipped',
+    message,
+  });
+}
+
+export function preflightAutonomousEditAction(
   repoRoot: string,
   action: AutonomousEditAction,
   allowlist: string[],
@@ -770,9 +838,10 @@ function preflightAutonomousEditAction(
         if (anchorFragmentMatch.kind === 'multiple') {
           return buildNormalizedFailedEdit(action, check.normalizedPath, `Replace target text was not found exactly and anchor-fragment matching found ${anchorFragmentMatch.count} candidate blocks; provide a more specific anchored block.`);
         }
-        if (anchorFragmentMatch.kind === 'none') {
-          return buildNormalizedFailedEdit(action, check.normalizedPath, buildReplaceFailureDiagnostic(current, find));
+        if (anchorFragmentMatch.kind === 'unique') {
+          return null;
         }
+        return buildNormalizedFailedEdit(action, check.normalizedPath, buildReplaceFailureDiagnostic(current, find));
       }
     }
     return null;
@@ -791,40 +860,86 @@ export function applyAutonomousEditsWithManifest(
   allowlist: string[],
   denylist: string[],
 ): { appliedEdits: AppliedAutonomousEdit[]; sessionManifest: AutonomousEditSessionManifest } {
-  const results: AppliedAutonomousEdit[] = [];
   const requestedActions = actions.map((action) => AutonomousEditActionSchema.parse(action));
   const manifest = buildAutonomousEditSessionManifest(requestedActions);
   const touchedFiles = new Map<string, AutonomousEditTouchedFile>();
-  const preflightFailures = requestedActions
-    .map((action) => preflightAutonomousEditAction(repoRoot, action, allowlist, denylist))
-    .filter((result): result is AppliedAutonomousEdit => Boolean(result));
+  const resultsByIndex = new Map<number, AppliedAutonomousEdit>();
+  const preflightResults = requestedActions.map((action, index) => ({
+    index,
+    action,
+    normalizedPath: normalizeRepoRelativePath(action.path),
+    failure: preflightAutonomousEditAction(repoRoot, action, allowlist, denylist),
+  }));
+  const preflightFailures = preflightResults.filter((entry): entry is typeof entry & { failure: AppliedAutonomousEdit } => Boolean(entry.failure));
+  let actionsToApply = preflightResults.filter((entry) => !entry.failure);
 
   if (preflightFailures.length > 0) {
-    const failedPaths = new Set(preflightFailures.map((edit) => String(edit.path || '').trim()).filter(Boolean));
-    const skipped = requestedActions
-      .filter((action) => !failedPaths.has(normalizeRepoRelativePath(action.path)))
-      .map((action) => AppliedAutonomousEditSchema.parse({
-        ...action,
-        path: normalizeRepoRelativePath(action.path),
-        status: 'skipped',
-        message: 'Autonomous edit batch was not applied because another edit failed preflight validation.',
-      }));
+    const failedPaths = new Set(
+      preflightFailures
+        .map((entry) => String(entry.failure.path || entry.normalizedPath).trim())
+        .filter(Boolean),
+    );
+    const siblingPathSkips = actionsToApply.filter((entry) => failedPaths.has(entry.normalizedPath));
+    const unaffectedActions = actionsToApply.filter((entry) => !failedPaths.has(entry.normalizedPath));
 
-    return {
-      appliedEdits: [...preflightFailures, ...skipped],
-      sessionManifest: AutonomousEditSessionManifestSchema.parse({
-        ...manifest,
-        appliedEdits: [...preflightFailures, ...skipped],
-        touchedFiles: [],
-        rollbackStatus: 'not-required',
-      }),
-    };
+    if (unaffectedActions.length === 0) {
+      for (const entry of preflightFailures) {
+        resultsByIndex.set(entry.index, entry.failure);
+      }
+      for (const entry of siblingPathSkips) {
+        resultsByIndex.set(
+          entry.index,
+          buildNormalizedSkippedEdit(
+            entry.action,
+            entry.normalizedPath,
+            'Autonomous edit batch was not applied because another edit targeting the same path failed preflight validation.',
+          ),
+        );
+      }
+
+      const orderedResults = preflightResults
+        .map((entry) => resultsByIndex.get(entry.index))
+        .filter((result): result is AppliedAutonomousEdit => Boolean(result));
+
+      return {
+        appliedEdits: orderedResults,
+        sessionManifest: AutonomousEditSessionManifestSchema.parse({
+          ...manifest,
+          appliedEdits: orderedResults,
+          touchedFiles: [],
+          rollbackStatus: 'not-required',
+        }),
+      };
+    }
+
+    for (const entry of preflightFailures) {
+      resultsByIndex.set(
+        entry.index,
+        buildNormalizedSkippedEdit(
+          entry.action,
+          String(entry.failure.path || entry.normalizedPath).trim(),
+          `Skipped preflight-invalid autonomous edit while applying other valid edits in the batch: ${entry.failure.message}`,
+        ),
+      );
+    }
+    for (const entry of siblingPathSkips) {
+      resultsByIndex.set(
+        entry.index,
+        buildNormalizedSkippedEdit(
+          entry.action,
+          entry.normalizedPath,
+          'Skipped because another autonomous edit targeting the same path failed preflight validation; leaving this path unchanged for this batch.',
+        ),
+      );
+    }
+
+    actionsToApply = unaffectedActions;
   }
 
-  for (const action of requestedActions) {
+  for (const { index, action } of actionsToApply) {
     const check = checkAutonomousEditPath(repoRoot, action.path, allowlist, denylist);
     if (!check.allowed) {
-      results.push(AppliedAutonomousEditSchema.parse({
+      resultsByIndex.set(index, AppliedAutonomousEditSchema.parse({
         ...action,
         path: check.normalizedPath || normalizeRepoRelativePath(action.path),
         status: 'failed',
@@ -840,7 +955,7 @@ export function applyAutonomousEditsWithManifest(
         const find = typeof action.find === 'string' ? action.find : '';
         const replace = typeof action.replace === 'string' ? action.replace : '';
         if (!find) {
-          results.push(AppliedAutonomousEditSchema.parse({
+          resultsByIndex.set(index, AppliedAutonomousEditSchema.parse({
             ...action,
             path: check.normalizedPath,
             status: 'failed',
@@ -849,7 +964,7 @@ export function applyAutonomousEditsWithManifest(
           continue;
         }
         if (!fs.existsSync(absolutePath)) {
-          results.push(AppliedAutonomousEditSchema.parse({
+          resultsByIndex.set(index, AppliedAutonomousEditSchema.parse({
             ...action,
             path: check.normalizedPath,
             status: 'failed',
@@ -863,7 +978,7 @@ export function applyAutonomousEditsWithManifest(
         if (matchCount === 0) {
           const indentationInsensitiveMatch = findIndentationInsensitiveReplaceWindow(current, find);
           if (indentationInsensitiveMatch.kind === 'multiple') {
-            results.push(AppliedAutonomousEditSchema.parse({
+            resultsByIndex.set(index, AppliedAutonomousEditSchema.parse({
               ...action,
               path: check.normalizedPath,
               status: 'failed',
@@ -876,7 +991,7 @@ export function applyAutonomousEditsWithManifest(
             const replacement = reindentBlock(replace, indentationInsensitiveMatch.indent);
             const next = `${current.slice(0, indentationInsensitiveMatch.start)}${replacement}${current.slice(indentationInsensitiveMatch.end)}`;
             if (next === current) {
-              results.push(AppliedAutonomousEditSchema.parse({
+              resultsByIndex.set(index, AppliedAutonomousEditSchema.parse({
                 ...action,
                 path: check.normalizedPath,
                 status: 'skipped',
@@ -889,7 +1004,7 @@ export function applyAutonomousEditsWithManifest(
               touchedFiles.set(check.normalizedPath, captureTouchedFileSnapshot(repoRoot, check.normalizedPath));
             }
             fs.writeFileSync(absolutePath, next, 'utf8');
-            results.push(AppliedAutonomousEditSchema.parse({
+            resultsByIndex.set(index, AppliedAutonomousEditSchema.parse({
               ...action,
               path: check.normalizedPath,
               status: 'applied',
@@ -898,48 +1013,54 @@ export function applyAutonomousEditsWithManifest(
             continue;
           }
 
-          results.push(AppliedAutonomousEditSchema.parse({
-            ...action,
-            path: check.normalizedPath,
-            status: 'failed',
-            message: buildReplaceFailureDiagnostic(current, find),
-          }));
           const anchorFragmentMatch = findAnchorFragmentReplaceWindow(current, find);
           if (anchorFragmentMatch.kind === 'multiple') {
-            results[results.length - 1] = AppliedAutonomousEditSchema.parse({
+            const anchorFragmentFailure = AppliedAutonomousEditSchema.parse({
               ...action,
               path: check.normalizedPath,
               status: 'failed',
               message: `Replace target text was not found exactly and anchor-fragment matching found ${anchorFragmentMatch.count} candidate blocks; provide a more specific anchored block.`,
             });
-          } else if (anchorFragmentMatch.kind === 'unique') {
+            resultsByIndex.set(index, anchorFragmentFailure);
+            continue;
+          }
+          if (anchorFragmentMatch.kind === 'unique') {
             const replacement = reindentBlock(replace, anchorFragmentMatch.indent);
             const next = `${current.slice(0, anchorFragmentMatch.start)}${replacement}${current.slice(anchorFragmentMatch.end)}`;
             if (next === current) {
-              results[results.length - 1] = AppliedAutonomousEditSchema.parse({
+              resultsByIndex.set(index, AppliedAutonomousEditSchema.parse({
                 ...action,
                 path: check.normalizedPath,
                 status: 'skipped',
                 message: 'No content change was produced by the anchor-fragment replace action.',
-              });
-            } else {
-              if (!touchedFiles.has(check.normalizedPath)) {
-                touchedFiles.set(check.normalizedPath, captureTouchedFileSnapshot(repoRoot, check.normalizedPath));
-              }
-              fs.writeFileSync(absolutePath, next, 'utf8');
-              results[results.length - 1] = AppliedAutonomousEditSchema.parse({
-                ...action,
-                path: check.normalizedPath,
-                status: 'applied',
-                message: `Replace action applied successfully using anchor-fragment block matching (${anchorFragmentMatch.anchorCount} anchor lines).`,
-              });
+              }));
+              continue;
             }
+
+            if (!touchedFiles.has(check.normalizedPath)) {
+              touchedFiles.set(check.normalizedPath, captureTouchedFileSnapshot(repoRoot, check.normalizedPath));
+            }
+            fs.writeFileSync(absolutePath, next, 'utf8');
+            resultsByIndex.set(index, AppliedAutonomousEditSchema.parse({
+              ...action,
+              path: check.normalizedPath,
+              status: 'applied',
+              message: `Replace action applied successfully using anchor-fragment block matching (${anchorFragmentMatch.anchorCount} anchor lines).`,
+            }));
+            continue;
           }
+
+          resultsByIndex.set(index, AppliedAutonomousEditSchema.parse({
+            ...action,
+            path: check.normalizedPath,
+            status: 'failed',
+            message: buildReplaceFailureDiagnostic(current, find),
+          }));
           continue;
         }
 
         if (matchCount > 1) {
-          results.push(AppliedAutonomousEditSchema.parse({
+          resultsByIndex.set(index, AppliedAutonomousEditSchema.parse({
             ...action,
             path: check.normalizedPath,
             status: 'failed',
@@ -950,7 +1071,7 @@ export function applyAutonomousEditsWithManifest(
 
         const next = current.replace(find, replace);
         if (next === current) {
-          results.push(AppliedAutonomousEditSchema.parse({
+          resultsByIndex.set(index, AppliedAutonomousEditSchema.parse({
             ...action,
             path: check.normalizedPath,
             status: 'skipped',
@@ -963,7 +1084,7 @@ export function applyAutonomousEditsWithManifest(
           touchedFiles.set(check.normalizedPath, captureTouchedFileSnapshot(repoRoot, check.normalizedPath));
         }
         fs.writeFileSync(absolutePath, next, 'utf8');
-        results.push(AppliedAutonomousEditSchema.parse({
+        resultsByIndex.set(index, AppliedAutonomousEditSchema.parse({
           ...action,
           path: check.normalizedPath,
           status: 'applied',
@@ -974,7 +1095,7 @@ export function applyAutonomousEditsWithManifest(
 
       const content = typeof action.content === 'string' ? action.content : '';
       if (!content) {
-        results.push(AppliedAutonomousEditSchema.parse({
+        resultsByIndex.set(index, AppliedAutonomousEditSchema.parse({
           ...action,
           path: check.normalizedPath,
           status: 'failed',
@@ -986,7 +1107,7 @@ export function applyAutonomousEditsWithManifest(
       if (fs.existsSync(absolutePath)) {
         const current = fs.readFileSync(absolutePath, 'utf8');
         if (current === content) {
-          results.push(AppliedAutonomousEditSchema.parse({
+          resultsByIndex.set(index, AppliedAutonomousEditSchema.parse({
             ...action,
             path: check.normalizedPath,
             status: 'skipped',
@@ -1001,14 +1122,14 @@ export function applyAutonomousEditsWithManifest(
       }
       fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
       fs.writeFileSync(absolutePath, content, 'utf8');
-      results.push(AppliedAutonomousEditSchema.parse({
+      resultsByIndex.set(index, AppliedAutonomousEditSchema.parse({
         ...action,
         path: check.normalizedPath,
         status: 'applied',
         message: 'Write action applied successfully.',
       }));
     } catch (error: any) {
-      results.push(AppliedAutonomousEditSchema.parse({
+      resultsByIndex.set(index, AppliedAutonomousEditSchema.parse({
         ...action,
         path: check.normalizedPath,
         status: 'failed',
@@ -1017,11 +1138,15 @@ export function applyAutonomousEditsWithManifest(
     }
   }
 
+  const orderedResults = preflightResults
+    .map((entry) => resultsByIndex.get(entry.index))
+    .filter((result): result is AppliedAutonomousEdit => Boolean(result));
+
   return {
-    appliedEdits: results,
+    appliedEdits: orderedResults,
     sessionManifest: AutonomousEditSessionManifestSchema.parse({
       ...manifest,
-      appliedEdits: results,
+      appliedEdits: orderedResults,
       touchedFiles: Array.from(touchedFiles.values()),
       rollbackStatus: touchedFiles.size > 0 ? 'pending' : 'not-required',
     }),

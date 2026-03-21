@@ -33,8 +33,17 @@ const RESPONSES_HISTORY_TTL_SECONDS = Math.max(60, readEnvNumber('RESPONSES_HIST
 const RESPONSES_HISTORY_REDIS_PREFIX = 'api:responses_history:';
 const RESPONSES_HISTORY_MEMORY_MAX_ENTRIES = Math.max(0, readEnvNumber('RESPONSES_HISTORY_MEMORY_MAX_ENTRIES', 128));
 const RESPONSES_HISTORY_MAX_CHAIN_DEPTH = Math.max(1, readEnvNumber('RESPONSES_HISTORY_MAX_CHAIN_DEPTH', 64));
-const RESPONSES_HISTORY_MAX_ITEMS = Math.max(32, readEnvNumber('RESPONSES_HISTORY_MAX_ITEMS', 512));
+const RESPONSES_HISTORY_MAX_ITEMS = Math.max(128, readEnvNumber('RESPONSES_HISTORY_MAX_ITEMS', 4096));
+const RESPONSES_HISTORY_MAX_STORAGE_BYTES = Math.max(
+  256 * 1024,
+  readEnvNumber('RESPONSES_HISTORY_MAX_STORAGE_BYTES', 4 * 1024 * 1024)
+);
 const RESPONSES_HISTORY_SNAPSHOT_INTERVAL = Math.max(2, readEnvNumber('RESPONSES_HISTORY_SNAPSHOT_INTERVAL', 12));
+const RESPONSES_HISTORY_ARCHIVE_TTL_SECONDS = Math.max(
+  RESPONSES_HISTORY_TTL_SECONDS,
+  readEnvNumber('RESPONSES_HISTORY_ARCHIVE_TTL_SECONDS', 30 * 24 * 60 * 60)
+);
+const RESPONSES_HISTORY_ARCHIVE_REDIS_PREFIX = 'api:responses_history_archive:';
 const responsesHistoryMemory = new Map<string, { expiresAt: number; entry: StoredResponsesHistoryEntry }>();
 
 export function cloneResponsesHistoryValue<T>(value: T): T {
@@ -44,6 +53,10 @@ export function cloneResponsesHistoryValue<T>(value: T): T {
 
 export function getResponsesHistoryRedisKey(responseId: string): string {
   return `${RESPONSES_HISTORY_REDIS_PREFIX}${responseId}`;
+}
+
+function getResponsesHistoryArchiveRedisKey(responseId: string): string {
+  return `${RESPONSES_HISTORY_ARCHIVE_REDIS_PREFIX}${responseId}`;
 }
 
 function cacheResponsesHistoryEntry(entry: StoredResponsesHistoryEntry): void {
@@ -107,6 +120,68 @@ function getReplayDepth(entry: StoredResponsesHistoryEntry | null | undefined): 
   return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 1;
 }
 
+async function loadResponsesHistoryArchiveEntry(responseId: string): Promise<StoredResponsesHistoryEntry | null> {
+  const normalizedId = typeof responseId === 'string' ? responseId.trim() : '';
+  if (!normalizedId || !redis) return null;
+
+  try {
+    const raw = await redis.get(getResponsesHistoryArchiveRedisKey(normalizedId));
+    if (!raw) return null;
+    return normalizeStoredResponsesHistoryEntry(JSON.parse(raw) as StoredResponsesHistoryEntry);
+  } catch {
+    return null;
+  }
+}
+
+async function saveResponsesHistoryArchiveEntry(entry: StoredResponsesHistoryEntry): Promise<void> {
+  const normalizedId = typeof entry?.id === 'string' ? entry.id.trim() : '';
+  if (!normalizedId || !redis) return;
+
+  const stored = normalizeStoredResponsesHistoryEntry({
+    ...cloneResponsesHistoryValue(entry),
+    id: normalizedId,
+  });
+
+  try {
+    await redis.set(
+      getResponsesHistoryArchiveRedisKey(normalizedId),
+      JSON.stringify(stored),
+      'EX',
+      RESPONSES_HISTORY_ARCHIVE_TTL_SECONDS,
+    );
+  } catch (error: any) {
+    console.warn(`[ResponsesHistory] Failed to persist archive ${normalizedId}: ${error?.message || error}`);
+  }
+}
+
+async function touchResponsesHistoryArchiveEntry(entry: StoredResponsesHistoryEntry): Promise<void> {
+  const normalizedId = typeof entry?.id === 'string' ? entry.id.trim() : '';
+  if (!normalizedId || !redis) return;
+
+  await saveResponsesHistoryArchiveEntry(entry);
+}
+
+async function touchResponsesHistoryEntry(entry: StoredResponsesHistoryEntry): Promise<StoredResponsesHistoryEntry> {
+  const stored = normalizeStoredResponsesHistoryEntry(entry);
+  cacheResponsesHistoryEntry(stored);
+  await touchResponsesHistoryArchiveEntry(stored);
+
+  if (!redis) return stored;
+
+  try {
+    await redis.set(
+      getResponsesHistoryRedisKey(stored.id),
+      JSON.stringify(stored),
+      'EX',
+      RESPONSES_HISTORY_TTL_SECONDS,
+    );
+  } catch (error: any) {
+    console.warn(`[ResponsesHistory] Failed to refresh ${stored.id}: ${error?.message || error}`);
+  }
+
+  return stored;
+}
+
 export function pruneExpiredResponsesHistoryMemory(): void {
   const now = Date.now();
   for (const [key, cached] of responsesHistoryMemory) {
@@ -121,24 +196,33 @@ export async function loadResponsesHistoryEntry(responseId: string): Promise<Sto
   pruneExpiredResponsesHistoryMemory();
   const cached = responsesHistoryMemory.get(normalizedId);
   if (cached) {
-    if (cached.expiresAt > Date.now()) return cloneResponsesHistoryValue(cached.entry);
+    if (cached.expiresAt > Date.now()) {
+      const refreshed = await touchResponsesHistoryEntry(cached.entry);
+      return cloneResponsesHistoryValue(refreshed);
+    }
     responsesHistoryMemory.delete(normalizedId);
   }
 
-  if (!redis) return null;
-
-  try {
-    const raw = await redis.get(getResponsesHistoryRedisKey(normalizedId));
-    if (!raw) return null;
-    const parsed = normalizeStoredResponsesHistoryEntry(
-      JSON.parse(raw) as StoredResponsesHistoryEntry
-    );
-    cacheResponsesHistoryEntry(parsed);
-    return cloneResponsesHistoryValue(parsed);
-  } catch (error: any) {
-    console.warn(`[ResponsesHistory] Failed to load ${normalizedId}: ${error?.message || error}`);
-    return null;
+  if (redis) {
+    try {
+      const raw = await redis.get(getResponsesHistoryRedisKey(normalizedId));
+      if (raw) {
+        const parsed = normalizeStoredResponsesHistoryEntry(
+          JSON.parse(raw) as StoredResponsesHistoryEntry
+        );
+        const refreshed = await touchResponsesHistoryEntry(parsed);
+        return cloneResponsesHistoryValue(refreshed);
+      }
+    } catch (error: any) {
+      console.warn(`[ResponsesHistory] Failed to load ${normalizedId} from Redis: ${error?.message || error}`);
+    }
   }
+
+  const archived = await loadResponsesHistoryArchiveEntry(normalizedId);
+  if (!archived) return null;
+
+  const refreshed = await touchResponsesHistoryEntry(archived);
+  return cloneResponsesHistoryValue(refreshed);
 }
 
 export async function saveResponsesHistoryEntry(entry: StoredResponsesHistoryEntry): Promise<void> {
@@ -150,6 +234,7 @@ export async function saveResponsesHistoryEntry(entry: StoredResponsesHistoryEnt
     id: normalizedId,
   });
   cacheResponsesHistoryEntry(stored);
+  await saveResponsesHistoryArchiveEntry(stored);
 
   if (!redis) return;
 
@@ -174,6 +259,16 @@ export function buildStoredResponsesHistoryOutput(outputText: string, toolCalls?
 
 function countHistoryItems(items: any[]): number {
   return Array.isArray(items) ? items.length : 0;
+}
+
+function estimateResponsesHistoryStorageBytes(value: unknown): number {
+  if (typeof value === 'undefined') return 0;
+
+  try {
+    return Buffer.byteLength(JSON.stringify(value), 'utf8');
+  } catch {
+    return Buffer.byteLength(String(value ?? ''), 'utf8');
+  }
 }
 
 export function buildResponsesHistoryStoragePlan(params: {
@@ -238,23 +333,38 @@ export async function mergeResponsesHistoryInput(
   }
 
   const merged: any[] = [];
+  let storageBytes = 0;
   for (const entry of chain.reverse()) {
     const historicalInput = isLegacySnapshotEntry(entry)
       ? cloneResponsesHistoryValue(entry.input || [])
       : cloneResponsesHistoryValue(entry.input_delta || []);
     const historicalOutput = cloneResponsesHistoryValue(entry.output || []);
+    storageBytes += estimateResponsesHistoryStorageBytes(historicalInput);
+    storageBytes += estimateResponsesHistoryStorageBytes(historicalOutput);
     merged.push(...historicalInput, ...historicalOutput);
     if (countHistoryItems(merged) > RESPONSES_HISTORY_MAX_ITEMS) {
       throw new Error(
         `Responses history exceeded item limit (${RESPONSES_HISTORY_MAX_ITEMS}). Start a new response thread.`
       );
     }
+    if (storageBytes > RESPONSES_HISTORY_MAX_STORAGE_BYTES) {
+      throw new Error(
+        `Responses history exceeded storage limit (${RESPONSES_HISTORY_MAX_STORAGE_BYTES} bytes). Start a new response thread.`
+      );
+    }
   }
 
-  merged.push(...cloneResponsesHistoryValue(nextInput || []));
+  const clonedNextInput = cloneResponsesHistoryValue(nextInput || []);
+  storageBytes += estimateResponsesHistoryStorageBytes(clonedNextInput);
+  merged.push(...clonedNextInput);
   if (countHistoryItems(merged) > RESPONSES_HISTORY_MAX_ITEMS) {
     throw new Error(
       `Responses history exceeded item limit (${RESPONSES_HISTORY_MAX_ITEMS}). Start a new response thread.`
+    );
+  }
+  if (storageBytes > RESPONSES_HISTORY_MAX_STORAGE_BYTES) {
+    throw new Error(
+      `Responses history exceeded storage limit (${RESPONSES_HISTORY_MAX_STORAGE_BYTES} bytes). Start a new response thread.`
     );
   }
 

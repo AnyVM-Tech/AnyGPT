@@ -14,11 +14,42 @@ import dns from 'node:dns/promises';
 import net from 'node:net';
 // Removed imports related to compute and Provider state
 
+const REMOTE_MEDIA_FETCHABILITY_CACHE_TTL_MS = Math.max(
+  1000,
+  Number(process.env.GEMINI_REMOTE_MEDIA_FETCHABILITY_CACHE_TTL_MS ?? 30000)
+);
+const remoteMediaFetchabilityCache = new Map<
+  string,
+  { expiresAt: number; value: boolean }
+>();
+
+function getCachedRemoteMediaFetchability(url: string): boolean | null {
+  const cached = remoteMediaFetchabilityCache.get(url);
+  if (!cached) return null;
+  if (cached.expiresAt <= Date.now()) {
+    remoteMediaFetchabilityCache.delete(url);
+    return null;
+  }
+  return cached.value;
+}
+
+function setCachedRemoteMediaFetchability(url: string, value: boolean): boolean {
+  remoteMediaFetchabilityCache.set(url, {
+    value,
+    expiresAt: Date.now() + REMOTE_MEDIA_FETCHABILITY_CACHE_TTL_MS
+  });
+  return value;
+}
+
 function isLikelyFetchableRemoteMediaUrl(url: string): boolean {
   if (!url || typeof url !== 'string') return false;
+  const cached = getCachedRemoteMediaFetchability(url);
+  if (cached !== null) return cached;
   try {
     const parsed = new URL(url);
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return setCachedRemoteMediaFetchability(url, false);
+    }
     if (!parsed.hostname || parsed.hostname === 'localhost') return false;
     return true;
   } catch {
@@ -170,6 +201,18 @@ function copyGeminiErrorMetadata(target: Error, source: any): Error {
     }
   }
   return target;
+}
+
+function isGeminiCatalogAuthFailureMessage(message: string): boolean {
+  const normalized = String(message || '').toLowerCase();
+  return (
+    normalized.includes('api key not found') ||
+    normalized.includes('api key not valid') ||
+    normalized.includes('please pass a valid api key') ||
+    normalized.includes('api_key_invalid') ||
+    normalized.includes('api key invalid') ||
+    normalized.includes('api_key') && normalized.includes('invalid')
+  );
 }
 
 function getCachedGeminiCatalogAuthFailure(apiKey: string, endpoint: string): Error | null {
@@ -478,6 +521,8 @@ export class GeminiAI implements IAIProvider {
     }
     const cachedAuthFailure = getCachedGeminiCatalogAuthFailure(this.apiKey, GEMINI_API_BASE);
     if (cachedAuthFailure) {
+      (cachedAuthFailure as any).retryable = false;
+      (cachedAuthFailure as any).providerSwitchWorthless = true;
       throw cachedAuthFailure;
     }
 
@@ -486,10 +531,54 @@ export class GeminiAI implements IAIProvider {
       const response = await fetchWithTimeout(endpoint);
       if (!response.ok) {
         const responseText = await response.text().catch(() => '');
-        console.error(`Gemini ListModels raw error response: ${this.redactApiKey(responseText)}`);
-        const listModelsError = new Error(`Gemini ListModels failed: [${response.status} ${response.statusText}] ${this.redactApiKey(responseText)}`);
+        const redactedResponseText = this.redactApiKey(responseText);
+        console.error(`Gemini ListModels raw error response: ${redactedResponseText}`);
+        const listModelsError = new Error(`Gemini ListModels failed: [${response.status} ${response.statusText}] ${redactedResponseText}`);
         (listModelsError as any).status = response.status;
         (listModelsError as any).statusCode = response.status;
+        const normalizedListModelsErrorText = `${response.status} ${response.statusText} ${redactedResponseText}`.toLowerCase();
+        const isCatalogAuthOrGovernanceFailure =
+          response.status === 400 ||
+          response.status === 401 ||
+          response.status === 403;
+        const isInvalidApiKeyFailure =
+          normalizedListModelsErrorText.includes('api key not valid') ||
+          normalizedListModelsErrorText.includes('api_key_invalid') ||
+          normalizedListModelsErrorText.includes('invalid api key');
+        const isDisabledOrForbiddenCatalogFailure =
+          normalizedListModelsErrorText.includes('generative language api has not been used in project') ||
+          normalizedListModelsErrorText.includes('generative language api is disabled') ||
+          normalizedListModelsErrorText.includes('service_disabled') ||
+          normalizedListModelsErrorText.includes('accessnotconfigured') ||
+          normalizedListModelsErrorText.includes('forbidden') ||
+          normalizedListModelsErrorText.includes('permission denied') ||
+          normalizedListModelsErrorText.includes('permission_denied') ||
+          normalizedListModelsErrorText.includes('api has not been used in project') ||
+          normalizedListModelsErrorText.includes('enable it by visiting');
+        if (
+          isCatalogAuthOrGovernanceFailure &&
+          (isInvalidApiKeyFailure || isDisabledOrForbiddenCatalogFailure)
+        ) {
+          (listModelsError as any).retryable = false;
+          (listModelsError as any).providerSwitchWorthless = true;
+          (listModelsError as any).requestRetryWorthless = true;
+          (listModelsError as any).failureOrigin = 'upstream_provider';
+        }
+        const isGeminiCatalogAuthFailure =
+          response.status === 401 ||
+          response.status === 403 ||
+          (response.status === 400 && (
+            normalizedListModelsErrorText.includes('api key not valid') ||
+            normalizedListModelsErrorText.includes('api_key_invalid') ||
+            normalizedListModelsErrorText.includes('invalid api key')
+          ));
+        if (isGeminiCatalogAuthFailure) {
+          (listModelsError as any).retryable = false;
+          (listModelsError as any).requestRetryWorthless = true;
+          (listModelsError as any).requestRetryWorthless = true;
+          (listModelsError as any).providerSwitchWorthless = true;
+          cacheGeminiCatalogAuthFailure(this.apiKey, GEMINI_API_BASE, listModelsError);
+        }
         throw listModelsError;
       }
 

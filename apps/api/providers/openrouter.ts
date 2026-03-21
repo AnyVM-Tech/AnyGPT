@@ -17,7 +17,69 @@ function isOpenRouterToolUseUnsupportedError(error: any): boolean {
       || error?.message
       || ''
   );
-  return status === 404 && /no endpoints found that support (tool use|the requested tool settings)/i.test(message);
+  return status === 404 && /no endpoints found that support (tool use|the tool|the provided ['"]tool_choice['"] value)/i.test(message);
+}
+
+function isOpenRouterAuthConfigurationError(error: any): boolean {
+  const status = Number(error?.response?.status || error?.status || 0);
+  const message = String(
+    error?.response?.data?.error?.message
+      || error?.response?.data?.message
+      || error?.message
+      || ''
+  ).toLowerCase();
+  const code = String(
+    error?.response?.data?.error?.code
+      || error?.response?.data?.code
+      || ''
+  ).toLowerCase();
+
+  if (code === 'user_not_found') return true;
+  if (status === 401 || status === 403) return true;
+  return (
+    message.includes('user_not_found') ||
+    message.includes('user not found') ||
+    message.includes('invalid api key') ||
+    message.includes('incorrect api key') ||
+    message.includes('unauthorized') ||
+    message.includes('forbidden') ||
+    message.includes('authentication')
+  );
+}
+
+function isOpenRouterAuthFailure(error: any): boolean {
+  const status = Number(error?.response?.status || error?.status || 0);
+  const message = String(
+    error?.response?.data?.error?.message
+      || error?.response?.data?.message
+      || error?.message
+      || ''
+  ).toLowerCase();
+  const code = String(
+    error?.response?.data?.error?.code
+      || error?.response?.data?.code
+      || ''
+  ).toLowerCase();
+
+  if (status === 401 || status === 403) return true;
+  if (code.includes('auth') || code.includes('unauthorized') || code.includes('forbidden')) return true;
+  return (
+    message.includes('auth:user_not_found') ||
+    message.includes('user_not_found') ||
+    message.includes('invalid api key') ||
+    message.includes('incorrect api key') ||
+    message.includes('unauthorized') ||
+    message.includes('forbidden') ||
+    message.includes('authentication')
+  );
+}
+
+function markRetryableOpenRouterRoutingError(target: Error, error: any): Error {
+  if (isOpenRouterToolUseUnsupportedError(error)) {
+    (target as any).retryable = true;
+    (target as any).providerSwitchWorthless = false;
+  }
+  return target;
 }
 
 function annotateOpenRouterCapabilityError(target: any, error: any): void {
@@ -400,13 +462,22 @@ export class OpenRouterAI implements IAIProvider {
     }
   }
 
-  private getSourceMessages(message: IMessage): Array<{ role: string; content: any }> {
-    return Array.isArray(message.messages) && message.messages.length > 0
-      ? message.messages
-      : [{ role: message.role || 'user', content: message.content }];
+  private getSourceMessages(message: IMessage): Array<Record<string, any>> {
+    if (Array.isArray(message.messages) && message.messages.length > 0) {
+      return message.messages;
+    }
+
+    if (message.useResponsesApi && Array.isArray(message.content)) {
+      const converted = this.convertResponsesInputToChatMessages(message.content);
+      if (converted.length > 0) {
+        return converted;
+      }
+    }
+
+    return [{ role: message.role || 'user', content: message.content }];
   }
 
-  private async inlineImageUrls(sourceMessages: Array<{ role: string; content: any }>, referer?: string): Promise<void> {
+  private async inlineImageUrls(sourceMessages: Array<Record<string, any>>, referer?: string): Promise<void> {
     for (const msg of sourceMessages) {
       if (!Array.isArray(msg.content)) continue;
       for (const part of msg.content) {
@@ -508,6 +579,14 @@ export class OpenRouterAI implements IAIProvider {
     if (!Array.isArray(content)) return content;
     const textParts: string[] = [];
     for (const part of content) {
+      if (part?.type === 'output_text' && typeof part.text === 'string') {
+        textParts.push(part.text);
+        continue;
+      }
+      if (part?.type === 'output_text' && typeof part.output_text === 'string') {
+        textParts.push(part.output_text);
+        continue;
+      }
       if (part?.type === 'text' && typeof part.text === 'string') {
         textParts.push(part.text);
         continue;
@@ -521,7 +600,280 @@ export class OpenRouterAI implements IAIProvider {
     return textParts.length > 0 ? textParts.join('\n') : content;
   }
 
-  private buildRequestData(message: IMessage, stream: boolean = false, sourceMessages?: Array<{ role: string; content: any }>) {
+  private normalizeResponsesToolCalls(toolCalls: any): any[] | undefined {
+    if (!Array.isArray(toolCalls) || toolCalls.length === 0) return undefined;
+    const normalized = toolCalls
+      .map((toolCall, index) => {
+        if (!toolCall || typeof toolCall !== 'object') return null;
+        if (
+          toolCall.type === 'function' &&
+          toolCall.function &&
+          typeof toolCall.function === 'object'
+        ) {
+          return toolCall;
+        }
+
+        const name =
+          typeof toolCall?.function?.name === 'string' && toolCall.function.name.trim()
+            ? toolCall.function.name.trim()
+            : typeof toolCall?.name === 'string' && toolCall.name.trim()
+              ? toolCall.name.trim()
+              : undefined;
+        if (!name) return null;
+
+        const rawId =
+          typeof toolCall?.call_id === 'string' && toolCall.call_id.trim()
+            ? toolCall.call_id.trim()
+            : typeof toolCall?.tool_call_id === 'string' && toolCall.tool_call_id.trim()
+              ? toolCall.tool_call_id.trim()
+              : typeof toolCall?.id === 'string' && toolCall.id.trim()
+                ? toolCall.id.trim()
+                : `call_${Date.now()}_${index}`;
+
+        const argsSource =
+          toolCall?.function?.arguments ??
+          toolCall?.arguments ??
+          toolCall?.tool?.arguments ??
+          toolCall?.tool_call?.arguments ??
+          {};
+        const args =
+          typeof argsSource === 'string'
+            ? argsSource
+            : JSON.stringify(argsSource);
+
+        return {
+          id: rawId,
+          type: 'function',
+          function: {
+            name,
+            arguments: args,
+          },
+        };
+      })
+      .filter(Boolean);
+
+    return normalized.length > 0 ? normalized : undefined;
+  }
+
+  private extractResponsesToolCallsFromContent(content: any): any[] | undefined {
+    if (!Array.isArray(content)) return undefined;
+
+    const aggregated: any[] = [];
+    for (const part of content) {
+      if (!part || typeof part !== 'object') continue;
+      if (part.type === 'tool_calls' && Array.isArray(part.tool_calls)) {
+        aggregated.push(...part.tool_calls);
+        continue;
+      }
+      if (Array.isArray((part as any).content)) {
+        const nested = this.extractResponsesToolCallsFromContent((part as any).content);
+        if (nested) aggregated.push(...nested);
+      }
+    }
+
+    return this.normalizeResponsesToolCalls(aggregated);
+  }
+
+  private normalizeResponsesChatContent(content: any): any {
+    if (Array.isArray(content)) {
+      const normalizedParts: any[] = [];
+
+      for (const part of content) {
+        if (typeof part === 'string') {
+          normalizedParts.push({ type: 'text', text: part });
+          continue;
+        }
+        if (!part || typeof part !== 'object') continue;
+
+        const nestedContent = Array.isArray((part as any).content) ? (part as any).content : null;
+        if (nestedContent) {
+          const nested = this.normalizeResponsesChatContent(nestedContent);
+          if (Array.isArray(nested)) {
+            normalizedParts.push(...nested);
+          } else if (typeof nested === 'string' && nested.trim()) {
+            normalizedParts.push({ type: 'text', text: nested });
+          }
+          continue;
+        }
+
+        const type = String((part as any).type || '').toLowerCase();
+        if ((type === 'text' || type === 'input_text') && typeof (part as any).text === 'string') {
+          normalizedParts.push({ type: 'text', text: (part as any).text });
+          continue;
+        }
+        if (type === 'output_text') {
+          const text =
+            typeof (part as any).text === 'string'
+              ? (part as any).text
+              : typeof (part as any).output_text === 'string'
+                ? (part as any).output_text
+                : '';
+          if (text) {
+            normalizedParts.push({ type: 'text', text });
+          }
+          continue;
+        }
+        if (type === 'image_url') {
+          const imageUrl =
+            typeof (part as any).image_url === 'string'
+              ? { url: (part as any).image_url }
+              : (part as any).image_url;
+          if (imageUrl?.url) {
+            normalizedParts.push({ type: 'image_url', image_url: imageUrl });
+          }
+          continue;
+        }
+        if (type === 'input_image') {
+          const rawImageUrl = (part as any).image_url;
+          const imageUrl =
+            typeof rawImageUrl === 'string'
+              ? { url: rawImageUrl }
+              : rawImageUrl?.url
+                ? rawImageUrl
+                : undefined;
+          if (imageUrl?.url) {
+            normalizedParts.push({ type: 'image_url', image_url: imageUrl });
+          }
+          continue;
+        }
+      }
+
+      if (normalizedParts.length > 0) {
+        return normalizedParts;
+      }
+    }
+
+    if (content && typeof content === 'object' && Array.isArray((content as any).content)) {
+      return this.normalizeResponsesChatContent((content as any).content);
+    }
+
+    return this.normalizeContent(content);
+  }
+
+  private convertResponsesInputToChatMessages(rawInput: any[]): Array<Record<string, any>> {
+    const sourceMessages: Array<Record<string, any>> = [];
+    let bufferedUserContent: any[] = [];
+
+    const flushBufferedUserContent = () => {
+      if (bufferedUserContent.length === 0) return;
+      sourceMessages.push({
+        role: 'user',
+        content: bufferedUserContent,
+      });
+      bufferedUserContent = [];
+    };
+
+    for (const entry of rawInput) {
+      if (!entry || typeof entry !== 'object') {
+        const normalized = this.normalizeResponsesChatContent(entry);
+        if (Array.isArray(normalized)) {
+          bufferedUserContent.push(...normalized);
+        } else if (typeof normalized === 'string' && normalized.trim()) {
+          bufferedUserContent.push({ type: 'text', text: normalized });
+        }
+        continue;
+      }
+
+      const entryRole = typeof entry.role === 'string' ? entry.role.trim().toLowerCase() : '';
+      const entryType = String(entry.type || '').toLowerCase();
+
+      if (entryRole) {
+        flushBufferedUserContent();
+
+        if (entryRole === 'tool' || entryRole === 'function') {
+          const toolCallId =
+            typeof entry.tool_call_id === 'string' && entry.tool_call_id.trim()
+              ? entry.tool_call_id.trim()
+              : typeof entry.call_id === 'string' && entry.call_id.trim()
+                ? entry.call_id.trim()
+                : undefined;
+          sourceMessages.push({
+            role: 'tool',
+            content: this.normalizeResponsesChatContent(
+              typeof entry.output !== 'undefined' ? entry.output : entry.content
+            ),
+            ...(toolCallId ? { tool_call_id: toolCallId } : {}),
+            ...(typeof entry.name === 'string' && entry.name.trim()
+              ? { name: entry.name.trim() }
+              : {}),
+          });
+          continue;
+        }
+
+        const toolCalls =
+          this.normalizeResponsesToolCalls(entry.tool_calls) ??
+          this.extractResponsesToolCallsFromContent(entry.content);
+        sourceMessages.push({
+          role: entryRole,
+          content: this.normalizeResponsesChatContent(entry.content),
+          ...(toolCalls ? { tool_calls: toolCalls } : {}),
+          ...(typeof entry.name === 'string' && entry.name.trim()
+            ? { name: entry.name.trim() }
+            : {}),
+        });
+        continue;
+      }
+
+      if (entryType === 'message') {
+        flushBufferedUserContent();
+        const toolCalls = this.extractResponsesToolCallsFromContent(entry.content);
+        sourceMessages.push({
+          role:
+            typeof entry.role === 'string' && entry.role.trim()
+              ? entry.role.trim().toLowerCase()
+              : 'assistant',
+          content: this.normalizeResponsesChatContent(entry.content),
+          ...(toolCalls ? { tool_calls: toolCalls } : {}),
+        });
+        continue;
+      }
+
+      if (entryType === 'function_call') {
+        flushBufferedUserContent();
+        const toolCalls = this.normalizeResponsesToolCalls([entry]);
+        if (toolCalls) {
+          sourceMessages.push({
+            role: 'assistant',
+            content: '',
+            tool_calls: toolCalls,
+          });
+        }
+        continue;
+      }
+
+      if (entryType === 'function_call_output') {
+        flushBufferedUserContent();
+        const toolCallId =
+          typeof entry.call_id === 'string' && entry.call_id.trim()
+            ? entry.call_id.trim()
+            : typeof entry.tool_call_id === 'string' && entry.tool_call_id.trim()
+              ? entry.tool_call_id.trim()
+              : undefined;
+        sourceMessages.push({
+          role: 'tool',
+          content: this.normalizeResponsesChatContent(entry.output),
+          ...(toolCallId ? { tool_call_id: toolCallId } : {}),
+        });
+        continue;
+      }
+
+      if (entryType === 'reasoning') {
+        continue;
+      }
+
+      const normalized = this.normalizeResponsesChatContent(entry);
+      if (Array.isArray(normalized)) {
+        bufferedUserContent.push(...normalized);
+      } else if (typeof normalized === 'string' && normalized.trim()) {
+        bufferedUserContent.push({ type: 'text', text: normalized });
+      }
+    }
+
+    flushBufferedUserContent();
+    return sourceMessages;
+  }
+
+  private buildRequestData(message: IMessage, stream: boolean = false, sourceMessages?: Array<Record<string, any>>) {
     const messages = sourceMessages ?? this.getSourceMessages(message);
 
     const data: any = {
@@ -741,6 +1093,12 @@ export class OpenRouterAI implements IAIProvider {
       const msg = this.extractErrorMessage(error, 'Unknown OpenRouter stream error');
       const wrappedError = new Error(`OpenRouter API stream call failed: ${msg} (latency ${latency}ms)`);
       (wrappedError as any).__providerUniqueLogged = true;
+      if (isOpenRouterToolUseUnsupportedError(error)) {
+        (wrappedError as any).retryable = false;
+        (wrappedError as any).failureOrigin = 'upstream_provider';
+        (wrappedError as any).providerSwitchWorthless = true;
+        (wrappedError as any).requestRetryWorthless = true;
+      }
       throw wrappedError;
     }
   }

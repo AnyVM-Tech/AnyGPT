@@ -28,6 +28,8 @@ Default connection details:
 
 The LangGraph server currently loads environment variables from [`../../.env.local`](../../.env.local) via [`langgraph.json`](langgraph.json). If you keep your control-plane credentials elsewhere, update the `env` path in [`langgraph.json`](langgraph.json) before launching Studio.
 
+Studio now uses the same file-backed control-plane checkpoint persistence model as the CLI, writing state to [`apps/langgraph-control-plane/.control-plane/studio-checkpoints.json`](.control-plane/studio-checkpoints.json) instead of using process-local memory only.
+
 ## Purpose
 
 This package is intentionally separated from [`apps/api`](../api/README.md) so that agent orchestration, approval flow, and deployment logic do not become part of the API runtime.
@@ -360,13 +362,18 @@ bun run dev -- --goal="Watch repo health" --scopes=repo --continuous --interval-
 # Continuous autonomous execution loop (enables execute + auto-approve)
 bun run dev -- --goal="Continuously validate experimental API" --scopes=api-experimental --autonomous
 
+# Detached live autonomous runner with PID/log/status management
+bun run control-plane:autonomous:start
+bun run control-plane:autonomous:status
+bun run control-plane:autonomous:stop
+
 # Bounded autonomous run for smoke testing
-bun run dev -- --goal="Autonomous smoke run" --scopes=api-experimental --autonomous --interval-ms=5000 --max-iterations=2
+bun run dev -- --goal="Autonomous smoke run" --scopes=api-experimental --autonomous --interval-ms=1000 --max-iterations=2
 ```
 
-When `--interval-ms` is omitted, continuous and autonomous loops now default to `5000ms`. Override that default with `CONTROL_PLANE_INTERVAL_MS` when you want a different steady-state cadence.
+When `--interval-ms` is omitted, continuous and autonomous loops now default to `1000ms`. Override that default with `CONTROL_PLANE_INTERVAL_MS` for the direct CLI, or with `CONTROL_PLANE_AUTONOMOUS_INTERVAL_MS` for the detached wrapper.
 
-Continuous/autonomous status is persisted to [`apps/langgraph-control-plane/.control-plane/runner-status.json`](.control-plane/runner-status.json), including:
+Continuous/autonomous status is persisted to [`apps/langgraph-control-plane/.control-plane/runner-status.json`](.control-plane/runner-status.json) for the direct CLI and to [`apps/langgraph-control-plane/.control-plane/live-autonomous-runner-status.json`](.control-plane/live-autonomous-runner-status.json) for the detached wrapper, including:
 
 - current iteration
 - running phase (`starting`, `streaming`, `sleeping`, `paused`, `completed`, `failed`)
@@ -408,7 +415,7 @@ bun run dev -- --goal="Fix control-plane issues" --scopes=control-plane --execut
 bun run dev -- --goal="Continuously improve experimental API" --scopes=api-experimental --autonomous
 
 # Coordinated multi-runner autonomous loop
-bun run dev -- --goal="Continuously improve repo health" --scopes=repo,api-experimental,control-plane --autonomous --multi-runner
+bun run dev -- --goal="Continuously improve repo health" --scopes=repo,api,api-experimental,control-plane,repo-surface --autonomous --multi-runner
 
 # Customize write scope and action count
 bun run dev -- --goal="Control-plane self-heal" --scopes=control-plane --execute --autonomous-edits --edit-allowlist=apps/langgraph-control-plane,apps/api --max-edit-actions=2
@@ -418,7 +425,7 @@ Autonomous code edits are enforced through the allowlist/denylist logic, session
 
 Continuous autonomous runs now fan out up to `CONTROL_PLANE_AI_CODE_EDIT_AGENT_PARALLELISM` focused edit agents per iteration. The planner keeps one primary full-context agent and, when aggressive experimental mode is active, adds narrower API/control-plane/repo-focused edit agents so the loop stops spending every iteration on one broad no-op plan.
 
-`--multi-runner` now adds a supervisor process on top of that internal planner fanout. The coordinator writes the main status file, derives per-lane child status/checkpoint/pid/log files, and keeps child runners on locked disjoint lanes such as `api-experimental`, `control-plane`, and `repo-surface` instead of letting adaptive scope expansion collapse them back into overlap.
+`--multi-runner` now adds a supervisor process on top of that internal planner fanout. The coordinator writes the main status file, derives per-lane child status/checkpoint/pid/log files, and keeps child runners on locked disjoint lanes such as `api-experimental`, `api`, `control-plane`, and `repo-surface` instead of letting adaptive scope expansion collapse them back into overlap.
 
 Default allowlist:
 
@@ -466,16 +473,18 @@ Rollback is automatic when a touched repair fails smoke validation, when the eva
 Runtime speed/aggression controls are now environment-driven:
 
 ```bash
-CONTROL_PLANE_INTERVAL_MS=5000
+CONTROL_PLANE_INTERVAL_MS=1000
 CONTROL_PLANE_MCP_INSPECTION_TIMEOUT_MS=8000
 CONTROL_PLANE_AI_AGENT_TIMEOUT_MS=25000
-CONTROL_PLANE_AI_CODE_EDIT_AGENT_PARALLELISM=3
+CONTROL_PLANE_AI_CODE_EDIT_AGENT_PARALLELISM=6
 CONTROL_PLANE_REPAIR_SMOKE_TIMEOUT_MS=120000
 CONTROL_PLANE_POST_REPAIR_VALIDATION_TIMEOUT_MS=600000
 CONTROL_PLANE_AUTO_RESTART_EXPERIMENTAL=true
 ```
 
-The runner status file at [`apps/langgraph-control-plane/.control-plane/runner-status.json`](.control-plane/runner-status.json) now surfaces the repair-loop status, intent summary, planner fanout/focus metadata, smoke result counts, promoted paths, rollback paths, and repair session metadata.
+The detached wrapper also accepts `CONTROL_PLANE_AUTONOMOUS_*` overrides, but now falls back to the standard `CONTROL_PLANE_INTERVAL_MS`, `CONTROL_PLANE_AI_CODE_EDIT_AGENT_PARALLELISM`, and `CONTROL_PLANE_AUTO_RESTART_EXPERIMENTAL` knobs when those detached-specific vars are unset.
+
+The runner status file at [`apps/langgraph-control-plane/.control-plane/runner-status.json`](.control-plane/runner-status.json) now surfaces the repair-loop status, intent summary, planner fanout/focus metadata, smoke result counts, promoted paths, rollback paths, and repair session metadata. The detached service writes the same fields to [`apps/langgraph-control-plane/.control-plane/live-autonomous-runner-status.json`](.control-plane/live-autonomous-runner-status.json).
 
 It also now persists the prompt lifecycle fields, governance gate state, evaluation scorecard fields, repair touched paths, and observability tags needed to correlate LangSmith runs back to a specific bounded edit session.
 
@@ -520,8 +529,9 @@ For AnyGPT API scopes, the control plane is biased toward experimental-safe exec
 - API test jobs can seed those isolated files from the current production JSON data without mutating the live files
 - the deploy default is [`sudo systemctl restart anygpt-experimental`](../../apps/api/anygpt-experimental.service)
 - promoted autonomous API repairs run an additional experimental build/backtest pass before any restart is attempted
-- autonomous post-repair restarts are reserved for `anygpt-experimental` and only occur on autonomous runs after validation passes
-- production restarts targeting the `anygpt.service` alias or [`apps/api/anygpt-api.service`](../../apps/api/anygpt-api.service) are intentionally blocked by the workflow guardrails
+- autonomous post-repair restarts target `anygpt-experimental` by default and only occur on autonomous runs after validation passes
+- production API restarts are now available as an explicit opt-in post-repair path via `CONTROL_PLANE_AUTO_RESTART_PRODUCTION=true`, and only run after promoted autonomous API edits pass post-repair validation
+- production restarts still stay out of the normal default path; enabling the production restart flag should be treated as an operator-level choice for `anygpt.service` / [`apps/api/anygpt-api.service`](../../apps/api/anygpt-api.service)
 - API planning ingests recent repo/API log tails before generating build/test/fix plans
 
 The current scaffold keeps Redis/Dragonfly isolation as a control-plane concern by cloning production DB `0` into experimental DB `1` before API test execution, while the API’s isolated test flow also separates filesystem-backed data through [`API_PROVIDERS_FILE`](../api/modules/dataManager.ts), [`API_KEYS_FILE`](../api/modules/dataManager.ts), and [`API_MODELS_FILE`](../api/modules/dataManager.ts) overrides.

@@ -38,6 +38,184 @@ function isGeminiLikeProviderId(providerId: string): boolean {
   return normalized.includes('gemini') || normalized.includes('google');
 }
 
+function hasRecentProviderAuthOrConfigFailureSignal(provider: LoadedProviderData): boolean {
+  const lastError = String((provider as any)?.lastError || (provider as any)?.last_error || '').toLowerCase();
+  const code = String((provider as any)?.lastErrorCode || (provider as any)?.error_code || '').toLowerCase();
+  return (
+    code === 'invalid_api_key' ||
+    code === 'api_key_invalid' ||
+    code === 'incorrect_api_key' ||
+    code === 'gemini_project_auth_failure' ||
+    code === 'service_disabled' ||
+    code === 'accessnotconfigured' ||
+    code === 'user_not_found' ||
+    lastError.includes('invalid api key') ||
+    lastError.includes('incorrect api key') ||
+    lastError.includes('api key not valid') ||
+    lastError.includes('api key not found') ||
+    lastError.includes('api_key_invalid') ||
+    lastError.includes('user_not_found') ||
+    lastError.includes('user not found') ||
+    lastError.includes('generative language api has not been used in project') ||
+    lastError.includes('generative language api is disabled') ||
+    lastError.includes('accessnotconfigured') ||
+    lastError.includes('service_disabled') ||
+    lastError.includes('forbidden') ||
+    lastError.includes('unauthorized') ||
+    lastError.includes('authentication')
+  );
+}
+
+function hasRecentRuntimeCapacityFailureSignal(provider: LoadedProviderData): boolean {
+  const lastError = String((provider as any)?.lastError || (provider as any)?.last_error || '').toLowerCase();
+  const code = String((provider as any)?.lastErrorCode || (provider as any)?.error_code || '').toLowerCase();
+  return (
+    code === 'memory_pressure' ||
+    lastError.includes('memory pressure') ||
+    lastError.includes('rejected under memory pressure') ||
+    lastError.includes('swap_used_mb=') ||
+    lastError.includes('rss_mb=') ||
+    lastError.includes('active_runtime_mb=') ||
+    lastError.includes('external_mb=') ||
+    lastError.includes('heap_used_mb=')
+  );
+}
+
+function hasRecentProviderAuthOrGovernanceFailureSignal(provider: LoadedProviderData): boolean {
+  const providerId = String((provider as any)?.id || '').toLowerCase();
+  const providerType = String((provider as any)?.provider || (provider as any)?.type || '').toLowerCase();
+  const lastError = String((provider as any)?.lastError || (provider as any)?.last_error || '').toLowerCase();
+  const status = Number((provider as any)?.lastStatus || (provider as any)?.last_status || 0);
+  const code = String((provider as any)?.lastErrorCode || (provider as any)?.last_error_code || '').toLowerCase();
+
+  const geminiLike = providerId.includes('gemini') || providerType.includes('gemini') || providerType.includes('google');
+  if (geminiLike) {
+    if (
+      status === 400 ||
+      status === 401 ||
+      status === 403 ||
+      code === 'api_key_invalid' ||
+      code === 'service_disabled' ||
+      lastError.includes('gemini listmodels failed') ||
+      lastError.includes('api key not valid') ||
+      lastError.includes('api key expired') ||
+      lastError.includes('invalid api key') ||
+      lastError.includes('generative language api has not been used in project') ||
+      lastError.includes('generative language api is disabled') ||
+      lastError.includes('service_disabled') ||
+      lastError.includes('permission_denied') ||
+      lastError.includes('accessnotconfigured') ||
+      lastError.includes('generativelanguage.googleapis.com')
+    ) {
+      return true;
+    }
+  }
+
+  return (
+    status === 401 ||
+    status === 403 ||
+    code === 'invalid_api_key' ||
+    code === 'api_key_invalid' ||
+    lastError.includes('invalid api key') ||
+    lastError.includes('incorrect api key') ||
+    lastError.includes('api key expired') ||
+    lastError.includes('authentication') ||
+    lastError.includes('unauthorized') ||
+    lastError.includes('forbidden') ||
+    lastError.includes('user_not_found')
+  );
+}
+
+function hasRecentRateLimitOrTimeoutSignal(provider: LoadedProviderData): boolean {
+  const lastError = String((provider as any)?.lastError || (provider as any)?.last_error || '').toLowerCase();
+  const status = Number((provider as any)?.lastStatus || (provider as any)?.last_status || 0);
+  const code = String((provider as any)?.lastErrorCode || (provider as any)?.last_error_code || '').toLowerCase();
+  const memoryPressureLike =
+    code === 'memory_pressure' ||
+    lastError.includes('memory pressure') ||
+    lastError.includes('rejected under memory pressure') ||
+    lastError.includes('swap_used_mb=') ||
+    lastError.includes('rss_mb=') ||
+    lastError.includes('active_runtime_mb=') ||
+    lastError.includes('external_mb=') ||
+    lastError.includes('heap_used_mb=');
+  return (
+    memoryPressureLike ||
+    status === 408 ||
+    status === 409 ||
+    status === 425 ||
+    status === 429 ||
+    lastError.includes('rate limit') ||
+    lastError.includes('rate_limit') ||
+    lastError.includes('too many requests') ||
+    lastError.includes('resource_exhausted') ||
+    lastError.includes('quota exceeded') ||
+    lastError.includes('quota exhausted') ||
+    lastError.includes('timed out') ||
+    lastError.includes('timeout')
+  );
+}
+
+function preferProvidersWithoutRecentRateLimitOrTimeout<T extends LoadedProviderData>(providers: T[]): T[] {
+  const healthy = providers.filter((provider) => !hasRecentRateLimitOrTimeoutSignal(provider));
+  return healthy.length > 0 ? healthy : providers;
+}
+
+function hasOpenRouterBillingFailureSignal(provider: LoadedProviderData): boolean {
+  const providerId = String(provider?.id || '').toLowerCase();
+  const providerType = String((provider as any)?.provider || (provider as any)?.type || '').toLowerCase();
+  const providerUrl = String((provider as any)?.provider_url || '').toLowerCase();
+  const isOpenRouter =
+    providerId.includes('openrouter') ||
+    providerType.includes('openrouter') ||
+    providerUrl.includes('openrouter.ai');
+  if (!isOpenRouter) return false;
+
+  const lastError = String((provider as any)?.lastError || (provider as any)?.last_error || '').toLowerCase();
+  const disabledReason = String((provider as any)?.disabled_reason || '').toLowerCase();
+  const combined = `${lastError} ${disabledReason}`;
+
+  return (
+    combined.includes('payment required') ||
+    combined.includes('insufficient credits') ||
+    combined.includes('insufficient credit') ||
+    combined.includes('billing') ||
+    combined.includes('credits') ||
+    combined.includes('402')
+  );
+}
+
+function hasRecentTimeoutOrRateLimitSignal(provider: LoadedProviderData): boolean {
+  const lastError = String((provider as any)?.lastError || (provider as any)?.last_error || '').toLowerCase();
+  const disabledReason = String((provider as any)?.disabled_reason || '').toLowerCase();
+  const combined = `${lastError} ${disabledReason}`;
+
+  return (
+    combined.includes('rate limit') ||
+    combined.includes('rate_limit') ||
+    combined.includes('too many requests') ||
+    combined.includes('resource_exhausted') ||
+    combined.includes('request timed out') ||
+    combined.includes('timed out') ||
+    combined.includes('timeout')
+  );
+}
+function hasInvalidOpenAiKeySignal(provider: LoadedProviderData): boolean {
+  const providerId = String(provider?.id || '').toLowerCase();
+  const providerType = String((provider as any)?.provider || (provider as any)?.type || '').toLowerCase();
+  if (!providerId.includes('openai') && !providerType.includes('openai')) return false;
+  const lastError = String((provider as any)?.lastError || (provider as any)?.last_error || '').toLowerCase();
+  if (!lastError) return false;
+  return (
+    lastError.includes('invalid api key') ||
+    lastError.includes('incorrect api key provided') ||
+    lastError.includes('invalid_api_key') ||
+    lastError.includes('api key provided is invalid') ||
+    lastError.includes('api key not found') ||
+    lastError.includes('you can find your api key at https://platform.openai.com/account/api-keys')
+  );
+}
+
 export type EmbeddingProviderSelection = {
   apiKey: string;
   baseUrl: string;
@@ -214,6 +392,8 @@ export async function pickOpenAIProviderKey(
   const matches = providers.filter((p: LoadedProviderData) =>
     !p.disabled &&
     p.id.includes('openai') &&
+    !hasInvalidOpenAiKeySignal(p) &&
+    !hasOpenRouterBillingFailureSignal(p) &&
     p.apiKey &&
     p.models &&
     modelId in p.models
@@ -320,12 +500,174 @@ export async function listVideoGenProviders(
   const matches = providers.filter((p: LoadedProviderData) =>
     !p.disabled &&
     (p.id.includes('xai') || p.id.includes('openai')) &&
+    !hasInvalidOpenAiKeySignal(p) &&
     p.apiKey &&
     p.models &&
     modelIdVariants.some((variant) => variant in p.models)
   );
   if (matches.length === 0) return [];
-  return shuffleArray(matches).map(mapVideoGenerationProviderSelection);
+  const healthyMatches = matches.filter(
+    (provider) =>
+      !hasRecentRateLimitOrTimeoutSignal(provider) &&
+      !hasOpenRouterBillingFailureSignal(provider)
+  );
+  const pickFrom = healthyMatches.length > 0 ? healthyMatches : matches;
+  return shuffleArray(pickFrom).map(mapVideoGenerationProviderSelection);
+}
+
+function hasRecentUnsupportedToolCallingSignal(provider: LoadedProviderData): boolean {
+  const lastError = String((provider as any)?.lastError || (provider as any)?.last_error || '').toLowerCase();
+  const code = String((provider as any)?.lastErrorCode || (provider as any)?.error_code || '').toLowerCase();
+  return (
+    code.includes('tool') ||
+    code.includes('unsupported') ||
+    lastError.includes('tool calls are not supported') ||
+    lastError.includes('tool call is not supported') ||
+    lastError.includes('tool calling is not supported') ||
+    lastError.includes('tool_choice is not supported') ||
+    lastError.includes('tools are not supported') ||
+    lastError.includes('does not support tools') ||
+    lastError.includes('does not support tool') ||
+    lastError.includes('function calling is not supported') ||
+    lastError.includes('no endpoints found that support tool use') ||
+    lastError.includes('no endpoints found that support the tool') ||
+    lastError.includes("no endpoints found that support the provided 'tool_choice' value") ||
+    lastError.includes('no endpoints found that support the provided tool_choice value')
+  );
+}
+
+function hasRecentGeminiCatalogAuthFailureSignal(provider: LoadedProviderData): boolean {
+  if (!isGeminiLikeProviderId(String(provider?.id || ''))) return false;
+  const lastError = String((provider as any)?.lastError || (provider as any)?.last_error || '').toLowerCase();
+  const code = String((provider as any)?.lastErrorCode || (provider as any)?.error_code || '').toLowerCase();
+  return (
+    code === 'api_key_invalid' ||
+    code === 'gemini_project_auth_failure' ||
+    code === 'service_disabled' ||
+    lastError.includes('gemini listmodels failed') ||
+    lastError.includes('api key not found') ||
+    lastError.includes('api key not valid') ||
+    lastError.includes('invalid api key') ||
+    lastError.includes('api_key_invalid') ||
+    lastError.includes('generative language api has not been used in project') ||
+    lastError.includes('generative language api is disabled') ||
+    lastError.includes('accessnotconfigured') ||
+    lastError.includes('service_disabled') ||
+    lastError.includes('gemini_project_auth_failure')
+  );
+}
+
+function isProviderHealthyForGeneralSelection(provider: LoadedProviderData): boolean {
+  const lastError = String((provider as any)?.lastError || (provider as any)?.last_error || '').toLowerCase();
+  const code = String((provider as any)?.lastErrorCode || (provider as any)?.error_code || '').toLowerCase();
+  const status = Number((provider as any)?.lastStatus || (provider as any)?.statusCode || (provider as any)?.last_status || 0);
+
+  const hasRecentProviderBoundFailure =
+    hasOpenRouterBillingFailureSignal(provider) ||
+    hasInvalidOpenAiKeySignal(provider) ||
+    hasRecentGeminiCatalogAuthFailureSignal(provider) ||
+    hasRecentProviderAuthOrConfigFailureSignal(provider) ||
+    code === 'invalid_api_key' ||
+    code === 'api_key_invalid' ||
+    code === 'incorrect_api_key_provided' ||
+    code === 'insufficient_quota' ||
+    code === 'insufficient_credits' ||
+    code === 'payment_required' ||
+    status === 401 ||
+    status === 402 ||
+    status === 403 ||
+    lastError.includes('invalid api key') ||
+    lastError.includes('incorrect api key provided') ||
+    lastError.includes('api key expired') ||
+    lastError.includes('payment required') ||
+    lastError.includes('insufficient credits') ||
+    lastError.includes('insufficient credit') ||
+    lastError.includes('quota exceeded') ||
+    lastError.includes('quota exhausted') ||
+    lastError.includes('resource has been exhausted');
+
+  return (
+    !hasRecentRuntimeCapacityFailureSignal(provider) &&
+    !hasRecentUnsupportedToolCallingSignal(provider) &&
+    !hasRecentProviderBoundFailure
+  );
+}
+
+function hasWorthlessRetryOrSwitchSignal(provider: LoadedProviderData): boolean {
+  const lastError = String((provider as any)?.lastError || (provider as any)?.last_error || '').toLowerCase();
+  const code = String((provider as any)?.lastErrorCode || (provider as any)?.error_code || '').toLowerCase();
+  return (
+    code === 'invalid_api_key' ||
+    code === 'api_key_invalid' ||
+    code === 'service_disabled' ||
+    code === 'accessnotconfigured' ||
+    lastError.includes('providerswitchworthless') ||
+    lastError.includes('requestretryworthless') ||
+    lastError.includes('provider switch worthless') ||
+    lastError.includes('request retry worthless') ||
+    lastError.includes('invalid api key') ||
+    lastError.includes('api key not found') ||
+    lastError.includes('api_key_invalid') ||
+    lastError.includes('generative language api has not been used in project') ||
+    lastError.includes('generative language api is disabled') ||
+    lastError.includes('service_disabled') ||
+    lastError.includes('accessnotconfigured') ||
+    lastError.includes('cannot fetch content from the provided url') ||
+    lastError.includes('unsupported_remote_media_url') ||
+    lastError.includes('returned an empty streaming response') ||
+    lastError.includes('empty streaming response')
+  );
+}
+
+function compareProviderSelectionPriority(left: LoadedProviderData, right: LoadedProviderData): number {
+  const leftAuthOrConfig = hasRecentProviderAuthOrConfigFailureSignal(left);
+  const rightAuthOrConfig = hasRecentProviderAuthOrConfigFailureSignal(right);
+  if (leftAuthOrConfig !== rightAuthOrConfig) {
+    return leftAuthOrConfig ? 1 : -1;
+  }
+
+  const leftBillingOrQuota = hasOpenRouterBillingFailureSignal(left);
+  const rightBillingOrQuota = hasOpenRouterBillingFailureSignal(right);
+  if (leftBillingOrQuota !== rightBillingOrQuota) {
+    return leftBillingOrQuota ? 1 : -1;
+  }
+
+  const leftWorthlessRetry = hasWorthlessRetryOrSwitchSignal(left);
+  const rightWorthlessRetry = hasWorthlessRetryOrSwitchSignal(right);
+  if (leftWorthlessRetry !== rightWorthlessRetry) {
+    return leftWorthlessRetry ? 1 : -1;
+  }
+
+  const leftRuntimeCapacity = hasRecentRuntimeCapacityFailureSignal(left);
+  const rightRuntimeCapacity = hasRecentRuntimeCapacityFailureSignal(right);
+  if (leftRuntimeCapacity !== rightRuntimeCapacity) {
+    return leftRuntimeCapacity ? 1 : -1;
+  }
+
+  const leftAuthOrConfigFailure = hasRecentProviderAuthOrConfigFailureSignal(left);
+  const rightAuthOrConfigFailure = hasRecentProviderAuthOrConfigFailureSignal(right);
+  if (leftAuthOrConfigFailure !== rightAuthOrConfigFailure) {
+    return leftAuthOrConfigFailure ? 1 : -1;
+  }
+
+  const leftBillingFailure = hasOpenRouterBillingFailureSignal(left);
+  const rightBillingFailure = hasOpenRouterBillingFailureSignal(right);
+  if (leftBillingFailure !== rightBillingFailure) {
+    return leftBillingFailure ? 1 : -1;
+  }
+
+  const leftRateLimited = hasRecentRateLimitOrTimeoutSignal(left);
+  const rightRateLimited = hasRecentRateLimitOrTimeoutSignal(right);
+  if (leftRateLimited !== rightRateLimited) {
+    return leftRateLimited ? 1 : -1;
+  }
+
+  const leftLastErrorAt = Number((left as any)?.lastErrorAt || (left as any)?.last_error_at || 0);
+  const rightLastErrorAt = Number((right as any)?.lastErrorAt || (right as any)?.last_error_at || 0);
+  if (leftRateLimited && rightRateLimited && leftLastErrorAt !== rightLastErrorAt) {
+    return leftLastErrorAt - rightLastErrorAt;
+  }
+  return 0;
 }
 
 export async function listAnyVideoProviders(): Promise<VideoGenerationProviderSelection[]> {
@@ -333,6 +675,7 @@ export async function listAnyVideoProviders(): Promise<VideoGenerationProviderSe
   const matches = providers.filter((p: LoadedProviderData) =>
     !p.disabled &&
     (p.id.includes('xai') || p.id.includes('openai')) &&
+    !hasOpenRouterBillingFailureSignal(p) &&
     p.apiKey
   );
   if (matches.length === 0) return [];

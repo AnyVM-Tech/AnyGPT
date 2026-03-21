@@ -10,11 +10,14 @@ import dotenv from 'dotenv';
 import {
   ControlPlaneStateSchema,
   createControlPlaneGraph,
+  resolveControlPlaneAiConfig,
   resolveControlPlaneCheckpointPath,
+  writeSemanticMemoryNotes,
   type ControlPlaneEvaluationGatePolicy,
   type ScopeExpansionMode,
 } from './workflow.js';
 import {
+  AppliedAutonomousEditSchema,
   resolveAutonomousEditAllowlist,
   resolveAutonomousEditDenylist,
 } from './autonomousEdits.js';
@@ -54,6 +57,10 @@ type ParsedArgs = {
   pidFilePath?: string;
   streamMode: 'updates' | 'values';
   resumeValue?: unknown;
+  replayCheckpointId?: string;
+  forkCheckpointId?: string;
+  forkStateJson?: string;
+  subgraphs: boolean;
 };
 
 type RunnerStatus = {
@@ -83,6 +90,8 @@ type RunnerStatus = {
   proposedEditCount?: number;
   appliedEditCount?: number;
   lastAppliedEditPaths?: string[];
+  recentAutonomousEditFailures?: unknown[];
+  recentAutonomousLearningNotes?: string[];
   repairStatus?: string;
   repairDecisionReason?: string;
   repairIntentSummary?: string;
@@ -104,6 +113,8 @@ type RunnerStatus = {
   repairRollbackPaths?: string[];
   experimentalRestartStatus?: string;
   experimentalRestartReason?: string;
+  productionRestartStatus?: string;
+  productionRestartReason?: string;
   langSmithOrganizationId?: string;
   langSmithWorkspaceId?: string;
   langSmithWorkspaceName?: string;
@@ -151,6 +162,7 @@ type RunnerStatus = {
   controlPlaneAiModel?: string;
   experimentalApiBaseUrl?: string;
   experimentalServiceName?: string;
+  productionServiceName?: string;
   evaluationGateMode: ControlPlaneEvaluationGatePolicy['mode'];
   evaluationGateTarget: ControlPlaneEvaluationGatePolicy['target'];
   evaluationGateAggregationMode?: string;
@@ -171,6 +183,13 @@ type RunnerStatus = {
   evaluationGateComparisonUrl?: string;
   evaluationResultCount?: number;
   repairTouchedPaths?: string[];
+  latestCheckpointId?: string;
+  latestCheckpointCreatedAt?: string;
+  checkpointCount?: number;
+  checkpointNextNodes?: string[];
+  replayCheckpointId?: string;
+  lastForkCheckpointId?: string;
+  subgraphStreamingEnabled?: boolean;
   observabilityTags?: string[];
   summary?: string;
   runnerMode?: 'single-runner' | 'multi-runner-coordinator' | 'multi-runner-child';
@@ -237,12 +256,14 @@ const DEFAULT_RUNNER_STATUS_PATH = './apps/langgraph-control-plane/.control-plan
 const DEFAULT_CONTROL_PLANE_PROMPT_IDENTIFIER = 'anygpt-control-plane-agent';
 const DEFAULT_CONTROL_PLANE_PROMPT_CHANNEL = 'live';
 const DEFAULT_CONTROL_PLANE_PROMPT_SYNC_CHANNEL = 'default';
-const DEFAULT_AUTONOMOUS_FULL_COVERAGE_SCOPES = ['repo', 'api-experimental', 'control-plane'];
+const DEFAULT_AUTONOMOUS_FULL_COVERAGE_SCOPES = ['repo', 'api', 'api-experimental', 'control-plane', 'repo-surface'];
 const EXPANSIVE_SCOPE_ALIASES = new Set(['all', 'everything', 'adaptive', '*']);
 const DEFAULT_REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const DEFAULT_CONTROL_PLANE_EXPERIMENTAL_API_BASE_URL = 'http://127.0.0.1:3310';
 const DEFAULT_CONTROL_PLANE_EXPERIMENTAL_SERVICE = 'anygpt-experimental.service';
-const DEFAULT_CONTINUOUS_INTERVAL_MS = 5_000;
+const DEFAULT_CONTROL_PLANE_PRODUCTION_SERVICE = 'anygpt.service';
+const DEFAULT_CONTINUOUS_INTERVAL_MS = 1_000;
+const RUNNER_STATUS_HEARTBEAT_MS = 5_000;
 const MULTI_RUNNER_COORDINATOR_POLL_MS = 2_000;
 const MULTI_RUNNER_RESTART_DELAY_MS = 1_500;
 
@@ -575,6 +596,37 @@ function printStreamChunk(chunk: unknown): void {
   console.log(JSON.stringify(chunk, null, 2));
 }
 
+function summarizeStreamChunk(chunk: unknown): string | undefined {
+  if (!chunk || typeof chunk !== 'object' || Array.isArray(chunk)) return undefined;
+
+  const chunkRecord = chunk as Record<string, unknown>;
+  const sectionNames = Object.keys(chunkRecord)
+    .map((key) => String(key || '').trim())
+    .filter(Boolean);
+  if (sectionNames.length === 0) return undefined;
+
+  const previewParts = sectionNames.slice(0, 3).map((sectionName) => {
+    const sectionValue = chunkRecord[sectionName];
+    if (!sectionValue || typeof sectionValue !== 'object' || Array.isArray(sectionValue)) {
+      return sectionName;
+    }
+
+    const sectionRecord = sectionValue as Record<string, unknown>;
+    const nestedKeys = Object.keys(sectionRecord)
+      .map((key) => String(key || '').trim())
+      .filter(Boolean)
+      .slice(0, 3);
+    return nestedKeys.length > 0
+      ? `${sectionName}:${nestedKeys.join(',')}`
+      : sectionName;
+  });
+
+  const suffix = sectionNames.length > previewParts.length
+    ? ` (+${sectionNames.length - previewParts.length} more)`
+    : '';
+  return `${previewParts.join(' | ')}${suffix}`;
+}
+
 function writeRunnerStatus(statusFilePath: string, status: RunnerStatus): void {
   fs.mkdirSync(path.dirname(statusFilePath), { recursive: true });
   const tempPath = `${statusFilePath}.tmp`;
@@ -607,6 +659,11 @@ function installRunnerLifecycleHooks(parsedArgs: ParsedArgs, getRunnerStatus: ()
   if (pidFilePath) {
     writeRunnerPidFile(pidFilePath, process.pid);
   }
+  process.once('exit', () => {
+    if (pidFilePath) {
+      removeRunnerPidFile(pidFilePath, process.pid);
+    }
+  });
 
   let finalized = false;
   const finalize = (patch: Partial<RunnerStatus>): void => {
@@ -625,6 +682,17 @@ function installRunnerLifecycleHooks(parsedArgs: ParsedArgs, getRunnerStatus: ()
   };
 
   const handleSignal = (signal: 'SIGINT' | 'SIGTERM' | 'SIGHUP'): void => {
+    if (parsedArgs.continuous) {
+      finalize({
+        running: false,
+        phase: 'completed',
+        lastError: undefined,
+        lastRunCompletedAt: new Date().toISOString(),
+        summary: `${getRunnerStatus().summary || 'Runner stopped.'}\nShutdown reason: ${signal}`,
+      });
+      process.exit(0);
+    }
+
     finalize({
       running: false,
       phase: 'failed',
@@ -641,17 +709,18 @@ function installRunnerLifecycleHooks(parsedArgs: ParsedArgs, getRunnerStatus: ()
 
 function resolveLangSmithRunnerStatusSeed(): Partial<RunnerStatus> {
   const runtimeConfig = resolveLangSmithRuntimeConfig();
-  if (!runtimeConfig) return {};
-
+  const aiConfig = resolveControlPlaneAiConfig();
   const configuredWorkspaceName = String(process.env.CONTROL_PLANE_LANGSMITH_WORKSPACE_NAME || '').trim();
 
-    return {
-      langSmithOrganizationId: runtimeConfig.workspaceId || undefined,
-      langSmithWorkspaceId: runtimeConfig.workspaceId || undefined,
-      langSmithWorkspaceName: configuredWorkspaceName || undefined,
-      langSmithProjectName: runtimeConfig.projectName || undefined,
-      promptAvailableChannels: ['candidate', 'default', 'live'],
-    };
+  return {
+    langSmithOrganizationId: runtimeConfig?.workspaceId || undefined,
+    langSmithWorkspaceId: runtimeConfig?.workspaceId || undefined,
+    langSmithWorkspaceName: configuredWorkspaceName || undefined,
+    langSmithProjectName: runtimeConfig?.projectName || undefined,
+    promptAvailableChannels: ['candidate', 'default', 'live'],
+    controlPlaneAiBackend: aiConfig.enabled ? aiConfig.baseUrl : '',
+    controlPlaneAiModel: aiConfig.enabled ? aiConfig.model : '',
+  };
 }
 
 function readPersistedLangSmithRunnerStatusSeed(statusFilePath: string): Partial<RunnerStatus> {
@@ -666,6 +735,18 @@ function readPersistedLangSmithRunnerStatusSeed(statusFilePath: string): Partial
           .map((entry) => String(entry || '').trim())
           .filter(Boolean)
           .slice(0, 10)
+      : undefined;
+    const recentAutonomousEditFailures = Array.isArray(parsed.recentAutonomousEditFailures)
+      ? parsed.recentAutonomousEditFailures
+          .map((entry) => AppliedAutonomousEditSchema.safeParse(entry))
+          .flatMap((result) => result.success ? [result.data] : [])
+          .slice(-4)
+      : undefined;
+    const recentAutonomousLearningNotes = Array.isArray(parsed.recentAutonomousLearningNotes)
+      ? parsed.recentAutonomousLearningNotes
+          .map((entry: unknown) => String(entry || '').trim())
+          .filter(Boolean)
+          .slice(-8)
       : undefined;
 
     return {
@@ -749,6 +830,8 @@ function readPersistedLangSmithRunnerStatusSeed(statusFilePath: string): Partial
       repairTouchedPaths: Array.isArray(parsed.repairTouchedPaths)
         ? parsed.repairTouchedPaths.map((entry) => String(entry || '').trim()).filter(Boolean)
         : undefined,
+      recentAutonomousEditFailures,
+      recentAutonomousLearningNotes,
       observabilityTags: Array.isArray(parsed.observabilityTags)
         ? parsed.observabilityTags.map((entry) => String(entry || '').trim()).filter(Boolean).slice(0, 20)
         : undefined,
@@ -895,6 +978,7 @@ function createBaseRunnerStatus(parsedArgs: ParsedArgs): RunnerStatus {
     controlPlaneAiModel: '',
     experimentalApiBaseUrl,
     experimentalServiceName: DEFAULT_CONTROL_PLANE_EXPERIMENTAL_SERVICE,
+    productionServiceName: DEFAULT_CONTROL_PLANE_PRODUCTION_SERVICE,
     evaluationGateMode: parsedArgs.evaluationGatePolicy.mode,
     evaluationGateTarget: parsedArgs.evaluationGatePolicy.target,
     evaluationGateAggregationMode: parsedArgs.evaluationGatePolicy.aggregationMode,
@@ -932,8 +1016,17 @@ function createBaseRunnerStatus(parsedArgs: ParsedArgs): RunnerStatus {
     repairPromotedPaths: [],
     repairRollbackPaths: [],
     repairTouchedPaths: [],
+    latestCheckpointId: undefined,
+    latestCheckpointCreatedAt: undefined,
+    checkpointCount: 0,
+    checkpointNextNodes: [],
+    replayCheckpointId: parsedArgs.replayCheckpointId,
+    lastForkCheckpointId: parsedArgs.forkCheckpointId,
+    subgraphStreamingEnabled: parsedArgs.subgraphs,
     experimentalRestartStatus: 'not-needed',
     experimentalRestartReason: '',
+    productionRestartStatus: 'not-needed',
+    productionRestartReason: '',
     governanceGateStatus: 'not-evaluated',
     governanceGateReason: 'Governance gate has not been evaluated yet.',
     governanceGateBlocks: [],
@@ -963,13 +1056,350 @@ function mergeRunnerStatus(status: RunnerStatus, patch: Partial<RunnerStatus>): 
   };
 }
 
+async function collectCheckpointHistorySeed(
+  graph: Awaited<ReturnType<typeof createControlPlaneGraph>>['graph'],
+  threadId: string,
+): Promise<Partial<RunnerStatus>> {
+  const config = { configurable: { thread_id: threadId } };
+  const history: any[] = [];
+  try {
+    for await (const state of graph.getStateHistory(config as any)) {
+      history.push(state);
+      if (history.length >= 12) break;
+    }
+  } catch {
+    return {};
+  }
+
+  if (history.length === 0) return {};
+  const latest = history[0] as any;
+  const latestCheckpointId = typeof latest?.config?.configurable?.checkpoint_id === 'string'
+    ? latest.config.configurable.checkpoint_id.trim()
+    : '';
+  const latestCheckpointCreatedAt = typeof latest?.createdAt === 'string' && latest.createdAt.trim()
+    ? latest.createdAt.trim()
+    : '';
+  const checkpointNextNodes = Array.isArray(latest?.next)
+    ? latest.next.map((entry: unknown) => String(entry || '').trim()).filter(Boolean).slice(0, 8)
+    : [];
+  const replayCandidate = history.find((state) => Array.isArray((state as any)?.next) && (state as any).next.length > 0) as any;
+  const replayCheckpointId = typeof replayCandidate?.config?.configurable?.checkpoint_id === 'string'
+    ? replayCandidate.config.configurable.checkpoint_id.trim()
+    : latestCheckpointId;
+
+  return {
+    latestCheckpointId: latestCheckpointId || undefined,
+    latestCheckpointCreatedAt: latestCheckpointCreatedAt || undefined,
+    checkpointCount: history.length,
+    checkpointNextNodes,
+    replayCheckpointId: replayCheckpointId || undefined,
+  };
+}
+
+function buildInitialGraphInput(
+  initialState: ReturnType<typeof ControlPlaneStateSchema.parse>,
+  runnerStatus: RunnerStatus,
+): ReturnType<typeof ControlPlaneStateSchema.parse> {
+  const seededFailedEdits = Array.isArray(runnerStatus.recentAutonomousEditFailures)
+    ? runnerStatus.recentAutonomousEditFailures
+        .map((entry) => AppliedAutonomousEditSchema.safeParse(entry))
+        .flatMap((result) => result.success ? [result.data] : [])
+    : [];
+
+  return ControlPlaneStateSchema.parse({
+    ...initialState,
+    appliedEdits: seededFailedEdits.length > 0 ? seededFailedEdits : initialState.appliedEdits,
+    recentAutonomousLearningNotes: Array.isArray(runnerStatus.recentAutonomousLearningNotes)
+      ? runnerStatus.recentAutonomousLearningNotes.map((entry: string) => String(entry || '').trim()).filter(Boolean).slice(-8)
+      : initialState.recentAutonomousLearningNotes,
+    recentRepairValidationFailureCount: Math.max(
+      0,
+      (typeof runnerStatus.repairSmokeFailedCount === 'number' ? runnerStatus.repairSmokeFailedCount : 0)
+        + (typeof runnerStatus.postRepairValidationFailedCount === 'number' ? runnerStatus.postRepairValidationFailedCount : 0),
+    ),
+    repairStatus: typeof runnerStatus.repairStatus === 'string' && runnerStatus.repairStatus.trim()
+      ? runnerStatus.repairStatus
+      : initialState.repairStatus,
+    repairDecisionReason: typeof runnerStatus.repairDecisionReason === 'string'
+      ? runnerStatus.repairDecisionReason
+      : initialState.repairDecisionReason,
+  });
+}
+
+function deriveRecentAutonomousEditFailures(
+  appliedEdits: unknown,
+  previousFailures: unknown[] | undefined,
+): unknown[] {
+  const parsedAppliedEdits = Array.isArray(appliedEdits)
+    ? appliedEdits
+        .map((entry) => AppliedAutonomousEditSchema.safeParse(entry))
+        .flatMap((result) => result.success ? [result.data] : [])
+    : [];
+  const failedEdits = parsedAppliedEdits.filter((edit: any) => edit?.status === 'failed').slice(-4);
+
+  if (failedEdits.length > 0) {
+    return failedEdits;
+  }
+  if (parsedAppliedEdits.some((edit: any) => edit?.status === 'applied')) {
+    return [];
+  }
+  return Array.isArray(previousFailures) ? previousFailures : [];
+}
+
+function deriveRecentAutonomousLearningNotes(
+  result: Record<string, unknown>,
+  previousNotes: string[] | undefined,
+): string[] {
+  const notes = new Set<string>(Array.isArray(previousNotes)
+    ? previousNotes.map((entry) => String(entry || '').trim()).filter(Boolean).slice(-8)
+    : []);
+
+  const repairDecisionReason = typeof result.repairDecisionReason === 'string'
+    ? result.repairDecisionReason.trim()
+    : '';
+  if (/path fit score \(0\)|too weak for the active signals/i.test(repairDecisionReason)) {
+    notes.add('Avoid repeating broad or weakly justified proposals; prefer edits whose reason text directly matches the active signal class and touched path.');
+  }
+  if (/Build experimental API after autonomous promotion \(exit 1\)|Build api \(repair smoke\) \(exit 1\)/i.test(repairDecisionReason)) {
+    notes.add('When an API edit fails experimental build validation, treat that edit shape as unsafe until a narrower proposal or stronger anchored replace block is available.');
+  }
+
+  const recentFailures = Array.isArray(result.appliedEdits)
+    ? result.appliedEdits
+        .map((entry) => AppliedAutonomousEditSchema.safeParse(entry))
+        .flatMap((parsed) => parsed.success ? [parsed.data] : [])
+        .filter((entry) => entry.status === 'failed')
+    : [];
+  for (const failure of recentFailures) {
+    const message = String(failure.message || '').trim();
+    if (/Replace target text was not found|anchor fragment|anchored block|matched \d+ times/i.test(message)) {
+      notes.add('When replace anchors fail, prefer refreshed anchored excerpts or narrower blocks before retrying the same path.');
+    }
+  }
+
+  return Array.from(notes).slice(-8);
+}
+
+function summarizeFailedExecutedJobs(executedJobs: unknown): string {
+  const failedJobs = Array.isArray(executedJobs)
+    ? executedJobs.filter((job: any) => job?.status === 'failed')
+    : [];
+  if (failedJobs.length === 0) return '';
+
+  const firstFailed = failedJobs[0] as Record<string, unknown>;
+  const title = typeof firstFailed.title === 'string' && firstFailed.title.trim()
+    ? firstFailed.title.trim()
+    : 'job';
+  const exitSuffix = typeof firstFailed.exitCode === 'number'
+    ? ` (exit ${firstFailed.exitCode})`
+    : '';
+  return `${failedJobs.length} executed job(s) failed; first failure: ${title}${exitSuffix}.`;
+}
+
+function summarizeTerminalRunFailure(result: unknown): string {
+  const resultRecord = result && typeof result === 'object'
+    ? result as Record<string, unknown>
+    : {};
+
+  const executedJobFailure = summarizeFailedExecutedJobs(resultRecord.executedJobs);
+  if (executedJobFailure) return executedJobFailure;
+
+  const repairStatus = typeof resultRecord.repairStatus === 'string'
+    ? resultRecord.repairStatus.trim()
+    : '';
+  const repairDecisionReason = typeof resultRecord.repairDecisionReason === 'string'
+    ? resultRecord.repairDecisionReason.trim()
+    : '';
+  if (repairStatus === 'failed' || repairStatus === 'rolled-back') {
+    return repairDecisionReason || (repairStatus === 'rolled-back'
+      ? 'Autonomous repair failed and was rolled back.'
+      : 'Autonomous repair failed.');
+  }
+
+  const postRepairValidationStatus = typeof resultRecord.postRepairValidationStatus === 'string'
+    ? resultRecord.postRepairValidationStatus.trim()
+    : '';
+  if (postRepairValidationStatus === 'failed') {
+    return repairDecisionReason || 'Post-repair validation failed.';
+  }
+
+  const experimentalRestartStatus = typeof resultRecord.experimentalRestartStatus === 'string'
+    ? resultRecord.experimentalRestartStatus.trim()
+    : '';
+  const experimentalRestartReason = typeof resultRecord.experimentalRestartReason === 'string'
+    ? resultRecord.experimentalRestartReason.trim()
+    : '';
+  if (experimentalRestartStatus === 'failed') {
+    return experimentalRestartReason || 'Experimental service restart failed after a promoted repair.';
+  }
+
+  return '';
+}
+
 function formatError(error: unknown): string {
   if (error instanceof Error) return error.stack || error.message;
   return String(error);
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function sleep(ms: number, jitterMs = 0): Promise<void> {
+  const safeMs = Number.isFinite(ms) ? Math.max(0, ms) : 0;
+  const safeJitterMs = Number.isFinite(jitterMs) ? Math.max(0, jitterMs) : 0;
+  const delay = safeJitterMs > 0
+    ? safeMs + Math.floor(Math.random() * (safeJitterMs + 1))
+    : safeMs;
+  return new Promise((resolve) => setTimeout(resolve, delay));
+}
+
+function getContinuousRetryDelayMs(consecutiveFailures: number): number {
+  const normalizedFailures = Number.isFinite(consecutiveFailures)
+    ? Math.max(0, Math.floor(consecutiveFailures))
+    : 0;
+  const configuredBaseDelayMs = Number(
+    process.env.CONTROL_PLANE_CONTINUOUS_RETRY_BASE_MS ?? process.env.CONTROL_PLANE_CONTINUOUS_RETRY_MS ?? 5_000
+  );
+  const baseDelayMs = Math.max(
+    1_000,
+    Number.isFinite(configuredBaseDelayMs) ? configuredBaseDelayMs : 5_000
+  );
+  const configuredMaxDelayMs = Number(
+    process.env.CONTROL_PLANE_CONTINUOUS_RETRY_MAX_MS ?? 30_000
+  );
+  const maxDelayMs = Math.max(
+    baseDelayMs,
+    Number.isFinite(configuredMaxDelayMs) ? configuredMaxDelayMs : 30_000
+  );
+  const backoffStep = Math.max(0, normalizedFailures - 1);
+  const exponentialDelayMs = Math.min(
+    maxDelayMs,
+    baseDelayMs * (2 ** Math.min(backoffStep, 3))
+  );
+  const jitterCapMs = Math.min(2_000, Math.max(500, Math.floor(exponentialDelayMs * 0.2)));
+  return Math.min(maxDelayMs, exponentialDelayMs + Math.floor(Math.random() * (jitterCapMs + 1)));
+}
+
+function shellEscapeArg(value: string): string {
+  if (!value) return "''";
+  return `'${String(value).replace(/'/g, `'"'"'`)}'`;
+}
+
+function buildRunnerInvocationArgs(parsedArgs: ParsedArgs): string[] {
+  const args = [
+    './bun.sh',
+    'run',
+    './apps/langgraph-control-plane/src/index.ts',
+    `--goal=${parsedArgs.goal}`,
+    `--scopes=${parsedArgs.scopes.join(',')}`,
+    `--thread-id=${parsedArgs.threadId}`,
+    `--repo-root=${parsedArgs.repoRoot}`,
+    `--interval-ms=${parsedArgs.intervalMs}`,
+    `--max-edit-actions=${parsedArgs.maxEditActions}`,
+    `--prompt-identifier=${parsedArgs.promptIdentifier}`,
+    `--prompt-channel=${parsedArgs.promptChannel}`,
+    `--prompt-sync=${parsedArgs.promptSyncEnabled ? 'true' : 'false'}`,
+    `--prompt-sync-channel=${parsedArgs.promptSyncChannel}`,
+    `--eval-gate-mode=${parsedArgs.evaluationGatePolicy.mode}`,
+    `--eval-gate-target=${parsedArgs.evaluationGatePolicy.target}`,
+    `--eval-gate-aggregation-mode=${parsedArgs.evaluationGatePolicy.aggregationMode || 'all'}`,
+    `--eval-gate-require-evaluation=${parsedArgs.evaluationGatePolicy.requireEvaluation ? 'true' : 'false'}`,
+    `--eval-gate-min-results=${parsedArgs.evaluationGatePolicy.minResultCount}`,
+    `--eval-gate-metric=${parsedArgs.evaluationGatePolicy.metricKey}`,
+    `--eval-gate-min-score=${parsedArgs.evaluationGatePolicy.minMetricAverageScore}`,
+    `--eval-gate-min-weighted-score=${parsedArgs.evaluationGatePolicy.minimumWeightedScore ?? 0}`,
+    `--eval-gate-scorecard-name=${parsedArgs.evaluationGatePolicy.scorecardName}`,
+    `--mcp-config=${parsedArgs.mcpConfigPath}`,
+    `--checkpoint-path=${parsedArgs.checkpointPath}`,
+    `--status-file=${parsedArgs.statusFilePath}`,
+    `--stream-mode=${parsedArgs.streamMode}`,
+    `--edit-allowlist=${parsedArgs.editAllowlist.join(',')}`,
+    `--scope-expansion=${parsedArgs.scopeExpansionMode}`,
+  ];
+
+  if (parsedArgs.pidFilePath) {
+    args.push(`--pid-file=${parsedArgs.pidFilePath}`);
+  }
+  if (parsedArgs.multiRunner && !parsedArgs.coordinatorChildId) {
+    args.push('--multi-runner');
+  }
+  if (parsedArgs.coordinatorChildId) {
+    args.push(`--coordinator-child=${parsedArgs.coordinatorChildId}`);
+  }
+  if (parsedArgs.coordinatorParentThreadId) {
+    args.push(`--coordinator-parent-thread-id=${parsedArgs.coordinatorParentThreadId}`);
+  }
+  if (parsedArgs.maxIterations !== null) {
+    args.push(`--max-iterations=${parsedArgs.maxIterations}`);
+  }
+  if (parsedArgs.promptRef.trim()) {
+    args.push(`--prompt-ref=${parsedArgs.promptRef}`);
+  }
+  if (parsedArgs.promptPromoteChannel.trim()) {
+    args.push(`--prompt-promote=${parsedArgs.promptPromoteChannel}`);
+  }
+  if (parsedArgs.replayCheckpointId?.trim()) {
+    args.push(`--replay-checkpoint-id=${parsedArgs.replayCheckpointId}`);
+  }
+  if (parsedArgs.forkCheckpointId?.trim()) {
+    args.push(`--fork-checkpoint-id=${parsedArgs.forkCheckpointId}`);
+  }
+  if (parsedArgs.forkStateJson?.trim()) {
+    args.push(`--fork-state=${parsedArgs.forkStateJson}`);
+  }
+  if (parsedArgs.subgraphs) {
+    args.push('--subgraphs');
+  }
+  if (parsedArgs.editDenylist.length > 0) {
+    args.push(`--edit-denylist=${parsedArgs.editDenylist.join(',')}`);
+  }
+  if (parsedArgs.evaluationGatePolicy.requiredMetricKeys.length > 0) {
+    args.push(`--eval-gate-required-metrics=${parsedArgs.evaluationGatePolicy.requiredMetricKeys.join(',')}`);
+  }
+  const metricThresholds = Object.entries(parsedArgs.evaluationGatePolicy.additionalMetricThresholds || {})
+    .map(([key, value]) => `${key}:${value}`);
+  if (metricThresholds.length > 0) {
+    args.push(`--eval-gate-metric-thresholds=${metricThresholds.join(',')}`);
+  }
+  const metricWeights = Object.entries(parsedArgs.evaluationGatePolicy.metricWeights || {})
+    .map(([key, value]) => `${key}:${value}`);
+  if (metricWeights.length > 0) {
+    args.push(`--eval-gate-metric-weights=${metricWeights.join(',')}`);
+  }
+  if (parsedArgs.evaluationGatePolicy.baselineExperimentName.trim()) {
+    args.push(`--eval-gate-baseline-experiment=${parsedArgs.evaluationGatePolicy.baselineExperimentName}`);
+  }
+  if (parsedArgs.executePlan) {
+    args.push('--execute');
+  }
+  if (parsedArgs.allowDeploy) {
+    args.push('--allow-deploy');
+  }
+  if (parsedArgs.approvalMode === 'auto') {
+    args.push('--auto-approve');
+  }
+  if (parsedArgs.continuous) {
+    args.push('--continuous');
+  }
+  if (parsedArgs.autonomous) {
+    args.push('--autonomous');
+  }
+  if (parsedArgs.autonomousEditEnabled) {
+    args.push('--autonomous-edits');
+  }
+  if (parsedArgs.deployCommand.trim()) {
+    args.push(`--deploy-command=${parsedArgs.deployCommand}`);
+  }
+
+  return args;
+}
+
+function buildResumeCommand(parsedArgs: ParsedArgs, resumeValue: unknown): string {
+  const resumeArg = typeof resumeValue === 'string'
+    ? resumeValue
+    : JSON.stringify(resumeValue);
+  const args = [
+    ...buildRunnerInvocationArgs(parsedArgs),
+    `--resume=${resumeArg}`,
+  ];
+  return `bash ${args.map((arg) => shellEscapeArg(arg)).join(' ')}`;
 }
 
 function parseArgs(argv: string[]): ParsedArgs {
@@ -981,6 +1411,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   let autonomous = false;
   let autonomousEditEnabled = false;
   let multiRunner = false;
+  let subgraphs = false;
 
   for (const arg of argv) {
     if (arg === '--execute') {
@@ -1015,6 +1446,10 @@ function parseArgs(argv: string[]): ParsedArgs {
       multiRunner = true;
       continue;
     }
+    if (arg === '--subgraphs') {
+      subgraphs = true;
+      continue;
+    }
     if (arg.startsWith('--') && arg.includes('=')) {
       const [key, value] = arg.slice(2).split(/=(.*)/s, 2);
       argMap.set(key, value);
@@ -1038,7 +1473,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     1_000,
   );
   const maxIterations = parseMaxIterations(argMap.get('max-iterations'));
-  const maxEditActions = parseIntegerArg(argMap.get('max-edit-actions'), 5, 1);
+  const maxEditActions = parseIntegerArg(argMap.get('max-edit-actions'), 12, 1);
   const coordinatorChildId = String(argMap.get('coordinator-child') || '').trim() || undefined;
   const coordinatorParentThreadId = String(argMap.get('coordinator-parent-thread-id') || '').trim() || undefined;
   const scopeExpansionMode = parseScopeExpansionMode(
@@ -1076,6 +1511,13 @@ function parseArgs(argv: string[]): ParsedArgs {
   const editDenylist = resolveAutonomousEditDenylist(
     argMap.get('edit-denylist') || process.env.CONTROL_PLANE_EDIT_DENYLIST,
   );
+  autonomousEditEnabled = parseBooleanArg(
+    argMap.get('autonomous-edits')
+    || argMap.get('autonomous-edit-enabled')
+    || process.env.CONTROL_PLANE_AUTONOMOUS_EDITS,
+    autonomousEditEnabled,
+  );
+
   const evaluationGatePolicy: ControlPlaneEvaluationGatePolicy = {
     mode: parseEvaluationGateMode(argMap.get('eval-gate-mode') || process.env.CONTROL_PLANE_EVAL_GATE_MODE),
     target: parseEvaluationGateTarget(argMap.get('eval-gate-target') || process.env.CONTROL_PLANE_EVAL_GATE_TARGET),
@@ -1159,6 +1601,10 @@ function parseArgs(argv: string[]): ParsedArgs {
     pidFilePath: resolveRunnerPidPath(repoRoot, argMap.get('pid-file')),
     streamMode: argMap.get('stream-mode') === 'values' ? 'values' : 'updates',
     resumeValue: parseResumeValue(argMap.get('resume')),
+    replayCheckpointId: String(argMap.get('replay-checkpoint-id') || '').trim() || undefined,
+    forkCheckpointId: String(argMap.get('fork-checkpoint-id') || '').trim() || undefined,
+    forkStateJson: String(argMap.get('fork-state') || '').trim() || undefined,
+    subgraphs,
   };
 }
 
@@ -1171,14 +1617,33 @@ async function runGraphOnce(
   const config = {
     configurable: {
       thread_id: parsedArgs.threadId,
+      ...(parsedArgs.replayCheckpointId ? { checkpoint_id: parsedArgs.replayCheckpointId } : {}),
+      ...(parsedArgs.forkCheckpointId ? { checkpoint_id: parsedArgs.forkCheckpointId } : {}),
     },
     streamMode: parsedArgs.streamMode,
+    ...(parsedArgs.subgraphs ? { subgraphs: true } : {}),
   };
-  const input = typeof parsedArgs.resumeValue === 'undefined'
-    ? initialState
-    : new Command({ resume: parsedArgs.resumeValue });
+  const input = parsedArgs.forkCheckpointId && parsedArgs.forkStateJson
+    ? null
+    : typeof parsedArgs.resumeValue === 'undefined'
+      ? buildInitialGraphInput(initialState, runnerStatus)
+      : new Command({ resume: parsedArgs.resumeValue });
   let lastChunk: unknown = undefined;
   let sawInterrupt = false;
+
+  if (parsedArgs.forkCheckpointId && parsedArgs.forkStateJson) {
+    const forkState = JSON.parse(parsedArgs.forkStateJson) as Record<string, unknown>;
+    const forkConfig = await controlPlaneGraph.updateState(
+      {
+        configurable: {
+          thread_id: parsedArgs.threadId,
+          checkpoint_id: parsedArgs.forkCheckpointId,
+        },
+      } as any,
+      forkState,
+    );
+    Object.assign(config.configurable, (forkConfig as any)?.configurable || {});
+  }
 
   console.log(`[langgraph-control-plane] thread_id=${parsedArgs.threadId}`);
   console.log(`[langgraph-control-plane] checkpoint_path=${path.relative(parsedArgs.repoRoot, parsedArgs.checkpointPath)}`);
@@ -1190,18 +1655,60 @@ async function runGraphOnce(
       running: true,
       phase: 'streaming',
       lastRunStartedAt: new Date().toISOString(),
+      lastRunCompletedAt: undefined,
       sawInterrupt: false,
-      summary: undefined,
+      summary: 'Waiting for graph output...',
       lastError: undefined,
     }),
   );
 
-  for await (const chunk of await controlPlaneGraph.stream(input as any, config as any)) {
-    lastChunk = chunk;
-    if (isInterruptChunk(chunk)) {
-      sawInterrupt = true;
+  const getRunnerStatusSummaryFallback = (): string => {
+    const persistedStatus = readRunnerStatusSnapshot(parsedArgs.statusFilePath);
+    const currentSummary = typeof persistedStatus?.summary === 'string'
+      ? String(persistedStatus.summary || '').trim()
+      : '';
+    return currentSummary || 'Streaming graph output...';
+  };
+
+  const heartbeat = setInterval(() => {
+    try {
+      writeRunnerStatus(
+        parsedArgs.statusFilePath,
+        mergeRunnerStatus(runnerStatus, {
+          running: true,
+          phase: sawInterrupt ? 'paused' : 'streaming',
+          sawInterrupt,
+          lastError: undefined,
+          summary: getRunnerStatusSummaryFallback(),
+        }),
+      );
+    } catch (error) {
+      console.warn(`[langgraph-control-plane] Failed to write runner heartbeat: ${formatError(error)}`);
     }
-    printStreamChunk(chunk);
+  }, RUNNER_STATUS_HEARTBEAT_MS);
+
+  let streamedChunkCount = 0;
+  try {
+    for await (const chunk of await controlPlaneGraph.stream(input as any, config as any)) {
+      lastChunk = chunk;
+      streamedChunkCount += 1;
+      if (isInterruptChunk(chunk)) {
+        sawInterrupt = true;
+      }
+      writeRunnerStatus(
+        parsedArgs.statusFilePath,
+        mergeRunnerStatus(runnerStatus, {
+          running: true,
+          phase: sawInterrupt ? 'paused' : 'streaming',
+          sawInterrupt,
+          lastError: undefined,
+          summary: summarizeStreamChunk(chunk) || `Streaming graph output (${streamedChunkCount} chunk${streamedChunkCount === 1 ? '' : 's'})...`,
+        }),
+      );
+      printStreamChunk(chunk);
+    }
+  } finally {
+    clearInterval(heartbeat);
   }
 
   const stateSnapshot = await controlPlaneGraph.getState(config as any).catch(() => undefined);
@@ -1218,7 +1725,7 @@ async function runGraphOnce(
 
   if (sawInterrupt) {
     console.log('\n--- RESUME ---');
-    console.log(`bash ./bun.sh run ./apps/langgraph-control-plane/src/index.ts --thread-id=${parsedArgs.threadId} --resume=approve`);
+    console.log(buildResumeCommand(parsedArgs, 'approve'));
   }
 
   return { result, sawInterrupt };
@@ -1228,12 +1735,55 @@ function buildCoordinatorChildSpecs(parsedArgs: ParsedArgs): CoordinatorChildSpe
   const requestedScopes = new Set(parsedArgs.scopes.map((scope) => String(scope || '').trim().toLowerCase()).filter(Boolean));
   const laneTemplates: Array<{ id: string; label: string; scopes: string[]; editAllowlist: string[] }> = [];
 
-  if (requestedScopes.has('repo') || requestedScopes.has('api') || requestedScopes.has('api-experimental')) {
+  const includeApiExperimentalLane = requestedScopes.has('repo') || requestedScopes.has('api-experimental');
+  const includeApiDataLane = requestedScopes.has('repo') || requestedScopes.has('api');
+
+  if (includeApiExperimentalLane) {
     laneTemplates.push({
       id: 'api-experimental',
       label: 'API Experimental',
       scopes: ['api-experimental'],
-      editAllowlist: ['apps/api'],
+      editAllowlist: [
+        'apps/api/providers',
+        'apps/api/routes',
+        'apps/api/ws',
+        'apps/api/server.ts',
+        'apps/api/server.launcher.bun.ts',
+        'apps/api/modules/requestQueue.ts',
+        'apps/api/modules/openaiProviderSelection.ts',
+        'apps/api/modules/openaiRequestSupport.ts',
+        'apps/api/modules/openaiRouteSupport.ts',
+        'apps/api/modules/openaiRouteUtils.ts',
+        'apps/api/modules/openaiResponsesFormat.ts',
+        'apps/api/modules/geminiMediaValidation.ts',
+        'apps/api/modules/responsesHistory.ts',
+        'apps/api/modules/rateLimit.ts',
+        'apps/api/modules/rateLimitRedis.ts',
+        'apps/api/modules/requestIntake.ts',
+        'apps/api/modules/tokenEstimation.ts',
+        'apps/api/modules/userData.ts',
+      ],
+    });
+  }
+  if (includeApiDataLane) {
+    laneTemplates.push({
+      id: 'api-data',
+      label: 'API Data & Model Sync',
+      scopes: ['api'],
+      editAllowlist: [
+        'apps/api/models.json',
+        'apps/api/pricing.json',
+        'apps/api/modules/modelUpdater.ts',
+        'apps/api/modules/dataManager.ts',
+        'apps/api/modules/adminKeySync.ts',
+        'apps/api/modules/keyChecker.ts',
+        'apps/api/dev/fetchPricing.ts',
+        'apps/api/dev/checkModelCapabilities.ts',
+        'apps/api/dev/refreshModels.ts',
+        'apps/api/dev/updatemodels.ts',
+        'apps/api/dev/updateproviders.ts',
+        'apps/api/routes/models.ts',
+      ],
     });
   }
 
@@ -1246,12 +1796,12 @@ function buildCoordinatorChildSpecs(parsedArgs: ParsedArgs): CoordinatorChildSpe
     });
   }
 
-  if (requestedScopes.has('repo')) {
+  if (requestedScopes.has('repo') || requestedScopes.has('repo-surface')) {
     laneTemplates.push({
       id: 'repo-surface',
       label: 'Repo Surface',
       scopes: ['repo-surface'],
-      editAllowlist: ['package.json', 'turbo.json', 'bun.sh', 'README.md', 'apps/homepage', 'apps/ui'],
+      editAllowlist: ['package.json', 'turbo.json', 'bun.sh', 'README.md', 'SETUP.md', 'apps/homepage', 'apps/ui', 'scripts'],
     });
   }
 
@@ -1296,91 +1846,20 @@ function buildCoordinatorChildSpecs(parsedArgs: ParsedArgs): CoordinatorChildSpe
 }
 
 function buildCoordinatorChildArgs(parsedArgs: ParsedArgs, spec: CoordinatorChildSpec): string[] {
-  const args = [
-    './bun.sh',
-    'run',
-    './apps/langgraph-control-plane/src/index.ts',
-    `--goal=${parsedArgs.goal}`,
-    `--scopes=${spec.scopes.join(',')}`,
-    `--thread-id=${spec.threadId}`,
-    `--repo-root=${parsedArgs.repoRoot}`,
-    `--interval-ms=${parsedArgs.intervalMs}`,
-    `--max-edit-actions=${parsedArgs.maxEditActions}`,
-    `--prompt-identifier=${parsedArgs.promptIdentifier}`,
-    `--prompt-channel=${parsedArgs.promptChannel}`,
-    `--prompt-sync=${parsedArgs.promptSyncEnabled ? 'true' : 'false'}`,
-    `--prompt-sync-channel=${parsedArgs.promptSyncChannel}`,
-    `--eval-gate-mode=${parsedArgs.evaluationGatePolicy.mode}`,
-    `--eval-gate-target=${parsedArgs.evaluationGatePolicy.target}`,
-    `--eval-gate-aggregation-mode=${parsedArgs.evaluationGatePolicy.aggregationMode || 'all'}`,
-    `--eval-gate-require-evaluation=${parsedArgs.evaluationGatePolicy.requireEvaluation ? 'true' : 'false'}`,
-    `--eval-gate-min-results=${parsedArgs.evaluationGatePolicy.minResultCount}`,
-    `--eval-gate-metric=${parsedArgs.evaluationGatePolicy.metricKey}`,
-    `--eval-gate-min-score=${parsedArgs.evaluationGatePolicy.minMetricAverageScore}`,
-    `--eval-gate-min-weighted-score=${parsedArgs.evaluationGatePolicy.minimumWeightedScore ?? 0}`,
-    `--eval-gate-scorecard-name=${parsedArgs.evaluationGatePolicy.scorecardName}`,
-    `--mcp-config=${parsedArgs.mcpConfigPath}`,
-    `--checkpoint-path=${spec.checkpointPath}`,
-    `--status-file=${spec.statusFilePath}`,
-    `--pid-file=${spec.pidFilePath}`,
-    `--stream-mode=${parsedArgs.streamMode}`,
-    `--edit-allowlist=${spec.editAllowlist.join(',')}`,
-    `--scope-expansion=${spec.scopeExpansionMode}`,
-    `--coordinator-child=${spec.id}`,
-    `--coordinator-parent-thread-id=${parsedArgs.threadId}`,
-  ];
-
-  if (parsedArgs.maxIterations !== null) {
-    args.push(`--max-iterations=${parsedArgs.maxIterations}`);
-  }
-  if (parsedArgs.promptRef.trim()) {
-    args.push(`--prompt-ref=${parsedArgs.promptRef}`);
-  }
-  if (parsedArgs.promptPromoteChannel.trim()) {
-    args.push(`--prompt-promote=${parsedArgs.promptPromoteChannel}`);
-  }
-  if (parsedArgs.editDenylist.length > 0) {
-    args.push(`--edit-denylist=${parsedArgs.editDenylist.join(',')}`);
-  }
-  if (parsedArgs.evaluationGatePolicy.requiredMetricKeys.length > 0) {
-    args.push(`--eval-gate-required-metrics=${parsedArgs.evaluationGatePolicy.requiredMetricKeys.join(',')}`);
-  }
-  const metricThresholds = Object.entries(parsedArgs.evaluationGatePolicy.additionalMetricThresholds || {})
-    .map(([key, value]) => `${key}:${value}`);
-  if (metricThresholds.length > 0) {
-    args.push(`--eval-gate-metric-thresholds=${metricThresholds.join(',')}`);
-  }
-  const metricWeights = Object.entries(parsedArgs.evaluationGatePolicy.metricWeights || {})
-    .map(([key, value]) => `${key}:${value}`);
-  if (metricWeights.length > 0) {
-    args.push(`--eval-gate-metric-weights=${metricWeights.join(',')}`);
-  }
-  if (parsedArgs.evaluationGatePolicy.baselineExperimentName.trim()) {
-    args.push(`--eval-gate-baseline-experiment=${parsedArgs.evaluationGatePolicy.baselineExperimentName}`);
-  }
-  if (parsedArgs.executePlan) {
-    args.push('--execute');
-  }
-  if (parsedArgs.allowDeploy) {
-    args.push('--allow-deploy');
-  }
-  if (parsedArgs.approvalMode === 'auto') {
-    args.push('--auto-approve');
-  }
-  if (parsedArgs.continuous) {
-    args.push('--continuous');
-  }
-  if (parsedArgs.autonomous) {
-    args.push('--autonomous');
-  }
-  if (parsedArgs.autonomousEditEnabled) {
-    args.push('--autonomous-edits');
-  }
-  if (parsedArgs.deployCommand.trim()) {
-    args.push(`--deploy-command=${parsedArgs.deployCommand}`);
-  }
-
-  return args;
+  return buildRunnerInvocationArgs({
+    ...parsedArgs,
+    scopes: spec.scopes,
+    threadId: spec.threadId,
+    multiRunner: false,
+    coordinatorChildId: spec.id,
+    coordinatorParentThreadId: parsedArgs.threadId,
+    scopeExpansionMode: spec.scopeExpansionMode,
+    checkpointPath: spec.checkpointPath,
+    statusFilePath: spec.statusFilePath,
+    pidFilePath: spec.pidFilePath,
+    editAllowlist: spec.editAllowlist,
+    resumeValue: undefined,
+  });
 }
 
 function spawnCoordinatorChild(parsedArgs: ParsedArgs, runtime: CoordinatorChildRuntime): void {
@@ -1423,7 +1902,7 @@ function spawnCoordinatorChild(parsedArgs: ParsedArgs, runtime: CoordinatorChild
   child.on('exit', (code, signal) => {
     runtime.lastExitCode = code;
     runtime.lastExitSignal = signal;
-    runtime.pid = readPidFile(runtime.spec.pidFilePath);
+    runtime.pid = undefined;
     runtime.process = undefined;
     runtime.nextRestartAt = Date.now() + MULTI_RUNNER_RESTART_DELAY_MS;
     fs.appendFileSync(
@@ -1439,13 +1918,30 @@ function spawnCoordinatorChild(parsedArgs: ParsedArgs, runtime: CoordinatorChild
 function collectCoordinatedRunnerEntry(runtime: CoordinatorChildRuntime): CoordinatedRunnerStatusEntry {
   const status = runtime.lastStatus || {};
   const pidFromFile = readPidFile(runtime.spec.pidFilePath);
-  const pid = runtime.process?.pid || runtime.pid || pidFromFile;
-  const running = (runtime.process ? runtime.process.exitCode === null : false)
-    || (status.running === true)
-    || isPidAlive(pid);
-  const phase = typeof status.phase === 'string'
-    ? status.phase
-    : (running ? 'streaming' : (runtime.lastExitCode || runtime.lastSpawnError ? 'failed' : 'completed'));
+  const processPid = runtime.process?.pid;
+  const processAlive = runtime.process ? runtime.process.exitCode === null : false;
+  const filePidAlive = isPidAlive(pidFromFile);
+  const cachedPidAlive = !filePidAlive && isPidAlive(runtime.pid) ? runtime.pid : undefined;
+  const pid = processAlive
+    ? processPid
+    : (filePidAlive ? pidFromFile : cachedPidAlive);
+  const running = processAlive || Boolean(filePidAlive || cachedPidAlive);
+
+  let phase = typeof status.phase === 'string' ? status.phase : '';
+  if (!running && ['starting', 'streaming', 'sleeping'].includes(phase)) {
+    phase = '';
+  }
+  if (!phase) {
+    phase = running
+      ? 'streaming'
+      : (
+        (typeof status.lastError === 'string' && status.lastError.trim())
+        || runtime.lastSpawnError
+        || (typeof runtime.lastExitCode === 'number' && runtime.lastExitCode !== 0)
+      )
+        ? 'failed'
+        : 'completed';
+  }
 
   return {
     id: runtime.spec.id,
@@ -1590,9 +2086,13 @@ async function runMultiRunnerCoordinator(parsedArgs: ParsedArgs): Promise<void> 
     while (true) {
       for (const runtime of childRuntimes) {
         runtime.lastStatus = readRunnerStatusSnapshot(runtime.spec.statusFilePath);
-        const knownPid = runtime.process?.pid || runtime.pid || readPidFile(runtime.spec.pidFilePath);
-        if (!runtime.process && isPidAlive(knownPid)) {
-          runtime.pid = knownPid;
+        const pidFromFile = readPidFile(runtime.spec.pidFilePath);
+        if (!runtime.process) {
+          if (isPidAlive(pidFromFile)) {
+            runtime.pid = pidFromFile;
+          } else if (!isPidAlive(runtime.pid)) {
+            runtime.pid = undefined;
+          }
         }
 
         const canRestart = !shuttingDown
@@ -1600,7 +2100,7 @@ async function runMultiRunnerCoordinator(parsedArgs: ParsedArgs): Promise<void> 
           && parsedArgs.maxIterations === null
           && (!runtime.lastStatus || runtime.lastStatus.phase !== 'paused');
         const processAlive = runtime.process ? runtime.process.exitCode === null : false;
-        const pidAlive = isPidAlive(runtime.pid || readPidFile(runtime.spec.pidFilePath));
+        const pidAlive = isPidAlive(pidFromFile) || isPidAlive(runtime.pid);
         if (!processAlive && !pidAlive && canRestart && Date.now() >= runtime.nextRestartAt) {
           runtime.restartCount += 1;
           spawnCoordinatorChild(parsedArgs, runtime);
@@ -1685,7 +2185,7 @@ async function main() {
     await runMultiRunnerCoordinator(parsedArgs);
     return;
   }
-  const { graph: controlPlaneGraph, checkpointer } = await createControlPlaneGraph({
+  const { graph: controlPlaneGraph, checkpointer, store } = await createControlPlaneGraph({
     repoRoot: parsedArgs.repoRoot,
     checkpointPath: parsedArgs.checkpointPath,
   });
@@ -1694,21 +2194,30 @@ async function main() {
   installRunnerLifecycleHooks(parsedArgs, () => runnerStatus);
 
   let iteration = 0;
+  let consecutiveTerminalFailures = 0;
   while (true) {
     iteration += 1;
     runnerStatus = mergeRunnerStatus(runnerStatus, {
       iteration,
       running: true,
       phase: 'starting',
+      lastRunCompletedAt: undefined,
+      summary: 'Starting graph run...',
     });
     writeRunnerStatus(parsedArgs.statusFilePath, runnerStatus);
 
     try {
       const { result, sawInterrupt } = await runGraphOnce(parsedArgs, controlPlaneGraph, runnerStatus);
+      const terminalFailureSummary = summarizeTerminalRunFailure(result);
+      consecutiveTerminalFailures = terminalFailureSummary
+        ? consecutiveTerminalFailures + 1
+        : 0;
+      const checkpointHistorySeed = await collectCheckpointHistorySeed(controlPlaneGraph, parsedArgs.threadId);
       runnerStatus = mergeRunnerStatus(runnerStatus, {
-        running: parsedArgs.continuous && !sawInterrupt,
-        phase: sawInterrupt ? 'paused' : 'completed',
+        running: parsedArgs.continuous && !sawInterrupt && !terminalFailureSummary,
+        phase: sawInterrupt ? 'paused' : (terminalFailureSummary ? 'failed' : 'completed'),
         sawInterrupt,
+        lastError: terminalFailureSummary || undefined,
         proposedEditCount: Array.isArray(result.proposedEdits) ? result.proposedEdits.length : 0,
         appliedEditCount: Array.isArray(result.appliedEdits)
           ? result.appliedEdits.filter((edit: any) => edit?.status === 'applied').length
@@ -1718,6 +2227,14 @@ async function main() {
               .filter((edit: any) => edit?.status === 'applied' && typeof edit?.path === 'string')
               .map((edit: any) => edit.path)
           : [],
+        recentAutonomousEditFailures: deriveRecentAutonomousEditFailures(
+          result.appliedEdits,
+          runnerStatus.recentAutonomousEditFailures,
+        ),
+        recentAutonomousLearningNotes: deriveRecentAutonomousLearningNotes(
+          result as Record<string, unknown>,
+          runnerStatus.recentAutonomousLearningNotes,
+        ),
         effectiveScopes: Array.isArray((result as any).effectiveScopes)
           ? (result as any).effectiveScopes.map((scope: any) => String(scope || '').trim()).filter(Boolean)
           : runnerStatus.effectiveScopes,
@@ -1796,6 +2313,12 @@ async function main() {
         experimentalRestartReason: typeof (result as any).experimentalRestartReason === 'string'
           ? (result as any).experimentalRestartReason
           : runnerStatus.experimentalRestartReason,
+        productionRestartStatus: typeof (result as any).productionRestartStatus === 'string'
+          ? (result as any).productionRestartStatus
+          : runnerStatus.productionRestartStatus,
+        productionRestartReason: typeof (result as any).productionRestartReason === 'string'
+          ? (result as any).productionRestartReason
+          : runnerStatus.productionRestartReason,
         langSmithOrganizationId: typeof (result as any).langSmithWorkspace?.id === 'string'
           && String((result as any).langSmithWorkspace.id).trim()
           ? String((result as any).langSmithWorkspace.id).trim()
@@ -2026,6 +2549,13 @@ async function main() {
               .map((file: any) => String(file?.path || '').trim())
               .filter(Boolean)
           : [],
+        latestCheckpointId: checkpointHistorySeed.latestCheckpointId,
+        latestCheckpointCreatedAt: checkpointHistorySeed.latestCheckpointCreatedAt,
+        checkpointCount: checkpointHistorySeed.checkpointCount,
+        checkpointNextNodes: checkpointHistorySeed.checkpointNextNodes,
+        replayCheckpointId: checkpointHistorySeed.replayCheckpointId,
+        lastForkCheckpointId: parsedArgs.forkCheckpointId,
+        subgraphStreamingEnabled: parsedArgs.subgraphs,
         observabilityTags: Array.isArray((result as any).observabilityTags)
           ? (result as any).observabilityTags
               .map((tag: any) => String(tag || '').trim())
@@ -2035,7 +2565,25 @@ async function main() {
         summary: result.summary,
         lastRunCompletedAt: new Date().toISOString(),
       });
+      await writeSemanticMemoryNotes(
+        store,
+        {
+          langSmithProjectName: runnerStatus.langSmithProjectName || '',
+          governanceProfile: runnerStatus.governanceProfile || '',
+        },
+        runnerStatus.recentAutonomousLearningNotes || [],
+        {
+          signalSignature: runnerStatus.repairIntentSummary,
+          failureClass: runnerStatus.repairStatus,
+          resolution: runnerStatus.repairDecisionReason,
+          source: 'runner-status-memory',
+        },
+      ).catch(() => undefined);
       writeRunnerStatus(parsedArgs.statusFilePath, runnerStatus);
+
+      if (terminalFailureSummary && !parsedArgs.continuous) {
+        throw new Error(terminalFailureSummary);
+      }
 
       if (!parsedArgs.continuous || sawInterrupt) {
         break;
@@ -2054,13 +2602,20 @@ async function main() {
         break;
       }
 
+      const nextDelayMs = terminalFailureSummary
+        ? getContinuousRetryDelayMs(consecutiveTerminalFailures)
+        : parsedArgs.intervalMs;
       runnerStatus = mergeRunnerStatus(runnerStatus, {
         running: true,
-        phase: 'sleeping',
+        phase: terminalFailureSummary ? 'failed' : 'sleeping',
       });
       writeRunnerStatus(parsedArgs.statusFilePath, runnerStatus);
-      console.log(`\n[langgraph-control-plane] sleeping ${parsedArgs.intervalMs}ms before next iteration...`);
-      await sleep(parsedArgs.intervalMs);
+      if (terminalFailureSummary) {
+        console.log(`\n[langgraph-control-plane] iteration ended with failure but continuous mode is enabled; sleeping ${nextDelayMs}ms before retry...`);
+      } else {
+        console.log(`\n[langgraph-control-plane] sleeping ${nextDelayMs}ms before next iteration...`);
+      }
+      await sleep(nextDelayMs);
     } catch (error) {
       runnerStatus = mergeRunnerStatus(runnerStatus, {
         running: false,

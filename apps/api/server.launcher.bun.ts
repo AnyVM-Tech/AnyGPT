@@ -43,11 +43,99 @@ const SCRIPT_PATH = DIST_SERVER_PATH && fs.existsSync(DIST_SERVER_PATH)
   : SOURCE_SCRIPT_PATH;
 const SERVER_MODULE_URL = pathToFileURL(SCRIPT_PATH).href;
 const BUN_BIN = process.execPath;
+const LAUNCH_LOCK_DIR = path.resolve(SCRIPT_DIR, '.control-plane');
+const LAUNCH_LOCK_FILE = path.join(
+	LAUNCH_LOCK_DIR,
+	`server-launcher.${String(process.env.NODE_ENV || 'development').trim() || 'development'}.${BASE_PORT}.lock.json`,
+);
 
 type WorkerProcess = any;
 
+type LaunchLockRecord = {
+	pid: number;
+	basePort: number;
+	nodeEnv: string;
+	scriptPath: string;
+	acquiredAt: string;
+};
+
 const workers = new Map<number, WorkerProcess>();
 let shuttingDown = false;
+
+function isPidAlive(pid: number | undefined): boolean {
+	if (!pid || !Number.isFinite(pid) || pid <= 0) return false;
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+function readLaunchLock(): LaunchLockRecord | null {
+	if (!fs.existsSync(LAUNCH_LOCK_FILE)) return null;
+	try {
+		const parsed = JSON.parse(fs.readFileSync(LAUNCH_LOCK_FILE, 'utf8'));
+		const pid = Number(parsed?.pid);
+		if (!Number.isFinite(pid) || pid <= 0) return null;
+		return {
+			pid: Math.floor(pid),
+			basePort: Number(parsed?.basePort || BASE_PORT) || BASE_PORT,
+			nodeEnv: String(parsed?.nodeEnv || process.env.NODE_ENV || '').trim(),
+			scriptPath: String(parsed?.scriptPath || SCRIPT_PATH).trim(),
+			acquiredAt: String(parsed?.acquiredAt || '').trim(),
+		};
+	} catch {
+		return null;
+	}
+}
+
+function releaseLaunchLock(): void {
+	const existing = readLaunchLock();
+	if (!existing || existing.pid !== process.pid) return;
+	try {
+		fs.rmSync(LAUNCH_LOCK_FILE, { force: true });
+	} catch {
+		// Ignore lock cleanup failures during shutdown.
+	}
+}
+
+function acquireLaunchLock(): void {
+	fs.mkdirSync(LAUNCH_LOCK_DIR, { recursive: true });
+	const record = JSON.stringify({
+		pid: process.pid,
+		basePort: BASE_PORT,
+		nodeEnv: String(process.env.NODE_ENV || '').trim(),
+		scriptPath: SCRIPT_PATH,
+		acquiredAt: new Date().toISOString(),
+	}, null, 2);
+
+	while (true) {
+		try {
+			const handle = fs.openSync(LAUNCH_LOCK_FILE, 'wx');
+			fs.writeFileSync(handle, record, 'utf8');
+			fs.closeSync(handle);
+			return;
+		} catch (error: any) {
+			if (error?.code !== 'EEXIST') {
+				throw error;
+			}
+			const existing = readLaunchLock();
+			if (!existing || !isPidAlive(existing.pid)) {
+				try {
+					fs.rmSync(LAUNCH_LOCK_FILE, { force: true });
+				} catch {
+					// Ignore stale lock cleanup failures; retry create.
+				}
+				continue;
+			}
+			console.warn(
+				`[Launcher] Another AnyGPT API launcher already owns port ${BASE_PORT} for ${existing.nodeEnv || process.env.NODE_ENV || 'unknown'} (pid ${existing.pid}). Exiting duplicate launcher.`,
+			);
+			process.exit(75);
+		}
+	}
+}
 
 function buildWorkerEnv(index: number): NodeJS.ProcessEnv {
 	const env: NodeJS.ProcessEnv = {
@@ -124,6 +212,9 @@ function shutdown(signal: NodeJS.Signals): void {
 }
 
 async function main(): Promise<void> {
+	acquireLaunchLock();
+	process.on('exit', () => releaseLaunchLock());
+
 	if (WORKER_COUNT <= 1) {
 		process.env.CLUSTER_WORKERS = '0';
 		await import(SERVER_MODULE_URL);

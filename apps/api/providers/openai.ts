@@ -18,6 +18,29 @@ function isXaiBaseUrl(baseUrl?: string): boolean {
 	);
 }
 
+function isXaiMultiAgentModel(modelId?: string): boolean {
+	const normalized = String(modelId || '').toLowerCase().trim();
+	return normalized.includes('multi-agent');
+}
+
+function assertSupportedXaiChatCompletionsRequest(
+	baseUrl: string | undefined,
+	modelId: string | undefined,
+	operation: 'sendMessage' | 'sendMessageStream'
+): void {
+	if (!isXaiBaseUrl(baseUrl) || !isXaiMultiAgentModel(modelId)) return;
+	const normalizedModelId = String(modelId || '').trim() || 'unknown';
+	const error = new Error(
+		`xAI chat completions do not support multi-agent model ${normalizedModelId} for ${operation}; route this model to a compatible endpoint instead.`
+	);
+	(error as any).status = 400;
+	(error as any).statusCode = 400;
+	(error as any).code = 'xai_multi_agent_chat_completions_unsupported';
+	(error as any).retryable = false;
+	(error as any).providerSwitchWorthless = true;
+	throw error;
+}
+
 function isTransientOpenAIError(error: any): boolean {
 	const status = Number(error?.response?.status || error?.status || 0);
 	if (status === 520) return true;
@@ -394,6 +417,7 @@ export class OpenAI implements IAIProvider {
 		const normalized = this.normalizeModelId(modelId);
 		if (this.isComputerUseModel(normalized)) return true;
 		if (normalized.includes('codex')) return true;
+		if (normalized.includes('multi-agent')) return true;
 		// GPT-5-family models are Responses-first for reliable structured tool calling.
 		if (normalized.includes('gpt-5')) return true;
 		if (normalized.includes('gpt-4.1')) return true;
@@ -2697,9 +2721,34 @@ export class OpenAI implements IAIProvider {
 			if (errorMessage.startsWith('API stream call failed:')) {
 				const wrappedError = new Error(errorMessage);
 				(wrappedError as any).__providerUniqueLogged = true;
-				if (isEmptyStreamingResponse) {
+				const wrappedMessage = String(wrappedError.message || '');
+				const wrappedEmptyStreamingResponse =
+					isEmptyStreamingResponse || /empty streaming response/i.test(wrappedMessage);
+				const wrappedTransientOpenAIError = isTransientOpenAIError({
+					...error,
+					message: wrappedMessage,
+				});
+				const wrappedAuthError = /invalid api key|incorrect api key provided|invalid_api_key/i.test(wrappedMessage);
+				if (wrappedEmptyStreamingResponse || wrappedTransientOpenAIError) {
 					(wrappedError as any).retryable = true;
-					(wrappedError as any).providerSwitchWorthless = false;
+					(wrappedError as any).failureOrigin = 'upstream_provider';
+				}
+				if (wrappedAuthError) {
+					(wrappedError as any).retryable = false;
+					(wrappedError as any).status = 401;
+					(wrappedError as any).statusCode = 401;
+					(wrappedError as any).code = 'invalid_api_key';
+					(wrappedError as any).failureOrigin = 'provider_auth';
+					(wrappedError as any).providerSwitchWorthless = true;
+					(wrappedError as any).requestRetryWorthless = true;
+				}
+				if (wrappedEmptyStreamingResponse) {
+					(wrappedError as any).providerSwitchWorthless = true;
+					(wrappedError as any).requestRetryWorthless = true;
+				}
+				if (wrappedTransientOpenAIError) {
+					(wrappedError as any).providerSwitchWorthless = true;
+					(wrappedError as any).requestRetryWorthless = true;
 				}
 				throw wrappedError;
 			}
@@ -2707,9 +2756,29 @@ export class OpenAI implements IAIProvider {
 				`API stream call failed: ${errorMessage}`
 			);
 			(wrappedError as any).__providerUniqueLogged = true;
-			if (isEmptyStreamingResponse) {
+			const wrappedTransientOpenAIError = isTransientOpenAIError({
+				...error,
+				message: wrappedError.message,
+			});
+			const wrappedGatewayError = /bad gateway|gateway timeout|service unavailable|cloudflare|<html/i.test(wrappedError.message);
+			const wrappedAuthError = /invalid api key|incorrect api key provided|invalid_api_key/i.test(wrappedError.message);
+			if (isEmptyStreamingResponse || wrappedTransientOpenAIError || wrappedGatewayError) {
 				(wrappedError as any).retryable = true;
-				(wrappedError as any).providerSwitchWorthless = false;
+				(wrappedError as any).failureOrigin = 'upstream_provider';
+			}
+			if (wrappedAuthError) {
+				(wrappedError as any).retryable = false;
+				(wrappedError as any).failureOrigin = 'provider_auth';
+				(wrappedError as any).providerSwitchWorthless = true;
+				(wrappedError as any).requestRetryWorthless = true;
+			}
+			if (isEmptyStreamingResponse) {
+				(wrappedError as any).providerSwitchWorthless = true;
+				(wrappedError as any).requestRetryWorthless = true;
+			}
+			if (wrappedTransientOpenAIError) {
+				(wrappedError as any).providerSwitchWorthless = true;
+				(wrappedError as any).requestRetryWorthless = true;
 			}
 			throw wrappedError;
 		}

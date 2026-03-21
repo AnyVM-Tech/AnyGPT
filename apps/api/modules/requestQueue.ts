@@ -126,6 +126,8 @@ type RequestQueueOptions = {
 	memoryPressureGuard?: boolean;
 };
 
+export type RequestQueueLane = 'shared' | 'responses';
+
 const BYTES_PER_MEGABYTE = 1024 * 1024;
 const DEFAULT_SYSTEM_TOTAL_MB = Math.max(
 	1,
@@ -165,6 +167,27 @@ const MEMORY_PRESSURE_MIN_ACTIVE_RUNTIME_MB_FOR_RSS_GATE = (() => {
 	const raw = Number(
 		process.env.REQUEST_MEMORY_MIN_ACTIVE_RUNTIME_MB_FOR_RSS_GATE ??
 			fallback
+	);
+	return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : fallback;
+})();
+const MEMORY_PRESSURE_MIN_ACTIVE_RUNTIME_MB_FOR_SWAP_GATE = (() => {
+	const fallback = Math.max(
+		MEMORY_PRESSURE_MIN_ACTIVE_RUNTIME_MB_FOR_RSS_GATE,
+		Math.floor(MEMORY_PRESSURE_MAX_RSS_MB * 0.5)
+	);
+	const raw = Number(
+		process.env.REQUEST_MEMORY_MIN_ACTIVE_RUNTIME_MB_FOR_SWAP_GATE ??
+			fallback
+	);
+	return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : fallback;
+})();
+const MEMORY_PRESSURE_MIN_RSS_MB_FOR_SWAP_GATE = (() => {
+	const fallback = Math.max(
+		MEMORY_PRESSURE_MIN_ACTIVE_RUNTIME_MB_FOR_RSS_GATE,
+		Math.floor(MEMORY_PRESSURE_MAX_RSS_MB * 0.9)
+	);
+	const raw = Number(
+		process.env.REQUEST_MEMORY_MIN_RSS_MB_FOR_SWAP_GATE ?? fallback
 	);
 	return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : fallback;
 })();
@@ -291,21 +314,28 @@ function buildMemoryPressureReasons(
 	const externalMb = bytesToMegabytes(snapshot.externalBytes);
 	const arrayBuffersMb = bytesToMegabytes(snapshot.arrayBuffersBytes);
 	const activeRuntimeMb = heapUsedMb + externalMb + arrayBuffersMb;
+	const rssNearSwapGate = rssMb >= MEMORY_PRESSURE_MIN_RSS_MB_FOR_SWAP_GATE;
 	const actionableSwapPressure =
 		swapUsedMb !== null &&
 		swapUsedMb >= MEMORY_PRESSURE_MAX_SWAP_USED_MB &&
 		(
 			availableSystemMb <= MEMORY_PRESSURE_MIN_AVAILABLE_SYSTEM_MB * 2 ||
-			activeRuntimeMb >=
-				MEMORY_PRESSURE_MIN_ACTIVE_RUNTIME_MB_FOR_RSS_GATE
+			(
+				rssNearSwapGate &&
+				activeRuntimeMb >=
+					MEMORY_PRESSURE_MIN_ACTIVE_RUNTIME_MB_FOR_SWAP_GATE
+			)
 		);
 	const elevatedSwapPressure =
 		swapUsedMb !== null &&
 		swapUsedMb >= Math.floor(MEMORY_PRESSURE_MAX_SWAP_USED_MB * 0.5) &&
 		(
 			availableSystemMb <= MEMORY_PRESSURE_MIN_AVAILABLE_SYSTEM_MB * 2 ||
-			activeRuntimeMb >=
-				MEMORY_PRESSURE_MIN_ACTIVE_RUNTIME_MB_FOR_RSS_GATE
+			(
+				rssNearSwapGate &&
+				activeRuntimeMb >=
+					MEMORY_PRESSURE_MIN_ACTIVE_RUNTIME_MB_FOR_SWAP_GATE
+			)
 		);
 
 	if (availableSystemMb <= MEMORY_PRESSURE_MIN_AVAILABLE_SYSTEM_MB) {
@@ -322,6 +352,9 @@ function buildMemoryPressureReasons(
 	const lowHeadroom =
 		availableSystemMb <= MEMORY_PRESSURE_MIN_AVAILABLE_SYSTEM_MB * 2
 		|| elevatedSwapPressure;
+	const lowHeadroomForBufferPressure =
+		availableSystemMb <= MEMORY_PRESSURE_MIN_AVAILABLE_SYSTEM_MB * 2
+		|| rssMb >= MEMORY_PRESSURE_MAX_RSS_MB;
 	if (
 		lowHeadroom &&
 		rssMb >= MEMORY_PRESSURE_MAX_RSS_MB &&
@@ -332,12 +365,18 @@ function buildMemoryPressureReasons(
 				` active_runtime_mb=${activeRuntimeMb.toFixed(0)}>=${MEMORY_PRESSURE_MIN_ACTIVE_RUNTIME_MB_FOR_RSS_GATE}`
 		);
 	}
-	if (lowHeadroom && externalMb >= MEMORY_PRESSURE_MAX_EXTERNAL_MB) {
+	if (
+		lowHeadroomForBufferPressure &&
+		externalMb >= MEMORY_PRESSURE_MAX_EXTERNAL_MB
+	) {
 		reasons.push(
 			`external_mb=${externalMb.toFixed(0)}>=${MEMORY_PRESSURE_MAX_EXTERNAL_MB}`
 		);
 	}
-	if (lowHeadroom && arrayBuffersMb >= MEMORY_PRESSURE_MAX_ARRAY_BUFFERS_MB) {
+	if (
+		lowHeadroomForBufferPressure &&
+		arrayBuffersMb >= MEMORY_PRESSURE_MAX_ARRAY_BUFFERS_MB
+	) {
 		reasons.push(
 			`array_buffers_mb=${arrayBuffersMb.toFixed(0)}>=${MEMORY_PRESSURE_MAX_ARRAY_BUFFERS_MB}`
 		);
@@ -541,8 +580,6 @@ export class RequestQueue {
 						settled = true;
 						if (timeoutId) clearTimeout(timeoutId);
 						reject(error);
-						const nextQueued = this.queue.shift();
-						if (nextQueued) nextQueued();
 						return;
 					}
 				}
@@ -598,24 +635,74 @@ function getBaselineTierRps(): number {
 	return Math.floor(Math.min(...values));
 }
 
+let cachedSystemMemoryBytes: number | null = null;
+let cachedCpuCount: number | null = null;
+function getSystemMemoryBytes(): number {
+	if (cachedSystemMemoryBytes !== null) return cachedSystemMemoryBytes;
+	try {
+		cachedSystemMemoryBytes = Number(require('os').totalmem?.() || 0);
+	} catch {
+		cachedSystemMemoryBytes = 0;
+	}
+	return cachedSystemMemoryBytes;
+}
+
+function getCpuCount(): number {
+	if (cachedCpuCount !== null) return cachedCpuCount;
+	try {
+		const cpus = require('os').cpus?.();
+		cachedCpuCount = Array.isArray(cpus) && cpus.length > 0 ? cpus.length : 1;
+	} catch {
+		cachedCpuCount = 1;
+	}
+	return cachedCpuCount;
+}
+
 const REQUEST_QUEUE_CONCURRENCY = (() => {
 	const baselineTierRps = getBaselineTierRps();
-	const suggestedDefault = Math.max(
-		12,
-		Math.min(32, Math.ceil(baselineTierRps * 0.75))
+	const cpuCount = getCpuCount();
+	const memoryUsage = process.memoryUsage?.() || { rss: 0, external: 0, heapUsed: 0 };
+	const totalMemoryBytes = Number(memoryUsage.rss || 0);
+	const externalMemoryBytes = Number((memoryUsage as { external?: number }).external || 0);
+	const heapUsedBytes = Number((memoryUsage as { heapUsed?: number }).heapUsed || 0);
+	const activeRuntimeBytes = Math.max(0, totalMemoryBytes - heapUsedBytes - externalMemoryBytes);
+	const systemMemoryBytes = getSystemMemoryBytes();
+	const memoryPressureRatio =
+		systemMemoryBytes > 0 ? totalMemoryBytes / systemMemoryBytes : 0;
+	const externalPressureRatio =
+		systemMemoryBytes > 0 ? externalMemoryBytes / systemMemoryBytes : 0;
+	const activeRuntimePressureRatio =
+		systemMemoryBytes > 0 ? activeRuntimeBytes / systemMemoryBytes : 0;
+	const severeRuntimePressure =
+		externalPressureRatio >= 0.03 ||
+		memoryPressureRatio >= 0.12 ||
+		activeRuntimePressureRatio >= 0.03;
+	const elevatedRuntimePressure =
+		externalPressureRatio >= 0.02 ||
+		memoryPressureRatio >= 0.09 ||
+		activeRuntimePressureRatio >= 0.02;
+	const memoryAwareCap =
+		severeRuntimePressure ? 1 :
+		externalPressureRatio >= 0.025 || memoryPressureRatio >= 0.1 ? 2 :
+		externalPressureRatio >= 0.02 || memoryPressureRatio >= 0.08 ? 3 :
+		externalPressureRatio >= 0.015 || memoryPressureRatio >= 0.06 ? 4 :
+		memoryPressureRatio >= 0.04 ? 6 : 24;
+	const minimumSuggestedConcurrency =
+		memoryPressureRatio >= 0.08 || externalPressureRatio >= 0.015 ? 1 : 2;
+	const scaledByTier = Math.max(
+		minimumSuggestedConcurrency,
+		Math.min(24, Math.ceil(baselineTierRps / 2))
 	);
-	const raw = Number(
-		process.env.REQUEST_QUEUE_CONCURRENCY ?? String(suggestedDefault)
-	);
-	if (!Number.isFinite(raw) || raw <= 0) return suggestedDefault;
-	return Math.floor(raw);
-})();
-
-const REQUEST_QUEUE_MAX_PENDING = (() => {
+	const configured = Number(process.env.REQUEST_QUEUE_CONCURRENCY ?? scaledByTier);
+	if (!Number.isFinite(configured) || configured <= 0) {
+		return Math.max(minimumSuggestedConcurrency, Math.min(memoryAwareCap, scaledByTier));
+	}
+	return Math.max(1, Math.min(memoryAwareCap, Math.floor(configured)));
+})();const REQUEST_QUEUE_MAX_PENDING = (() => {
 	const baselineTierRps = getBaselineTierRps();
 	const suggestedDefault = Math.min(
-		8192,
-		Math.max(1024, REQUEST_QUEUE_CONCURRENCY * 192, baselineTierRps * 24)
+		2048,
+		Math.max(256, REQUEST_QUEUE_CONCURRENCY * 48, baselineTierRps * 12)
 	);
 	const raw = Number(
 		process.env.REQUEST_QUEUE_MAX_PENDING ?? String(suggestedDefault)
@@ -627,6 +714,14 @@ const REQUEST_QUEUE_MAX_PENDING = (() => {
 const REQUEST_QUEUE_MAX_WAIT_MS = (() => {
 	const raw = Number(process.env.REQUEST_QUEUE_MAX_WAIT_MS ?? 15_000);
 	if (!Number.isFinite(raw) || raw <= 0) return 0;
+	return Math.floor(raw);
+})();
+
+const MEMORY_PRESSURE_IDLE_SMALL_BODY_BYPASS_BYTES = (() => {
+	const raw = Number(
+		process.env.MEMORY_PRESSURE_IDLE_SMALL_BODY_BYPASS_BYTES ?? 16 * 1024
+	);
+	if (!Number.isFinite(raw) || raw < 0) return 16 * 1024;
 	return Math.floor(raw);
 })();
 
@@ -645,6 +740,30 @@ const REQUEST_BODY_READ_QUEUE_MAX_PENDING = (() => {
 		process.env.REQUEST_BODY_READ_QUEUE_MAX_PENDING ?? fallback
 	);
 	if (!Number.isFinite(raw) || raw < 0) return fallback;
+	return Math.floor(raw);
+})();
+
+const RESPONSES_QUEUE_CONCURRENCY = (() => {
+	const fallback = Math.max(4, Math.min(REQUEST_QUEUE_CONCURRENCY, 12));
+	const raw = Number(
+		process.env.RESPONSES_QUEUE_CONCURRENCY ?? fallback
+	);
+	if (!Number.isFinite(raw) || raw <= 0) return fallback;
+	return Math.floor(raw);
+})();
+
+const RESPONSES_QUEUE_MAX_PENDING = (() => {
+	const fallback = Math.max(256, RESPONSES_QUEUE_CONCURRENCY * 96);
+	const raw = Number(
+		process.env.RESPONSES_QUEUE_MAX_PENDING ?? fallback
+	);
+	if (!Number.isFinite(raw) || raw < 0) return fallback;
+	return Math.floor(raw);
+})();
+
+const RESPONSES_QUEUE_MAX_WAIT_MS = (() => {
+	const raw = Number(process.env.RESPONSES_QUEUE_MAX_WAIT_MS ?? REQUEST_QUEUE_MAX_WAIT_MS);
+	if (!Number.isFinite(raw) || raw <= 0) return 0;
 	return Math.floor(raw);
 })();
 
@@ -714,3 +833,153 @@ export const requestQueue = new RequestQueue(REQUEST_QUEUE_CONCURRENCY, {
 	maxWaitMs: REQUEST_QUEUE_MAX_WAIT_MS,
 	memoryPressureGuard: true
 });
+
+export const responsesQueue = new RequestQueue(RESPONSES_QUEUE_CONCURRENCY, {
+	label: 'responses-queue',
+	maxPending: RESPONSES_QUEUE_MAX_PENDING,
+	maxWaitMs: RESPONSES_QUEUE_MAX_WAIT_MS,
+	memoryPressureGuard: true
+});
+
+export function getRequestQueueForLane(lane: RequestQueueLane = 'shared'): RequestQueue {
+	return lane === 'responses' ? responsesQueue : requestQueue;
+}
+
+export function getRequestQueueSnapshot(extra: Record<string, unknown> = {}) {
+	const snapshot = requestQueue.snapshot();
+	const concurrency = Math.max(1, Number(snapshot.concurrency) || 0);
+	const maxPending = Math.max(1, Number(snapshot.maxPending) || 0);
+	const inFlight = Math.max(0, Number(snapshot.inFlight) || 0);
+	const pending = Math.max(0, Number(snapshot.pending) || 0);
+	const availableConcurrency = Math.max(0, concurrency - inFlight);
+	const availablePending = Math.max(0, maxPending - pending);
+	const utilization =
+		concurrency > 0 ? Number((inFlight / concurrency).toFixed(3)) : 0;
+	const pendingUtilization =
+		maxPending > 0 ? Number((pending / maxPending).toFixed(3)) : 0;
+	const waitMs = Math.max(0, Number(snapshot.maxWaitMs) || 0);
+	const waitSeconds = Number((waitMs / 1000).toFixed(3));
+	const pressureScore = Number(
+		Math.max(utilization, pendingUtilization).toFixed(3)
+	);
+	const idle = inFlight === 0 && pending === 0;
+	const queueState = idle
+		? 'idle'
+		: inFlight >= concurrency && pending > 0
+			? 'overloaded'
+			: pending > 0
+				? 'backlogged'
+				: inFlight >= concurrency
+					? 'saturated'
+					: 'active';
+		const saturated = inFlight >= concurrency;
+		const nearSaturation = utilization >= 0.9 || pendingUtilization >= 0.9;
+		const backlogged = pending > 0;
+		const overloaded = saturated && pending > 0;
+		const runtimeCapacityPressureOrigin = idle
+			? 'runtime_capacity_idle'
+			: overloaded
+				? 'runtime_capacity_with_queue_overload'
+				: saturated
+					? 'runtime_capacity_with_queue_saturation'
+					: backlogged
+						? 'runtime_capacity_with_queue_backlog'
+						: 'runtime_capacity_with_queue_activity';
+		const waitTimeoutPressureOrigin = overloaded
+			? 'queue_overload'
+			: saturated
+				? 'queue_saturation'
+				: backlogged
+					? 'queue_backlog'
+					: idle
+						? 'queue_idle'
+						: 'queue_activity';
+		const pressureTier = idle
+			? 'idle'
+			: overloaded || pressureScore >= 1
+				? 'critical'
+				: nearSaturation || pressureScore >= 0.9
+					? 'high'
+					: pressureScore >= 0.6
+						? 'elevated'
+						: 'normal';
+		const snapshotAny = snapshot as any;
+		const memoryPressureReasons = Array.isArray(snapshotAny?.memoryPressureReasons)
+			? snapshotAny.memoryPressureReasons.map((reason: unknown) => String(reason || '').toLowerCase())
+			: [];
+		const memoryPressureActive = Boolean(snapshotAny?.memoryPressureActive)
+			|| memoryPressureReasons.length > 0;
+		const swapOnlyPressure =
+			memoryPressureReasons.length > 0 &&
+			memoryPressureReasons.every((reason: string) => reason.includes('swap_used_mb='));
+		const processMemoryBytes = Number(snapshotAny?.memorySnapshot?.rssBytes || 0)
+			+ Number(snapshotAny?.memorySnapshot?.externalBytes || 0)
+			+ Number(snapshotAny?.memorySnapshot?.heapUsedBytes || 0);
+		const processMemoryPressure = processMemoryBytes > 0
+			? processMemoryBytes >= Math.max(1, Math.floor(getSystemMemoryBytes() * 0.7))
+			: false;
+		const runtimeCapacityPressure = memoryPressureActive && idle && (!swapOnlyPressure || processMemoryPressure);
+		const memoryPressureWithLowQueueDepth =
+			memoryPressureActive &&
+			inFlight === 0 &&
+			pending === 0;
+		const runtimeCapacityLikely =
+			idle ||
+			(inFlight <= 1 && pending === 0) ||
+			(memoryPressureActive && !overloaded && pending <= Math.max(64, Math.floor(maxPending * 0.05)));
+		const runtimeCapacityPressureLikely = Boolean(
+			memoryPressureActive && (idle || (inFlight <= Math.max(1, Math.ceil(concurrency * 0.25)) && pending <= 1))
+		)
+			|| Boolean(snapshotAny?.memoryPressure?.active)
+			|| Boolean(snapshotAny?.memoryPressure?.reasons?.length);
+		const memoryPressureLikely = memoryPressureActive || (runtimeCapacityLikely && pressureTier !== 'critical');
+		const operatorRecoveryHint = memoryPressureLikely
+			? 'Runtime memory pressure is likely dominating over queue contention; reduce rss/external/swap usage, recycle the worker, or shed large requests before increasing concurrency.'
+			: overloaded
+				? 'Queue contention is likely contributing; reduce intake rate or add capacity before retry amplification builds.'
+				: 'Retry after a short delay and inspect queue occupancy plus runtime memory snapshots if pressure persists.';
+		const failureOriginHint = memoryPressureLikely
+			? 'runtime_capacity'
+			: overloaded || saturated
+				? 'request_queue'
+				: 'mixed';
+		const bottleneckHint = memoryPressureLikely
+			? 'memory-pressure'
+			: overloaded
+				? 'queue-overload'
+				: backlogged
+					? 'queue-backlog'
+					: saturated
+						? 'concurrency-saturation'
+						: 'none';
+		const bottleneck = memoryPressureLikely
+			? 'memory-pressure'
+			: runtimeCapacityLikely
+				? 'runtime-capacity'
+				: 'queue-capacity';
+		const failureOrigin = memoryPressureLikely
+			? 'memory_pressure'
+			: runtimeCapacityLikely
+				? 'runtime_capacity'
+				: 'queue_capacity';
+		const healthSummary = `${queueState}|tier=${pressureTier}|bottleneck=${bottleneck}|origin=${failureOrigin}|u=${utilization.toFixed(2)}|p=${pendingUtilization.toFixed(2)}|w=${waitMs}ms|in=${inFlight}/${concurrency}|q=${pending}/${maxPending}`;
+		return {
+		...snapshot,
+		utilization,
+		pendingUtilization,
+		pressureScore,
+		pressureTier,
+		availableConcurrency,
+		availablePending,
+		waitMs,
+		waitSeconds,
+		idle,
+		queueState,
+		healthSummary,
+		saturated,
+		nearSaturation,
+		backlogged,
+		overloaded,
+		...extra
+	};
+}

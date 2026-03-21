@@ -9,15 +9,46 @@
 
 export function isRateLimitOrQuotaError(error: any): boolean {
 	const message = String(error?.message || error || '').toLowerCase();
-	if (!message) return false;
+	const code = String(error?.code || error?.errorDetails?.code || '').toLowerCase();
+	const status = Number(error?.status || error?.statusCode || error?.response?.status || error?.errorDetails?.statusCode || 0);
+	if (!message && !code && !status) return false;
+	const memoryPressureLike =
+		code === 'memory_pressure' ||
+		message.includes('memory pressure') ||
+		message.includes('rejected under memory pressure') ||
+		message.includes('swap_used_mb=') ||
+		message.includes('rss_mb=') ||
+		message.includes('active_runtime_mb=') ||
+		message.includes('external_mb=') ||
+		message.includes('heap_used_mb=');
+	if (memoryPressureLike) return false;
 	return (
 		message.includes('rate limit') ||
 		message.includes('rate_limit') ||
 		message.includes('resource_exhausted') ||
 		message.includes('quota exceeded') ||
+		message.includes('quota exhausted') ||
+		message.includes('insufficient credits') ||
+		message.includes('insufficient credit') ||
+		message.includes('payment required') ||
+		message.includes('billing') ||
+		message.includes('credits') ||
 		message.includes('too many requests') ||
 		message.includes('status 429') ||
-		message.includes(' 429 ')
+		message.includes(' 429 ') ||
+		message.includes('status 402') ||
+		message.includes(' 402 ') ||
+		code === 'insufficient_quota' ||
+		code === 'insufficient_credits' ||
+		code === 'payment_required' ||
+		status === 402 ||
+		message.includes('currently experiencing high demand') ||
+		message.includes('spikes in demand are usually temporary') ||
+		(message.includes('status": "unavailable"') ||
+			message.includes("status': 'unavailable'") ||
+			message.includes('"status": "unavailable"') ||
+			message.includes("'status': 'unavailable'")) ||
+		(status === 503 && message.includes('overload'))
 	);
 }
 
@@ -247,9 +278,138 @@ export function isModelAccessError(error: any): boolean {
 
 // --- Tool Unsupported ---
 
-export function isToolUnsupportedError(error: any): boolean {
+export function isProviderAuthConfigurationError(error: any): boolean {
 	const message = String(error?.message || error || '').toLowerCase();
 	if (!message) return false;
+	return (
+		message.includes('invalid api key') ||
+		message.includes('incorrect api key') ||
+		message.includes('api key not found') ||
+		message.includes('api_key_invalid') ||
+		message.includes('invalid_api_key') ||
+		message.includes('authentication') ||
+		message.includes('unauthorized') ||
+		message.includes('forbidden') ||
+		message.includes('please pass a valid api key') ||
+		message.includes('you can find your api key at https://platform.openai.com/account/api-keys')
+	);
+}
+
+export function isTransientProviderGatewayError(error: any): boolean {
+	const status = Number(error?.response?.status || error?.status || error?.statusCode || 0);
+	const message = String(error?.message || error || '').toLowerCase();
+	if (status === 502 || status === 503 || status === 504 || status === 520) return true;
+	if (!message) return false;
+	const hasHtmlGatewayBody =
+		message.includes('<html') &&
+		(
+			message.includes('502 bad gateway') ||
+			message.includes('503 service unavailable') ||
+			message.includes('504 gateway timeout')
+		);
+	return (
+		hasHtmlGatewayBody ||
+		message.includes('bad gateway') ||
+		message.includes('gateway timeout') ||
+		message.includes('service unavailable') ||
+		message.includes('upstream connect error') ||
+		message.includes('upstream request timeout') ||
+		message.includes('cloudflare') ||
+		message.includes('memory pressure') ||
+		message.includes('request-queue rejected under memory pressure') ||
+		message.includes('empty streaming response') ||
+		message.includes('returned an empty streaming response')
+	);
+}
+
+export function isInvalidApiKeyError(error: any): boolean {
+	const status = Number(error?.response?.status || error?.status || 0);
+	const message = String(error?.message || error || '').toLowerCase();
+	if (!message) return false;
+	return (
+		status === 401 ||
+		(status === 400 && (
+			message.includes('invalid api key') ||
+			message.includes('incorrect api key provided') ||
+			message.includes('invalid_api_key') ||
+			message.includes('api key not found') ||
+			message.includes('api_key_invalid') ||
+			message.includes('api key expired') ||
+			message.includes('api key not valid') ||
+			message.includes('you can find your api key at https://platform.openai.com/account/api-keys')
+		)) ||
+		message.includes('invalid api key') ||
+		message.includes('incorrect api key provided') ||
+		message.includes('invalid_api_key') ||
+		message.includes('api key not found') ||
+		message.includes('api_key_invalid') ||
+		message.includes('api key expired') ||
+		message.includes('api key not valid') ||
+		message.includes('you can find your api key at https://platform.openai.com/account/api-keys')
+	);
+}
+
+export function isMemoryPressureError(error: any): boolean {
+	const message = String(error?.message || error || '').toLowerCase();
+	const code = String(error?.code || error?.errorDetails?.code || '').toUpperCase();
+	const status = Number(error?.status || error?.statusCode || error?.errorDetails?.statusCode || 0);
+	if (code === 'MEMORY_PRESSURE') return true;
+	if (!message) return false;
+	if (
+		message.includes('memory pressure') ||
+		message.includes('rejected under memory pressure') ||
+		message.includes('request-queue rejected under memory pressure') ||
+		message.includes('service temporarily unavailable: request-queue rejected under memory pressure') ||
+		message.includes('swap_used_mb=') ||
+		message.includes('rss_mb=')
+	) {
+		return true;
+	}
+	return status === 503 && (
+		message.includes('service temporarily unavailable') &&
+		(message.includes('request-queue') || message.includes('chat-completions:intake')) &&
+		(message.includes('swap') || message.includes('rss') || message.includes('content_length='))
+	);
+}
+
+export function isProviderAuthOrConfigurationError(error: any): boolean {
+	const message = String(error?.message || error || '').toLowerCase();
+	const code = String(error?.code || error?.errorDetails?.code || '').toLowerCase();
+	const status = Number(error?.status || error?.statusCode || error?.errorDetails?.statusCode || 0);
+	if (!message && !code && !status) return false;
+	return (
+		code === 'invalid_api_key' ||
+		code === 'api_key_invalid' ||
+		status === 401 ||
+		message.includes('invalid api key') ||
+		message.includes('incorrect api key provided') ||
+		message.includes('api key not valid') ||
+		message.includes('invalid_api_key') ||
+		message.includes('api_key_invalid') ||
+		message.includes('you can find your api key at https://platform.openai.com/account/api-keys') ||
+		message.includes('unauthorized') ||
+		message.includes('authentication failed')
+	);
+}
+
+export function isToolUnsupportedError(error: any): boolean {
+	const message = String(error?.message || error || '').toLowerCase();
+	const status = Number(error?.status || error?.statusCode || error?.response?.status || 0);
+	if (!message) return false;
+
+	if (
+		status === 404 &&
+		message.includes('no endpoints found') &&
+		(
+			message.includes('tool use') ||
+			message.includes('tool_choice') ||
+			message.includes('the tool') ||
+			message.includes('support the provided') ||
+			message.includes('supports the provided')
+		)
+	) {
+		return true;
+	}
 
 	const patterns = [
 		"unsupported parameter: 'tools'",
@@ -265,17 +425,36 @@ export function isToolUnsupportedError(error: any): boolean {
 		'tool calling is not supported',
 		'tool_calls is not supported',
 		'tool_choice is not supported',
+		'tool choice must be auto',
+		'the provided tool_choice value',
 		'tools are not supported',
 		'tools is not supported',
 		'tools not supported',
 		'does not support tools',
 		'does not support tool',
 		'function calling is not supported',
-		'function_call is not supported'
+		'function_call is not supported',
+		'no endpoints found that support tool use',
+		'no endpoints found that support the tool',
+		"no endpoints found that support the provided 'tool_choice' value",
+		'no endpoints found that support the provided tool_choice value',
+		'client side tool is not supported for multi-agent models',
+		'client-side tools for multi-agent models require beta access',
+		'requires beta access',
+		'requires that either input content or output modality contain audio',
+		'this model requires that either input content or output modality contain audio',
+		'requires audio input',
+		'requires audio output',
+		'audio-only',
+		'audio only'
 	];
 
 	if (patterns.some(pattern => message.includes(pattern))) return true;
 	if (message.includes('tools') && message.includes('not supported'))
+		return true;
+	if (message.includes('tool use') && message.includes('no endpoints found'))
+		return true;
+	if (message.includes('output modality') && message.includes('audio'))
 		return true;
 	return false;
 }

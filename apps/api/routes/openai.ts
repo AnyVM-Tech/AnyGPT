@@ -7,6 +7,7 @@ import { messageHandler } from '../providers/handler.js';
 import { IMessage, type ModelCapability } from '../providers/interfaces.js';
 import {
 	type StoredResponsesHistoryEntry,
+	type ResponsesHistoryStoragePlan,
 	buildResponsesHistoryStoragePlan,
 	cloneResponsesHistoryValue,
 	loadResponsesHistoryEntry,
@@ -24,11 +25,20 @@ import {
 	buildResponsesOutputItemDoneEvent,
 	buildResponsesOutputTextDeltaEvent,
 	buildResponsesOutputTextDoneEvent,
+	buildResponsesUsage,
 	buildResponsesResponseObject,
 	createResponsesItemId,
 	createResponsesMessageItem,
 	createResponsesReasoningItem
 } from '../modules/openaiResponsesFormat.js';
+import {
+	buildResponsesCompactionSummary,
+	createResponsesCompactionItem,
+	estimateResponsesCompactionTokens,
+	expandResponsesCompactionItems,
+	findResponsesCompactionKeepStartIndex,
+	resolveResponsesCompactionThreshold
+} from '../modules/responsesCompaction.js';
 import {
 	extractTextFromContent,
 	extractInputAudioFromContent,
@@ -189,6 +199,7 @@ const INTERACTIONS_TOKEN_TTL_SECONDS = 15 * 60;
 const rateLimitMiddleware = createRateLimitMiddleware(requestTimestamps);
 const CHAT_COMPLETIONS_INTAKE_LABEL = 'chat-completions:intake';
 const RESPONSES_INTAKE_LABEL = 'responses:intake';
+const RESPONSES_COMPACT_INTAKE_LABEL = 'responses-compact:intake';
 const AZURE_CHAT_COMPLETIONS_INTAKE_LABEL = 'azure-chat-completions:intake';
 
 function writeResponsesSseEvent(
@@ -515,6 +526,19 @@ async function parseChatCompletionsRequestBody(
 	);
 }
 
+function normalizeResponsesInputValue(rawInput: any): any[] {
+	if (Array.isArray(rawInput)) {
+		return rawInput;
+	}
+	if (typeof rawInput === 'string') {
+		return [{ type: 'input_text', text: rawInput }];
+	}
+	if (rawInput && typeof rawInput === 'object') {
+		return [rawInput];
+	}
+	throw new Error('input must be a string, array, or object.');
+}
+
 function extractResponsesRequestBody(requestBody: any): {
 	message: IMessage;
 	modelId: string;
@@ -545,16 +569,7 @@ function extractResponsesRequestBody(requestBody: any): {
 		throw new Error('input is required for the responses API.');
 	}
 
-	let normalizedInput: any;
-	if (Array.isArray(rawInput)) {
-		normalizedInput = rawInput;
-	} else if (typeof rawInput === 'string') {
-		normalizedInput = [{ type: 'input_text', text: rawInput }];
-	} else if (typeof rawInput === 'object') {
-		normalizedInput = [rawInput];
-	} else {
-		throw new Error('input must be a string, array, or object.');
-	}
+	const normalizedInput = normalizeResponsesInputValue(rawInput);
 
 	const maxTokens =
 		typeof requestBody.max_tokens === 'number'
@@ -2711,6 +2726,169 @@ openaiRouter.post(
 );
 
 openaiRouter.post(
+	'/responses/compact',
+	async (request: Request, response: Response) => {
+		if (!request.apiKey || !request.tierLimits) {
+			await logError(
+				{
+					message:
+						'Authentication or configuration failed in /v1/responses/compact after middleware'
+				},
+				request
+			);
+			if (!response.completed) {
+				return response.status(401).json({
+					error: 'Authentication or configuration failed',
+					timestamp: new Date().toISOString()
+				});
+			}
+			return;
+		}
+
+		try {
+			const requestBody = await readJsonRequestBody(request, {
+				label: RESPONSES_COMPACT_INTAKE_LABEL,
+				extra: { route: '/v1/responses/compact' }
+			});
+
+			if (
+				!requestBody?.model ||
+				typeof requestBody.model !== 'string' ||
+				!requestBody.model.trim()
+			) {
+				return response.status(400).json({
+					error: {
+						message: 'model parameter is required.',
+						type: 'invalid_request_error',
+						param: 'model',
+						code: 'invalid_model'
+					},
+					timestamp: new Date().toISOString()
+				});
+			}
+
+			const modelId = requestBody.model.trim();
+			const previousResponseId =
+				typeof requestBody?.previous_response_id === 'string' &&
+				requestBody.previous_response_id.trim()
+					? requestBody.previous_response_id.trim()
+					: undefined;
+
+			let normalizedInput: any[] = [];
+			if (typeof requestBody?.input !== 'undefined') {
+				try {
+					normalizedInput = normalizeResponsesInputValue(
+						requestBody.input
+					);
+				} catch (error: any) {
+					return response.status(400).json({
+						error: {
+							message:
+								error?.message || 'input must be a string, array, or object.',
+							type: 'invalid_request_error',
+							param: 'input',
+							code: 'invalid_input'
+						},
+						timestamp: new Date().toISOString()
+					});
+				}
+			}
+
+			let sourceInput = cloneResponsesHistoryValue(normalizedInput);
+			if (previousResponseId) {
+				const previousEntry = await loadResponsesHistoryEntry(
+					previousResponseId
+				);
+				if (!previousEntry) {
+					return response.status(400).json({
+						error: {
+							message: `Previous response with id '${previousResponseId}' not found.`,
+							type: 'invalid_request_error',
+							param: 'previous_response_id',
+							code: 'previous_response_not_found'
+						},
+						timestamp: new Date().toISOString()
+					});
+				}
+				const mergedHistory = await mergeResponsesHistoryInput(
+					previousEntry,
+					sourceInput
+				);
+				sourceInput = cloneResponsesHistoryValue(mergedHistory.input);
+			}
+
+			if (!Array.isArray(sourceInput) || sourceInput.length === 0) {
+				return response.status(400).json({
+					error: {
+						message:
+							'input or previous_response_id is required for responses compaction.',
+						type: 'invalid_request_error',
+						param: 'input',
+						code: 'invalid_input'
+					},
+					timestamp: new Date().toISOString()
+				});
+			}
+
+			const summaryText =
+				buildResponsesCompactionSummary(sourceInput);
+			const createdAt = Math.floor(Date.now() / 1000);
+			const responseId = `resp_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+			const compactionItem = createResponsesCompactionItem({
+				model: modelId,
+				summary: summaryText,
+				sourceItemCount: sourceInput.length,
+				createdAt
+			});
+			const outputItems = [compactionItem];
+			const inputTokens = estimateResponsesCompactionTokens(sourceInput);
+			const outputTokens = estimateResponsesCompactionTokens(outputItems);
+
+			await saveResponsesHistoryEntry({
+				id: responseId,
+				model: modelId,
+				input: cloneResponsesHistoryValue(outputItems),
+				output: [],
+				output_text: '',
+				created: createdAt,
+				replay_depth: 1,
+				compacted: true
+			});
+
+			return response.json({
+				id: responseId,
+				object: 'response.compaction',
+				created_at: createdAt,
+				model: modelId,
+				output: outputItems,
+				usage: buildResponsesUsage({
+					input_tokens: inputTokens,
+					output_tokens: outputTokens,
+					total_tokens: inputTokens + outputTokens
+				})
+			});
+		} catch (error: any) {
+			await logError(error, request);
+			const timestamp = new Date().toISOString();
+			const message =
+				typeof error?.message === 'string' && error.message.trim()
+					? error.message
+					: 'Internal Server Error';
+			if (!response.completed) {
+				return response.status(500).json({
+					error: {
+						message,
+						type: 'server_error',
+						code: 'internal_error'
+					},
+					timestamp
+				});
+			}
+		}
+	}
+);
+
+openaiRouter.post(
 	'/responses',
 	async (request: Request, response: Response) => {
 		if (!request.apiKey || !request.tierLimits) {
@@ -2824,9 +3002,14 @@ openaiRouter.post(
 			const responsesHistoryInputDelta = Array.isArray(message.content)
 				? cloneResponsesHistoryValue(message.content)
 				: [cloneResponsesHistoryValue(message.content)];
-			let responsesHistoryMergedInput = cloneResponsesHistoryValue(
-				responsesHistoryInputDelta
-			);
+			let responsesHistoryExpandedInputDelta: any[] =
+				cloneResponsesHistoryValue(
+					responsesHistoryInputDelta
+				) as any[];
+			let responsesHistoryMergedInput: any[] =
+				cloneResponsesHistoryValue(
+					responsesHistoryInputDelta
+				) as any[];
 			const localPreviousResponseId =
 				typeof message.previous_response_id === 'string' &&
 				message.previous_response_id.trim()
@@ -2879,6 +3062,95 @@ openaiRouter.post(
 					return;
 				}
 				delete (message as any).previous_response_id;
+			}
+			if (Array.isArray(message.content)) {
+				try {
+					message.content = expandResponsesCompactionItems(
+						message.content
+					);
+					responsesHistoryExpandedInputDelta =
+						expandResponsesCompactionItems(
+							responsesHistoryExpandedInputDelta
+						);
+				} catch (compactionError: any) {
+					if (!response.completed) {
+						return response.status(400).json({
+							error: {
+								message:
+									compactionError?.message ||
+									'Compaction input could not be decoded.',
+								type: 'invalid_request_error',
+								param: 'input',
+								code: 'invalid_compaction_item'
+							},
+							timestamp: new Date().toISOString()
+						});
+					}
+					return;
+				}
+			}
+			let inlineCompactionItem: Record<string, any> | null = null;
+			let inlineCompactionHistoryStoragePlan:
+				| ResponsesHistoryStoragePlan
+				| null = null;
+			const inlineCompactThreshold =
+				resolveResponsesCompactionThreshold(
+					requestBody?.context_management ??
+						requestBody?.extra_body?.context_management
+				);
+			if (
+				inlineCompactThreshold &&
+				Array.isArray(message.content) &&
+				message.content.length > 1
+			) {
+				const fullInputItems = cloneResponsesHistoryValue(
+					message.content
+				);
+				const keepTailCount =
+					localPreviousResponseId &&
+					Array.isArray(responsesHistoryExpandedInputDelta) &&
+					responsesHistoryExpandedInputDelta.length > 0 &&
+					fullInputItems.length >
+						responsesHistoryExpandedInputDelta.length
+						? responsesHistoryExpandedInputDelta.length
+						: undefined;
+				const keepStartIndex =
+					findResponsesCompactionKeepStartIndex(
+						fullInputItems,
+						keepTailCount
+					);
+				const compactedHead = fullInputItems.slice(0, keepStartIndex);
+				const keptTail = fullInputItems.slice(keepStartIndex);
+				const estimatedInputTokens =
+					estimateResponsesCompactionTokens(fullInputItems);
+				if (
+					estimatedInputTokens > inlineCompactThreshold &&
+					compactedHead.length > 0 &&
+					keptTail.length > 0
+				) {
+					inlineCompactionItem = createResponsesCompactionItem({
+						model: modelId,
+						summary:
+							buildResponsesCompactionSummary(compactedHead),
+						sourceItemCount: compactedHead.length,
+						createdAt: Math.floor(Date.now() / 1000)
+					});
+					const compactedInput: any[] = [
+						inlineCompactionItem,
+						...keptTail
+					];
+					(message as any).content =
+						expandResponsesCompactionItems(
+							cloneResponsesHistoryValue(compactedInput)
+						);
+					responsesHistoryMergedInput =
+						cloneResponsesHistoryValue(compactedInput);
+					inlineCompactionHistoryStoragePlan = {
+						input: cloneResponsesHistoryValue(compactedInput),
+						replay_depth: 1,
+						compacted: true
+					};
+				}
 			}
 			message.service_tier = getServiceTierForUserTier(request.userTier);
 			const imageFetchReferer = normalizeImageFetchReferer(
@@ -2984,6 +3256,14 @@ openaiRouter.post(
 				created,
 				model: modelId
 			};
+			const resolveResponsesHistoryStoragePlan =
+				(): ResponsesHistoryStoragePlan =>
+					inlineCompactionHistoryStoragePlan || 
+					buildResponsesHistoryStoragePlan({
+						previousEntry: previousResponsesHistoryEntry,
+						inputDelta: responsesHistoryInputDelta,
+						fullInput: responsesHistoryMergedInput
+					});
 
 			if (effectiveStream) {
 				response.setHeader('Content-Type', 'text/event-stream');
@@ -3019,6 +3299,7 @@ openaiRouter.post(
 					let completionTokensFinal: number | undefined;
 					let responsesCreatedSent = false;
 					let responsesTextItemStarted = false;
+					let inlineCompactionItemEmitted = false;
 					let pendingReasoningText = '';
 					let streamedReasoningText = '';
 					const canInferResponsesToolCallsFromText =
@@ -3033,16 +3314,11 @@ openaiRouter.post(
 						totalTokens: number,
 						promptTokens: number | undefined,
 						completionTokens: number | undefined,
-						toolCalls: any[] | undefined
-					) => {
+							toolCalls: any[] | undefined
+						) => {
 						void (async () => {
 							const historyStoragePlan =
-								buildResponsesHistoryStoragePlan({
-									previousEntry:
-										previousResponsesHistoryEntry,
-									inputDelta: responsesHistoryInputDelta,
-									fullInput: responsesHistoryMergedInput
-								});
+								resolveResponsesHistoryStoragePlan();
 								try {
 									await saveResponsesHistoryEntry({
 										id: responseId,
@@ -3099,7 +3375,10 @@ openaiRouter.post(
 					};
 
 					const getAssistantOutputIndex = () =>
-						reasoningItemStarted ? 1 : 0;
+						(inlineCompactionItem ? 1 : 0) +
+						(reasoningItemStarted ? 1 : 0);
+					const getReasoningOutputIndex = () =>
+						inlineCompactionItem ? 1 : 0;
 
 					const ensureResponsesCreated = () => {
 						if (responsesCreatedSent) return;
@@ -3115,8 +3394,32 @@ openaiRouter.post(
 						responsesCreatedSent = true;
 					};
 
+					const ensureInlineCompactionItemEmitted = () => {
+						if (!inlineCompactionItem || inlineCompactionItemEmitted)
+							return;
+						ensureResponsesCreated();
+						writeResponsesSseEvent(
+							response,
+							buildResponsesOutputItemAddedEvent({
+								responseId,
+								outputIndex: 0,
+								item: inlineCompactionItem
+							})
+						);
+						writeResponsesSseEvent(
+							response,
+							buildResponsesOutputItemDoneEvent({
+								responseId,
+								outputIndex: 0,
+								item: inlineCompactionItem
+							})
+						);
+						inlineCompactionItemEmitted = true;
+					};
+
 					const ensureResponsesTextItemStarted = () => {
 						ensureResponsesCreated();
+						ensureInlineCompactionItemEmitted();
 						if (responsesTextItemStarted) return;
 						writeResponsesSseEvent(
 							response,
@@ -3144,12 +3447,13 @@ openaiRouter.post(
 
 					const ensureResponsesReasoningItemStarted = () => {
 						ensureResponsesCreated();
+						ensureInlineCompactionItemEmitted();
 						if (reasoningItemStarted) return;
 						writeResponsesSseEvent(
 							response,
 							buildResponsesOutputItemAddedEvent({
 								responseId,
-								outputIndex: 0,
+								outputIndex: getReasoningOutputIndex(),
 								item: createResponsesReasoningItem('', {
 									id: reasoningItemId,
 									status: 'in_progress'
@@ -3160,7 +3464,7 @@ openaiRouter.post(
 							type: 'response.reasoning_summary_part.added',
 							response_id: responseId,
 							item_id: reasoningItemId,
-							output_index: 0,
+							output_index: getReasoningOutputIndex(),
 							summary_index: 0,
 							part: { type: 'summary_text', text: '' }
 						});
@@ -3592,6 +3896,14 @@ openaiRouter.post(
 							total_tokens: totalTokenUsage
 						}
 					});
+					if (inlineCompactionItem) {
+						finalPayload.output = [
+							inlineCompactionItem,
+							...(Array.isArray(finalPayload.output)
+								? finalPayload.output
+								: [])
+						];
+					}
 
 					const finalOutputItems = Array.isArray(finalPayload.output)
 						? finalPayload.output
@@ -3601,7 +3913,7 @@ openaiRouter.post(
 							type: 'response.reasoning_summary_text.done',
 							response_id: responseId,
 							item_id: reasoningItemId,
-							output_index: 0,
+							output_index: getReasoningOutputIndex(),
 							summary_index: 0,
 							text: streamedReasoningText
 						});
@@ -3609,7 +3921,7 @@ openaiRouter.post(
 							type: 'response.reasoning_summary_part.done',
 							response_id: responseId,
 							item_id: reasoningItemId,
-							output_index: 0,
+							output_index: getReasoningOutputIndex(),
 							summary_index: 0,
 							part: {
 								type: 'summary_text',
@@ -3620,7 +3932,7 @@ openaiRouter.post(
 							response,
 							buildResponsesOutputItemDoneEvent({
 								responseId,
-								outputIndex: 0,
+								outputIndex: getReasoningOutputIndex(),
 								item: createResponsesReasoningItem(
 									streamedReasoningText,
 									{ id: reasoningItemId, status: 'completed' }
@@ -3680,6 +3992,7 @@ openaiRouter.post(
 					for (const [index, item] of finalOutputItems.entries()) {
 						if (item?.type !== 'function_call') continue;
 						ensureResponsesCreated();
+						ensureInlineCompactionItemEmitted();
 						writeResponsesSseEvent(
 							response,
 							buildResponsesOutputItemAddedEvent({
@@ -3792,26 +4105,31 @@ openaiRouter.post(
 				const responseBody = buildResponsesResponseObject({
 					id: responseId,
 					created,
-				model: modelId,
-				outputText,
-				toolCalls: effectiveToolCalls,
-				reasoningText:
-					typeof result.reasoning === 'string'
-						? result.reasoning
-						: undefined,
-				status: 'completed',
-				usage: {
-					input_tokens: promptTokensUsed,
-					output_tokens: completionTokensUsed,
-					total_tokens: totalTokensUsed
+					model: modelId,
+					outputText,
+					toolCalls: effectiveToolCalls,
+					reasoningText:
+						typeof result.reasoning === 'string'
+							? result.reasoning
+							: undefined,
+					status: 'completed',
+					usage: {
+						input_tokens: promptTokensUsed,
+						output_tokens: completionTokensUsed,
+						total_tokens: totalTokensUsed
+					}
+				});
+				if (inlineCompactionItem) {
+					responseBody.output = [
+						inlineCompactionItem,
+						...(Array.isArray(responseBody.output)
+							? responseBody.output
+							: [])
+					];
 				}
-				});
 
-				const historyStoragePlan = buildResponsesHistoryStoragePlan({
-					previousEntry: previousResponsesHistoryEntry,
-					inputDelta: responsesHistoryInputDelta,
-					fullInput: responsesHistoryMergedInput
-				});
+				const historyStoragePlan =
+					resolveResponsesHistoryStoragePlan();
 				await saveResponsesHistoryEntry({
 					id: responseId,
 					model: modelId,

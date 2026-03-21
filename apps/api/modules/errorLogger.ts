@@ -4,8 +4,44 @@ import crypto from 'crypto';
 import redis from '../modules/db.js'; // Import redis client
 import type { Request } from '../lib/uws-compat.js';
 import { logger } from './logger.js';
-import { isInsufficientCreditsError, isModelAccessError } from './errorClassification.js';
+import { isInsufficientCreditsError, isModelAccessError, isInvalidApiKeyError } from './errorClassification.js';
 import { hashToken, redactToken } from './redaction.js';
+
+function sanitizeProviderErrorText(value: string): string {
+	if (!value) return value;
+	return value
+		.replace(/\bsk(?:-proj)?-[A-Za-z0-9_*.-]{8,}\b/g, '[redacted-api-key]')
+		.replace(/sk-proj-[A-Za-z0-9_*.-]{16,}/gi, '[redacted-api-key]')
+		.replace(/sk-proj-[*A-Za-z0-9._-]{12,}/gi, '[redacted-api-key]')
+		.replace(/sk-proj-[*A-Za-z0-9._-]+/gi, '[redacted-api-key]')
+		.replace(/sk-proj-[^\s,;)'"\]}]+/gi, '[redacted-api-key]')
+		.replace(/\bAIza[0-9A-Za-z\-_]{16,}\b/g, '[redacted-api-key]')
+		.replace(/\b(?:api[_-]?key|authorization)\b\s*[:=]\s*(?:bearer\s+)?(?:"[^"]+"|'[^']+'|[^\s,;]+)/gi, (match) => {
+			const separatorMatch = match.match(/[:=]/);
+			const separator = separatorMatch ? separatorMatch[0] : ':';
+			const label = match.toLowerCase().includes('authorization') ? 'authorization' : 'api_key';
+			return `${label}${separator} [redacted]`;
+		})
+		.replace(/\bauthorization\b\s*[:=]\s*bearer\s+[A-Za-z0-9._\-]+/gi, 'authorization: [redacted]');
+}
+
+function sanitizeProviderErrorValue<T>(value: T): T {
+	if (typeof value === 'string') {
+		return sanitizeProviderErrorText(value) as T;
+	}
+	if (Array.isArray(value)) {
+		return value.map((entry) => sanitizeProviderErrorValue(entry)) as T;
+	}
+	if (value && typeof value === 'object') {
+		return Object.fromEntries(
+			Object.entries(value as Record<string, unknown>).map(([key, entry]) => [
+				key,
+				sanitizeProviderErrorValue(entry),
+			])
+		) as T;
+	}
+	return value;
+}
 
 const logDirectory = path.resolve(process.cwd(), 'logs'); // Logs at the workspace root
 const errorLogFilePath = path.join(logDirectory, 'api-errors.jsonl');

@@ -8,7 +8,7 @@
     "apps/*"
   ],
   "scripts": {
-    "build": "tsc -b",
+    "build": "bash ./scripts/with-bun-path.sh ./node_modules/.bin/turbo run build",
     "dev": "bash ./scripts/with-bun-path.sh ./node_modules/.bin/turbo run dev",
     "frontend:dev": "bash ./scripts/run-frontend-stack.sh dev",
     "frontend:start": "bash ./scripts/run-frontend-stack.sh start",
@@ -17,7 +17,11 @@
     "typecheck": "tsc --noEmit",
     "format": "prettier --write ./",
     "prepare": "husky",
-    "setup": "bash ./bun.sh run -F anygpt-api setup"
+    "setup": "bash ./bun.sh run -F anygpt-api setup",
+    "control-plane:autonomous:start": "bash ./scripts/control-plane-autonomous-runner.sh start",
+    "control-plane:autonomous:status": "bash ./scripts/control-plane-autonomous-runner.sh status",
+    "control-plane:autonomous:stop": "bash ./scripts/control-plane-autonomous-runner.sh stop",
+    "control-plane:autonomous:restart": "bash ./scripts/control-plane-autonomous-runner.sh restart"
   },
   "devDependencies": {
     "eslint": "^8.57.1",

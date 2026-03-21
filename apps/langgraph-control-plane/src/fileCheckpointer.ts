@@ -187,6 +187,26 @@ export class FileMemorySaver extends MemorySaver {
     };
   }
 
+  private quarantineInvalidSnapshot(error: unknown): void {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`[langgraph-control-plane] Invalid checkpoint snapshot at ${this.filePath}; starting from an empty checkpoint. ${message}`);
+    if (!fs.existsSync(this.filePath)) return;
+
+    const quarantinedPath = `${this.filePath}.corrupt-${Date.now()}`;
+    try {
+      fs.renameSync(this.filePath, quarantinedPath);
+      console.warn(`[langgraph-control-plane] Moved invalid checkpoint snapshot to ${quarantinedPath}`);
+    } catch (renameError) {
+      const renameMessage = renameError instanceof Error ? renameError.message : String(renameError);
+      console.warn(`[langgraph-control-plane] Failed to move invalid checkpoint snapshot aside: ${renameMessage}`);
+      try {
+        fs.rmSync(this.filePath, { force: true });
+      } catch {
+        // Ignore cleanup failures; setup will still rebuild from empty state if the file cannot be removed.
+      }
+    }
+  }
+
   private async persist(): Promise<void> {
     fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
     const tempPath = `${this.filePath}.tmp`;
@@ -197,7 +217,13 @@ export class FileMemorySaver extends MemorySaver {
   async setup(): Promise<void> {
     if (this.loaded) return;
 
-    const snapshot = this.readSnapshot();
+    let snapshot: PersistedMemorySnapshot | undefined;
+    try {
+      snapshot = this.readSnapshot();
+    } catch (error) {
+      this.quarantineInvalidSnapshot(error);
+      snapshot = undefined;
+    }
     this.storage = restoreStorage(snapshot?.storage);
     this.writes = restoreWrites(snapshot?.writes);
     this.storage = compactStorage(this.storage as InMemoryStorage);

@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { END, MemorySaver, START, StateGraph, interrupt } from '@langchain/langgraph';
+import { END, START, StateGraph, interrupt, type BaseStore, type Runtime } from '@langchain/langgraph';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { commandOptions, createClient } from 'redis';
@@ -16,10 +16,12 @@ import {
   AutonomousEditSessionManifestSchema,
   applyAutonomousEditsWithManifest,
   checkAutonomousEditPath,
+  preflightAutonomousEditAction,
   readAutonomousEditContext,
   rollbackAutonomousEditSession,
 } from './autonomousEdits.js';
 import { FileMemorySaver } from './fileCheckpointer.js';
+import { PersistentSemanticMemoryStore } from './semanticMemoryStore.js';
 import {
   collectLangSmithClientSnapshot,
   collectLangSmithGovernanceSnapshot,
@@ -395,12 +397,27 @@ const CONTROL_PLANE_PROMPT_LIFECYCLE_CHANNELS = ['candidate', 'default', 'live']
 const CONTROL_PLANE_LANGSMITH_PROJECT_DESCRIPTION = 'AnyGPT LangGraph control plane runtime project with bounded workspace/project governance automation';
 const CONTROL_PLANE_GOVERNANCE_PROFILE_FILE = 'apps/langgraph-control-plane/governance-profiles.json';
 
+const DEFAULT_CONTROL_PLANE_AUTONOMOUS_EDIT_PROMPT = [
+  'You are the autonomous code edit agent for the AnyGPT LangGraph control plane. Produce only safe, bounded code changes within the allowlist and prefer the smallest viable edit.',
+  'Treat provider-bound failures (for example upstream API incompatibility, unsupported endpoint or mode combinations such as streaming or multi-agent restrictions, unsupported tool-calling or tool_choice combinations reported by an upstream router or provider, invalid API keys, disabled upstream APIs or projects, quota or payment exhaustion, repeated invalid upstream response structures, repeated empty streaming responses for the same model or endpoint, repeated upstream OpenAI-compatible streaming server_error responses for the same model or endpoint, repeated provider catalog or list-model auth failures, repeated Gemini ListModels 400/401/403 failures indicating disabled APIs, forbidden projects, expired or invalid API keys, or missing upstream activation, memory-pressure queue rejections caused by high rss/external/runtime usage without a clear local leak in the candidate files, or non-retryable remote media fetch failures) as ambiguous for direct repair unless a clear local guard, fallback, validation, routing, provider-selection fix, failure-origin classification improvement, bounded candidate prioritization improvement, operator-facing recovery note, or bounded local load-shedding improvement is visible in the provided candidate files.',
+  'When logs show request-queue memory-pressure rejections with high rss, external memory, or swap usage but low in-flight and pending counts, treat the active failure as runtime-capacity pressure by default rather than a clear queue-logic bug; prefer the smallest bounded edit that improves failure-origin labeling, operator-facing recovery notes, autonomous decision reasons, or conservative load-shedding guidance in candidate files over speculative concurrency increases or threshold loosening.',
+  'When active repair signals are repeated MEMORY_PRESSURE 503s from requestQueue/requestIntake with high rss, heap, external, or swap usage and low queue occupancy, treat them as runtime-capacity signals by default; prefer edits that improve failure-origin labeling, operator-facing recovery notes, candidate prioritization, or bounded load-shedding heuristics over speculative concurrency increases or broad queue rewrites unless the candidate files show a clear local regression.',
+  'When logs already mark providerSwitchWorthless or requestRetryWorthless for these failures, prefer a bounded heuristic, note-quality, observability, cooldown, provider de-prioritization, failure-origin labeling, or recovery-planning improvement over speculative provider implementation edits.',
+  'When repeated Gemini catalog failures are the active signal, especially ListModels 400/401/403 responses about disabled APIs, forbidden projects, or expired/invalid keys, prefer edits that improve autonomous classification, decision reasons, candidate-path prioritization, repair summaries, or operator-facing notes in control-plane candidate files rather than direct provider code changes unless the candidate files show an obvious local validation or routing defect.',
+  'When the stated goal concerns failed jobs, runner failure propagation, or terminal status accuracy, prioritize small control-plane fixes that ensure failed repair/build/deploy/job outcomes are surfaced as runner failure, persisted in status fields, and reflected in summaries before attempting unrelated provider changes.',
+  'When repeated empty streaming responses are concentrated on the same provider family, model, or endpoint, treat them as upstream/provider-bound by default and prefer control-plane recovery guidance, provider de-prioritization notes, or retry-worthlessness labeling over speculative streaming implementation edits unless a small local guard is clearly visible in the candidate files.',
+  'When active repair signals are dominated by memory-pressure rejections that already include runtime snapshots (for example swap_used_mb, rssBytes, externalBytes, or queue idle snapshots), treat them as runtime-capacity incidents by default and prefer bounded request-intake observability, clearer failure-origin labeling, operator-facing recovery notes, or autonomous decision-quality improvements over speculative concurrency or provider-routing changes unless the candidate files show an obvious local threshold or leak bug.',
+  'When logs show many skipped providers, repeated upstream-only failures, repeated catalog or auth failures for the same provider family, or unsupported endpoint or mode combinations for a specific model, bias toward improving heuristics, operator visibility, and autonomous recovery notes rather than attempting speculative provider implementation edits.',
+].join(' ');
+
 const DEFAULT_CONTROL_PLANE_PROMPT_BUNDLE = ControlPlanePromptBundleSchema.parse({
   planner: 'You are the planner agent for the AnyGPT LangGraph control plane. Produce concise, actionable planning notes based on logs, MCP findings, and requested scopes. Focus on priorities, risks, and safe next steps.',
   build: 'You are the build agent for the AnyGPT LangGraph control plane. Review the planned build jobs and provide concise notes about build order, likely breakpoints, and preflight checks. Do not invent new shell commands.',
   quality: 'You are the quality agent for the AnyGPT LangGraph control plane. Review the requested test jobs and provide concise notes about the highest-value validations, likely regressions, and smoke checks.',
   deploy: 'You are the deploy agent for the AnyGPT LangGraph control plane. Review the deploy intent and provide concise notes about rollout risk, approval considerations, and rollback readiness. Keep the deployment experimental-safe.',
-  autonomousEdit: 'You are the autonomous code edit agent for the AnyGPT LangGraph control plane. Produce only safe, bounded code changes within the allowlist and prefer the smallest viable edit.',
+  autonomousEdit: `${DEFAULT_CONTROL_PLANE_AUTONOMOUS_EDIT_PROMPT}
+
+Provider-bound repair heuristics: treat repeated upstream incompatibility, auth/governance drift, quota/payment exhaustion, invalid API keys, disabled upstream APIs/projects, repeated empty streaming responses for the same provider/model/endpoint, repeated OpenRouter-style tool-use or tool_choice 404 probe failures, and repeated Gemini ListModels 400/401/403 failures as ambiguous for direct provider repair unless the candidate files clearly expose a small local guard, capability filter, routing exclusion, validation, or fallback improvement. Repeated OpenAI-compatible empty streaming responses such as "returned an empty streaming response" for the same model/endpoint and repeated Gemini ListModels 400/401/403 messages indicating an invalid API key, that the Generative Language API has not been used in a project before, is disabled, or requires upstream activation should be classified as upstream/provider-bound by default. When those signals dominate, prefer the smallest bounded control-plane improvement that sharpens failure-origin labeling, autonomous decision reasons, candidate-path prioritization, provider de-prioritization notes, cooldown/retry-worthlessness guidance, or operator-facing recovery notes over speculative provider implementation changes.`,
 });
 
 type ControlPlanePromptSelectionSource = z.infer<typeof ControlPlanePromptSelectionSourceSchema>;
@@ -516,10 +533,21 @@ export const LogInsightSchema = z.object({
   lines: z.array(z.string()).default([]),
 });
 
+export const SemanticMemoryNoteSchema = z.object({
+  key: z.string(),
+  category: z.string(),
+  memory: z.string(),
+  signalSignature: z.string().default(''),
+  failureClass: z.string().default(''),
+  resolution: z.string().default(''),
+  source: z.string().default(''),
+});
+
 export const AutonomousOperationModeSchema = z.enum(['idle', 'repair', 'improvement']);
 export const RepairStatusSchema = z.enum(['idle', 'not-needed', 'planned', 'promoted', 'rolled-back', 'failed']);
 export const PostRepairValidationStatusSchema = z.enum(['not-needed', 'planned', 'passed', 'failed']);
 export const ExperimentalRestartStatusSchema = z.enum(['not-needed', 'pending', 'success', 'failed', 'skipped']);
+export const ProductionRestartStatusSchema = z.enum(['not-needed', 'pending', 'success', 'failed', 'skipped']);
 export const ScopeExpansionModeSchema = z.enum(['adaptive', 'locked']);
 
 export const ControlPlaneStateSchema = z.object({
@@ -542,6 +570,7 @@ export const ControlPlaneStateSchema = z.object({
     ).trim() || 'http://127.0.0.1:3310',
   ),
   experimentalServiceName: z.string().default('anygpt-experimental.service'),
+  productionServiceName: z.string().default('anygpt.service'),
   approvalMode: z.enum(['manual', 'auto']).default('manual'),
   approvalGranted: z.boolean().nullable().default(null),
   approvalMessage: z.string().default(''),
@@ -599,6 +628,10 @@ export const ControlPlaneStateSchema = z.object({
   proposedEdits: z.array(AutonomousEditActionSchema).default([]),
   appliedEdits: z.array(AppliedAutonomousEditSchema).default([]),
   autonomousEditNotes: z.array(z.string()).default([]),
+  recentAutonomousLearningNotes: z.array(z.string()).default([]),
+  semanticMemoryNotes: z.array(SemanticMemoryNoteSchema).default([]),
+  autonomousEditReviewDecision: z.enum(['pending', 'approved', 'rejected']).default('pending'),
+  autonomousEditReviewReason: z.string().default(''),
   autonomousPlannerAgentCount: z.number().int().nonnegative().default(0),
   autonomousPlannerFocuses: z.array(z.string()).default([]),
   autonomousPlannerStrategy: z.string().default(''),
@@ -609,6 +642,7 @@ export const ControlPlaneStateSchema = z.object({
   improvementSignals: z.array(z.string()).default([]),
   repairStatus: RepairStatusSchema.default('idle'),
   repairDecisionReason: z.string().default(''),
+  recentRepairValidationFailureCount: z.number().int().nonnegative().default(0),
   repairSmokeJobs: z.array(PlannedJobSchema).default([]),
   repairSmokeResults: z.array(ExecutedJobSchema).default([]),
   postRepairValidationJobs: z.array(PlannedJobSchema).default([]),
@@ -618,6 +652,8 @@ export const ControlPlaneStateSchema = z.object({
   repairRollbackPaths: z.array(z.string()).default([]),
   experimentalRestartStatus: ExperimentalRestartStatusSchema.default('not-needed'),
   experimentalRestartReason: z.string().default(''),
+  productionRestartStatus: ProductionRestartStatusSchema.default('not-needed'),
+  productionRestartReason: z.string().default(''),
   repairNotes: z.array(z.string()).default([]),
   repairSessionManifest: AutonomousEditSessionManifestSchema.nullable().default(null),
   executePlan: z.boolean().default(false),
@@ -929,6 +965,7 @@ function shouldApplyAutonomousEditsForState(state: ControlPlaneState): boolean {
   const governanceGateResult = resolveStateGovernanceGateResult(state);
   return state.executePlan
     && state.autonomousEditEnabled
+    && state.autonomousEditReviewDecision === 'approved'
     && state.proposedEdits.length > 0
     && !evaluationGateResult.blocksAutonomousEdits
     && !governanceGateResult.blocksAutonomousEdits;
@@ -1042,7 +1079,64 @@ function isExternallyCausedRepairSignal(signal: string): boolean {
   }
 
   const searchable = normalizeRepairSignalCategoryText(collectRepairSignalTextFragments(normalized).join(' | '));
-  return /(key_invalid|api[_-]?key[_-]?invalid|invalid api key|unauthorized|resource has been exhausted|check quota|quota exceeded|insufficient_quota|insufficient quota|no quota|insufficient credits|credit balance|billing|request failed with status code 402|\b402\b|probe_(?:skip|retry)|unsupported \(rate limit\/timeout\)|rate limit\/timeout|switching provider|provider switch worthless|providerswitchworthless|request retry worthless|requestretryworthless|remote media urls could not be fetched by gemini|gemini_unsupported_remote_media_url|publicly accessible url or inline\/base64 media content|catalog auth failure|function calling is not enabled|cannot fetch content from the provided url|image_url could not be fetched by the provider|currently experiencing high demand|failureorigin.?upstream_provider|failureorigin.?input|upstream_provider|input-bound|provider-bound|langsmith run queue pressure|langsmith queue pressure|annotation backlog|queued review item\(s\) need attention|no sampled feedback items were available for governance signal inspection)/i.test(searchable);
+  return /(key_invalid|api[_-]?key[_-]?invalid|api key not found|api key not valid|invalid api key|unauthorized|permission_denied|service_disabled|generative language api has not been used in project|disabled upstream api|disabled upstream apis|disabled project|disabled api|resource has been exhausted|check quota|quota exceeded|insufficient_quota|insufficient quota|no quota|insufficient credits|credit balance|billing|request failed with status code 402|\b402\b|probe_(?:skip|retry)|unsupported \(rate limit\/timeout\)|rate limit\/timeout|switching provider|provider switch worthless|providerswitchworthless|request retry worthless|requestretryworthless|remote media urls could not be fetched by gemini|gemini_unsupported_remote_media_url|publicly accessible url or inline\/base64 media content|catalog auth failure|listmodels failed|server_error|empty streaming response|returned an empty streaming response|function calling is not enabled|cannot fetch content from the provided url|image_url could not be fetched by the provider|currently experiencing high demand|failureorigin.?upstream_provider|failureorigin.?input|upstream_provider|input-bound|provider-bound|langsmith run queue pressure|langsmith queue pressure|annotation backlog|queued review item\(s\) need attention|no sampled feedback items were available for governance signal inspection)/i.test(searchable);
+}
+
+function shouldAvoidProviderPathAutonomousEdits(signals: string[]): boolean {
+  const normalizedSignals = signals
+    .map((signal) => normalizeRepairSignalCategoryText(collectRepairSignalTextFragments(signal).join(' | ')))
+    .filter(Boolean);
+  if (normalizedSignals.length === 0) return false;
+
+  const providerBoundSignals = normalizedSignals.filter((signal) => /provider switch worthless|request retry worthless|listmodels failed|api key not found|api key not valid|key_invalid|service_disabled|permission_denied|generative language api has not been used in project|provider-bound|upstream_provider/.test(signal));
+  return providerBoundSignals.length > 0 && providerBoundSignals.length >= Math.max(1, Math.ceil(normalizedSignals.length / 2));
+}
+
+function shouldRestrictAutonomousEditsToControlPlane(state: Pick<ControlPlaneState, 'repairSignals' | 'autonomousOperationMode'>): boolean {
+  const actionableSignalCount = countActionableRepairSignals(state.repairSignals);
+  const externalSignalCount = countExternallyCausedRepairSignals(state.repairSignals);
+  if (actionableSignalCount > 0) return false;
+  if (externalSignalCount === 0) return false;
+  return state.autonomousOperationMode !== 'repair' || shouldAvoidProviderPathAutonomousEdits(state.repairSignals);
+}
+
+function isTightlyCoupledAutonomousEditBatch(touchedPaths: string[]): boolean {
+  const normalizedPaths = Array.from(new Set(touchedPaths.map((candidatePath) => String(candidatePath || '').trim()).filter(Boolean)));
+  if (normalizedPaths.length <= 1) return true;
+  if (normalizedPaths.length > 2) return false;
+
+  const hasWorkflow = normalizedPaths.includes('apps/langgraph-control-plane/src/workflow.ts');
+  const hasIndex = normalizedPaths.includes('apps/langgraph-control-plane/src/index.ts');
+  const hasErrorClassification = normalizedPaths.includes('apps/api/modules/errorClassification.ts');
+  const allControlPlane = normalizedPaths.every((candidatePath) => candidatePath.startsWith('apps/langgraph-control-plane/'));
+  const allApiModules = normalizedPaths.every((candidatePath) => candidatePath.startsWith('apps/api/modules/'));
+
+  if (allControlPlane) return true;
+  if (allApiModules && hasErrorClassification) return true;
+  if (hasWorkflow && (hasIndex || hasErrorClassification)) return true;
+  return false;
+}
+
+function scoreAutonomousEditPathFit(
+  state: Pick<ControlPlaneState, 'repairSignals' | 'improvementSignals' | 'autonomousOperationMode'>,
+  path: string,
+  supportingText: string = '',
+): number {
+  const normalizedPath = String(path || '').trim();
+  if (!normalizedPath) return 0;
+  const sourceText = [...state.repairSignals, ...state.improvementSignals, supportingText].join(' | ').toLowerCase();
+
+  let score = 0;
+  if (normalizedPath.startsWith('apps/langgraph-control-plane/')) score += 2;
+  if (normalizedPath.startsWith('apps/api/modules/errorClassification.ts') && /server_error|invalid_response_structure|failureorigin|provider-bound|request retry worthless|providerswitchworthless/.test(sourceText)) score += 4;
+  if (normalizedPath.startsWith('apps/api/modules/requestQueue.ts') && /memory pressure|queue|overloaded|max_pending|swap_used_mb|external_mb/.test(sourceText)) score += 4;
+  if (normalizedPath.startsWith('apps/api/modules/requestIntake.ts') && /content_length|intake|request body|bufferedrequestbody/.test(sourceText)) score += 4;
+  if (normalizedPath.startsWith('apps/api/modules/openaiProviderSelection.ts') && /provider selection|provider switch|retry worthless|routing|model-availability|probe|tool-calling|tool_choice|unsupported(?:-| )tool|healthy selection/.test(sourceText)) score += 3;
+  if (normalizedPath.startsWith('apps/api/modules/openaiRequestSupport.ts') && /heartbeat|keepalive|keep-alive|backpressure|response\.write|drain|sse|stream teardown|stream keepalive|premature stream/.test(sourceText)) score += 3;
+  if (normalizedPath.startsWith('apps/api/providers/openai.ts') && /server_error|empty streaming response|responses endpoint|stream/.test(sourceText)) score += 2;
+  if (normalizedPath.startsWith('apps/api/providers/gemini.ts') && /gemini/.test(sourceText)) score += 1;
+  if (normalizedPath.startsWith('apps/api/providers/')) score -= 1;
+  return score;
 }
 
 function isActionableRepairSignal(signal: string): boolean {
@@ -1118,16 +1212,27 @@ function isRepetitiveRepairSignal(signal: string, frequencyCount: number): boole
 function deriveRepairIntent(state: ControlPlaneState): { summary: string; signals: string[] } {
   const signals: string[] = [];
   const staleSignals: string[] = [];
+  const runnerFailureRetryPattern = /\[langgraph-control-plane\] iteration ended with failure but continuous mode is enabled; sleeping \d+ms before retry/i;
 
-  for (const insight of state.logInsights.slice(0, 6)) {
-    for (const line of insight.lines.slice(-2)) {
-      if (line && isLikelyRepairLogLine(line)) {
-        const signal = `Log ${insight.file}: ${line}`;
-        if (isFreshSignalText(signal)) {
-          signals.push(signal);
-        } else {
-          staleSignals.push(signal);
-        }
+  for (const insight of state.logInsights.slice(0, 12)) {
+    if (insight.file.includes('live-autonomous-runner.log')) {
+      continue;
+    }
+    for (const line of insight.lines.slice(-4)) {
+      if (
+        !line
+        || !isLikelyRepairLogLine(line)
+        || runnerFailureRetryPattern.test(line)
+        || (insight.file.includes('live-autonomous-runner.log') && line.includes('[failed] Build repo: bash ./bun.sh run build'))
+        || (insight.file.includes('live-autonomous-runner.log') && line.includes('"summary": "Goal: Continuously monitor, fix, and improve AnyGPT'))
+      ) {
+        continue;
+      }
+      const signal = `Log ${insight.file}: ${line}`;
+      if (isFreshSignalText(signal)) {
+        signals.push(signal);
+      } else {
+        staleSignals.push(signal);
       }
     }
   }
@@ -1425,16 +1530,20 @@ function buildRepairSmokeJobs(state: ControlPlaneState): PlannedJob[] {
   }
 
   if (touchesApiCode) {
-    const apiSmokeSource = [...state.testJobs, ...state.buildJobs].find((job) => (
+    const apiBuildSource = state.buildJobs.find((job) => (
       (job.target === 'api' || job.target === 'api-experimental')
-      && (job.kind === 'test' || job.kind === 'build')
+      && job.kind === 'build'
+    ));
+    const apiTestSource = state.testJobs.find((job) => (
+      (job.target === 'api' || job.target === 'api-experimental')
+      && job.kind === 'test'
     ));
 
-    if (apiSmokeSource) {
+    if (apiBuildSource) {
       jobs.push({
-        ...apiSmokeSource,
-        id: `${apiSmokeSource.id}-repair-smoke`,
-        title: `${apiSmokeSource.title} (repair smoke)`,
+        ...apiBuildSource,
+        id: `${apiBuildSource.id}-repair-smoke`,
+        title: `${apiBuildSource.title} (repair smoke)`,
       });
     } else {
       jobs.push({
@@ -1443,6 +1552,14 @@ function buildRepairSmokeJobs(state: ControlPlaneState): PlannedJob[] {
         kind: 'build',
         title: 'Smoke build experimental API repair',
         command: API_EXPERIMENTAL_BUILD_COMMAND,
+      });
+    }
+
+    if (apiTestSource) {
+      jobs.push({
+        ...apiTestSource,
+        id: `${apiTestSource.id}-repair-smoke`,
+        title: `${apiTestSource.title} (repair smoke)`,
       });
     }
   }
@@ -1516,6 +1633,16 @@ type AiCodeEditResult = {
   error?: string;
 };
 
+type AutonomousEditReviewResult = {
+  enabled: boolean;
+  approved: boolean;
+  reason: string;
+  confidence: 'low' | 'medium' | 'high';
+  model: string;
+  backend: string;
+  error?: string;
+};
+
 type AutonomousEditAgentWorkload = {
   label: string;
   focus: string;
@@ -1562,13 +1689,14 @@ const API_EXPERIMENTAL_TEST_COMMAND = [
   `API_KEYS_FILE=${CONTROL_PLANE_PACKAGE_KEYS_FILE}`,
   `API_MODELS_FILE=${CONTROL_PLANE_PACKAGE_MODELS_FILE}`,
   `TEST_API_BASE_URL=http://localhost:${CONTROL_PLANE_TEST_PORT}`,
+  'TEST_SETUP_MODE=external',
   'DATA_SOURCE_PREFERENCE=${CONTROL_PLANE_DATA_SOURCE_PREFERENCE:-redis}',
   'REDIS_URL=${CONTROL_PLANE_REDIS_URL:-${REDIS_URL:-127.0.0.1:6380}}',
   'REDIS_USERNAME=${CONTROL_PLANE_REDIS_USERNAME:-${REDIS_USERNAME:-default}}',
   'REDIS_PASSWORD=${CONTROL_PLANE_REDIS_PASSWORD:-${REDIS_PASSWORD:-}}',
   'REDIS_TLS=${CONTROL_PLANE_REDIS_TLS:-${REDIS_TLS:-false}}',
   `REDIS_DB={CONTROL_PLANE_TARGET_REDIS_DB:-${CONTROL_PLANE_TARGET_REDIS_DB}}`,
-  'bash ./bun.sh run -F anygpt-api test',
+  'bash ./bun.sh run -F anygpt-api test:run',
 ].join(' ').replace('\u007f', '$');
 
 function parsePositiveIntegerEnv(name: string, fallback: number, minimum: number): number {
@@ -1588,34 +1716,36 @@ function parseBooleanEnv(name: string, fallback: boolean): boolean {
 }
 
 const SAFE_EXPERIMENTAL_DEPLOY_COMMAND = 'sudo systemctl restart anygpt-experimental';
+const SAFE_PRODUCTION_DEPLOY_COMMAND = 'sudo systemctl restart anygpt.service';
+const AUTO_RESTART_PRODUCTION_AFTER_REPAIR = parseBooleanEnv('CONTROL_PLANE_AUTO_RESTART_PRODUCTION', false);
 const REDACTED_SECRET_PLACEHOLDER = '[redacted]';
 const REDACTED_IP_PLACEHOLDER = '[redacted-ip]';
 const MCP_CLIENT_NAME = 'anygpt-langgraph-control-plane';
 const MCP_CLIENT_VERSION = '0.1.0';
-const DEFAULT_LOG_TAIL_LINE_COUNT = parsePositiveIntegerEnv('CONTROL_PLANE_LOG_TAIL_LINES', 16, 4);
+const DEFAULT_LOG_TAIL_LINE_COUNT = parsePositiveIntegerEnv('CONTROL_PLANE_LOG_TAIL_LINES', 40, 4);
 const MCP_INSPECTION_TIMEOUT_MS = parsePositiveIntegerEnv('CONTROL_PLANE_MCP_INSPECTION_TIMEOUT_MS', 8_000, 1_000);
 const MCP_MAX_TOOL_PAGES = 20;
-const AI_NOTES_AGENT_REQUEST_TIMEOUT_MS = parsePositiveIntegerEnv('CONTROL_PLANE_AI_NOTES_TIMEOUT_MS', 8_000, 1_000);
 const AI_AGENT_REQUEST_TIMEOUT_MS = parsePositiveIntegerEnv('CONTROL_PLANE_AI_AGENT_TIMEOUT_MS', 40_000, 5_000);
-const AI_AGENT_NOTE_LIMIT = 6;
-const AI_AGENT_PAYLOAD_STRING_MAX_CHARS = parsePositiveIntegerEnv('CONTROL_PLANE_AI_MAX_STRING_CHARS', 1_200, 200);
-const AI_AGENT_LOG_LINE_MAX_CHARS = parsePositiveIntegerEnv('CONTROL_PLANE_AI_LOG_LINE_MAX_CHARS', 1_600, 200);
-const AI_AGENT_PAYLOAD_ARRAY_LIMIT = parsePositiveIntegerEnv('CONTROL_PLANE_AI_ARRAY_LIMIT', 8, 2);
-const AI_AGENT_PAYLOAD_OBJECT_KEY_LIMIT = parsePositiveIntegerEnv('CONTROL_PLANE_AI_OBJECT_KEY_LIMIT', 12, 4);
-const AI_AGENT_CONTEXT_NOTE_LIMIT = parsePositiveIntegerEnv('CONTROL_PLANE_AI_CONTEXT_NOTE_LIMIT', 6, 2);
-const AI_AGENT_SIGNAL_PAYLOAD_LIMIT = parsePositiveIntegerEnv('CONTROL_PLANE_AI_SIGNAL_PAYLOAD_LIMIT', 6, 2);
-const AI_CODE_EDIT_CANDIDATE_FILE_LIMIT = parsePositiveIntegerEnv('CONTROL_PLANE_AI_CANDIDATE_FILE_LIMIT', 6, 2);
-const AI_CODE_EDIT_CANDIDATE_PATH_LIMIT = parsePositiveIntegerEnv('CONTROL_PLANE_AI_CANDIDATE_PATH_LIMIT', 10, 4);
-const AI_CODE_EDIT_CANDIDATE_FILE_MAX_CHARS = parsePositiveIntegerEnv('CONTROL_PLANE_AI_CANDIDATE_FILE_MAX_CHARS', 1_400, 400);
-const AI_CODE_EDIT_PAYLOAD_STRING_MAX_CHARS = parsePositiveIntegerEnv('CONTROL_PLANE_AI_CODE_EDIT_MAX_STRING_CHARS', 1_600, 400);
-const AI_CODE_EDIT_AGENT_PARALLELISM = parsePositiveIntegerEnv('CONTROL_PLANE_AI_CODE_EDIT_AGENT_PARALLELISM', 3, 1);
+const AI_NOTES_AGENT_REQUEST_TIMEOUT_MS = parsePositiveIntegerEnv('CONTROL_PLANE_AI_NOTES_TIMEOUT_MS', 20_000, 1_000);
+const AI_AGENT_NOTE_LIMIT = 8;
+const AI_AGENT_PAYLOAD_STRING_MAX_CHARS = parsePositiveIntegerEnv('CONTROL_PLANE_AI_MAX_STRING_CHARS', 2_000, 200);
+const AI_AGENT_LOG_LINE_MAX_CHARS = parsePositiveIntegerEnv('CONTROL_PLANE_AI_LOG_LINE_MAX_CHARS', 2_400, 200);
+const AI_AGENT_PAYLOAD_ARRAY_LIMIT = parsePositiveIntegerEnv('CONTROL_PLANE_AI_ARRAY_LIMIT', 20, 2);
+const AI_AGENT_PAYLOAD_OBJECT_KEY_LIMIT = parsePositiveIntegerEnv('CONTROL_PLANE_AI_OBJECT_KEY_LIMIT', 24, 4);
+const AI_AGENT_CONTEXT_NOTE_LIMIT = parsePositiveIntegerEnv('CONTROL_PLANE_AI_CONTEXT_NOTE_LIMIT', 16, 2);
+const AI_AGENT_SIGNAL_PAYLOAD_LIMIT = parsePositiveIntegerEnv('CONTROL_PLANE_AI_SIGNAL_PAYLOAD_LIMIT', 20, 2);
+const AI_CODE_EDIT_CANDIDATE_FILE_LIMIT = parsePositiveIntegerEnv('CONTROL_PLANE_AI_CANDIDATE_FILE_LIMIT', 20, 2);
+const AI_CODE_EDIT_CANDIDATE_PATH_LIMIT = parsePositiveIntegerEnv('CONTROL_PLANE_AI_CANDIDATE_PATH_LIMIT', 32, 4);
+const AI_CODE_EDIT_CANDIDATE_FILE_MAX_CHARS = parsePositiveIntegerEnv('CONTROL_PLANE_AI_CANDIDATE_FILE_MAX_CHARS', 4_000, 400);
+const AI_CODE_EDIT_PAYLOAD_STRING_MAX_CHARS = parsePositiveIntegerEnv('CONTROL_PLANE_AI_CODE_EDIT_MAX_STRING_CHARS', 4_000, 400);
+const AI_CODE_EDIT_AGENT_PARALLELISM = parsePositiveIntegerEnv('CONTROL_PLANE_AI_CODE_EDIT_AGENT_PARALLELISM', 6, 1);
 const CONTROL_PLANE_NOTE_HISTORY_LIMIT = parsePositiveIntegerEnv('CONTROL_PLANE_NOTE_HISTORY_LIMIT', 120, 20);
 const CONTROL_PLANE_TYPECHECK_COMMAND = 'bash ./bun.sh run -F anygpt-langgraph-control-plane typecheck';
 const REPAIR_SMOKE_JOB_LIMIT = 2;
 const REPAIR_SMOKE_TIMEOUT_MS = parsePositiveIntegerEnv('CONTROL_PLANE_REPAIR_SMOKE_TIMEOUT_MS', 120_000, 5_000);
 const POST_REPAIR_VALIDATION_JOB_LIMIT = 2;
 const POST_REPAIR_VALIDATION_TIMEOUT_MS = parsePositiveIntegerEnv('CONTROL_PLANE_POST_REPAIR_VALIDATION_TIMEOUT_MS', 600_000, 10_000);
-const AUTO_RESTART_EXPERIMENTAL_AFTER_REPAIR = parseBooleanEnv('CONTROL_PLANE_AUTO_RESTART_EXPERIMENTAL', true);
+const AUTO_RESTART_EXPERIMENTAL_AFTER_REPAIR = parseBooleanEnv('CONTROL_PLANE_AUTO_RESTART_EXPERIMENTAL', false);
 const AUTO_RESTART_EXPERIMENTAL_REQUIRE_IDLE = parseBooleanEnv('CONTROL_PLANE_AUTO_RESTART_EXPERIMENTAL_REQUIRE_IDLE', true);
 const EXPERIMENTAL_RESTART_CLIENT_INSPECTION_TIMEOUT_MS = parsePositiveIntegerEnv(
   'CONTROL_PLANE_EXPERIMENTAL_RESTART_CLIENT_INSPECTION_TIMEOUT_MS',
@@ -1624,7 +1754,7 @@ const EXPERIMENTAL_RESTART_CLIENT_INSPECTION_TIMEOUT_MS = parsePositiveIntegerEn
 );
 const DEFAULT_EXPERIMENTAL_API_PORT = 3310;
 const CONTROL_PLANE_SIGNAL_FRESHNESS_WINDOW_MS = parsePositiveIntegerEnv('CONTROL_PLANE_SIGNAL_FRESHNESS_WINDOW_MS', 12 * 60 * 60 * 1000, 60_000);
-const AUTONOMOUS_FULL_COVERAGE_SCOPES = ['repo', 'api-experimental', 'control-plane'] as const;
+const AUTONOMOUS_FULL_COVERAGE_SCOPES = ['repo', 'api', 'api-experimental', 'control-plane', 'repo-surface'] as const;
 const EXPANSIVE_SCOPE_ALIASES = new Set(['all', 'everything', 'adaptive', '*']);
 
 const EXPLICIT_SENSITIVE_KEYS = new Set([
@@ -2031,6 +2161,7 @@ function buildApprovalRequests(state: ControlPlaneState): ApprovalRequest[] {
     !evaluationGateResult.blocksAutonomousEdits
     && !governanceGateResult.blocksAutonomousEdits
     && state.autonomousEditEnabled
+    && state.autonomousEditReviewDecision === 'approved'
     && state.proposedEdits.length > 0
   ) {
     approvals.push(ApprovalRequestSchema.parse({
@@ -2314,7 +2445,7 @@ function buildControlPlaneObservabilityMetadata(
   };
 }
 
-function resolveControlPlaneAiConfig(): ControlPlaneAiConfig {
+export function resolveControlPlaneAiConfig(): ControlPlaneAiConfig {
   const explicitBaseUrl = normalizeOpenAiCompatibleBaseUrl(String(process.env.CONTROL_PLANE_AI_BASE_URL || '').trim());
   const explicitApiKey = String(process.env.CONTROL_PLANE_AI_API_KEY || '').trim();
   const explicitModel = String(process.env.CONTROL_PLANE_AI_MODEL || '').trim();
@@ -2483,6 +2614,62 @@ function loadRuntimeAutonomousEditPlanOverride(
   }
 }
 
+function getControlPlaneSemanticMemoryNamespace(state: Pick<ControlPlaneState, 'langSmithProjectName' | 'governanceProfile'>): string[] {
+  const projectName = String(state.langSmithProjectName || 'anygpt-control-plane-autonomous').trim() || 'anygpt-control-plane-autonomous';
+  const governanceProfile = String(state.governanceProfile || 'experimental').trim() || 'experimental';
+  return ['control-plane', 'semantic-memory', projectName, governanceProfile];
+}
+
+async function readSemanticMemoryNotes(
+  store: BaseStore | undefined,
+  state: Pick<ControlPlaneState, 'langSmithProjectName' | 'governanceProfile' | 'repairSignals' | 'improvementSignals' | 'recentAutonomousLearningNotes'>,
+): Promise<Array<z.infer<typeof SemanticMemoryNoteSchema>>> {
+  if (!store) return [];
+  const namespace = getControlPlaneSemanticMemoryNamespace(state);
+  const query = [...state.repairSignals, ...state.improvementSignals, ...state.recentAutonomousLearningNotes]
+    .slice(-12)
+    .join(' | ')
+    .trim();
+  const results = await store.search(namespace, {
+    query: query || 'control plane runner learnings',
+    limit: 6,
+  }).catch(() => []);
+  return results
+    .map((item) => SemanticMemoryNoteSchema.safeParse({
+      key: item.key,
+      category: item.value.category,
+      memory: item.value.memory,
+      signalSignature: item.value.signalSignature,
+      failureClass: item.value.failureClass,
+      resolution: item.value.resolution,
+      source: item.value.source,
+    }))
+    .flatMap((parsed) => parsed.success ? [parsed.data] : []);
+}
+
+export async function writeSemanticMemoryNotes(
+  store: BaseStore | undefined,
+  state: Pick<ControlPlaneState, 'langSmithProjectName' | 'governanceProfile'>,
+  notes: string[],
+  metadata?: { signalSignature?: string; failureClass?: string; resolution?: string; source?: string },
+): Promise<void> {
+  if (!store || notes.length === 0) return;
+  const namespace = getControlPlaneSemanticMemoryNamespace(state);
+  const normalizedNotes = Array.from(new Set(notes.map((entry) => String(entry || '').trim()).filter(Boolean))).slice(-4);
+  for (const memory of normalizedNotes) {
+    const keySeed = `${metadata?.failureClass || 'general'}:${metadata?.signalSignature || 'none'}:${memory}`;
+    const key = Buffer.from(keySeed).toString('base64url').slice(0, 96);
+    await store.put(namespace, key, {
+      category: metadata?.failureClass || 'general',
+      memory,
+      signalSignature: metadata?.signalSignature || '',
+      failureClass: metadata?.failureClass || '',
+      resolution: metadata?.resolution || '',
+      source: metadata?.source || 'runner-learning',
+    }).catch(() => undefined);
+  }
+}
+
 function buildSharedAiAgentPayload(state: ControlPlaneState): Record<string, unknown> {
   const evaluationGatePolicy = resolveStateEvaluationGatePolicy(state);
   const evaluationGateResult = resolveStateEvaluationGateResult(state);
@@ -2610,9 +2797,26 @@ function buildSharedAiAgentPayload(state: ControlPlaneState): Record<string, unk
     })),
     logInsights: state.logInsights.map((insight) => ({
       file: insight.file,
-      latest: insight.lines.slice(-2),
+      latest: insight.lines.slice(-6),
     })),
     plannerNotes: compactStringArrayForAi(state.plannerNotes, AI_AGENT_CONTEXT_NOTE_LIMIT),
+    recentAutonomousLearningNotes: compactStringArrayForAi(state.recentAutonomousLearningNotes, 8),
+    semanticMemoryNotes: state.semanticMemoryNotes.map((note) => ({
+      category: note.category,
+      memory: note.memory,
+      failureClass: note.failureClass,
+      resolution: note.resolution,
+      signalSignature: note.signalSignature,
+      source: note.source,
+    })),
+    recentExecutedJobs: state.executedJobs.slice(-8).map((job) => ({
+      title: job.title,
+      target: job.target,
+      kind: job.kind,
+      status: job.status,
+      exitCode: job.exitCode,
+      output: truncateTextMiddle(String(job.output || ''), 1200),
+    })),
     allowDeploy: state.allowDeploy,
     deployCommand: state.deployCommand,
     repair: {
@@ -2734,11 +2938,110 @@ async function callAiNotesAgent(
       notes,
     };
   } catch (error: any) {
+    const errorText = String(error?.message || error || '');
+    const rawMessage = error?.name === 'AbortError' || errorText === 'The operation was aborted.'
+      ? `AI ${role} agent timed out after ${AI_NOTES_AGENT_REQUEST_TIMEOUT_MS}ms`
+      : errorText;
     return {
       enabled: true,
       model: config.model,
       backend: config.baseUrl,
       notes: [],
+      error: redactSensitiveText(rawMessage),
+    };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function callAiAutonomousEditReviewer(
+  state: ControlPlaneState,
+  payload: Record<string, unknown>,
+): Promise<AutonomousEditReviewResult> {
+  const config = resolveControlPlaneAiConfig();
+  if (!config.enabled) {
+    return {
+      enabled: false,
+      approved: false,
+      reason: '',
+      confidence: 'low',
+      model: config.model,
+      backend: config.baseUrl,
+    };
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), AI_AGENT_REQUEST_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(`${config.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${config.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: config.model,
+        temperature: 0,
+        ...(config.reasoningEffort ? { reasoning_effort: config.reasoningEffort } : {}),
+        response_format: { type: 'json_object' },
+        messages: [
+          {
+            role: 'system',
+            content: [
+              'You are a strict autonomous edit reviewer for the AnyGPT control plane.',
+              'Return JSON only in the form {"approved": boolean, "reason": string, "confidence": "low" | "medium" | "high"}.',
+              'Reject speculative edits that do not clearly match the active signals.',
+              'Prefer rejecting edits when the proposed path set is broad, weakly justified, or mixes unrelated subsystems.',
+              'Allow tightly coupled multi-file edits only when the reason clearly depends on both files and the payload shows strong signal/path alignment.',
+              'When signals are externally caused or provider-bound, approve only control-plane or clearly justified classification/queue/resilience edits.',
+              'Do not output markdown fences or prose outside the JSON object.',
+            ].join('\n'),
+          },
+          {
+            role: 'user',
+            content: JSON.stringify(compactUnknownForAi(payload, {
+              maxStringChars: AI_CODE_EDIT_PAYLOAD_STRING_MAX_CHARS,
+              maxArrayItems: AI_AGENT_PAYLOAD_ARRAY_LIMIT,
+              maxObjectKeys: AI_AGENT_PAYLOAD_OBJECT_KEY_LIMIT,
+              maxDepth: 5,
+            })),
+          },
+        ],
+      }),
+      signal: controller.signal,
+    });
+
+    const rawText = await response.text();
+    if (!response.ok) {
+      throw new Error(`AI autonomous edit reviewer failed (${response.status}): ${rawText.slice(0, 400)}`);
+    }
+
+    const payloadJson = JSON.parse(rawText);
+    const assistantText = extractAssistantTextFromChatCompletionPayload(payloadJson);
+    const jsonObjectText = extractJsonObjectFromText(assistantText);
+    if (!jsonObjectText) {
+      throw new Error('AI autonomous edit reviewer returned unparsable content.');
+    }
+
+    const parsed = JSON.parse(jsonObjectText) as Record<string, unknown>;
+    const confidence = parsed.confidence === 'high' || parsed.confidence === 'medium' ? parsed.confidence : 'low';
+    return {
+      enabled: true,
+      approved: parsed.approved === true,
+      reason: String(parsed.reason || '').trim(),
+      confidence,
+      model: config.model,
+      backend: config.baseUrl,
+    };
+  } catch (error: any) {
+    return {
+      enabled: true,
+      approved: false,
+      reason: redactSensitiveText(error?.message || String(error)),
+      confidence: 'low',
+      model: config.model,
+      backend: config.baseUrl,
       error: redactSensitiveText(error?.message || String(error)),
     };
   } finally {
@@ -3022,23 +3325,35 @@ function buildScopeJobs(
   kind: 'build' | 'test',
 ): PlannedJob[] {
   const jobs: PlannedJob[] = [];
+  const normalizedScopes = uniqueScopes(scopes);
+  const seenCommands = new Set<string>();
+  const shouldSkipAggregateRepoJob = normalizedScopes.includes('repo')
+    && normalizedScopes.some((scope) => ['api', 'api-experimental', 'control-plane', 'repo-surface'].includes(scope));
 
-  for (const scope of scopes) {
+  for (const scope of normalizedScopes) {
+    if (scope === 'repo' && shouldSkipAggregateRepoJob) {
+      continue;
+    }
+
     const commands = SCOPE_COMMANDS[scope];
     if (!commands) {
       continue;
     }
 
     const command = kind === 'build' ? commands.build : commands.test;
-    if (command) {
-      jobs.push({
-        id: `${scope}-${kind}`,
-        target: scope,
-        kind,
-        title: `${kind === 'build' ? 'Build' : 'Test'} ${scope}`,
-        command,
-      });
+    const normalizedCommand = String(command || '').trim();
+    if (!normalizedCommand || seenCommands.has(normalizedCommand)) {
+      continue;
     }
+    seenCommands.add(normalizedCommand);
+
+    jobs.push({
+      id: `${scope}-${kind}`,
+      target: scope,
+      kind,
+      title: `${kind === 'build' ? 'Build' : 'Test'} ${scope}`,
+      command: normalizedCommand,
+    });
   }
 
   return jobs;
@@ -3080,7 +3395,6 @@ function listRecentLogCandidatePaths(state: ControlPlaneState): string[] {
     path.resolve(state.repoRoot, 'apps', 'api', 'logs', 'admin-keys.jsonl'),
     path.resolve(state.repoRoot, 'apps', 'api', 'logs', 'api-error.jsonl'),
     path.resolve(state.repoRoot, 'apps', 'api', 'logs', 'api-errors.jsonl'),
-    path.resolve(state.repoRoot, 'apps', 'langgraph-control-plane', '.control-plane', 'live-autonomous-runner.log'),
     path.resolve(state.repoRoot, 'apps', 'langgraph-control-plane', 'studio-server.log'),
   ];
   const discoveredCandidates = fs.existsSync(logDir)
@@ -3213,6 +3527,8 @@ function filterInvalidAutonomousEditProposals(
 ): { accepted: AutonomousEditAction[]; notes: string[] } {
   const accepted: AutonomousEditAction[] = [];
   const notes: string[] = [];
+  const avoidProviderPathEdits = shouldAvoidProviderPathAutonomousEdits(state.repairSignals);
+  const restrictToControlPlane = shouldRestrictAutonomousEditsToControlPlane(state);
 
   for (const edit of edits) {
     const check = checkAutonomousEditPath(
@@ -3226,6 +3542,16 @@ function filterInvalidAutonomousEditProposals(
       continue;
     }
 
+    if (avoidProviderPathEdits && check.normalizedPath.startsWith('apps/api/providers/')) {
+      notes.push(`Skipped autonomous edit proposal for ${check.normalizedPath}: active repair signals are provider-bound, so autonomous provider-file edits are blocked for this iteration.`);
+      continue;
+    }
+
+    if (restrictToControlPlane && !check.normalizedPath.startsWith('apps/langgraph-control-plane/')) {
+      notes.push(`Skipped autonomous edit proposal for ${check.normalizedPath}: current signals are externally caused or repetitive, so this iteration is restricted to control-plane-only edits.`);
+      continue;
+    }
+
     if (edit.type === 'replace') {
       if (!existingCandidatePaths.has(check.normalizedPath)) {
         notes.push(`Skipped autonomous replace proposal for ${check.normalizedPath}: replace edits must target an existing candidate file from the current context.`);
@@ -3234,6 +3560,30 @@ function filterInvalidAutonomousEditProposals(
       const absolutePath = path.resolve(state.repoRoot, check.normalizedPath);
       if (!fs.existsSync(absolutePath)) {
         notes.push(`Skipped autonomous replace proposal for ${check.normalizedPath}: target file does not exist.`);
+        continue;
+      }
+      const current = fs.readFileSync(absolutePath, 'utf8');
+      const find = typeof edit.find === 'string' ? edit.find : '';
+      if (!find) {
+        notes.push(`Skipped autonomous replace proposal for ${check.normalizedPath}: replace edits must include a find block.`);
+        continue;
+      }
+      const exactMatchCount = current.includes(find)
+        ? current.split(find).length - 1
+        : 0;
+      const preflightFailure = exactMatchCount === 0
+        ? preflightAutonomousEditAction(
+            state.repoRoot,
+            {
+              ...edit,
+              path: check.normalizedPath,
+            },
+            state.editAllowlist,
+            state.editDenylist,
+          )
+        : null;
+      if (preflightFailure) {
+        notes.push(`Skipped autonomous replace proposal for ${check.normalizedPath}: ${preflightFailure.message}`);
         continue;
       }
     }
@@ -3528,7 +3878,7 @@ async function listActiveExperimentalClientConnections(
     .filter((client) => client.pid !== process.pid);
 }
 
-async function inspectMcpNode(state: ControlPlaneState): Promise<Partial<ControlPlaneState>> {
+async function inspectMcpNode(state: ControlPlaneState, runtime?: Runtime): Promise<Partial<ControlPlaneState>> {
   const configPath = resolveMcpConfigPath(state);
   const mcpServerConfigs = loadMcpServers(configPath);
   const mcpServers = mcpServerConfigs.map((config) => sanitizeMcpServer(config));
@@ -3566,6 +3916,7 @@ async function inspectMcpNode(state: ControlPlaneState): Promise<Partial<Control
   let promptPromotionReason = '';
   let promptPromotionBlockedReason = '';
   const promptSelectionNotes: string[] = [];
+  const semanticMemoryNotes = await readSemanticMemoryNotes(runtime?.store, state).catch(() => [] as Array<z.infer<typeof SemanticMemoryNoteSchema>>);
   let langSmithSnapshot: Awaited<ReturnType<typeof collectLangSmithClientSnapshot>> | null = null;
   let langSmithProject: z.infer<typeof LangSmithProjectSummarySchema> | null = null;
   let langSmithAccessibleWorkspaces: Array<z.infer<typeof LangSmithWorkspaceSummarySchema>> = [];
@@ -4054,6 +4405,7 @@ async function inspectMcpNode(state: ControlPlaneState): Promise<Partial<Control
       promptPromotionReason,
       promptPromotionBlockedReason,
       promptSelectionNotes,
+      semanticMemoryNotes,
       governanceProfile: governanceProfile.name,
       langSmithEnabled: Boolean(langSmithConfig),
       langSmithProjectName: langSmithProject?.name || langSmithSnapshot?.projectName || langSmithConfig?.projectName || '',
@@ -4223,11 +4575,21 @@ async function repairIntentNode(state: ControlPlaneState): Promise<Partial<Contr
   const improvementIntent = autonomousOperationMode === 'improvement'
     ? deriveImprovementIntent(state)
     : { summary: '', signals: [] };
+  const previousFailedPaths = Array.from(new Set(
+    state.appliedEdits
+      .filter((edit) => edit.status === 'failed')
+      .map((edit) => String(edit.path || '').trim())
+      .filter(Boolean),
+  ));
+
   const notes = [
     `Autonomous lane: ${autonomousOperationMode}`,
     `Repair intent: ${repairIntent.summary}`,
     ...repairIntent.signals.map((signal) => `Repair signal: ${signal}`),
   ];
+  if (previousFailedPaths.length > 0) {
+    notes.push(`Previous failed autonomous edit targets: ${previousFailedPaths.join(', ')}`);
+  }
   if (improvementIntent.summary.trim()) {
     notes.push(`Improvement intent: ${improvementIntent.summary}`);
   }
@@ -4294,12 +4656,37 @@ async function autonomousEditPlannerNode(state: ControlPlaneState): Promise<Part
       referencedCandidatePaths.add(match);
     }
   }
+  const signalPrioritySources = [
+    ...state.repairSignals,
+    ...state.improvementSignals,
+  ].slice(-20);
+  const signalReferencedCandidatePaths = new Set<string>();
+  for (const sourceText of signalPrioritySources) {
+    for (const match of String(sourceText || '').match(/apps\/[A-Za-z0-9._/-]+\.(?:ts|js|json|md|mts|service)/g) || []) {
+      signalReferencedCandidatePaths.add(match);
+    }
+  }
+
   const prioritizedCandidateFiles = [...candidateFiles]
     .sort((left, right) => {
+      const leftSignalReferenced = signalReferencedCandidatePaths.has(left.path);
+      const rightSignalReferenced = signalReferencedCandidatePaths.has(right.path);
+      if (leftSignalReferenced !== rightSignalReferenced) {
+        return leftSignalReferenced ? -1 : 1;
+      }
+
+      const leftReferenced = referencedCandidatePaths.has(left.path);
+      const rightReferenced = referencedCandidatePaths.has(right.path);
+      if (leftReferenced !== rightReferenced) {
+        return leftReferenced ? -1 : 1;
+      }
       const rank = (candidatePath: string): number => {
         if (failedPaths.has(candidatePath)) return -10;
+        if (signalReferencedCandidatePaths.has(candidatePath)) return -2;
         if (referencedCandidatePaths.has(candidatePath)) return 0;
         const hotPathIndex = [
+          'apps/langgraph-control-plane/src/workflow.ts',
+          'apps/langgraph-control-plane/src/index.ts',
           'apps/api/providers/handler.ts',
           'apps/api/providers/openrouter.ts',
           'apps/api/providers/openai.ts',
@@ -4396,8 +4783,8 @@ async function autonomousEditPlannerNode(state: ControlPlaneState): Promise<Part
           previousRepairStatus: state.repairStatus,
           previousRepairDecisionReason: truncateTextMiddle(state.repairDecisionReason, AI_AGENT_PAYLOAD_STRING_MAX_CHARS),
           previousAutonomousEditNotes: compactStringArrayForAi(
-            state.autonomousEditNotes.filter((note) => /autonomous edit failed|replace target text was not found|matched \d+ times/i.test(note)),
-            8,
+            state.autonomousEditNotes.filter((note) => /autonomous edit failed|replace target text was not found|matched \d+ times|provider-bound|blocked for this iteration/i.test(note)),
+            12,
           ),
           previousFailedEdits: recentFailedEdits,
           previousFailedEditAnchorHints: failedEditAnchorHints,
@@ -4487,10 +4874,12 @@ async function autonomousEditPlannerNode(state: ControlPlaneState): Promise<Part
     proposedEdits,
     appliedEdits: [],
     autonomousEditNotes: notes,
+    autonomousEditReviewDecision: 'pending',
+    autonomousEditReviewReason: '',
     autonomousPlannerAgentCount: runtimeOverride.plan ? 1 : plannerWorkloads.length,
     autonomousPlannerFocuses: plannerFocuses,
     autonomousPlannerStrategy: plannerStrategy,
-    repairStatus: proposedEdits.length > 0 ? 'planned' : 'not-needed',
+    repairStatus: proposedEdits.length > 0 ? 'planned' : (operationMode === 'repair' ? 'idle' : 'not-needed'),
     repairDecisionReason: '',
     repairPromotedPaths: [],
     repairRollbackPaths: [],
@@ -4541,6 +4930,115 @@ async function approvalGateNode(state: ControlPlaneState): Promise<Partial<Contr
     pendingApprovals,
     approvalGranted: resolved.approved,
     approvalMessage: resolved.message,
+  };
+}
+
+function buildAutonomousEditReviewRejectionPatch(
+  state: ControlPlaneState,
+  reason: string,
+  options?: { proposedEdits?: AutonomousEditAction[] },
+): Partial<ControlPlaneState> {
+  return {
+    ...(options && 'proposedEdits' in options ? { proposedEdits: options.proposedEdits || [] } : {}),
+    autonomousEditReviewDecision: 'rejected',
+    autonomousEditReviewReason: reason,
+    autonomousEditNotes: appendUniqueNotes(state.autonomousEditNotes, [reason]),
+    plannerNotes: appendUniqueNotes(state.plannerNotes, [reason]),
+    repairStatus: state.autonomousOperationMode === 'repair' ? 'idle' : 'not-needed',
+    repairDecisionReason: reason,
+  };
+}
+
+async function reviewAutonomousEditsNode(state: ControlPlaneState): Promise<Partial<ControlPlaneState>> {
+  if (!state.autonomousEditEnabled || state.proposedEdits.length === 0) {
+    return {
+      autonomousEditReviewDecision: 'approved',
+      autonomousEditReviewReason: state.autonomousEditEnabled ? 'No autonomous edits required review.' : 'Autonomous edits are disabled.',
+    };
+  }
+
+  const touchedPaths = Array.from(new Set(state.proposedEdits.map((edit) => String(edit.path || '').trim()).filter(Boolean)));
+  const providerPathTouches = touchedPaths.filter((candidatePath) => candidatePath.startsWith('apps/api/providers/'));
+  const apiTouches = touchedPaths.filter((candidatePath) => candidatePath.startsWith('apps/api/'));
+  const controlPlaneTouches = touchedPaths.filter((candidatePath) => candidatePath.startsWith('apps/langgraph-control-plane/'));
+  const nonControlPlaneTouches = touchedPaths.filter((candidatePath) => !candidatePath.startsWith('apps/langgraph-control-plane/'));
+  const providerBoundSignals = shouldAvoidProviderPathAutonomousEdits(state.repairSignals);
+  const restrictToControlPlane = shouldRestrictAutonomousEditsToControlPlane(state);
+  const recentFailures = Math.max(
+    state.recentRepairValidationFailureCount,
+    state.repairSmokeResults.filter((job) => job.status === 'failed').length
+      + state.postRepairValidationResults.filter((job) => job.status === 'failed').length,
+  );
+  const isBroadPlan = touchedPaths.length > 2 || state.proposedEdits.length > 2;
+  const proposalReasonByPath = new Map<string, string>();
+  for (const edit of state.proposedEdits) {
+    const normalizedPath = String(edit.path || '').trim();
+    const normalizedReason = String(edit.reason || '').trim();
+    if (!normalizedPath || !normalizedReason) continue;
+    const reasonParts = [proposalReasonByPath.get(normalizedPath), normalizedReason]
+      .filter((value): value is string => Boolean(value));
+    proposalReasonByPath.set(normalizedPath, reasonParts.join(' | '));
+  }
+  const weakestPathFitScore = touchedPaths.length > 0
+    ? Math.min(...touchedPaths.map((candidatePath) => scoreAutonomousEditPathFit(state, candidatePath, proposalReasonByPath.get(candidatePath) || '')))
+    : 0;
+
+  if (providerBoundSignals && providerPathTouches.length > 0) {
+    const reason = `Rejected autonomous edit batch before apply: provider-bound repair signals are active, so provider-file edits are not allowed (${providerPathTouches.join(', ')}).`;
+    return buildAutonomousEditReviewRejectionPatch(state, reason, {
+      proposedEdits: state.proposedEdits.filter((edit) => !String(edit.path || '').trim().startsWith('apps/api/providers/')),
+    });
+  }
+
+  if (restrictToControlPlane && nonControlPlaneTouches.length > 0) {
+    const reason = `Rejected autonomous edit batch before apply: current signals are externally caused or repetitive, so only control-plane edits are allowed for this iteration.`;
+    return buildAutonomousEditReviewRejectionPatch(state, reason);
+  }
+
+  if (recentFailures > 0 && isBroadPlan) {
+    const reason = `Rejected autonomous edit batch before apply: recent repair validation failures are present, so only narrowly scoped follow-up edits are allowed.`;
+    return buildAutonomousEditReviewRejectionPatch(state, reason);
+  }
+
+  if (state.autonomousOperationMode === 'repair' && touchedPaths.length > 1 && !isTightlyCoupledAutonomousEditBatch(touchedPaths)) {
+    const reason = 'Rejected autonomous edit batch before apply: repair iterations may use multiple edits only for tightly coupled file pairs.';
+    return buildAutonomousEditReviewRejectionPatch(state, reason);
+  }
+
+  if (weakestPathFitScore < 2) {
+    const reason = `Rejected autonomous edit batch before apply: the proposed path fit score (${weakestPathFitScore}) is too weak for the active signals, so a more clearly justified change is required.`;
+    return buildAutonomousEditReviewRejectionPatch(state, reason);
+  }
+
+  const reviewPayload = {
+    threadId: state.threadId,
+    operationMode: state.autonomousOperationMode,
+    repairSignals: state.repairSignals,
+    improvementSignals: state.improvementSignals,
+    touchedPaths,
+    proposedEdits: state.proposedEdits,
+    weakestPathFitScore,
+    providerBoundSignals,
+    restrictToControlPlane,
+    recentFailures,
+    existingPlannerNotes: compactStringArrayForAi(state.plannerNotes, 12),
+  };
+
+  if (state.autonomousOperationMode === 'improvement' && touchedPaths.length > 1) {
+    const aiReview = await callAiAutonomousEditReviewer(state, reviewPayload);
+    if (!aiReview.enabled || !aiReview.approved || aiReview.confidence === 'low') {
+      const reason = aiReview.reason || 'Rejected autonomous edit batch before apply: improvement iterations must stay single-path unless a high-confidence review broadens scope.';
+      return buildAutonomousEditReviewRejectionPatch(state, reason);
+    }
+  }
+
+  const reason = touchedPaths.length > 0
+    ? `Autonomous edit batch approved after bounded review for ${touchedPaths.join(', ')}.`
+    : 'Autonomous edit batch approved after bounded review.';
+  return {
+    autonomousEditReviewDecision: 'approved',
+    autonomousEditReviewReason: reason,
+    autonomousEditNotes: appendUniqueNotes(state.autonomousEditNotes, [reason]),
   };
 }
 
@@ -5053,6 +5551,84 @@ async function restartExperimentalServiceNode(state: ControlPlaneState): Promise
   };
 }
 
+async function restartProductionServiceNode(state: ControlPlaneState): Promise<Partial<ControlPlaneState>> {
+  const touchesApiCode = getRepairTouchedPaths(state).some((candidatePath) => candidatePath.startsWith('apps/api/'));
+  if (!touchesApiCode || state.repairStatus !== 'promoted') {
+    return {
+      productionRestartStatus: 'not-needed',
+      productionRestartReason: '',
+    };
+  }
+
+  if (!state.autonomous) {
+    const reason = 'Production auto-restart is reserved for autonomous runs; manual runs keep restart decisions operator-controlled.';
+    return {
+      productionRestartStatus: 'skipped',
+      productionRestartReason: reason,
+      repairNotes: appendUniqueNotes(state.repairNotes, [reason]),
+      plannerNotes: appendUniqueNotes(state.plannerNotes, [reason]),
+    };
+  }
+
+  if (state.postRepairValidationStatus !== 'passed') {
+    const reason = state.postRepairValidationStatus === 'failed'
+      ? 'Production auto-restart skipped because post-repair validation failed.'
+      : 'Production auto-restart skipped because post-repair validation did not complete.';
+    return {
+      productionRestartStatus: 'skipped',
+      productionRestartReason: reason,
+      repairNotes: appendUniqueNotes(state.repairNotes, [reason]),
+      plannerNotes: appendUniqueNotes(state.plannerNotes, [reason]),
+    };
+  }
+
+  if (!AUTO_RESTART_PRODUCTION_AFTER_REPAIR) {
+    const reason = 'Production auto-restart skipped because CONTROL_PLANE_AUTO_RESTART_PRODUCTION=false.';
+    return {
+      productionRestartStatus: 'skipped',
+      productionRestartReason: reason,
+      repairNotes: appendUniqueNotes(state.repairNotes, [reason]),
+      plannerNotes: appendUniqueNotes(state.plannerNotes, [reason]),
+    };
+  }
+
+  const restartJob: PlannedJob = {
+    id: 'restart-production-service',
+    target: 'api-production',
+    kind: 'deploy',
+    title: `Restart production AnyGPT service (${state.productionServiceName || 'anygpt.service'})`,
+    command: SAFE_PRODUCTION_DEPLOY_COMMAND,
+  };
+  const restartResults = await executePlannedJobs(
+    state,
+    [restartJob],
+    { timeoutMs: POST_REPAIR_VALIDATION_TIMEOUT_MS },
+  );
+  const restartResult = restartResults[0];
+  const productionRestartStatus: z.infer<typeof ProductionRestartStatusSchema> = !restartResult
+    ? 'failed'
+    : restartResult.status === 'success'
+      ? 'success'
+      : restartResult.status === 'skipped'
+        ? 'skipped'
+        : 'failed';
+  const productionRestartReason = productionRestartStatus === 'success'
+    ? `Production AnyGPT service (${state.productionServiceName || 'anygpt.service'}) restarted after passing post-repair validation.`
+    : restartResult
+      ? `Production AnyGPT service restart ${restartResult.status}: ${restartResult.title}${typeof restartResult.exitCode === 'number' ? ` (exit ${restartResult.exitCode})` : ''}`
+      : 'Production AnyGPT service restart did not run.';
+  const notes = restartResult
+    ? [`Production restart ${restartResult.status}: ${restartResult.title}${typeof restartResult.exitCode === 'number' ? ` (exit ${restartResult.exitCode})` : ''}`, productionRestartReason]
+    : [productionRestartReason];
+
+  return {
+    productionRestartStatus,
+    productionRestartReason,
+    repairNotes: appendUniqueNotes(state.repairNotes, notes),
+    plannerNotes: appendUniqueNotes(state.plannerNotes, notes),
+  };
+}
+
 function shouldContinueAfterRepairDecision(state: ControlPlaneState): 'rollbackRepair' | 'runJobs' | 'summarize' {
   const touchedPaths = getRepairTouchedPaths(state);
   if (state.repairStatus === 'failed') {
@@ -5060,6 +5636,9 @@ function shouldContinueAfterRepairDecision(state: ControlPlaneState): 'rollbackR
   }
   if (state.repairStatus === 'promoted' || state.repairStatus === 'not-needed') {
     return shouldRunJobsForState(state) ? 'runJobs' : 'summarize';
+  }
+  if (state.repairStatus === 'rolled-back') {
+    return 'summarize';
   }
   return 'summarize';
 }
@@ -5084,15 +5663,33 @@ async function rollbackRepairNode(state: ControlPlaneState): Promise<Partial<Con
     ? rollbackResult.notes
     : ['Repair rollback completed without additional notes.'];
 
+  const rollbackDecisionReason = rollbackResult.status === 'rolled-back'
+    ? `${state.repairDecisionReason || 'Repair rollback applied.'} Rollback restored ${rollbackResult.restoredPaths.length} path(s).`
+    : `${state.repairDecisionReason || 'Repair rollback failed.'} ${rollbackResult.failedPaths.length} path(s) could not be restored.`;
+
   return {
     repairSessionManifest: rollbackResult.sessionManifest,
     repairStatus: rollbackResult.status === 'rolled-back' ? 'rolled-back' : 'failed',
     repairRollbackPaths: rollbackResult.restoredPaths,
-    repairDecisionReason: rollbackResult.status === 'rolled-back'
-      ? `${state.repairDecisionReason || 'Repair rollback applied.'} Rollback restored ${rollbackResult.restoredPaths.length} path(s).`
-      : `${state.repairDecisionReason || 'Repair rollback failed.'} ${rollbackResult.failedPaths.length} path(s) could not be restored.`,
-    repairNotes: appendUniqueNotes(state.repairNotes, notes),
-    plannerNotes: appendUniqueNotes(state.plannerNotes, notes),
+    repairDecisionReason: rollbackDecisionReason,
+    postRepairValidationStatus: state.postRepairValidationStatus,
+    postRepairValidationJobs: rollbackResult.status === 'rolled-back'
+      ? [...state.postRepairValidationJobs, buildNoteJob('rollback-validation', 'Rollback validation', 'Rollback completed and files were restored.')]
+      : state.postRepairValidationJobs,
+    postRepairValidationResults: rollbackResult.status === 'rolled-back'
+      ? [...state.postRepairValidationResults, {
+          id: 'rollback-validation',
+          target: 'control-plane',
+          kind: 'note',
+          title: 'Rollback validation',
+          command: 'Rollback completed and files were restored.',
+          status: 'success',
+          exitCode: 0,
+          output: rollbackDecisionReason,
+        }]
+      : state.postRepairValidationResults,
+    repairNotes: appendUniqueNotes(state.repairNotes, [...notes, rollbackDecisionReason]),
+    plannerNotes: appendUniqueNotes(state.plannerNotes, [...notes, rollbackDecisionReason]),
   };
 }
 
@@ -5131,7 +5728,7 @@ async function mergePlanNode(state: ControlPlaneState): Promise<Partial<ControlP
       ...mcpJobs,
       ...governanceFlagJobs,
       ...governanceMutationJobs,
-      ...autonomousEditJobs,
+      ...(state.autonomousEditReviewDecision === 'rejected' ? [] : autonomousEditJobs),
       ...state.buildJobs,
       ...state.testJobs,
       ...state.deployJobs,
@@ -5346,12 +5943,18 @@ async function summarizeNode(state: ControlPlaneState): Promise<Partial<ControlP
     if (state.experimentalRestartStatus !== 'not-needed') {
       lines.push(`Experimental restart: ${state.experimentalRestartStatus}${state.experimentalRestartReason.trim() ? ` — ${state.experimentalRestartReason}` : ''}`);
     }
+    if (state.productionRestartStatus !== 'not-needed') {
+      lines.push(`Production restart: ${state.productionRestartStatus}${state.productionRestartReason.trim() ? ` — ${state.productionRestartReason}` : ''}`);
+    }
   }
   lines.push(
     state.autonomousEditEnabled
       ? `Autonomous edits: enabled (${state.autonomousOperationMode}, ${state.proposedEdits.length} proposed, ${state.appliedEdits.filter((edit) => edit.status === 'applied').length} applied${evaluationGateResult.blocksAutonomousEdits ? ', blocked by evaluation gate' : ''}${governanceGateResult.blocksAutonomousEdits ? ', blocked by governance gate' : ''}, status=${state.repairStatus})`
       : 'Autonomous edits: disabled',
   );
+  if (state.autonomousEditEnabled && state.autonomousEditReviewDecision === 'rejected' && state.autonomousEditReviewReason.trim()) {
+    lines.push(`Autonomous edit review: rejected — ${state.autonomousEditReviewReason}`);
+  }
   lines.push(`Execution mode: ${state.executePlan ? 'execute' : 'plan-only'}`);
   if (state.approvalMessage.trim()) {
     lines.push(`Approval: ${state.approvalMessage}`);
@@ -5376,7 +5979,11 @@ async function summarizeNode(state: ControlPlaneState): Promise<Partial<ControlP
   }
 
   if (jobs.length === 0) {
-    lines.push('No jobs were created.');
+    if (state.autonomousEditEnabled && state.autonomousOperationMode === 'repair' && state.proposedEdits.length === 0) {
+      lines.push('No safe code-local repair was proposed in this iteration; the runner will continue monitoring and retesting.');
+    } else {
+      lines.push('No jobs were created.');
+    }
     return { summary: lines.join('\n') };
   }
 
@@ -5388,7 +5995,7 @@ async function summarizeNode(state: ControlPlaneState): Promise<Partial<ControlP
   return { summary: lines.join('\n') };
 }
 
-function buildControlPlaneGraph(checkpointer: any) {
+function buildControlPlaneGraph(checkpointer: any, store?: BaseStore) {
   return new StateGraph(ControlPlaneStateSchema)
     .addNode('inspectMcp', inspectMcpNode)
     .addNode('plannerAgent', plannerAgentNode)
@@ -5397,6 +6004,7 @@ function buildControlPlaneGraph(checkpointer: any) {
     .addNode('deployAgent', deployAgentNode)
     .addNode('repairIntent', repairIntentNode)
     .addNode('autonomousEditPlanner', autonomousEditPlannerNode)
+    .addNode('reviewAutonomousEdits', reviewAutonomousEditsNode)
     .addNode('mergePlan', mergePlanNode)
     .addNode('approvalGate', approvalGateNode)
     .addNode('applyAutonomousEdits', applyAutonomousEditsNode)
@@ -5405,6 +6013,7 @@ function buildControlPlaneGraph(checkpointer: any) {
     .addNode('repairDecision', repairDecisionNode)
     .addNode('postRepairValidate', postRepairValidateNode)
     .addNode('restartExperimentalService', restartExperimentalServiceNode)
+    .addNode('restartProductionService', restartProductionServiceNode)
     .addNode('rollbackRepair', rollbackRepairNode)
     .addNode('runJobs', runJobsNode)
     .addNode('summarize', summarizeNode)
@@ -5415,7 +6024,8 @@ function buildControlPlaneGraph(checkpointer: any) {
     .addEdge('qualityAgent', 'deployAgent')
     .addEdge('deployAgent', 'repairIntent')
     .addEdge('repairIntent', 'autonomousEditPlanner')
-    .addEdge('autonomousEditPlanner', 'mergePlan')
+    .addEdge('autonomousEditPlanner', 'reviewAutonomousEdits')
+    .addEdge('reviewAutonomousEdits', 'mergePlan')
     .addConditionalEdges('mergePlan', shouldExecuteNode, ['approvalGate', 'summarize'])
     .addConditionalEdges('approvalGate', shouldContinueAfterApproval, ['applyAutonomousEdits', 'runJobs', 'summarize'])
     .addConditionalEdges('applyAutonomousEdits', shouldContinueAfterAutonomousEdits, ['repairValidate', 'rollbackRepair', 'runJobs', 'summarize'])
@@ -5423,21 +6033,46 @@ function buildControlPlaneGraph(checkpointer: any) {
     .addEdge('repairEvaluate', 'repairDecision')
     .addEdge('repairDecision', 'postRepairValidate')
     .addEdge('postRepairValidate', 'restartExperimentalService')
-    .addConditionalEdges('restartExperimentalService', shouldContinueAfterRepairDecision, ['rollbackRepair', 'runJobs', 'summarize'])
+    .addEdge('restartExperimentalService', 'restartProductionService')
+    .addConditionalEdges('restartProductionService', shouldContinueAfterRepairDecision, ['rollbackRepair', 'runJobs', 'summarize'])
     .addEdge('rollbackRepair', 'summarize')
     .addEdge('runJobs', 'summarize')
     .addEdge('summarize', END)
-    .compile({ checkpointer });
+    .compile({ checkpointer, store });
+}
+
+function resolveControlPlaneSemanticMemoryStorePath(repoRoot: string): string {
+  return path.resolve(repoRoot, 'apps', 'langgraph-control-plane', '.control-plane', 'semantic-memory.json');
 }
 
 export async function createControlPlaneGraph(options: { repoRoot: string; checkpointPath?: string }) {
   const checkpointPath = resolveControlPlaneCheckpointPath(options.repoRoot, options.checkpointPath);
   const checkpointer = new FileMemorySaver(checkpointPath);
+  const store = new PersistentSemanticMemoryStore(resolveControlPlaneSemanticMemoryStorePath(options.repoRoot));
   await checkpointer.setup();
+  await store.start();
   return {
-    graph: buildControlPlaneGraph(checkpointer),
+    graph: buildControlPlaneGraph(checkpointer, store),
     checkpointer,
+    store,
   };
 }
 
-export const controlPlaneGraph = buildControlPlaneGraph(new MemorySaver());
+const defaultControlPlaneGraphRepoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+const defaultControlPlaneGraphCheckpointer = new FileMemorySaver(
+  resolveControlPlaneCheckpointPath(defaultControlPlaneGraphRepoRoot, './apps/langgraph-control-plane/.control-plane/default-graph-checkpoints.json')
+);
+const defaultControlPlaneGraphStore = new PersistentSemanticMemoryStore(
+  resolveControlPlaneSemanticMemoryStorePath(defaultControlPlaneGraphRepoRoot)
+);
+await defaultControlPlaneGraphStore.start();
+export const controlPlaneGraph = buildControlPlaneGraph(defaultControlPlaneGraphCheckpointer, defaultControlPlaneGraphStore);
+
+export async function createPersistentStudioControlPlaneGraph(options: { repoRoot: string; checkpointPath?: string }) {
+  const checkpointPath = resolveControlPlaneCheckpointPath(options.repoRoot, options.checkpointPath);
+  const checkpointer = new FileMemorySaver(checkpointPath);
+  const store = new PersistentSemanticMemoryStore(resolveControlPlaneSemanticMemoryStorePath(options.repoRoot));
+  await checkpointer.setup();
+  await store.start();
+  return buildControlPlaneGraph(checkpointer, store);
+}

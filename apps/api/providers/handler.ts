@@ -28,11 +28,12 @@ import {
 	ModelsFileStructure, // Import exported type
 	ModelDefinition // Import ModelDefinition from dataManager
 } from '../modules/dataManager.js';
+import { resolveSoraVideoModelId } from '../modules/openaiRouteUtils.js';
 import { refreshProviderCountsInModelsFile } from '../modules/modelUpdater.js'; // Added import
 // FIX: Import fs for schema loading
 import * as fs from 'fs';
 import * as path from 'path';
-import Ajv from 'ajv';
+import { Ajv } from 'ajv';
 import {
 	validateApiKeyAndUsage, // Now async
 	UserData, // Assuming this is exported from userData
@@ -49,7 +50,7 @@ import {
 	estimateTokensFromText,
 	estimateTokensFromMessagesBreakdown
 } from '../modules/tokenEstimation.js';
-import { RequestQueue, requestQueue } from '../modules/requestQueue.js';
+import { RequestQueue, getRequestQueueForLane, type RequestQueueLane } from '../modules/requestQueue.js';
 import {
 	isRateLimitOrQuotaError as isRateLimitOrQuotaErrorShared,
 	isInvalidProviderCredentialError as isInvalidProviderCredentialErrorShared,
@@ -235,6 +236,13 @@ const REQUEST_DEADLINE_MS = (() => {
 	const raw = process.env.REQUEST_DEADLINE_MS;
 	const parsed = raw !== undefined ? Number(raw) : NaN;
 	return Number.isFinite(parsed) && parsed > 0 ? parsed : 0; // default disabled (no request-level timeout)
+})();
+const PROVIDER_STREAM_IDLE_TIMEOUT_MS = (() => {
+	const raw = process.env.PROVIDER_STREAM_IDLE_TIMEOUT_MS;
+	const parsed = raw !== undefined ? Number(raw) : NaN;
+	return Number.isFinite(parsed) && parsed > 0
+		? Math.max(1_000, Math.floor(parsed))
+		: 90_000;
 })();
 const FALLBACK_ATTEMPT_TIMEOUT_MS = (() => {
 	const raw = process.env.FALLBACK_ATTEMPT_TIMEOUT_MS;
@@ -965,12 +973,14 @@ interface PendingProviderStatsUpdate {
 interface HandleMessagesOptions extends Partial<IMessage> {
 	requestId?: string;
 	skipQueue?: boolean;
+	queueLane?: RequestQueueLane;
 }
 
 interface HandleStreamingOptions extends Partial<IMessage> {
 	disablePassthrough?: boolean;
 	requestId?: string;
 	skipQueue?: boolean;
+	queueLane?: RequestQueueLane;
 }
 
 let providerConfigs: { [providerId: string]: ProviderConfig } = {};
@@ -1174,6 +1184,7 @@ export class MessageHandler {
 		options?: Partial<IMessage> & {
 			requestId?: string;
 			skipQueue?: boolean;
+			queueLane?: RequestQueueLane;
 			disablePassthrough?: boolean;
 		}
 	): Partial<IMessage> {
@@ -1181,6 +1192,7 @@ export class MessageHandler {
 		const {
 			requestId: _requestId,
 			skipQueue: _skipQueue,
+			queueLane: _queueLane,
 			disablePassthrough: _disablePassthrough,
 			...messageOverrides
 		} = options;
@@ -2294,6 +2306,7 @@ export class MessageHandler {
 		const options = normalizedArgs.options;
 		const messageOverrides = this.extractMessageOverrides(options);
 		const shouldUseRequestQueue = !options?.skipQueue;
+		const requestQueue = getRequestQueueForLane(options?.queueLane);
 		const execute = async () => {
 			if (!messages?.length || !modelId || !apiKey)
 				throw new Error('Invalid arguments');
@@ -3071,6 +3084,7 @@ export class MessageHandler {
 	): AsyncGenerator<any, void, unknown> {
 		const messageOverrides = this.extractMessageOverrides(options);
 		const shouldUseRequestQueue = !options?.skipQueue;
+		const requestQueue = getRequestQueueForLane(options?.queueLane);
 		if (!messages?.length || !modelId || !apiKey)
 			throw new Error('Invalid arguments for streaming');
 		if (!messageHandler)
@@ -3419,15 +3433,46 @@ export class MessageHandler {
 							let toolCalls: any[] | undefined;
 							let finishReason: string | undefined;
 							let sawReasoning = false;
+							const streamIterator = (
+								stream as AsyncIterable<any>
+							)[Symbol.asyncIterator]();
 
-							for await (const {
-								chunk,
-								latency,
-								response,
-								tool_calls,
-								finish_reason,
-								reasoning
-							} of stream as any) {
+							while (true) {
+								const streamElapsed = Date.now() - requestStartTime;
+								if (
+									REQUEST_DEADLINE_MS > 0 &&
+									streamElapsed >= REQUEST_DEADLINE_MS
+								) {
+									throw new Error(
+										`Request deadline exceeded (${REQUEST_DEADLINE_MS}ms)`
+									);
+								}
+								const remainingDeadlineMs =
+									REQUEST_DEADLINE_MS > 0
+										? Math.max(
+												1_000,
+												REQUEST_DEADLINE_MS - streamElapsed
+											)
+										: PROVIDER_STREAM_IDLE_TIMEOUT_MS;
+								const nextStreamResult =
+									await readNextProviderStreamChunkWithTimeout(
+										streamIterator,
+										Math.min(
+											PROVIDER_STREAM_IDLE_TIMEOUT_MS,
+											remainingDeadlineMs
+										),
+										providerId,
+										modelId
+									);
+								if (nextStreamResult.done) break;
+								const {
+									chunk,
+									latency,
+									response,
+									tool_calls,
+									finish_reason,
+									reasoning
+								} = nextStreamResult.value as any;
 								fullResponse = response;
 								totalLatency += latency || 0;
 								chunkCount++;
@@ -3867,6 +3912,62 @@ const GEMINI_INPUT_TOKEN_LIMIT = readEnvNumber(
 	1_048_576
 );
 
+async function readNextProviderStreamChunkWithTimeout<T>(
+	iterator: AsyncIterator<T>,
+	timeoutMs: number,
+	providerId: string,
+	modelId: string
+): Promise<IteratorResult<T>> {
+	if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+		return iterator.next();
+	}
+
+	let timedOut = false;
+	let timeoutId: NodeJS.Timeout | null = null;
+	const nextPromise = iterator.next().catch(error => {
+		if (timedOut) {
+			return new Promise<IteratorResult<T>>(() => {});
+		}
+		throw error;
+	});
+
+	const timeoutPromise = new Promise<IteratorResult<T>>((_, reject) => {
+		timeoutId = setTimeout(() => {
+			timedOut = true;
+			try {
+				const maybeReturn = iterator.return?.();
+				if (
+					maybeReturn &&
+					typeof (maybeReturn as Promise<unknown>).catch === 'function'
+				) {
+					void (maybeReturn as Promise<unknown>).catch(() => {});
+				}
+			} catch {
+				// Ignore iterator shutdown errors during timeout handling.
+			}
+
+			const timeoutError = new Error(
+				`Provider ${providerId} stream idle timeout after ${timeoutMs}ms for model ${modelId}.`
+			);
+			(timeoutError as any).status = 504;
+			(timeoutError as any).statusCode = 504;
+			(timeoutError as any).code = 'PROVIDER_STREAM_IDLE_TIMEOUT';
+			(timeoutError as any).retryable = true;
+			(timeoutError as any).failureOrigin = 'upstream_provider';
+			reject(timeoutError);
+		}, timeoutMs);
+		if (typeof timeoutId.unref === 'function') {
+			timeoutId.unref();
+		}
+	});
+
+	try {
+		return await Promise.race([nextPromise, timeoutPromise]);
+	} finally {
+		if (timeoutId) clearTimeout(timeoutId);
+	}
+}
+
 function isGeminiUnsupportedRemoteMediaUrlError(error: any): boolean {
 	const message = String(error?.message || '').toLowerCase();
 	const code = String(error?.code || '').toUpperCase();
@@ -3987,7 +4088,35 @@ function shouldSkipGeminiProviderForMessage(
 		lastError.includes('service_disabled') ||
 		lastError.includes('accessnotconfigured') ||
 		lastError.includes('generativelanguage.googleapis.com') ||
-		lastError.includes('gemini_project_auth_failure')
+		lastError.includes('gemini_project_auth_failure') ||
+		lastError.includes('api key not valid') ||
+		lastError.includes('api_key_invalid') ||
+		lastError.includes('invalid api key') ||
+		lastError.includes('invalid_argument')
+	) {
+		return true;
+	}
+
+	if (
+		lastError.includes('empty streaming response') ||
+		lastError.includes('returned an empty streaming response')
+	) {
+		return true;
+	}
+
+	if (
+		lastError.includes('invalid_response_structure') ||
+		lastError.includes('invalid response structure') ||
+		lastError.includes('gemini:invalid_response_structure')
+	) {
+		return true;
+	}
+
+	if (
+		lastError.includes('invalid api key') ||
+		lastError.includes('incorrect api key provided') ||
+		lastError.includes('invalid_api_key') ||
+		lastError.includes('you can find your api key at https://platform.openai.com/account/api-keys')
 	) {
 		return true;
 	}

@@ -46,6 +46,12 @@ export function isImageModelId(modelId: string): boolean {
   return normalized.includes('imagen') || normalized.includes('image') || normalized.includes('nano-banana');
 }
 
+function isAudioPreviewModelId(modelId: string): boolean {
+  const normalized = String(modelId || '').toLowerCase().trim();
+  if (!normalized) return false;
+  return normalized.includes('audio-preview');
+}
+
 export function isNanoBananaModel(modelId: string): boolean {
   const normalized = String(modelId || '').toLowerCase();
   return normalized.includes('nano-banana');

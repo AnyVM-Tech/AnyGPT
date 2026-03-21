@@ -6,11 +6,16 @@
   "scripts": {
     "dev": "bash ../../bun.sh run ./src/index.ts",
     "start": "bash ../../bun.sh run ./src/index.ts",
+    "control-plane:autonomous:start": "bash ../../scripts/control-plane-autonomous-runner.sh start",
+    "control-plane:autonomous:status": "bash ../../scripts/control-plane-autonomous-runner.sh status",
+    "control-plane:autonomous:stop": "bash ../../scripts/control-plane-autonomous-runner.sh stop",
+    "control-plane:autonomous:restart": "bash ../../scripts/control-plane-autonomous-runner.sh restart",
     "studio:dev": "bash ../../bun.sh x @langchain/langgraph-cli dev --config ./langgraph.json --host 0.0.0.0 --port 2024 --no-browser",
     "build": "tsc --project tsconfig.json --outDir dist",
     "typecheck": "tsc --project tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@langchain/core": "^1.1.34",
     "@langchain/langgraph": "^1.0.8",
     "@langchain/langgraph-checkpoint": "^1.0.0",
     "@modelcontextprotocol/sdk": "^1.27.1",
