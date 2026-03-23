@@ -264,6 +264,15 @@ const DEFAULT_CONTROL_PLANE_EXPERIMENTAL_SERVICE = 'anygpt-experimental.service'
 const DEFAULT_CONTROL_PLANE_PRODUCTION_SERVICE = 'anygpt.service';
 const DEFAULT_CONTINUOUS_INTERVAL_MS = 1_000;
 const RUNNER_STATUS_HEARTBEAT_MS = 5_000;
+const RUNNER_STREAM_CHUNK_TIMEOUT_MS = (() => {
+  const configured = Number(
+    process.env.CONTROL_PLANE_STREAM_CHUNK_TIMEOUT_MS
+    ?? process.env.CONTROL_PLANE_GRAPH_CHUNK_TIMEOUT_MS
+    ?? process.env.CONTROL_PLANE_GRAPH_STALL_TIMEOUT_MS
+    ?? 180_000,
+  );
+  return Math.max(15_000, Number.isFinite(configured) ? Math.floor(configured) : 180_000);
+})();
 const MULTI_RUNNER_COORDINATOR_POLL_MS = 2_000;
 const MULTI_RUNNER_RESTART_DELAY_MS = 1_500;
 
@@ -1250,6 +1259,45 @@ function sleep(ms: number, jitterMs = 0): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, delay));
 }
 
+async function readNextStreamChunkWithTimeout<T>(
+  iterator: AsyncIterator<T>,
+  timeoutMs: number,
+  context: string,
+): Promise<IteratorResult<T>> {
+  let timeoutId: NodeJS.Timeout | undefined;
+
+  try {
+    return await Promise.race([
+      iterator.next(),
+      new Promise<IteratorResult<T>>((_, reject) => {
+        timeoutId = setTimeout(() => {
+          void Promise.resolve(iterator.return?.()).catch(() => undefined);
+          reject(new Error(`Graph stream stalled for ${timeoutMs}ms while ${context}.`));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, context: string): Promise<T> {
+  let timeoutId: NodeJS.Timeout | undefined;
+
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(new Error(`${context} timed out after ${timeoutMs}ms.`));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+}
+
 function getContinuousRetryDelayMs(consecutiveFailures: number): number {
   const normalizedFailures = Number.isFinite(consecutiveFailures)
     ? Math.max(0, Math.floor(consecutiveFailures))
@@ -1689,7 +1737,20 @@ async function runGraphOnce(
 
   let streamedChunkCount = 0;
   try {
-    for await (const chunk of await controlPlaneGraph.stream(input as any, config as any)) {
+    const stream = await withTimeout(
+      controlPlaneGraph.stream(input as any, config as any),
+      RUNNER_STREAM_CHUNK_TIMEOUT_MS,
+      `Graph stream initialization for thread ${parsedArgs.threadId}`,
+    );
+    const iterator = stream[Symbol.asyncIterator]();
+    while (true) {
+      const nextChunk = await readNextStreamChunkWithTimeout(
+        iterator,
+        RUNNER_STREAM_CHUNK_TIMEOUT_MS,
+        `${getRunnerStatusSummaryFallback()} (thread ${parsedArgs.threadId})`,
+      );
+      if (nextChunk.done) break;
+      const chunk = nextChunk.value;
       lastChunk = chunk;
       streamedChunkCount += 1;
       if (isInterruptChunk(chunk)) {
@@ -1735,21 +1796,17 @@ function buildCoordinatorChildSpecs(parsedArgs: ParsedArgs): CoordinatorChildSpe
   const requestedScopes = new Set(parsedArgs.scopes.map((scope) => String(scope || '').trim().toLowerCase()).filter(Boolean));
   const laneTemplates: Array<{ id: string; label: string; scopes: string[]; editAllowlist: string[] }> = [];
 
-  const includeApiExperimentalLane = requestedScopes.has('repo') || requestedScopes.has('api-experimental');
-  const includeApiDataLane = requestedScopes.has('repo') || requestedScopes.has('api');
+  const includeApiFamilyLanes = requestedScopes.has('repo') || requestedScopes.has('api') || requestedScopes.has('api-experimental');
+  const includeRepoSurfaceFamilyLanes = requestedScopes.has('repo') || requestedScopes.has('repo-surface');
 
-  if (includeApiExperimentalLane) {
+  if (includeApiFamilyLanes) {
     laneTemplates.push({
-      id: 'api-experimental',
-      label: 'API Experimental',
-      scopes: ['api-experimental'],
+      id: 'api-routing',
+      label: 'API Routing & Providers',
+      scopes: ['api-routing'],
       editAllowlist: [
         'apps/api/providers',
-        'apps/api/routes',
-        'apps/api/ws',
-        'apps/api/server.ts',
-        'apps/api/server.launcher.bun.ts',
-        'apps/api/modules/requestQueue.ts',
+        'apps/api/routes/openai.ts',
         'apps/api/modules/openaiProviderSelection.ts',
         'apps/api/modules/openaiRequestSupport.ts',
         'apps/api/modules/openaiRouteSupport.ts',
@@ -1757,19 +1814,28 @@ function buildCoordinatorChildSpecs(parsedArgs: ParsedArgs): CoordinatorChildSpe
         'apps/api/modules/openaiResponsesFormat.ts',
         'apps/api/modules/geminiMediaValidation.ts',
         'apps/api/modules/responsesHistory.ts',
-        'apps/api/modules/rateLimit.ts',
-        'apps/api/modules/rateLimitRedis.ts',
-        'apps/api/modules/requestIntake.ts',
-        'apps/api/modules/tokenEstimation.ts',
-        'apps/api/modules/userData.ts',
       ],
     });
-  }
-  if (includeApiDataLane) {
+    laneTemplates.push({
+      id: 'api-runtime',
+      label: 'API Runtime & Queue',
+      scopes: ['api-runtime'],
+      editAllowlist: [
+        'apps/api/modules/requestQueue.ts',
+        'apps/api/modules/requestIntake.ts',
+        'apps/api/modules/rateLimit.ts',
+        'apps/api/modules/rateLimitRedis.ts',
+        'apps/api/modules/tokenEstimation.ts',
+        'apps/api/modules/userData.ts',
+        'apps/api/modules/errorClassification.ts',
+        'apps/api/modules/errorLogger.ts',
+        'apps/api/modules/middlewareFactory.ts',
+      ],
+    });
     laneTemplates.push({
       id: 'api-data',
       label: 'API Data & Model Sync',
-      scopes: ['api'],
+      scopes: ['api-data'],
       editAllowlist: [
         'apps/api/models.json',
         'apps/api/pricing.json',
@@ -1777,12 +1843,25 @@ function buildCoordinatorChildSpecs(parsedArgs: ParsedArgs): CoordinatorChildSpe
         'apps/api/modules/dataManager.ts',
         'apps/api/modules/adminKeySync.ts',
         'apps/api/modules/keyChecker.ts',
+        'apps/api/modules/db.ts',
         'apps/api/dev/fetchPricing.ts',
         'apps/api/dev/checkModelCapabilities.ts',
         'apps/api/dev/refreshModels.ts',
         'apps/api/dev/updatemodels.ts',
         'apps/api/dev/updateproviders.ts',
         'apps/api/routes/models.ts',
+      ],
+    });
+    laneTemplates.push({
+      id: 'api-platform',
+      label: 'API Platform & Validation',
+      scopes: ['api-platform'],
+      editAllowlist: [
+        'apps/api/server.ts',
+        'apps/api/server.launcher.bun.ts',
+        'apps/api/ws',
+        'apps/api/anygpt-api.service',
+        'apps/api/anygpt-experimental.service',
       ],
     });
   }
@@ -1796,12 +1875,24 @@ function buildCoordinatorChildSpecs(parsedArgs: ParsedArgs): CoordinatorChildSpe
     });
   }
 
-  if (requestedScopes.has('repo') || requestedScopes.has('repo-surface')) {
+  if (includeRepoSurfaceFamilyLanes) {
     laneTemplates.push({
-      id: 'repo-surface',
-      label: 'Repo Surface',
-      scopes: ['repo-surface'],
-      editAllowlist: ['package.json', 'turbo.json', 'bun.sh', 'README.md', 'SETUP.md', 'apps/homepage', 'apps/ui', 'scripts'],
+      id: 'workspace-surface',
+      label: 'Workspace Surface',
+      scopes: ['workspace-surface'],
+      editAllowlist: ['package.json', 'turbo.json', 'bun.sh', 'README.md', 'SETUP.md', 'pnpm-workspace.yaml', 'tsconfig.json', 'scripts'],
+    });
+    laneTemplates.push({
+      id: 'homepage-surface',
+      label: 'Homepage Surface',
+      scopes: ['homepage-surface'],
+      editAllowlist: ['apps/homepage'],
+    });
+    laneTemplates.push({
+      id: 'ui-surface',
+      label: 'UI Surface',
+      scopes: ['ui-surface'],
+      editAllowlist: ['apps/ui'],
     });
   }
 

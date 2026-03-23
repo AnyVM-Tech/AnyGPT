@@ -16,9 +16,10 @@ UNIT_FILE="$USER_SERVICE_DIR/$UNIT_NAME"
 DEFAULT_GOAL='Continuously monitor, fix, and improve AnyGPT across the repo, checking API, control-plane, UI, homepage, runtime health, routing, model availability, governance drift, and bounded safe improvements.'
 DEFAULT_SCOPES='repo,api,api-experimental,control-plane,repo-surface'
 DEFAULT_INTERVAL_MS='1000'
-DEFAULT_MAX_EDIT_ACTIONS='2'
+DEFAULT_MAX_EDIT_ACTIONS='6'
 DEFAULT_EDIT_ALLOWLIST='apps/langgraph-control-plane,apps/api,apps/homepage,apps/ui,scripts,README.md,SETUP.md,package.json,turbo.json,pnpm-workspace.yaml,tsconfig.json,bun.sh'
-DEFAULT_AGENT_PARALLELISM='1'
+DEFAULT_AGENT_PARALLELISM='6'
+DEFAULT_MULTI_RUNNER='true'
 DEFAULT_LOG_TAIL_LINES='80'
 
 print_usage() {
@@ -64,9 +65,10 @@ write_env_file() {
   local edit_allowlist="$5"
   local edit_denylist="$6"
   local agent_parallelism="$7"
-  local log_tail_lines="$8"
-  local auto_restart_experimental="$9"
-  local auto_restart_production="${10}"
+  local multi_runner="${8}"
+  local log_tail_lines="${9}"
+  local auto_restart_experimental="${10}"
+  local auto_restart_production="${11}"
 
   mkdir -p "$CONTROL_DIR"
   {
@@ -81,6 +83,7 @@ write_env_file() {
     write_env_var CONTROL_PLANE_AUTONOMOUS_CHECKPOINT_FILE "$CHECKPOINT_FILE"
     write_env_var CONTROL_PLANE_AUTONOMOUS_PID_FILE "$PID_FILE"
     write_env_var CONTROL_PLANE_AI_CODE_EDIT_AGENT_PARALLELISM "$agent_parallelism"
+    write_env_var CONTROL_PLANE_AUTONOMOUS_MULTI_RUNNER "$multi_runner"
     write_env_var CONTROL_PLANE_LOG_TAIL_LINES "$log_tail_lines"
     write_env_var CONTROL_PLANE_AUTO_RESTART_EXPERIMENTAL "$auto_restart_experimental"
     write_env_var CONTROL_PLANE_AUTO_RESTART_PRODUCTION "$auto_restart_production"
@@ -130,12 +133,13 @@ start_runner() {
   local edit_allowlist="${CONTROL_PLANE_AUTONOMOUS_EDIT_ALLOWLIST:-$DEFAULT_EDIT_ALLOWLIST}"
   local edit_denylist="${CONTROL_PLANE_AUTONOMOUS_EDIT_DENYLIST:-}"
   local agent_parallelism="${CONTROL_PLANE_AUTONOMOUS_AGENT_PARALLELISM:-${CONTROL_PLANE_AI_CODE_EDIT_AGENT_PARALLELISM:-$DEFAULT_AGENT_PARALLELISM}}"
+  local multi_runner="${CONTROL_PLANE_AUTONOMOUS_MULTI_RUNNER:-${CONTROL_PLANE_MULTI_RUNNER:-$DEFAULT_MULTI_RUNNER}}"
   local log_tail_lines="${CONTROL_PLANE_AUTONOMOUS_LOG_TAIL_LINES:-$DEFAULT_LOG_TAIL_LINES}"
   local auto_restart_experimental="${CONTROL_PLANE_AUTONOMOUS_AUTO_RESTART_EXPERIMENTAL:-${CONTROL_PLANE_AUTO_RESTART_EXPERIMENTAL:-false}}"
   local auto_restart_production="${CONTROL_PLANE_AUTONOMOUS_AUTO_RESTART_PRODUCTION:-${CONTROL_PLANE_AUTO_RESTART_PRODUCTION:-false}}"
 
   rotate_runtime_files
-  write_env_file "$goal" "$scopes" "$interval_ms" "$max_edit_actions" "$edit_allowlist" "$edit_denylist" "$agent_parallelism" "$log_tail_lines" "$auto_restart_experimental" "$auto_restart_production"
+  write_env_file "$goal" "$scopes" "$interval_ms" "$max_edit_actions" "$edit_allowlist" "$edit_denylist" "$agent_parallelism" "$multi_runner" "$log_tail_lines" "$auto_restart_experimental" "$auto_restart_production"
   chmod +x "$EXEC_SCRIPT"
   write_unit_file
 

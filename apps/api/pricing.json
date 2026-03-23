@@ -1,2115 +1,3119 @@
 {
-  "updated_at": "2026-03-05T06:28:27.441Z",
+  "updated_at": "2026-03-23T06:57:36.802Z",
   "models": {
     "deepseek-chat": {
       "input": 0.27,
       "output": 1.1,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "deepseek-reasoner": {
       "input": 0.55,
       "output": 2.19,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "gemini-2.5-flash": {
-      "input": 0.15,
-      "output": 0.6,
-      "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "gemini-2.5-pro": {
-      "input": 1.25,
-      "output": 10,
-      "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "gemini-2.0-flash": {
-      "input": 0.1,
-      "output": 0.4,
-      "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "gemini-2.0-flash-001": {
-      "input": 0.1,
-      "output": 0.4,
-      "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "gemini-2.0-flash-lite-001": {
-      "input": 0.075,
-      "output": 0.3,
-      "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "gemini-2.0-flash-lite": {
-      "input": 0.075,
-      "output": 0.3,
-      "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "gemma-3-1b-it": {
-      "input": 0,
-      "output": 0,
-      "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "gemma-3-4b-it": {
-      "input": 0,
-      "output": 0,
-      "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "gemma-3-27b-it": {
-      "input": 0,
-      "output": 0,
-      "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "gemma-3n-e2b-it": {
-      "input": 0,
-      "output": 0,
-      "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "gemini-flash-latest": {
-      "input": 0.15,
-      "output": 0.6,
-      "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "gemini-flash-lite-latest": {
-      "input": 0.075,
-      "output": 0.3,
-      "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "gemini-pro-latest": {
-      "input": 1.25,
-      "output": 10,
-      "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "gemini-2.5-flash-lite": {
-      "input": 0.075,
-      "output": 0.3,
-      "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "gemini-2.5-flash-lite-preview-09-2025": {
-      "input": 0.075,
-      "output": 0.3,
-      "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "gemini-3-pro-preview": {
-      "input": 1,
-      "output": 8,
-      "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "gemini-3-flash-preview": {
-      "input": 0.1,
-      "output": 0.4,
-      "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "gemini-3.1-pro-preview": {
-      "input": 1,
-      "output": 8,
-      "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "gemini-3.1-pro-preview-customtools": {
-      "input": 1,
-      "output": 8,
-      "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "gemini-2.5-computer-use-preview-10-2025": {
-      "input": 1.25,
-      "output": 10,
-      "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "deep-research-pro-preview-12-2025": {
-      "input": 2.5,
-      "output": 10,
-      "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "gemini-embedding-001": {
-      "input": 0,
-      "output": 0,
-      "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "aqa": {
-      "input": 0,
-      "output": 0,
-      "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "imagen-4.0-generate-001": {
-      "input": 0,
-      "output": 0,
-      "per_image": 0.04,
-      "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "imagen-4.0-ultra-generate-001": {
-      "input": 0,
-      "output": 0,
-      "per_image": 0.08,
-      "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "imagen-4.0-fast-generate-001": {
-      "input": 0,
-      "output": 0,
-      "per_image": 0.02,
-      "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "veo-2.0-generate-001": {
-      "input": 0,
-      "output": 0,
-      "per_request": 0.35,
-      "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "veo-3.0-generate-001": {
-      "input": 0,
-      "output": 0,
-      "per_request": 0.5,
-      "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "veo-3.0-fast-generate-001": {
-      "input": 0,
-      "output": 0,
-      "per_request": 0.25,
-      "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "veo-3.1-generate-preview": {
-      "input": 0,
-      "output": 0,
-      "per_request": 0.5,
-      "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "veo-3.1-fast-generate-preview": {
-      "input": 0,
-      "output": 0,
-      "per_request": 0.25,
-      "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "gemini-2.5-flash-native-audio-latest": {
-      "input": 0.15,
-      "output": 0.6,
-      "audio_input": 1,
-      "audio_output": 12,
-      "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "gemini-2.5-flash-native-audio-preview-09-2025": {
-      "input": 0.15,
-      "output": 0.6,
-      "audio_input": 1,
-      "audio_output": 12,
-      "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "gemini-2.5-flash-native-audio-preview-12-2025": {
-      "input": 0.15,
-      "output": 0.6,
-      "audio_input": 1,
-      "audio_output": 12,
-      "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "grok-3": {
-      "input": 3,
-      "output": 15,
-      "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "grok-3-mini": {
-      "input": 0.3,
-      "output": 0.5,
-      "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "grok-4-0709": {
-      "input": 6,
-      "output": 18,
-      "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "grok-4-1-fast-non-reasoning": {
-      "input": 3,
-      "output": 15,
-      "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "grok-4-1-fast-reasoning": {
-      "input": 3,
-      "output": 15,
-      "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "grok-4-fast-non-reasoning": {
-      "input": 3,
-      "output": 15,
-      "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "grok-4-fast-reasoning": {
-      "input": 3,
-      "output": 15,
-      "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "grok-code-fast-1": {
-      "input": 0.5,
-      "output": 2,
-      "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "gpt-4-0613": {
       "input": 30,
       "output": 60,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "gpt-4": {
       "input": 30,
       "output": 60,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "gpt-3.5-turbo": {
       "input": 0.5,
       "output": 1.5,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "gpt-4o-search-preview-2025-03-11": {
       "input": 2.5,
       "output": 10,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "gpt-5.3-codex": {
       "input": 2.5,
       "output": 10,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "gpt-realtime-1.5": {
       "input": 4,
       "output": 16,
-      "audio_input": 30,
-      "audio_output": 60,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "audio_input": 30,
+      "audio_output": 60
     },
     "gpt-audio-1.5": {
       "input": 2,
       "output": 8,
-      "audio_input": 30,
-      "audio_output": 60,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "audio_input": 30,
+      "audio_output": 60
     },
     "gpt-4o-search-preview": {
       "input": 2.5,
       "output": 10,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "gpt-4-1106-preview": {
       "input": 10,
       "output": 30,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "gpt-3.5-turbo-1106": {
       "input": 1,
       "output": 2,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "text-embedding-3-small": {
       "input": 0.02,
       "output": 0,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "text-embedding-3-large": {
       "input": 0.13,
       "output": 0,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "gpt-4-0125-preview": {
       "input": 10,
       "output": 30,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "gpt-4-turbo-preview": {
       "input": 10,
       "output": 30,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "gpt-3.5-turbo-0125": {
       "input": 0.5,
       "output": 1.5,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "gpt-4-turbo": {
       "input": 10,
       "output": 30,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "gpt-4-turbo-2024-04-09": {
       "input": 10,
       "output": 30,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "gpt-4o": {
       "input": 2.5,
       "output": 10,
-      "image_input": 0.001913,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "image_input": 0.001913
     },
     "gpt-4o-2024-05-13": {
       "input": 5,
       "output": 15,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "gpt-4o-mini-2024-07-18": {
       "input": 0.15,
       "output": 0.6,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "gpt-4o-mini": {
       "input": 0.15,
       "output": 0.6,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "gpt-4o-2024-08-06": {
       "input": 2.5,
       "output": 10,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "gpt-4o-audio-preview": {
       "input": 2.5,
       "output": 10,
-      "audio_input": 40,
-      "audio_output": 80,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "audio_input": 40,
+      "audio_output": 80
     },
     "gpt-4o-realtime-preview": {
       "input": 5,
       "output": 20,
-      "audio_input": 40,
-      "audio_output": 80,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "audio_input": 40,
+      "audio_output": 80
     },
     "omni-moderation-2024-09-26": {
       "input": 0,
       "output": 0,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "gpt-4o-realtime-preview-2024-12-17": {
       "input": 5,
       "output": 20,
-      "audio_input": 40,
-      "audio_output": 80,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "audio_input": 40,
+      "audio_output": 80
     },
     "gpt-4o-audio-preview-2024-12-17": {
       "input": 2.5,
       "output": 10,
-      "audio_input": 40,
-      "audio_output": 80,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "audio_input": 40,
+      "audio_output": 80
     },
     "gpt-4o-mini-realtime-preview-2024-12-17": {
       "input": 0.6,
       "output": 2.4,
-      "audio_input": 10,
-      "audio_output": 20,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "audio_input": 10,
+      "audio_output": 20
     },
     "gpt-4o-mini-audio-preview-2024-12-17": {
       "input": 0.15,
       "output": 0.6,
-      "audio_input": 10,
-      "audio_output": 20,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "audio_input": 10,
+      "audio_output": 20
     },
     "o1-2024-12-17": {
       "input": 15,
       "output": 60,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "o1": {
       "input": 15,
       "output": 60,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "gpt-4o-mini-realtime-preview": {
       "input": 0.6,
       "output": 2.4,
-      "audio_input": 10,
-      "audio_output": 20,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "audio_input": 10,
+      "audio_output": 20
     },
     "gpt-4o-mini-audio-preview": {
       "input": 0.15,
       "output": 0.6,
-      "audio_input": 10,
-      "audio_output": 20,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "audio_input": 10,
+      "audio_output": 20
     },
     "o3-mini": {
       "input": 1.1,
       "output": 4.4,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "o3-mini-2025-01-31": {
       "input": 1.1,
       "output": 4.4,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "gpt-4o-2024-11-20": {
       "input": 2.5,
       "output": 10,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "gpt-4o-mini-search-preview-2025-03-11": {
       "input": 0.15,
       "output": 0.6,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "gpt-4o-mini-search-preview": {
       "input": 0.15,
       "output": 0.6,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "o1-pro-2025-03-19": {
       "input": 150,
       "output": 600,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "o1-pro": {
       "input": 150,
       "output": 600,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "o3-2025-04-16": {
       "input": 10,
       "output": 40,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "o4-mini-2025-04-16": {
       "input": 1.1,
       "output": 4.4,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "o3": {
       "input": 10,
       "output": 40,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "o4-mini": {
       "input": 1.1,
       "output": 4.4,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "gpt-4.1-2025-04-14": {
       "input": 2,
       "output": 8,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "gpt-4.1": {
       "input": 2,
       "output": 8,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "gpt-4.1-mini-2025-04-14": {
       "input": 0.4,
       "output": 1.6,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "gpt-4.1-mini": {
       "input": 0.4,
       "output": 1.6,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "gpt-4.1-nano-2025-04-14": {
       "input": 0.1,
       "output": 0.4,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "gpt-4.1-nano": {
       "input": 0.1,
       "output": 0.4,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "gpt-4o-realtime-preview-2025-06-03": {
       "input": 5,
       "output": 20,
-      "audio_input": 40,
-      "audio_output": 80,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "audio_input": 40,
+      "audio_output": 80
     },
     "gpt-4o-audio-preview-2025-06-03": {
       "input": 2.5,
       "output": 10,
-      "audio_input": 40,
-      "audio_output": 80,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "audio_input": 40,
+      "audio_output": 80
     },
     "gpt-4o-transcribe-diarize": {
       "input": 2.5,
       "output": 10,
-      "audio_input": 6,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "audio_input": 6
     },
     "gpt-5-chat-latest": {
       "input": 5,
       "output": 20,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "gpt-5-2025-08-07": {
       "input": 5,
       "output": 20,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "gpt-5": {
-      "input": 5,
-      "output": 20,
-      "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "gpt-5-mini-2025-08-07": {
       "input": 0.6,
       "output": 2.4,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "gpt-5-mini": {
       "input": 0.6,
       "output": 2.4,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "gpt-5-nano-2025-08-07": {
       "input": 0.15,
       "output": 0.6,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "gpt-5-nano": {
-      "input": 0.15,
-      "output": 0.6,
-      "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "gpt-audio-2025-08-28": {
       "input": 2.5,
       "output": 10,
-      "audio_input": 40,
-      "audio_output": 80,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "audio_input": 40,
+      "audio_output": 80
     },
     "gpt-realtime": {
       "input": 5,
       "output": 20,
-      "audio_input": 40,
-      "audio_output": 80,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "audio_input": 40,
+      "audio_output": 80
     },
     "gpt-realtime-2025-08-28": {
       "input": 5,
       "output": 20,
-      "audio_input": 40,
-      "audio_output": 80,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "audio_input": 40,
+      "audio_output": 80
     },
     "gpt-audio": {
       "input": 2.5,
       "output": 10,
-      "audio_input": 40,
-      "audio_output": 80,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "audio_input": 40,
+      "audio_output": 80
     },
     "gpt-5-codex": {
       "input": 5,
       "output": 20,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "gpt-5-pro-2025-10-06": {
       "input": 10,
       "output": 40,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "gpt-5-pro": {
       "input": 10,
       "output": 40,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "gpt-audio-mini": {
       "input": 0.15,
       "output": 0.6,
-      "audio_input": 10,
-      "audio_output": 20,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "audio_input": 10,
+      "audio_output": 20
     },
     "gpt-audio-mini-2025-10-06": {
       "input": 0.15,
       "output": 0.6,
-      "audio_input": 10,
-      "audio_output": 20,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "audio_input": 10,
+      "audio_output": 20
     },
     "gpt-5-search-api": {
       "input": 5,
       "output": 20,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "gpt-realtime-mini": {
       "input": 0.6,
       "output": 2.4,
-      "audio_input": 10,
-      "audio_output": 20,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "audio_input": 10,
+      "audio_output": 20
     },
     "gpt-realtime-mini-2025-10-06": {
       "input": 0.6,
       "output": 2.4,
-      "audio_input": 10,
-      "audio_output": 20,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "audio_input": 10,
+      "audio_output": 20
     },
     "gpt-5-search-api-2025-10-14": {
       "input": 5,
       "output": 20,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "gpt-5.1-chat-latest": {
       "input": 4,
       "output": 16,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "gpt-5.1-2025-11-13": {
       "input": 4,
       "output": 16,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "gpt-5.1": {
       "input": 4,
       "output": 16,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "gpt-5.1-codex": {
       "input": 4,
       "output": 16,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "gpt-5.1-codex-mini": {
       "input": 0.5,
       "output": 2,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "gpt-5.1-codex-max": {
       "input": 8,
       "output": 32,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "gpt-5.2-2025-12-11": {
       "input": 3,
       "output": 12,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "gpt-5.2": {
       "input": 3,
       "output": 12,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "gpt-5.2-pro-2025-12-11": {
       "input": 8,
       "output": 32,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "gpt-5.2-pro": {
       "input": 8,
       "output": 32,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "gpt-5.2-chat-latest": {
       "input": 3,
       "output": 12,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "gpt-realtime-mini-2025-12-15": {
       "input": 0.6,
       "output": 2.4,
-      "audio_input": 10,
-      "audio_output": 20,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "audio_input": 10,
+      "audio_output": 20
     },
     "gpt-audio-mini-2025-12-15": {
       "input": 0.15,
       "output": 0.6,
-      "audio_input": 10,
-      "audio_output": 20,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "audio_input": 10,
+      "audio_output": 20
     },
     "gpt-5.2-codex": {
       "input": 3,
       "output": 12,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "gpt-3.5-turbo-16k": {
       "input": 3,
       "output": 4,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "text-embedding-ada-002": {
       "input": 0.1,
       "output": 0,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "computer-use-preview": {
       "input": 3,
       "output": 12,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "computer-use-preview-2025-03-11": {
       "input": 3,
       "output": 12,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "o3-pro": {
       "input": 20,
       "output": 80,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "o3-pro-2025-06-10": {
       "input": 20,
       "output": 80,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
-    "gpt-4-0314": {
-      "input": 30,
-      "output": 60,
+    "gpt-image-1": {
+      "input": 0,
+      "output": 0,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "per_image": 0.04
+    },
+    "gpt-image-1-mini": {
+      "input": 0,
+      "output": 0,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "per_image": 0.02
+    },
+    "gpt-image-1.5": {
+      "input": 0,
+      "output": 0,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "per_image": 0.04
+    },
+    "chatgpt-image-latest": {
+      "input": 0,
+      "output": 0,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "per_image": 0.04
+    },
+    "sora-2": {
+      "input": 0,
+      "output": 0,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "per_image": 0.1
+    },
+    "sora-2-pro": {
+      "input": 0,
+      "output": 0,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "per_image": 0.2
+    },
+    "gpt-5.4": {
+      "input": 2.375,
+      "output": 14.25,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "gpt-5.4-pro": {
+      "input": 28.5,
+      "output": 171,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "davinci-002": {
+      "input": 2,
+      "output": 2,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "babbage-002": {
+      "input": 0.4,
+      "output": 0.4,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "gpt-3.5-turbo-instruct": {
+      "input": 1.5,
+      "output": 2,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "gpt-3.5-turbo-instruct-0914": {
+      "input": 1.5,
+      "output": 2,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "tts-1-hd": {
+      "input": 30,
+      "output": 0,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "tts-1-1106": {
+      "input": 15,
+      "output": 0,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "tts-1-hd-1106": {
+      "input": 30,
+      "output": 0,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "gpt-4o-transcribe": {
+      "input": 2.5,
+      "output": 10,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "audio_input": 6
+    },
+    "tts-1": {
+      "input": 15,
+      "output": 0,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "whisper-1": {
+      "input": 0,
+      "output": 0,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "audio_input": 0.006
+    },
+    "o4-mini-deep-research": {
+      "input": 2,
+      "output": 8,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "o3-deep-research": {
+      "input": 10,
+      "output": 40,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "o3-deep-research-2025-06-26": {
+      "input": 10,
+      "output": 40,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "o4-mini-deep-research-2025-06-26": {
+      "input": 2,
+      "output": 8,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "gemini-2.5-flash": {
+      "input": 0.15,
+      "output": 0.6,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "gemini-2.5-pro": {
+      "input": 1.25,
+      "output": 10,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "gemini-2.0-flash": {
+      "input": 0.1,
+      "output": 0.4,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "gemini-2.0-flash-001": {
+      "input": 0.1,
+      "output": 0.4,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "gemini-2.0-flash-lite-001": {
+      "input": 0.075,
+      "output": 0.3,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "gemini-2.0-flash-lite": {
+      "input": 0.075,
+      "output": 0.3,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "gemini-2.5-flash-preview-tts": {
+      "input": 0.15,
+      "output": 0.6,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "audio_output": 12
+    },
+    "gemini-2.5-pro-preview-tts": {
+      "input": 1.25,
+      "output": 10,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "audio_output": 20
+    },
+    "gemma-3-1b-it": {
+      "input": 0,
+      "output": 0,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "gemma-3-4b-it": {
+      "input": 0,
+      "output": 0,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "gemma-3-12b-it": {
+      "input": 0,
+      "output": 0,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "gemma-3-27b-it": {
+      "input": 0,
+      "output": 0,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "gemma-3n-e4b-it": {
+      "input": 0,
+      "output": 0,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "gemma-3n-e2b-it": {
+      "input": 0,
+      "output": 0,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "gemini-flash-latest": {
+      "input": 0.15,
+      "output": 0.6,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "gemini-flash-lite-latest": {
+      "input": 0.075,
+      "output": 0.3,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "gemini-pro-latest": {
+      "input": 1.25,
+      "output": 10,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "gemini-2.5-flash-lite": {
+      "input": 0.075,
+      "output": 0.3,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "gemini-2.5-flash-image": {
+      "input": 0.15,
+      "output": 0.6,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "per_image": 0.04
+    },
+    "gemini-2.5-flash-lite-preview-09-2025": {
+      "input": 0.075,
+      "output": 0.3,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "gemini-3-pro-preview": {
+      "input": 1,
+      "output": 8,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "gemini-3-flash-preview": {
+      "input": 0.1,
+      "output": 0.4,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "gemini-3.1-pro-preview": {
+      "input": 1,
+      "output": 8,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "gemini-3.1-pro-preview-customtools": {
+      "input": 1,
+      "output": 8,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "gemini-3.1-flash-lite-preview": {
+      "input": 0.2375,
+      "output": 1.425,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "per_image": 2.4e-7
+    },
+    "gemini-3-pro-image-preview": {
+      "input": 1,
+      "output": 8,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "per_image": 0.04
+    },
+    "gemini-3.1-flash-image-preview": {
+      "input": 0.475,
+      "output": 2.85,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "gemini-robotics-er-1.5-preview": {
+      "input": 1.25,
+      "output": 5,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "gemini-2.5-computer-use-preview-10-2025": {
+      "input": 1.25,
+      "output": 10,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "deep-research-pro-preview-12-2025": {
+      "input": 2.5,
+      "output": 10,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "gemini-embedding-001": {
+      "input": 0,
+      "output": 0,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "aqa": {
+      "input": 0,
+      "output": 0,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "imagen-4.0-generate-001": {
+      "input": 0,
+      "output": 0,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "per_image": 0.04
+    },
+    "imagen-4.0-ultra-generate-001": {
+      "input": 0,
+      "output": 0,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "per_image": 0.08
+    },
+    "imagen-4.0-fast-generate-001": {
+      "input": 0,
+      "output": 0,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "per_image": 0.02
+    },
+    "veo-2.0-generate-001": {
+      "input": 0,
+      "output": 0,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "per_request": 0.35
+    },
+    "veo-3.0-generate-001": {
+      "input": 0,
+      "output": 0,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "per_request": 0.5
+    },
+    "veo-3.0-fast-generate-001": {
+      "input": 0,
+      "output": 0,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "per_request": 0.25
+    },
+    "veo-3.1-generate-preview": {
+      "input": 0,
+      "output": 0,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "per_request": 0.5
+    },
+    "veo-3.1-fast-generate-preview": {
+      "input": 0,
+      "output": 0,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "per_request": 0.25
+    },
+    "gemini-2.5-flash-native-audio-latest": {
+      "input": 0.15,
+      "output": 0.6,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "audio_input": 1,
+      "audio_output": 12
+    },
+    "gemini-2.5-flash-native-audio-preview-09-2025": {
+      "input": 0.15,
+      "output": 0.6,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "audio_input": 1,
+      "audio_output": 12
+    },
+    "gemini-2.5-flash-native-audio-preview-12-2025": {
+      "input": 0.15,
+      "output": 0.6,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "audio_input": 1,
+      "audio_output": 12
+    },
+    "nano-banana-pro-preview": {
+      "input": 0.15,
+      "output": 0.6,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "per_image": 0.04
+    },
+    "gpt-5.4-mini": {
+      "input": 0.7125,
+      "output": 4.275,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "gpt-5.4-nano": {
+      "input": 0.19,
+      "output": 1.1875,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "xiaomi/mimo-v2-omni": {
+      "input": 0.38,
+      "output": 1.9,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "xiaomi/mimo-v2-pro": {
+      "input": 0.95,
+      "output": 2.85,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "minimax/minimax-m2.7": {
+      "input": 0.285,
+      "output": 1.14,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "openai/gpt-5.4-nano": {
+      "input": 0.19,
+      "output": 1.1875,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "openai/gpt-5.4-mini": {
+      "input": 0.7125,
+      "output": 4.275,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "mistralai/mistral-small-2603": {
+      "input": 0.1425,
+      "output": 0.57,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "z-ai/glm-5-turbo": {
+      "input": 0.912,
+      "output": 3.04,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "x-ai/grok-4.20-multi-agent-beta": {
+      "input": 1.9,
+      "output": 5.7,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "x-ai/grok-4.20-beta": {
+      "input": 1.9,
+      "output": 5.7,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "nvidia/nemotron-3-super-120b-a12b": {
+      "input": 0.095,
+      "output": 0.475,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "bytedance-seed/seed-2.0-lite": {
+      "input": 0.2375,
+      "output": 1.9,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "qwen/qwen3.5-9b": {
+      "input": 0.0475,
+      "output": 0.1425,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "openai/gpt-5.4-pro": {
+      "input": 28.5,
+      "output": 171,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "openai/gpt-5.4": {
+      "input": 2.375,
+      "output": 14.25,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "inception/mercury-2": {
+      "input": 0.2375,
+      "output": 0.7125,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "openai/gpt-5.3-chat": {
+      "input": 1.6625,
+      "output": 13.3,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "google/gemini-3.1-flash-lite-preview": {
+      "input": 0.2375,
+      "output": 1.425,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "per_image": 2.4e-7
+    },
+    "bytedance-seed/seed-2.0-mini": {
+      "input": 0.095,
+      "output": 0.38,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "google/gemini-3.1-flash-image-preview": {
+      "input": 0.475,
+      "output": 2.85,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "qwen/qwen3.5-35b-a3b": {
+      "input": 0.154375,
+      "output": 1.235,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "qwen/qwen3.5-27b": {
+      "input": 0.18525,
+      "output": 1.482,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "qwen/qwen3.5-122b-a10b": {
+      "input": 0.247,
+      "output": 1.976,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "qwen/qwen3.5-flash-02-23": {
+      "input": 0.06175,
+      "output": 0.247,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "liquid/lfm-2-24b-a2b": {
+      "input": 0.0285,
+      "output": 0.114,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "google/gemini-3.1-pro-preview-customtools": {
+      "input": 1,
+      "output": 8,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "openai/gpt-5.3-codex": {
+      "input": 2.5,
+      "output": 10,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "aion-labs/aion-2.0": {
+      "input": 0.76,
+      "output": 1.52,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "google/gemini-3.1-pro-preview": {
       "input": 1,
       "output": 8,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "anthropic/claude-sonnet-4.6": {
       "input": 2.85,
       "output": 14.25,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "qwen/qwen3.5-plus-02-15": {
       "input": 0.247,
       "output": 1.482,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "qwen/qwen3.5-397b-a17b": {
       "input": 0.3705,
       "output": 2.223,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "minimax/minimax-m2.5": {
-      "input": 0.28025,
-      "output": 1.14,
+      "input": 0.19,
+      "output": 1.1115,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "z-ai/glm-5": {
-      "input": 0.76,
-      "output": 2.432,
+      "input": 0.684,
+      "output": 2.185,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "qwen/qwen3-max-thinking": {
       "input": 0.741,
       "output": 3.705,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "anthropic/claude-opus-4.6": {
       "input": 4.75,
       "output": 23.75,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "qwen/qwen3-coder-next": {
       "input": 0.114,
       "output": 0.7125,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "stepfun/step-3.5-flash": {
       "input": 0.095,
       "output": 0.285,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "moonshotai/kimi-k2.5": {
       "input": 0.4275,
       "output": 2.09,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "upstage/solar-pro-3": {
+      "input": 0.1425,
+      "output": 0.57,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "minimax/minimax-m2-her": {
       "input": 0.285,
       "output": 1.14,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "writer/palmyra-x5": {
       "input": 0.57,
       "output": 5.7,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "openai/gpt-audio": {
       "input": 2.5,
       "output": 10,
-      "audio_input": 40,
-      "audio_output": 80,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "audio_input": 40,
+      "audio_output": 80
     },
     "openai/gpt-audio-mini": {
       "input": 0.15,
       "output": 0.6,
-      "audio_input": 10,
-      "audio_output": 20,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "audio_input": 10,
+      "audio_output": 20
     },
     "z-ai/glm-4.7-flash": {
       "input": 0.057,
       "output": 0.38,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "openai/gpt-5.2-codex": {
       "input": 3,
       "output": 12,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "allenai/molmo-2-8b": {
-      "input": 0.19,
-      "output": 0.19,
-      "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "allenai/olmo-3.1-32b-instruct": {
       "input": 0.19,
       "output": 0.57,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "bytedance-seed/seed-1.6-flash": {
       "input": 0.07125,
       "output": 0.285,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "bytedance-seed/seed-1.6": {
       "input": 0.2375,
       "output": 1.9,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "minimax/minimax-m2.1": {
       "input": 0.2565,
       "output": 0.9025,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "z-ai/glm-4.7": {
-      "input": 0.285,
-      "output": 1.33,
+      "input": 0.3705,
+      "output": 1.6625,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "google/gemini-3-flash-preview": {
       "input": 0.1,
       "output": 0.4,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "mistralai/mistral-small-creative": {
       "input": 0.095,
       "output": 0.285,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "allenai/olmo-3.1-32b-think": {
       "input": 0.1425,
       "output": 0.475,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "xiaomi/mimo-v2-flash": {
       "input": 0.0855,
       "output": 0.2755,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "nvidia/nemotron-3-nano-30b-a3b": {
       "input": 0.0475,
       "output": 0.19,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "openai/gpt-5.2-chat": {
       "input": 1.6625,
       "output": 13.3,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "openai/gpt-5.2-pro": {
       "input": 8,
       "output": 32,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "openai/gpt-5.2": {
       "input": 3,
       "output": 12,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "mistralai/devstral-2512": {
       "input": 0.38,
       "output": 1.9,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "relace/relace-search": {
       "input": 0.95,
       "output": 2.85,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "z-ai/glm-4.6v": {
       "input": 0.285,
       "output": 0.855,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "nex-agi/deepseek-v3.1-nex-n1": {
       "input": 0.2565,
       "output": 0.95,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "essentialai/rnj-1-instruct": {
       "input": 0.1425,
       "output": 0.1425,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "openai/gpt-5.1-codex-max": {
       "input": 8,
       "output": 32,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "amazon/nova-2-lite-v1": {
       "input": 0.285,
       "output": 2.375,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "mistralai/ministral-14b-2512": {
       "input": 0.19,
       "output": 0.19,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "mistralai/ministral-8b-2512": {
       "input": 0.1425,
       "output": 0.1425,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "mistralai/ministral-3b-2512": {
       "input": 0.095,
       "output": 0.095,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "mistralai/mistral-large-2512": {
       "input": 0.475,
       "output": 1.425,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "arcee-ai/trinity-mini": {
       "input": 0.04275,
       "output": 0.1425,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "deepseek/deepseek-v3.2-speciale": {
       "input": 0.38,
       "output": 1.14,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "deepseek/deepseek-v3.2": {
-      "input": 0.2375,
-      "output": 0.38,
+      "input": 0.247,
+      "output": 0.361,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "prime-intellect/intellect-3": {
       "input": 0.19,
       "output": 1.045,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "anthropic/claude-opus-4.5": {
       "input": 4.75,
       "output": 23.75,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "allenai/olmo-3-32b-think": {
       "input": 0.1425,
       "output": 0.475,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "allenai/olmo-3-7b-instruct": {
-      "input": 0.095,
-      "output": 0.19,
-      "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "allenai/olmo-3-7b-think": {
-      "input": 0.114,
-      "output": 0.19,
-      "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "google/gemini-3-pro-image-preview": {
       "input": 1,
       "output": 8,
-      "per_image": 0.04,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "per_image": 0.04
     },
     "x-ai/grok-4.1-fast": {
       "input": 0.19,
       "output": 0.475,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "google/gemini-3-pro-preview": {
       "input": 1,
       "output": 8,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "deepcogito/cogito-v2.1-671b": {
       "input": 1.1875,
       "output": 1.1875,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "openai/gpt-5.1": {
       "input": 4,
       "output": 16,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "openai/gpt-5.1-chat": {
       "input": 1.1875,
       "output": 9.5,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "openai/gpt-5.1-codex": {
       "input": 4,
       "output": 16,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "openai/gpt-5.1-codex-mini": {
       "input": 0.5,
       "output": 2,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "kwaipilot/kat-coder-pro": {
       "input": 0.19665,
       "output": 0.7866,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "moonshotai/kimi-k2-thinking": {
       "input": 0.4465,
       "output": 1.9,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "amazon/nova-premier-v1": {
       "input": 2.375,
       "output": 11.875,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "perplexity/sonar-pro-search": {
       "input": 2.85,
       "output": 14.25,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "mistralai/voxtral-small-24b-2507": {
       "input": 0.095,
       "output": 0.285,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "openai/gpt-oss-safeguard-20b": {
       "input": 0.07125,
       "output": 0.285,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "nvidia/nemotron-nano-12b-v2-vl": {
       "input": 0.19,
       "output": 0.57,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "minimax/minimax-m2": {
       "input": 0.24225,
       "output": 0.95,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "qwen/qwen3-vl-32b-instruct": {
       "input": 0.0988,
       "output": 0.3952,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "liquid/lfm2-8b-a1b": {
       "input": 0.0095,
       "output": 0.019,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "liquid/lfm-2.2-6b": {
       "input": 0.0095,
       "output": 0.019,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "ibm-granite/granite-4.0-h-micro": {
       "input": 0.01615,
       "output": 0.1045,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "openai/gpt-5-image-mini": {
+      "input": 0,
+      "output": 0,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "per_image": 0.02
     },
     "anthropic/claude-haiku-4.5": {
       "input": 0.95,
       "output": 4.75,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "qwen/qwen3-vl-8b-thinking": {
       "input": 0.11115,
       "output": 1.29675,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "qwen/qwen3-vl-8b-instruct": {
       "input": 0.076,
       "output": 0.475,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "openai/gpt-5-image": {
       "input": 0,
       "output": 0,
-      "per_image": 0.04,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "per_image": 0.04
     },
     "openai/o3-deep-research": {
-      "input": 9.5,
-      "output": 38,
-      "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "input": 10,
+      "output": 40,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "openai/o4-mini-deep-research": {
-      "input": 1.9,
-      "output": 7.6,
-      "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "input": 2,
+      "output": 8,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "nvidia/llama-3.3-nemotron-super-49b-v1.5": {
       "input": 0.095,
       "output": 0.38,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "baidu/ernie-4.5-21b-a3b-thinking": {
       "input": 0.0665,
       "output": 0.266,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "google/gemini-2.5-flash-image": {
       "input": 0.15,
       "output": 0.6,
-      "per_image": 0.04,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "per_image": 0.04
+    },
+    "qwen/qwen3-vl-30b-a3b-thinking": {
+      "input": 0.1235,
+      "output": 1.482,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "qwen/qwen3-vl-30b-a3b-instruct": {
       "input": 0.1235,
       "output": 0.494,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "openai/gpt-5-pro": {
       "input": 10,
       "output": 40,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "z-ai/glm-4.6": {
       "input": 0.3705,
       "output": 1.805,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "z-ai/glm-4.6:exacto": {
-      "input": 0.418,
-      "output": 1.672,
-      "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "anthropic/claude-sonnet-4.5": {
       "input": 2.85,
       "output": 14.25,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "deepseek/deepseek-v3.2-exp": {
       "input": 0.2565,
       "output": 0.3895,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "thedrummer/cydonia-24b-v4.1": {
       "input": 0.285,
       "output": 0.475,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "relace/relace-apply-3": {
       "input": 0.8075,
       "output": 1.1875,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "google/gemini-2.5-flash-lite-preview-09-2025": {
       "input": 0.075,
       "output": 0.3,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "qwen/qwen3-vl-235b-a22b-thinking": {
+      "input": 0.247,
+      "output": 2.47,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "qwen/qwen3-vl-235b-a22b-instruct": {
       "input": 0.19,
       "output": 0.836,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "qwen/qwen3-max": {
-      "input": 1.14,
-      "output": 5.7,
+      "input": 0.741,
+      "output": 3.705,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "qwen/qwen3-coder-plus": {
       "input": 0.6175,
       "output": 3.0875,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "openai/gpt-5-codex": {
       "input": 5,
       "output": 20,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "deepseek/deepseek-v3.1-terminus:exacto": {
-      "input": 0.1995,
-      "output": 0.7505,
-      "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "deepseek/deepseek-v3.1-terminus": {
       "input": 0.1995,
       "output": 0.7505,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "x-ai/grok-4-fast": {
       "input": 0.19,
       "output": 0.475,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "alibaba/tongyi-deepresearch-30b-a3b": {
       "input": 0.0855,
       "output": 0.4275,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "qwen/qwen3-coder-flash": {
       "input": 0.18525,
       "output": 0.92625,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "qwen/qwen3-next-80b-a3b-thinking": {
-      "input": 0.1425,
-      "output": 1.14,
+      "input": 0.092625,
+      "output": 0.741,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "qwen/qwen3-next-80b-a3b-instruct": {
       "input": 0.0855,
       "output": 1.045,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "meituan/longcat-flash-chat": {
       "input": 0.19,
       "output": 0.76,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "qwen/qwen-plus-2025-07-28:thinking": {
       "input": 0.247,
       "output": 0.741,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "qwen/qwen-plus-2025-07-28": {
       "input": 0.247,
       "output": 0.741,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "nvidia/nemotron-nano-9b-v2": {
       "input": 0.038,
       "output": 0.152,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "moonshotai/kimi-k2-0905": {
       "input": 0.38,
       "output": 1.9,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "moonshotai/kimi-k2-0905:exacto": {
-      "input": 0.57,
-      "output": 2.375,
-      "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "qwen/qwen3-30b-a3b-thinking-2507": {
-      "input": 0.04845,
-      "output": 0.323,
+      "input": 0.076,
+      "output": 0.38,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "x-ai/grok-code-fast-1": {
       "input": 0.5,
       "output": 2,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "nousresearch/hermes-4-70b": {
       "input": 0.1235,
       "output": 0.38,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "nousresearch/hermes-4-405b": {
       "input": 0.95,
       "output": 2.85,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "deepseek/deepseek-chat-v3.1": {
       "input": 0.1425,
       "output": 0.7125,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "openai/gpt-4o-audio-preview": {
       "input": 2.5,
       "output": 10,
-      "audio_input": 40,
-      "audio_output": 80,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "audio_input": 40,
+      "audio_output": 80
     },
     "mistralai/mistral-medium-3.1": {
       "input": 0.38,
       "output": 1.9,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "baidu/ernie-4.5-21b-a3b": {
       "input": 0.0665,
       "output": 0.266,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "baidu/ernie-4.5-vl-28b-a3b": {
       "input": 0.133,
       "output": 0.532,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "z-ai/glm-4.5v": {
       "input": 0.57,
       "output": 1.71,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "ai21/jamba-large-1.7": {
       "input": 1.9,
       "output": 7.6,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "openai/gpt-5-chat": {
       "input": 1.1875,
       "output": 9.5,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "openai/gpt-5": {
       "input": 5,
       "output": 20,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "openai/gpt-5-mini": {
       "input": 0.6,
       "output": 2.4,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "openai/gpt-5-nano": {
       "input": 0.15,
       "output": 0.6,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "openai/gpt-oss-120b": {
       "input": 0.03705,
       "output": 0.1805,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "openai/gpt-oss-120b:exacto": {
-      "input": 0.03705,
-      "output": 0.1805,
-      "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "openai/gpt-oss-20b": {
       "input": 0.0285,
-      "output": 0.133,
+      "output": 0.1045,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "anthropic/claude-opus-4.1": {
       "input": 14.25,
       "output": 71.25,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "mistralai/codestral-2508": {
       "input": 0.285,
       "output": 0.855,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "qwen/qwen3-coder-30b-a3b-instruct": {
       "input": 0.0665,
       "output": 0.2565,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "qwen/qwen3-30b-a3b-instruct-2507": {
       "input": 0.0855,
       "output": 0.285,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "z-ai/glm-4.5": {
       "input": 0.57,
       "output": 2.09,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "z-ai/glm-4.5-air": {
       "input": 0.1235,
       "output": 0.8075,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "qwen/qwen3-235b-a22b-thinking-2507": {
+      "input": 0.142025,
+      "output": 1.42025,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "z-ai/glm-4-32b": {
       "input": 0.095,
       "output": 0.095,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "qwen/qwen3-coder": {
       "input": 0.209,
       "output": 0.95,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "qwen/qwen3-coder:exacto": {
-      "input": 0.209,
-      "output": 1.71,
-      "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "bytedance/ui-tars-1.5-7b": {
       "input": 0.095,
       "output": 0.19,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "google/gemini-2.5-flash-lite": {
       "input": 0.075,
       "output": 0.3,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "qwen/qwen3-235b-a22b-2507": {
       "input": 0.06745,
       "output": 0.095,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "switchpoint/router": {
+      "input": 0.8075,
+      "output": 3.23,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "moonshotai/kimi-k2": {
       "input": 0.5225,
       "output": 2.09,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "mistralai/devstral-medium": {
       "input": 0.38,
       "output": 1.9,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "mistralai/devstral-small": {
       "input": 0.095,
       "output": 0.285,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "x-ai/grok-4": {
       "input": 2.85,
       "output": 14.25,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "google/gemma-3n-e2b-it:free": {
+      "input": 0,
+      "output": 0,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "tencent/hunyuan-a13b-instruct": {
       "input": 0.133,
       "output": 0.5415,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "tngtech/deepseek-r1t2-chimera": {
+      "input": 0.285,
+      "output": 1.045,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "morph/morph-v3-large": {
       "input": 0.855,
       "output": 1.805,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "morph/morph-v3-fast": {
       "input": 0.76,
       "output": 1.14,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "baidu/ernie-4.5-vl-424b-a47b": {
       "input": 0.399,
       "output": 1.1875,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "baidu/ernie-4.5-300b-a47b": {
       "input": 0.266,
       "output": 1.045,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "inception/mercury": {
       "input": 0.2375,
       "output": 0.7125,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "mistralai/mistral-small-3.2-24b-instruct": {
-      "input": 0.057,
-      "output": 0.171,
+      "input": 0.07125,
+      "output": 0.19,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "minimax/minimax-m1": {
       "input": 0.38,
       "output": 2.09,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "google/gemini-2.5-flash": {
       "input": 0.15,
       "output": 0.6,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "google/gemini-2.5-pro": {
       "input": 1.25,
       "output": 10,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "openai/o3-pro": {
       "input": 20,
       "output": 80,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "x-ai/grok-3-mini": {
       "input": 0.3,
       "output": 0.5,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "x-ai/grok-3": {
       "input": 3,
       "output": 15,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "google/gemini-2.5-pro-preview": {
       "input": 1.1875,
       "output": 9.5,
       "source": "openrouter",
-      "per_image": 0.00000119,
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "per_image": 0.00000119
     },
     "deepseek/deepseek-r1-0528": {
       "input": 0.4275,
       "output": 2.0425,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "anthropic/claude-opus-4": {
       "input": 14.25,
       "output": 71.25,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "anthropic/claude-sonnet-4": {
       "input": 2.85,
       "output": 14.25,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "google/gemma-3n-e4b-it:free": {
+      "input": 0,
+      "output": 0,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "google/gemma-3n-e4b-it": {
       "input": 0,
       "output": 0,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "mistralai/mistral-medium-3": {
       "input": 0.38,
       "output": 1.9,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "google/gemini-2.5-pro-preview-05-06": {
       "input": 1.1875,
       "output": 9.5,
       "source": "openrouter",
-      "per_image": 0.00000119,
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "per_image": 0.00000119
+    },
+    "arcee-ai/spotlight": {
+      "input": 0.171,
+      "output": 0.171,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "arcee-ai/maestro-reasoning": {
+      "input": 0.855,
+      "output": 3.135,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "arcee-ai/virtuoso-large": {
+      "input": 0.7125,
+      "output": 1.14,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "arcee-ai/coder-large": {
+      "input": 0.475,
+      "output": 0.76,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "inception/mercury-coder": {
       "input": 0.2375,
       "output": 0.7125,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "meta-llama/llama-guard-4-12b": {
       "input": 0.171,
       "output": 0.171,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "qwen/qwen3-30b-a3b": {
       "input": 0.076,
       "output": 0.266,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "qwen/qwen3-8b": {
       "input": 0.0475,
       "output": 0.38,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "qwen/qwen3-14b": {
       "input": 0.057,
       "output": 0.228,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "qwen/qwen3-32b": {
       "input": 0.076,
       "output": 0.228,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "qwen/qwen3-235b-a22b": {
       "input": 0.43225,
       "output": 1.729,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "openai/o4-mini-high": {
       "input": 1.045,
       "output": 4.18,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "openai/o3": {
       "input": 10,
       "output": 40,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "openai/o4-mini": {
       "input": 1.1,
       "output": 4.4,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "qwen/qwen2.5-coder-7b-instruct": {
       "input": 0.0285,
       "output": 0.0855,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "openai/gpt-4.1": {
       "input": 2,
       "output": 8,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "openai/gpt-4.1-mini": {
       "input": 0.4,
       "output": 1.6,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "openai/gpt-4.1-nano": {
       "input": 0.1,
       "output": 0.4,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "eleutherai/llemma_7b": {
       "input": 0.76,
       "output": 1.14,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "alfredpros/codellama-7b-instruct-solidity": {
       "input": 0.76,
       "output": 1.14,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "x-ai/grok-3-mini-beta": {
       "input": 0.285,
       "output": 0.475,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "x-ai/grok-3-beta": {
       "input": 2.85,
       "output": 14.25,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "meta-llama/llama-4-maverick": {
       "input": 0.1425,
       "output": 0.57,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "meta-llama/llama-4-scout": {
       "input": 0.076,
       "output": 0.285,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "qwen/qwen2.5-vl-32b-instruct": {
       "input": 0.19,
       "output": 0.57,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "deepseek/deepseek-chat-v3-0324": {
       "input": 0.19,
       "output": 0.7315,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "openai/o1-pro": {
+      "input": 150,
+      "output": 600,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "mistralai/mistral-small-3.1-24b-instruct": {
-      "input": 0.3325,
-      "output": 0.532,
+      "input": 0.0285,
+      "output": 0.1045,
       "source": "openrouter",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
-    "gpt-image-1": {
+    "allenai/olmo-2-0325-32b-instruct": {
+      "input": 0.0475,
+      "output": 0.19,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "google/gemma-3-4b-it:free": {
       "input": 0,
       "output": 0,
-      "per_image": 0.04,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
-    "gpt-image-1-mini": {
+    "google/gemma-3-4b-it": {
       "input": 0,
       "output": 0,
-      "per_image": 0.02,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
-    "gpt-image-1.5": {
+    "google/gemma-3-12b-it:free": {
       "input": 0,
       "output": 0,
-      "per_image": 0.04,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
-    "gpt-5-image": {
+    "google/gemma-3-12b-it": {
       "input": 0,
       "output": 0,
-      "per_image": 0.04,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
-    "gpt-5-image-mini": {
+    "cohere/command-a": {
+      "input": 2.375,
+      "output": 9.5,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "openai/gpt-4o-mini-search-preview": {
+      "input": 0.15,
+      "output": 0.6,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "openai/gpt-4o-search-preview": {
+      "input": 2.5,
+      "output": 10,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "google/gemma-3-27b-it:free": {
       "input": 0,
       "output": 0,
-      "per_image": 0.02,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
     },
-    "chatgpt-image-latest": {
+    "google/gemma-3-27b-it": {
       "input": 0,
       "output": 0,
-      "per_image": 0.04,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "thedrummer/skyfall-36b-v2": {
+      "input": 0.5225,
+      "output": 0.76,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "perplexity/sonar-reasoning-pro": {
+      "input": 1.9,
+      "output": 7.6,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "perplexity/sonar-pro": {
+      "input": 2.85,
+      "output": 14.25,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "perplexity/sonar-deep-research": {
+      "input": 1.9,
+      "output": 7.6,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "qwen/qwq-32b": {
+      "input": 0.1425,
+      "output": 0.551,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "google/gemini-2.0-flash-lite-001": {
+      "input": 0.075,
+      "output": 0.3,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "anthropic/claude-3.7-sonnet": {
+      "input": 2.85,
+      "output": 14.25,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "anthropic/claude-3.7-sonnet:thinking": {
+      "input": 2.85,
+      "output": 14.25,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "mistralai/mistral-saba": {
+      "input": 0.19,
+      "output": 0.57,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "meta-llama/llama-guard-3-8b": {
+      "input": 0.019,
+      "output": 0.057,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "openai/o3-mini-high": {
+      "input": 1.045,
+      "output": 4.18,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "google/gemini-2.0-flash-001": {
+      "input": 0.1,
+      "output": 0.4,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "qwen/qwen-vl-plus": {
+      "input": 0.129675,
+      "output": 0.389025,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "aion-labs/aion-1.0": {
+      "input": 3.8,
+      "output": 7.6,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "aion-labs/aion-1.0-mini": {
+      "input": 0.665,
+      "output": 1.33,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "aion-labs/aion-rp-llama-3.1-8b": {
+      "input": 0.76,
+      "output": 1.52,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "qwen/qwen-vl-max": {
+      "input": 0.494,
+      "output": 1.976,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "qwen/qwen-turbo": {
+      "input": 0.030875,
+      "output": 0.1235,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "qwen/qwen2.5-vl-72b-instruct": {
+      "input": 0.76,
+      "output": 0.76,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "qwen/qwen-plus": {
+      "input": 0.247,
+      "output": 0.741,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "qwen/qwen-max": {
+      "input": 0.988,
+      "output": 3.952,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "openai/o3-mini": {
+      "input": 1.1,
+      "output": 4.4,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "mistralai/mistral-small-24b-instruct-2501": {
+      "input": 0.0475,
+      "output": 0.076,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "deepseek/deepseek-r1-distill-qwen-32b": {
+      "input": 0.2755,
+      "output": 0.2755,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "perplexity/sonar": {
+      "input": 0.95,
+      "output": 0.95,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "deepseek/deepseek-r1-distill-llama-70b": {
+      "input": 0.665,
+      "output": 0.76,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "minimax/minimax-01": {
+      "input": 0.19,
+      "output": 1.045,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "microsoft/phi-4": {
+      "input": 0.06175,
+      "output": 0.133,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "sao10k/l3.1-70b-hanami-x1": {
+      "input": 2.85,
+      "output": 2.85,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "deepseek/deepseek-chat": {
+      "input": 0.27,
+      "output": 1.1,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "sao10k/l3.3-euryale-70b": {
+      "input": 0.6175,
+      "output": 0.7125,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "openai/o1": {
+      "input": 15,
+      "output": 60,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "cohere/command-r7b-12-2024": {
+      "input": 0.035625,
+      "output": 0.1425,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "meta-llama/llama-3.3-70b-instruct": {
+      "input": 0.095,
+      "output": 0.304,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "amazon/nova-lite-v1": {
+      "input": 0.057,
+      "output": 0.228,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "amazon/nova-micro-v1": {
+      "input": 0.03325,
+      "output": 0.133,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "amazon/nova-pro-v1": {
+      "input": 0.76,
+      "output": 3.04,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "openai/gpt-4o-2024-11-20": {
+      "input": 2.5,
+      "output": 10,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "mistralai/mistral-large-2411": {
+      "input": 1.9,
+      "output": 5.7,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "mistralai/mistral-large-2407": {
+      "input": 1.9,
+      "output": 5.7,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "mistralai/pixtral-large-2411": {
+      "input": 1.9,
+      "output": 5.7,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "qwen/qwen-2.5-coder-32b-instruct": {
+      "input": 0.627,
+      "output": 0.95,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "thedrummer/unslopnemo-12b": {
+      "input": 0.38,
+      "output": 0.38,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "anthropic/claude-3.5-haiku": {
+      "input": 0.76,
+      "output": 3.8,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "anthracite-org/magnum-v4-72b": {
+      "input": 2.85,
+      "output": 4.75,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "anthropic/claude-3.5-sonnet": {
+      "input": 5.7,
+      "output": 28.5,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "qwen/qwen-2.5-7b-instruct": {
+      "input": 0.038,
+      "output": 0.095,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "nvidia/llama-3.1-nemotron-70b-instruct": {
+      "input": 1.14,
+      "output": 1.14,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "inflection/inflection-3-pi": {
+      "input": 2.375,
+      "output": 9.5,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "inflection/inflection-3-productivity": {
+      "input": 2.375,
+      "output": 9.5,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "thedrummer/rocinante-12b": {
+      "input": 0.1615,
+      "output": 0.4085,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "meta-llama/llama-3.2-3b-instruct": {
+      "input": 0.04845,
+      "output": 0.323,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "meta-llama/llama-3.2-1b-instruct": {
+      "input": 0.02565,
+      "output": 0.19,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "meta-llama/llama-3.2-11b-vision-instruct": {
+      "input": 0.04655,
+      "output": 0.04655,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "qwen/qwen-2.5-72b-instruct": {
+      "input": 0.114,
+      "output": 0.3705,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "cohere/command-r-08-2024": {
+      "input": 0.1425,
+      "output": 0.57,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "cohere/command-r-plus-08-2024": {
+      "input": 2.375,
+      "output": 9.5,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "sao10k/l3.1-euryale-70b": {
+      "input": 0.8075,
+      "output": 0.8075,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "qwen/qwen-2.5-vl-7b-instruct": {
+      "input": 0.19,
+      "output": 0.19,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "nousresearch/hermes-3-llama-3.1-70b": {
+      "input": 0.285,
+      "output": 0.285,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "nousresearch/hermes-3-llama-3.1-405b": {
+      "input": 0.95,
+      "output": 0.95,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "sao10k/l3-lunaris-8b": {
+      "input": 0.038,
+      "output": 0.0475,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "openai/gpt-4o-2024-08-06": {
+      "input": 2.5,
+      "output": 10,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "meta-llama/llama-3.1-405b": {
+      "input": 3.8,
+      "output": 3.8,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "meta-llama/llama-3.1-8b-instruct": {
+      "input": 0.019,
+      "output": 0.0475,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "meta-llama/llama-3.1-70b-instruct": {
+      "input": 0.38,
+      "output": 0.38,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "mistralai/mistral-nemo": {
+      "input": 0.019,
+      "output": 0.038,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "openai/gpt-4o-mini-2024-07-18": {
+      "input": 0.15,
+      "output": 0.6,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "openai/gpt-4o-mini": {
+      "input": 0.15,
+      "output": 0.6,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "google/gemma-2-27b-it": {
+      "input": 0.6175,
+      "output": 0.6175,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "google/gemma-2-9b-it": {
+      "input": 0.0285,
+      "output": 0.0855,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "sao10k/l3-euryale-70b": {
+      "input": 1.406,
+      "output": 1.406,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "nousresearch/hermes-2-pro-llama-3-8b": {
+      "input": 0.133,
+      "output": 0.133,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "openai/gpt-4o-2024-05-13": {
+      "input": 5,
+      "output": 15,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "openai/gpt-4o": {
+      "input": 2.5,
+      "output": 10,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "image_input": 0.001913
+    },
+    "openai/gpt-4o:extended": {
+      "input": 5.7,
+      "output": 17.1,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "meta-llama/llama-3-70b-instruct": {
+      "input": 0.4845,
+      "output": 0.703,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "meta-llama/llama-3-8b-instruct": {
+      "input": 0.0285,
+      "output": 0.038,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "mistralai/mixtral-8x22b-instruct": {
+      "input": 1.9,
+      "output": 5.7,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "microsoft/wizardlm-2-8x22b": {
+      "input": 0.589,
+      "output": 0.589,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "openai/gpt-4-turbo": {
+      "input": 10,
+      "output": 30,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "anthropic/claude-3-haiku": {
+      "input": 0.2375,
+      "output": 1.1875,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "mistralai/mistral-large": {
+      "input": 1.9,
+      "output": 5.7,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "openai/gpt-3.5-turbo-0613": {
+      "input": 0.5,
+      "output": 1.5,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "openai/gpt-4-turbo-preview": {
+      "input": 10,
+      "output": 30,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "mistralai/mixtral-8x7b-instruct": {
+      "input": 0.513,
+      "output": 0.513,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "alpindale/goliath-120b": {
+      "input": 3.5625,
+      "output": 7.125,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "openai/gpt-4-1106-preview": {
+      "input": 10,
+      "output": 30,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "openai/gpt-3.5-turbo-instruct": {
+      "input": 1.5,
+      "output": 2,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "mistralai/mistral-7b-instruct-v0.1": {
+      "input": 0.1045,
+      "output": 0.1805,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "openai/gpt-3.5-turbo-16k": {
+      "input": 3,
+      "output": 4,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "mancer/weaver": {
+      "input": 0.7125,
+      "output": 0.95,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "undi95/remm-slerp-l2-13b": {
+      "input": 0.4275,
+      "output": 0.6175,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "gryphe/mythomax-l2-13b": {
+      "input": 0.057,
+      "output": 0.057,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "openai/gpt-4-0314": {
+      "input": 30,
+      "output": 60,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "openai/gpt-4": {
+      "input": 30,
+      "output": 60,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "openai/gpt-3.5-turbo": {
+      "input": 0.5,
+      "output": 1.5,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "gpt-5-nano": {
+      "input": 0.15,
+      "output": 0.6,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "nvidia/llama-3.1-nemotron-ultra-253b-v1": {
+      "input": 0.57,
+      "output": 1.71,
+      "source": "openrouter",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "gpt-4-0314": {
+      "input": 30,
+      "output": 60,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "gpt-5": {
+      "input": 5,
+      "output": 20,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "gpt-4o-mini-transcribe": {
+      "input": 0,
+      "output": 0,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "audio_input": 3,
+      "audio_output": 0
+    },
+    "gpt-4o-mini-transcribe-2025-03-20": {
+      "input": 0,
+      "output": 0,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "audio_input": 3,
+      "audio_output": 0
+    },
+    "gpt-4o-mini-transcribe-2025-12-15": {
+      "input": 0,
+      "output": 0,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "audio_input": 3,
+      "audio_output": 0
+    },
+    "gpt-4o-mini-tts": {
+      "input": 0,
+      "output": 0,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "audio_input": 0,
+      "audio_output": 12
+    },
+    "gpt-4o-mini-tts-2025-03-20": {
+      "input": 0,
+      "output": 0,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "audio_input": 0,
+      "audio_output": 12
+    },
+    "gpt-4o-mini-tts-2025-12-15": {
+      "input": 0,
+      "output": 0,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "audio_input": 0,
+      "audio_output": 12
     },
     "dall-e-3": {
       "input": 0,
       "output": 0,
-      "per_image": 0.04,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "per_image": 0.04
     },
     "dall-e-2": {
       "input": 0,
       "output": 0,
-      "per_image": 0.02,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "per_image": 0.02
     },
-    "sora-2": {
+    "gpt-5-image": {
       "input": 0,
       "output": 0,
-      "per_image": 0.1,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "per_image": 0.04
     },
-    "sora-2-pro": {
+    "gpt-5-image-mini": {
       "input": 0,
       "output": 0,
-      "per_image": 0.2,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "gemini-2.5-flash-image": {
-      "input": 0.15,
-      "output": 0.6,
-      "per_image": 0.04,
-      "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "gemini-3-pro-image-preview": {
-      "input": 1,
-      "output": 8,
-      "per_image": 0.04,
-      "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
-    },
-    "nano-banana-pro-preview": {
-      "input": 0.15,
-      "output": 0.6,
-      "per_image": 0.04,
-      "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "per_image": 0.02
     },
     "grok-2-image-1212": {
       "input": 0,
       "output": 0,
-      "per_image": 0.07,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "per_image": 0.07
     },
     "grok-imagine-image": {
       "input": 0,
       "output": 0,
-      "per_image": 0.07,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "per_image": 0.07
     },
     "grok-imagine-image-pro": {
       "input": 0,
       "output": 0,
-      "per_image": 0.14,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "per_image": 0.14
     },
     "grok-imagine-video": {
       "input": 0,
       "output": 0,
-      "per_request": 0.5,
       "source": "official",
-      "updated_at": "2026-03-05T06:28:27.441Z"
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "per_request": 0.5
     }
   }
 }

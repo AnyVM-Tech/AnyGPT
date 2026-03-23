@@ -33,7 +33,12 @@ interface PricingFile {
   models: Record<string, ModelPricing>;
 }
 
-type PricingMap = Record<string, Partial<ModelPricing>>;
+type PricingSeed = Partial<ModelPricing> & {
+  image?: number;
+  request?: number;
+};
+
+type PricingMap = Record<string, PricingSeed>;
 
 function splitModelId(modelId: string): { prefix: string | null; baseId: string } {
   const parts = modelId.split('/');
@@ -99,18 +104,59 @@ function buildPricingCandidates(modelId: string): string[] {
     add(splitModelId(instructVariant).baseId);
   }
 
+  const audioFamilyMatch = modelId.match(/^(.*?)-(transcribe|tts)(?:-\d{4}(?:-\d{2}){0,2})$/);
+  if (audioFamilyMatch) {
+    const stableAudioFamily = `${audioFamilyMatch[1]}-${audioFamilyMatch[2]}`;
+    add(stableAudioFamily);
+    add(splitModelId(stableAudioFamily).baseId);
+
+    const familyRoot = audioFamilyMatch[1];
+    add(familyRoot);
+    add(splitModelId(familyRoot).baseId);
+  }
+
   return Array.from(candidates);
 }
 
-function resolveOfficialPricing(modelId: string): Partial<ModelPricing> | null {
+function resolveOfficialPricing(modelId: string): PricingSeed | null {
   for (const candidate of buildPricingCandidates(modelId)) {
     const price = OFFICIAL_PRICES[candidate];
     if (price) return price;
+
+    const directAudioFamilyBase = candidate.match(/^(.*?-(?:transcribe|tts))(?:-\d{4}(?:-\d{2}){0,2})$/)?.[1];
+    if (directAudioFamilyBase) {
+      const audioFamilyPrice = OFFICIAL_PRICES[directAudioFamilyBase];
+      if (audioFamilyPrice) return audioFamilyPrice;
+    }
+
+    const datedVariantBase = candidate.match(/^(.*?)-\d{4}(?:-\d{2}){0,2}$/)?.[1];
+    if (datedVariantBase) {
+      const basePrice = OFFICIAL_PRICES[datedVariantBase];
+      if (basePrice) return basePrice;
+
+      const datedAudioFamilyBase = datedVariantBase.match(/^(.*?-(?:transcribe|tts))(?:-\d{4}(?:-\d{2}){0,2})$/)?.[1];
+      if (datedAudioFamilyBase) {
+        const audioFamilyPrice = OFFICIAL_PRICES[datedAudioFamilyBase];
+        if (audioFamilyPrice) return audioFamilyPrice;
+      }
+    }
+
+    const numericSuffixBase = candidate.match(/^(.*?)-\d{3,}$/)?.[1];
+    if (numericSuffixBase) {
+      const basePrice = OFFICIAL_PRICES[numericSuffixBase];
+      if (basePrice) return basePrice;
+    }
+
+    const genericVersionBase = candidate.match(/^(.*?)-\d+(?:-\d+)*$/)?.[1];
+    if (genericVersionBase && genericVersionBase !== candidate) {
+      const basePrice = OFFICIAL_PRICES[genericVersionBase];
+      if (basePrice) return basePrice;
+    }
   }
   return null;
 }
 
-function resolveOpenRouterPricing(modelId: string, openrouterPrices: PricingMap): Partial<ModelPricing> | null {
+function resolveOpenRouterPricing(modelId: string, openrouterPrices: PricingMap): PricingSeed | null {
   if (openrouterPrices[modelId]) return openrouterPrices[modelId];
   const { baseId } = splitModelId(modelId);
   if (openrouterPrices[baseId]) return openrouterPrices[baseId];
@@ -128,25 +174,41 @@ function resolveOpenRouterPricing(modelId: string, openrouterPrices: PricingMap)
   return suffixMatches[0][1];
 }
 
-function buildPricingEntry(price: Partial<ModelPricing>, source: ModelPricing['source'], now: string): ModelPricing {
-  return {
+function buildPricingEntry(price: PricingSeed, source: ModelPricing['source'], now: string): ModelPricing {
+  const normalized: ModelPricing = {
     input: price.input ?? 0,
     output: price.output ?? 0,
-    ...price,
     source,
     updated_at: now,
-  } as ModelPricing;
+  };
+
+  if (typeof price.image_input === 'number') normalized.image_input = price.image_input;
+  if (typeof price.image_output === 'number') normalized.image_output = price.image_output;
+  if (typeof price.audio_input === 'number') normalized.audio_input = price.audio_input;
+  if (typeof price.audio_output === 'number') normalized.audio_output = price.audio_output;
+  if (typeof price.per_image === 'number') normalized.per_image = price.per_image;
+  else if (typeof price.image === 'number') normalized.per_image = price.image;
+  if (typeof price.per_request === 'number') normalized.per_request = price.per_request;
+  else if (typeof price.request === 'number') normalized.per_request = price.request;
+
+  return normalized;
 }
 
 // Official prices from provider documentation (as of Feb 2026)
 // All prices in $ per million tokens unless noted
-const OFFICIAL_PRICES: Record<string, Partial<ModelPricing>> = {
+const OFFICIAL_PRICES: Record<string, PricingSeed> = {
   // ============================================================
   // OpenAI — https://openai.com/api/pricing/
   // ============================================================
   // GPT-4o family
   'gpt-4o': { input: 2.50, output: 10.00, image_input: 0.001913, source: 'official' },
   'gpt-4o-2024-05-13': { input: 5.00, output: 15.00, source: 'official' },
+  'gpt-4o-mini-transcribe': { input: 0, output: 0, audio_input: 3.00, source: 'official' },
+  'gpt-4o-mini-transcribe-2025-03-20': { input: 0, output: 0, audio_input: 3.00, source: 'official' },
+  'gpt-4o-mini-transcribe-2025-12-15': { input: 0, output: 0, audio_input: 3.00, source: 'official' },
+  'gpt-4o-mini-tts': { input: 0.60, output: 12.00, audio_output: 24.00, source: 'official' },
+  'gpt-4o-mini-tts-2025-03-20': { input: 0.60, output: 12.00, audio_output: 24.00, source: 'official' },
+  'gpt-4o-mini-tts-2025-12-15': { input: 0.60, output: 12.00, audio_output: 24.00, source: 'official' },
   'gpt-4o-2024-08-06': { input: 2.50, output: 10.00, source: 'official' },
   'gpt-4o-2024-11-20': { input: 2.50, output: 10.00, source: 'official' },
   'gpt-4o-mini': { input: 0.15, output: 0.60, source: 'official' },
@@ -172,11 +234,15 @@ const OFFICIAL_PRICES: Record<string, Partial<ModelPricing>> = {
   'gpt-4-turbo-preview': { input: 10.00, output: 30.00, source: 'official' },
   'gpt-4-0125-preview': { input: 10.00, output: 30.00, source: 'official' },
   'gpt-4-1106-preview': { input: 10.00, output: 30.00, source: 'official' },
+  'davinci-002': { input: 2.00, output: 2.00, source: 'official' },
+  'babbage-002': { input: 0.40, output: 0.40, source: 'official' },
   // GPT-3.5 family
   'gpt-3.5-turbo': { input: 0.50, output: 1.50, source: 'official' },
   'gpt-3.5-turbo-0125': { input: 0.50, output: 1.50, source: 'official' },
   'gpt-3.5-turbo-1106': { input: 1.00, output: 2.00, source: 'official' },
   'gpt-3.5-turbo-16k': { input: 3.00, output: 4.00, source: 'official' },
+  'gpt-3.5-turbo-instruct': { input: 1.50, output: 2.00, source: 'official' },
+  'gpt-3.5-turbo-instruct-0914': { input: 1.50, output: 2.00, source: 'official' },
   // GPT-5 family (latest pricing)
   'gpt-5': { input: 5.00, output: 20.00, source: 'official' },
   'gpt-5-2025-08-07': { input: 5.00, output: 20.00, source: 'official' },
@@ -218,7 +284,12 @@ const OFFICIAL_PRICES: Record<string, Partial<ModelPricing>> = {
   'o3-pro-2025-06-10': { input: 20.00, output: 80.00, source: 'official' },
   'o4-mini': { input: 1.10, output: 4.40, source: 'official' },
   'o4-mini-2025-04-16': { input: 1.10, output: 4.40, source: 'official' },
+  'o3-deep-research': { input: 10.00, output: 40.00, source: 'official' },
+  'o3-deep-research-2025-06-26': { input: 10.00, output: 40.00, source: 'official' },
+  'o4-mini-deep-research': { input: 2.00, output: 8.00, source: 'official' },
+  'o4-mini-deep-research-2025-06-26': { input: 2.00, output: 8.00, source: 'official' },
   // Audio models
+  'gpt-4o-transcribe': { input: 2.50, output: 10.00, audio_input: 6.00, source: 'official' },
   'gpt-4o-audio-preview': { input: 2.50, output: 10.00, audio_input: 40.00, audio_output: 80.00, source: 'official' },
   'gpt-4o-audio-preview-2024-12-17': { input: 2.50, output: 10.00, audio_input: 40.00, audio_output: 80.00, source: 'official' },
   'gpt-4o-audio-preview-2025-06-03': { input: 2.50, output: 10.00, audio_input: 40.00, audio_output: 80.00, source: 'official' },
@@ -242,6 +313,11 @@ const OFFICIAL_PRICES: Record<string, Partial<ModelPricing>> = {
   'gpt-realtime-mini-2025-10-06': { input: 0.60, output: 2.40, audio_input: 10.00, audio_output: 20.00, source: 'official' },
   'gpt-realtime-mini-2025-12-15': { input: 0.60, output: 2.40, audio_input: 10.00, audio_output: 20.00, source: 'official' },
   'gpt-realtime-1.5': { input: 4.00, output: 16.00, audio_input: 30.00, audio_output: 60.00, source: 'official' },
+  'tts-1': { input: 15.00, source: 'official' },
+  'tts-1-1106': { input: 15.00, source: 'official' },
+  'tts-1-hd': { input: 30.00, source: 'official' },
+  'tts-1-hd-1106': { input: 30.00, source: 'official' },
+  'whisper-1': { audio_input: 0.006, source: 'official' },
   // Image generation
   'gpt-image-1': { input: 0, output: 0, per_image: 0.04, source: 'official' },
   'gpt-image-1-mini': { input: 0, output: 0, per_image: 0.02, source: 'official' },

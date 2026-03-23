@@ -16,14 +16,15 @@ fi
 : "${CONTROL_PLANE_AUTONOMOUS_GOAL:=Continuously monitor, fix, and improve AnyGPT across the repo, checking API, control-plane, UI, homepage, runtime health, routing, model availability, governance drift, and bounded safe improvements.}"
 : "${CONTROL_PLANE_AUTONOMOUS_SCOPES:=repo,api,api-experimental,control-plane,repo-surface}"
 : "${CONTROL_PLANE_AUTONOMOUS_INTERVAL_MS:=${CONTROL_PLANE_INTERVAL_MS:-1000}}"
-: "${CONTROL_PLANE_AUTONOMOUS_MAX_EDIT_ACTIONS:=2}"
+: "${CONTROL_PLANE_AUTONOMOUS_MAX_EDIT_ACTIONS:=6}"
 : "${CONTROL_PLANE_AUTONOMOUS_EDIT_ALLOWLIST:=apps/langgraph-control-plane,apps/api,apps/homepage,apps/ui,scripts,README.md,SETUP.md,package.json,turbo.json,pnpm-workspace.yaml,tsconfig.json,bun.sh}"
 : "${CONTROL_PLANE_AUTONOMOUS_EDIT_DENYLIST:=}"
 : "${CONTROL_PLANE_REPO_ROOT:=$ROOT_DIR}"
 : "${CONTROL_PLANE_AUTONOMOUS_STATUS_FILE:=$CONTROL_DIR/live-autonomous-runner-status.json}"
 : "${CONTROL_PLANE_AUTONOMOUS_CHECKPOINT_FILE:=$CONTROL_DIR/live-autonomous-runner-checkpoints.json}"
 : "${CONTROL_PLANE_AUTONOMOUS_PID_FILE:=$CONTROL_DIR/live-autonomous-runner.pid}"
-: "${CONTROL_PLANE_AI_CODE_EDIT_AGENT_PARALLELISM:=${CONTROL_PLANE_AUTONOMOUS_AGENT_PARALLELISM:-1}}"
+: "${CONTROL_PLANE_AI_CODE_EDIT_AGENT_PARALLELISM:=${CONTROL_PLANE_AUTONOMOUS_AGENT_PARALLELISM:-6}}"
+: "${CONTROL_PLANE_AUTONOMOUS_MULTI_RUNNER:=${CONTROL_PLANE_MULTI_RUNNER:-true}}"
 : "${CONTROL_PLANE_LOG_TAIL_LINES:=80}"
 : "${CONTROL_PLANE_AUTO_RESTART_EXPERIMENTAL:=${CONTROL_PLANE_AUTONOMOUS_AUTO_RESTART_EXPERIMENTAL:-false}}"
 : "${CONTROL_PLANE_AUTO_RESTART_PRODUCTION:=${CONTROL_PLANE_AUTONOMOUS_AUTO_RESTART_PRODUCTION:-false}}"
@@ -49,6 +50,10 @@ cmd=(
 
 if [[ -n "$CONTROL_PLANE_AUTONOMOUS_EDIT_DENYLIST" ]]; then
   cmd+=(--edit-denylist="$CONTROL_PLANE_AUTONOMOUS_EDIT_DENYLIST")
+fi
+
+if [[ "${CONTROL_PLANE_AUTONOMOUS_MULTI_RUNNER,,}" =~ ^(1|true|yes|on)$ ]]; then
+  cmd+=(--multi-runner)
 fi
 
 if [[ -n "${CONTROL_PLANE_AUTONOMOUS_MAX_ITERATIONS:-}" ]]; then

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
+import ts from 'typescript';
 import { z } from 'zod';
 
 export const AutonomousEditActionSchema = z.object({
@@ -802,6 +803,92 @@ function buildNormalizedSkippedEdit(action: AutonomousEditAction, normalizedPath
   });
 }
 
+function collectUnusedLocalDiagnosticsForFile(filePath: string, sourceText: string): string[] {
+  const compilerOptions: ts.CompilerOptions = {
+    target: ts.ScriptTarget.ES2022,
+    module: ts.ModuleKind.ESNext,
+    moduleResolution: ts.ModuleResolutionKind.Bundler,
+    lib: ['lib.es2022.d.ts'],
+    types: ['node'],
+    strict: true,
+    noUnusedLocals: true,
+    noUnusedParameters: false,
+    noEmit: true,
+    skipLibCheck: true,
+    resolveJsonModule: true,
+    esModuleInterop: true,
+  };
+
+  const compilerHost = ts.createCompilerHost(compilerOptions, true);
+  const originalGetSourceFile = compilerHost.getSourceFile.bind(compilerHost);
+  const normalizedFilePath = path.resolve(filePath);
+  const normalizedSourceText = String(sourceText || '');
+
+  compilerHost.getSourceFile = (candidateFileName, languageVersion, onError, shouldCreateNewSourceFile) => {
+    const resolvedCandidate = path.resolve(candidateFileName);
+    if (resolvedCandidate === normalizedFilePath) {
+      return ts.createSourceFile(candidateFileName, normalizedSourceText, languageVersion, true);
+    }
+    return originalGetSourceFile(candidateFileName, languageVersion, onError, shouldCreateNewSourceFile);
+  };
+
+  const originalReadFile = compilerHost.readFile?.bind(compilerHost);
+  compilerHost.readFile = (candidateFileName) => {
+    const resolvedCandidate = path.resolve(candidateFileName);
+    if (resolvedCandidate === normalizedFilePath) {
+      return normalizedSourceText;
+    }
+    return originalReadFile ? originalReadFile(candidateFileName) : undefined;
+  };
+
+  const originalFileExists = compilerHost.fileExists?.bind(compilerHost);
+  compilerHost.fileExists = (candidateFileName) => {
+    const resolvedCandidate = path.resolve(candidateFileName);
+    if (resolvedCandidate === normalizedFilePath) {
+      return true;
+    }
+    return originalFileExists ? originalFileExists(candidateFileName) : false;
+  };
+
+  compilerHost.writeFile = () => {};
+
+  const program = ts.createProgram([normalizedFilePath], compilerOptions, compilerHost);
+  return ts.getPreEmitDiagnostics(program)
+    .filter((diagnostic) => diagnostic.code === 6133 && diagnostic.file && path.resolve(diagnostic.file.fileName) === normalizedFilePath)
+    .map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n').trim())
+    .filter(Boolean);
+}
+
+function buildUnusedLocalFailureMessage(diagnostics: string[]): string {
+  const uniqueDiagnostics = Array.from(new Set(
+    diagnostics
+      .map((entry) => String(entry || '').trim())
+      .filter(Boolean),
+  ));
+  const preview = uniqueDiagnostics.slice(0, 3).join(' | ');
+  const suffix = uniqueDiagnostics.length > 3 ? ` (+${uniqueDiagnostics.length - 3} more)` : '';
+  return `Autonomous edit introduced unused local symbols and was rejected: ${preview}${suffix}`;
+}
+
+function validateAutonomousEditUnusedLocals(
+  absolutePath: string,
+  nextContent: string,
+): { ok: true } | { ok: false; message: string } {
+  if (!absolutePath.endsWith('.ts') && !absolutePath.endsWith('.tsx')) {
+    return { ok: true };
+  }
+
+  const diagnostics = collectUnusedLocalDiagnosticsForFile(absolutePath, nextContent);
+  if (diagnostics.length === 0) {
+    return { ok: true };
+  }
+
+  return {
+    ok: false,
+    message: buildUnusedLocalFailureMessage(diagnostics),
+  };
+}
+
 export function preflightAutonomousEditAction(
   repoRoot: string,
   action: AutonomousEditAction,
@@ -1000,6 +1087,17 @@ export function applyAutonomousEditsWithManifest(
               continue;
             }
 
+            const unusedLocalValidation = validateAutonomousEditUnusedLocals(absolutePath, next);
+            if (!unusedLocalValidation.ok) {
+              resultsByIndex.set(index, AppliedAutonomousEditSchema.parse({
+                ...action,
+                path: check.normalizedPath,
+                status: 'failed',
+                message: unusedLocalValidation.message,
+              }));
+              continue;
+            }
+
             if (!touchedFiles.has(check.normalizedPath)) {
               touchedFiles.set(check.normalizedPath, captureTouchedFileSnapshot(repoRoot, check.normalizedPath));
             }
@@ -1033,6 +1131,17 @@ export function applyAutonomousEditsWithManifest(
                 path: check.normalizedPath,
                 status: 'skipped',
                 message: 'No content change was produced by the anchor-fragment replace action.',
+              }));
+              continue;
+            }
+
+            const unusedLocalValidation = validateAutonomousEditUnusedLocals(absolutePath, next);
+            if (!unusedLocalValidation.ok) {
+              resultsByIndex.set(index, AppliedAutonomousEditSchema.parse({
+                ...action,
+                path: check.normalizedPath,
+                status: 'failed',
+                message: unusedLocalValidation.message,
               }));
               continue;
             }
@@ -1080,6 +1189,17 @@ export function applyAutonomousEditsWithManifest(
           continue;
         }
 
+        const unusedLocalValidation = validateAutonomousEditUnusedLocals(absolutePath, next);
+        if (!unusedLocalValidation.ok) {
+          resultsByIndex.set(index, AppliedAutonomousEditSchema.parse({
+            ...action,
+            path: check.normalizedPath,
+            status: 'failed',
+            message: unusedLocalValidation.message,
+          }));
+          continue;
+        }
+
         if (!touchedFiles.has(check.normalizedPath)) {
           touchedFiles.set(check.normalizedPath, captureTouchedFileSnapshot(repoRoot, check.normalizedPath));
         }
@@ -1115,6 +1235,17 @@ export function applyAutonomousEditsWithManifest(
           }));
           continue;
         }
+      }
+
+      const unusedLocalValidation = validateAutonomousEditUnusedLocals(absolutePath, content);
+      if (!unusedLocalValidation.ok) {
+        resultsByIndex.set(index, AppliedAutonomousEditSchema.parse({
+          ...action,
+          path: check.normalizedPath,
+          status: 'failed',
+          message: unusedLocalValidation.message,
+        }));
+        continue;
       }
 
       if (!touchedFiles.has(check.normalizedPath)) {

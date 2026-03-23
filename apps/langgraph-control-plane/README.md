@@ -425,7 +425,9 @@ Autonomous code edits are enforced through the allowlist/denylist logic, session
 
 Continuous autonomous runs now fan out up to `CONTROL_PLANE_AI_CODE_EDIT_AGENT_PARALLELISM` focused edit agents per iteration. The planner keeps one primary full-context agent and, when aggressive experimental mode is active, adds narrower API/control-plane/repo-focused edit agents so the loop stops spending every iteration on one broad no-op plan.
 
-`--multi-runner` now adds a supervisor process on top of that internal planner fanout. The coordinator writes the main status file, derives per-lane child status/checkpoint/pid/log files, and keeps child runners on locked disjoint lanes such as `api-experimental`, `api`, `control-plane`, and `repo-surface` instead of letting adaptive scope expansion collapse them back into overlap.
+`--multi-runner` now adds a supervisor process on top of that internal planner fanout. The coordinator writes the main status file, derives per-lane child status/checkpoint/pid/log files, and keeps child runners on locked disjoint lanes such as `api-routing`, `api-runtime`, `api-data`, `api-platform`, `control-plane`, `workspace-surface`, `homepage-surface`, and `ui-surface` instead of letting adaptive scope expansion collapse them back into overlap.
+
+When CodeQL SARIF results are available, the control plane now ingests them as repair signals. Drop SARIF files into common paths such as `reports/codeql-results.sarif`, `logs/codeql-results.sarif`, or `apps/langgraph-control-plane/.control-plane/codeql-results.sarif`, or point the runner at custom SARIF files with `CONTROL_PLANE_CODEQL_RESULTS=path/to/results.sarif,path/to/more.sarif`.
 
 Default allowlist:
 

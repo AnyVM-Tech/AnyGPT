@@ -2,6 +2,7 @@ import { dataManager, LoadedProviders, ModelsFileStructure } from './dataManager
 import { notifyNewModelsDiscovered } from './adminKeySync.js';
 import * as fs from 'fs';
 import * as path from 'path';
+import { fileURLToPath } from 'url';
 import { isNonChatModel } from './openaiRouteUtils.js';
 
 // --- Dynamic Pricing ---
@@ -50,10 +51,11 @@ function extractTokenSpeed(modelData: any): number | null {
 let basePricingCache: Record<string, BasePricing> | null = null;
 let supplementalPricingCache: Record<string, BasePricing> | null = null;
 let competitorMultsCache: Record<string, number> | null = null;
+const API_WORKSPACE_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 type CapabilitiesCache = Record<string, string[]>;
-const CAPABILITIES_CACHE_PATH = path.resolve('logs', 'model-capabilities.json');
-const PROBE_TESTED_PATH = path.resolve('logs', 'probe-tested.json');
+const CAPABILITIES_CACHE_PATH = path.resolve(API_WORKSPACE_DIR, 'logs', 'model-capabilities.json');
+const PROBE_TESTED_PATH = path.resolve(API_WORKSPACE_DIR, 'logs', 'probe-tested.json');
 
 type ProbeTestedFile = {
     data?: Record<string, Record<string, string>>;
@@ -63,8 +65,9 @@ type ProbeTestedFile = {
 type PricingCache = Record<string, Record<string, any>>;
 
 const CAPABILITY_ORDER = ['text', 'image_input', 'image_output', 'audio_input', 'audio_output', 'tool_calling'] as const;
-const PRICING_CACHE_PATH = path.resolve('logs', 'model-pricing.json');
-const ROUTER_MODELS_PRICING_PATH = path.resolve('dev', 'routermodels.json');
+const PRICING_CACHE_PATH = path.resolve(API_WORKSPACE_DIR, 'logs', 'model-pricing.json');
+const ROUTER_MODELS_PRICING_PATH = path.resolve(API_WORKSPACE_DIR, 'dev', 'routermodels.json');
+const BASE_PRICING_PATH = path.resolve(API_WORKSPACE_DIR, 'pricing.json');
 
 function normalizeCapabilities(caps: Iterable<string>): string[] {
     const unique = new Set<string>();
@@ -182,7 +185,7 @@ function areCapabilitiesEqual(a: string[] | undefined, b: string[] | undefined):
 function loadBasePricing(): Record<string, BasePricing> {
     if (basePricingCache) return basePricingCache;
     try {
-        const raw = fs.readFileSync(path.resolve('pricing.json'), 'utf8');
+        const raw = fs.readFileSync(BASE_PRICING_PATH, 'utf8');
         const parsed = JSON.parse(raw);
         basePricingCache = {
             ...loadSupplementalRouterPricing(),

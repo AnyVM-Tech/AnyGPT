@@ -399,6 +399,8 @@ const CONTROL_PLANE_GOVERNANCE_PROFILE_FILE = 'apps/langgraph-control-plane/gove
 
 const DEFAULT_CONTROL_PLANE_AUTONOMOUS_EDIT_PROMPT = [
   'You are the autonomous code edit agent for the AnyGPT LangGraph control plane. Produce only safe, bounded code changes within the allowlist and prefer the smallest viable edit.',
+  'When CodeQL or SARIF findings are available, treat them as code-local repair signals. Prefer the smallest fix in the referenced file, mention the CodeQL rule id or short description in the summary and edit reason, and avoid broad unrelated edits when a named finding already points to a specific path.',
+  'When repair signals show non-free models in apps/api/models.json still using zero placeholder or missing pricing without matching coverage in apps/api/pricing.json or apps/api/dev/routermodels.json, treat that as a code-local pricing coverage gap. Prefer the smallest bounded fix in apps/api/pricing.json, apps/api/dev/fetchPricing.ts, or apps/api/modules/modelUpdater.ts that improves pricing-source coverage or resolution, and do not normalize unresolved pricing by silently leaving zero placeholders unless the source files clearly mark the model as intentionally free.',
   'Treat provider-bound failures (for example upstream API incompatibility, unsupported endpoint or mode combinations such as streaming or multi-agent restrictions, unsupported tool-calling or tool_choice combinations reported by an upstream router or provider, invalid API keys, disabled upstream APIs or projects, quota or payment exhaustion, repeated invalid upstream response structures, repeated empty streaming responses for the same model or endpoint, repeated upstream OpenAI-compatible streaming server_error responses for the same model or endpoint, repeated provider catalog or list-model auth failures, repeated Gemini ListModels 400/401/403 failures indicating disabled APIs, forbidden projects, expired or invalid API keys, or missing upstream activation, memory-pressure queue rejections caused by high rss/external/runtime usage without a clear local leak in the candidate files, or non-retryable remote media fetch failures) as ambiguous for direct repair unless a clear local guard, fallback, validation, routing, provider-selection fix, failure-origin classification improvement, bounded candidate prioritization improvement, operator-facing recovery note, or bounded local load-shedding improvement is visible in the provided candidate files.',
   'When logs show request-queue memory-pressure rejections with high rss, external memory, or swap usage but low in-flight and pending counts, treat the active failure as runtime-capacity pressure by default rather than a clear queue-logic bug; prefer the smallest bounded edit that improves failure-origin labeling, operator-facing recovery notes, autonomous decision reasons, or conservative load-shedding guidance in candidate files over speculative concurrency increases or threshold loosening.',
   'When active repair signals are repeated MEMORY_PRESSURE 503s from requestQueue/requestIntake with high rss, heap, external, or swap usage and low queue occupancy, treat them as runtime-capacity signals by default; prefer edits that improve failure-origin labeling, operator-facing recovery notes, candidate prioritization, or bounded load-shedding heuristics over speculative concurrency increases or broad queue rewrites unless the candidate files show a clear local regression.',
@@ -1006,7 +1008,7 @@ function isLikelyRepairLogLine(line: string): boolean {
   const normalized = String(line || '').trim();
   if (!normalized) return false;
 
-  if (/\b(error|failed|failure|timeout|timed out|unauthorized|invalid|exception|refused|denied|backlog|overloaded|degraded|unavailable|unhealthy|panic)\b/i.test(normalized)) {
+  if (/\b(error|failed|failure|timeout|timed out|unauthorized|invalid|exception|refused|denied|backlog|overloaded|degraded|unavailable|unhealthy|panic|codeql|sarif|security|vulnerability|injection|xss|ssrf|traversal|taint)\b/i.test(normalized)) {
     return true;
   }
 
@@ -1128,9 +1130,18 @@ function scoreAutonomousEditPathFit(
 
   let score = 0;
   if (normalizedPath.startsWith('apps/langgraph-control-plane/')) score += 2;
+  if ((/codeql|sarif|security|vulnerability|injection|xss|ssrf|traversal|taint/.test(sourceText))) {
+    if (normalizedPath.startsWith('apps/api/')) score += 2;
+    if (normalizedPath.startsWith('apps/langgraph-control-plane/')) score += 2;
+    if (normalizedPath.startsWith('apps/homepage/') || normalizedPath.startsWith('apps/ui/')) score += 1;
+  }
   if (normalizedPath.startsWith('apps/api/modules/errorClassification.ts') && /server_error|invalid_response_structure|failureorigin|provider-bound|request retry worthless|providerswitchworthless/.test(sourceText)) score += 4;
   if (normalizedPath.startsWith('apps/api/modules/requestQueue.ts') && /memory pressure|queue|overloaded|max_pending|swap_used_mb|external_mb/.test(sourceText)) score += 4;
   if (normalizedPath.startsWith('apps/api/modules/requestIntake.ts') && /content_length|intake|request body|bufferedrequestbody/.test(sourceText)) score += 4;
+  if (normalizedPath === API_MODELS_SOURCE_FILE && /pricing coverage|pricing gap|zero placeholder pricing|missing pricing|pricing\.json|models\.json/.test(sourceText)) score += 3;
+  if (normalizedPath === API_PRICING_SOURCE_FILE && /pricing coverage|pricing gap|zero placeholder pricing|missing pricing|pricing\.json|models\.json|routermodels\.json|fetch pricing|fetchpricing/.test(sourceText)) score += 4;
+  if (normalizedPath === 'apps/api/modules/modelUpdater.ts' && /pricing coverage|pricing gap|zero placeholder pricing|missing pricing|pricing\.json|models\.json|buildzeropricing|pricing source/.test(sourceText)) score += 4;
+  if (normalizedPath === 'apps/api/dev/fetchPricing.ts' && /pricing coverage|pricing gap|zero placeholder pricing|missing pricing|pricing\.json|routermodels\.json|fetch pricing|fetchpricing/.test(sourceText)) score += 4;
   if (normalizedPath.startsWith('apps/api/modules/openaiProviderSelection.ts') && /provider selection|provider switch|retry worthless|routing|model-availability|probe|tool-calling|tool_choice|unsupported(?:-| )tool|healthy selection/.test(sourceText)) score += 3;
   if (normalizedPath.startsWith('apps/api/modules/openaiRequestSupport.ts') && /heartbeat|keepalive|keep-alive|backpressure|response\.write|drain|sse|stream teardown|stream keepalive|premature stream/.test(sourceText)) score += 3;
   if (normalizedPath.startsWith('apps/api/providers/openai.ts') && /server_error|empty streaming response|responses endpoint|stream/.test(sourceText)) score += 2;
@@ -1237,6 +1248,16 @@ function deriveRepairIntent(state: ControlPlaneState): { summary: string; signal
     }
   }
 
+  const pricingCoverageAudit = auditModelPricingCoverage(state.repoRoot);
+  if (pricingCoverageAudit && pricingCoverageAudit.unresolvedCount > 0) {
+    const sampleSuffix = pricingCoverageAudit.sampleModelIds.length > 0
+      ? ` (examples: ${pricingCoverageAudit.sampleModelIds.join(', ')})`
+      : '';
+    signals.push(
+      `Pricing coverage gap: ${API_MODELS_SOURCE_FILE} still contains ${pricingCoverageAudit.unresolvedCount} non-free model(s) with zero placeholder or missing pricing that do not resolve through ${API_PRICING_SOURCE_FILE} or ${API_ROUTER_MODELS_SOURCE_FILE}${sampleSuffix}. Prefer bounded fixes in ${API_PRICING_SOURCE_FILE}, apps/api/dev/fetchPricing.ts, or apps/api/modules/modelUpdater.ts.`,
+    );
+  }
+
   if (
     state.selectedPromptSource === 'local'
     && state.promptSelectionNotes.some((note) => /fallback|unavailable|disabled|no url returned/i.test(note))
@@ -1339,7 +1360,7 @@ function deriveImprovementIntent(state: ControlPlaneState): { summary: string; s
   const signals: string[] = [];
   const uniqueScopeSet = new Set(getEffectiveScopes(state));
 
-  if (uniqueScopeSet.has('api') || uniqueScopeSet.has('api-experimental') || uniqueScopeSet.has('repo')) {
+  if (hasApiFamilyScope(uniqueScopeSet) || uniqueScopeSet.has('repo')) {
     signals.push('Experimental API loop is healthy enough to pursue bounded throughput, routing, and model-availability improvements.');
   }
 
@@ -1347,7 +1368,7 @@ function deriveImprovementIntent(state: ControlPlaneState): { summary: string; s
     signals.push('Repo-wide coverage is active, so the autonomous loop can inspect root build/test health plus bounded UI, homepage, and workspace configuration improvements.');
   }
 
-  if (uniqueScopeSet.has('repo-surface')) {
+  if (hasRepoSurfaceFamilyScope(uniqueScopeSet)) {
     signals.push('Repo-surface coverage is active, so the autonomous loop can focus on root workspace files plus bounded homepage/UI improvements without widening into API or control-plane edits.');
   }
 
@@ -1359,7 +1380,7 @@ function deriveImprovementIntent(state: ControlPlaneState): { summary: string; s
     signals.push('If no novel repair target is present, prefer bounded feature work, codebase cleanup, architecture simplification, and developer-workflow hardening over repeating provider churn analysis.');
   }
 
-  if (uniqueScopeSet.has('repo-surface')) {
+  if (hasRepoSurfaceFamilyScope(uniqueScopeSet)) {
     signals.push('Prefer small root-workspace, homepage, and UI cleanup work when no code-local repair target is present.');
   }
 
@@ -1499,7 +1520,7 @@ function buildDeterministicAutonomousFallbackPlan(
   const queueEdits = buildDeterministicQueueOverloadFallbackEdits(state.repoRoot, candidateFiles).slice(0, state.maxEditActions);
   const activeScopes = new Set(getEffectiveScopes(state));
 
-  if (queueEdits.length > 0 && (queueSignalDetected || activeScopes.has('api-experimental') || activeScopes.has('api') || activeScopes.has('repo'))) {
+  if (queueEdits.length > 0 && (queueSignalDetected || hasApiFamilyScope(activeScopes) || activeScopes.has('repo'))) {
     return {
       summary: queueSignalDetected
         ? 'Deterministic experimental fallback: widen queue concurrency and backlog headroom after repeated request-queue overload signals.'
@@ -1664,6 +1685,9 @@ type LoadedMcpServerConfig = {
 
 const CONTROL_PLANE_DATA_DIR = './apps/api/.control-plane';
 const CONTROL_PLANE_PACKAGE_DATA_DIR = '.control-plane';
+const API_MODELS_SOURCE_FILE = 'apps/api/models.json';
+const API_PRICING_SOURCE_FILE = 'apps/api/pricing.json';
+const API_ROUTER_MODELS_SOURCE_FILE = 'apps/api/dev/routermodels.json';
 const CONTROL_PLANE_PROVIDERS_FILE = `${CONTROL_PLANE_DATA_DIR}/providers.json`;
 const CONTROL_PLANE_KEYS_FILE = `${CONTROL_PLANE_DATA_DIR}/keys.json`;
 const CONTROL_PLANE_MODELS_FILE = `${CONTROL_PLANE_DATA_DIR}/models.json`;
@@ -1715,6 +1739,190 @@ function parseBooleanEnv(name: string, fallback: boolean): boolean {
   return fallback;
 }
 
+type PricingCoverageAudit = {
+  unresolvedCount: number;
+  sampleModelIds: string[];
+};
+
+function readRepoJsonFile(repoRoot: string, repoRelativePath: string): unknown | null {
+  try {
+    const resolvedPath = path.resolve(repoRoot, repoRelativePath);
+    if (!fs.existsSync(resolvedPath)) return null;
+    return JSON.parse(fs.readFileSync(resolvedPath, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function isPlainObjectRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function hasPositiveRouterPricing(entry: unknown): boolean {
+  if (!isPlainObjectRecord(entry)) return false;
+  return ['prompt', 'completion', 'image', 'request']
+    .map((key) => Number.parseFloat(String(entry[key] ?? '0')))
+    .some((value) => Number.isFinite(value) && value > 0);
+}
+
+function isFreePricingModelId(modelId: string): boolean {
+  return modelId.endsWith(':free') || modelId === 'openrouter/free';
+}
+
+function buildPricingCoverageCandidates(modelId: string): string[] {
+  const candidates = new Set<string>();
+  const add = (value?: string | null) => {
+    if (!value) return;
+    candidates.add(value);
+  };
+
+  add(modelId);
+  const stripped = modelId.includes('/') ? modelId.split('/').pop()! : modelId;
+  add(stripped);
+
+  if (modelId.endsWith(':free')) {
+    const withoutFree = modelId.slice(0, -5);
+    add(withoutFree);
+    add(withoutFree.includes('/') ? withoutFree.split('/').pop()! : withoutFree);
+  }
+
+  if (modelId.endsWith(':exacto')) {
+    const withoutExacto = modelId.slice(0, -7);
+    add(withoutExacto);
+    add(withoutExacto.includes('/') ? withoutExacto.split('/').pop()! : withoutExacto);
+  }
+
+  if (modelId.includes('-thinking')) {
+    const withoutThinking = modelId.replace('-thinking', '');
+    add(withoutThinking);
+    add(withoutThinking.includes('/') ? withoutThinking.split('/').pop()! : withoutThinking);
+
+    const collapsedThinking = modelId.replace('-thinking-', '-');
+    add(collapsedThinking);
+    add(collapsedThinking.includes('/') ? collapsedThinking.split('/').pop()! : collapsedThinking);
+
+    const instructVariant = modelId.replace('-thinking', '-instruct');
+    add(instructVariant);
+    add(instructVariant.includes('/') ? instructVariant.split('/').pop()! : instructVariant);
+  }
+
+  const bare = stripped;
+  const namespace = modelId.includes('/') ? `${modelId.split('/')[0]}/` : '';
+  const withoutDateSuffix = bare.replace(/-\d{4}-\d{2}-\d{2}$/, '');
+  add(withoutDateSuffix);
+  if (namespace) add(`${namespace}${withoutDateSuffix}`);
+
+  const gpt5Match = withoutDateSuffix.match(/^gpt-5(?:\.\d+)?(?:-(pro|mini|nano|chat(?:-latest)?|chat|codex(?:-mini|-max)?|codex))?$/);
+  if (gpt5Match) {
+    const variant = gpt5Match[1];
+    const canonical = variant ? `gpt-5-${variant}` : 'gpt-5';
+    add(canonical);
+    if (namespace) add(`${namespace}${canonical}`);
+    if (!variant || variant === 'chat' || variant === 'chat-latest') {
+      add('gpt-5');
+      if (namespace) add(`${namespace}gpt-5`);
+    }
+  }
+
+  if (withoutDateSuffix === 'omni-moderation-latest') {
+    add('omni-moderation-2024-09-26');
+  }
+
+  if (/^gpt-4o-mini-transcribe(?:-\d{4}-\d{2}-\d{2})?$/i.test(withoutDateSuffix)) {
+    add('gpt-4o-mini-transcribe');
+  }
+  if (/^gpt-4o-transcribe(?:-\d{4}-\d{2}-\d{2})?$/i.test(withoutDateSuffix)) {
+    add('gpt-4o-transcribe');
+  }
+  if (/^gpt-4o-mini-tts(?:-\d{4}-\d{2}-\d{2})?$/i.test(withoutDateSuffix)) {
+    add('gpt-4o-mini-tts');
+  }
+  if (/^gpt-audio(?:-mini)?(?:-\d{4}-\d{2}-\d{2})?$/i.test(withoutDateSuffix)) {
+    const audioMatch = withoutDateSuffix.match(/^(gpt-audio(?:-mini)?)/i);
+    if (audioMatch?.[1]) add(audioMatch[1].toLowerCase());
+  }
+
+  return Array.from(candidates);
+}
+
+function buildKnownPricingCoverageMap(repoRoot: string): Record<string, Record<string, unknown>> {
+  const knownCoverage: Record<string, Record<string, unknown>> = {};
+
+  const pricingFile = readRepoJsonFile(repoRoot, API_PRICING_SOURCE_FILE);
+  const pricingModels = isPlainObjectRecord(pricingFile) && isPlainObjectRecord(pricingFile.models)
+    ? pricingFile.models
+    : null;
+  if (pricingModels) {
+    for (const [modelId, pricing] of Object.entries(pricingModels)) {
+      knownCoverage[modelId] = isPlainObjectRecord(pricing) ? pricing : {};
+    }
+  }
+
+  const routerModels = readRepoJsonFile(repoRoot, API_ROUTER_MODELS_SOURCE_FILE);
+  const routerRows = isPlainObjectRecord(routerModels) && Array.isArray(routerModels.data)
+    ? routerModels.data
+    : Array.isArray(routerModels)
+      ? routerModels
+      : [];
+  for (const row of routerRows) {
+    if (!isPlainObjectRecord(row)) continue;
+    const slug = typeof row.slug === 'string' ? row.slug.trim() : '';
+    if (!slug) continue;
+    const pricing = row.endpoint && isPlainObjectRecord(row.endpoint)
+      ? row.endpoint.pricing
+      : row.pricing;
+    if (!hasPositiveRouterPricing(pricing)) continue;
+    knownCoverage[slug] = isPlainObjectRecord(pricing) ? pricing : { slug };
+  }
+
+  return knownCoverage;
+}
+
+function extractNumericPricingValues(pricingRecord: unknown): number[] {
+  if (!isPlainObjectRecord(pricingRecord)) return [];
+  return Object.entries(pricingRecord)
+    .filter(([key]) => !['unit', 'source', 'updated_at'].includes(key))
+    .map(([, value]) => typeof value === 'number' ? value : Number.parseFloat(String(value)))
+    .filter((value) => Number.isFinite(value));
+}
+
+function hasKnownPricingCoverage(modelId: string, knownCoverage: Record<string, Record<string, unknown>>): boolean {
+  return buildPricingCoverageCandidates(modelId).some((candidate) => Boolean(knownCoverage[candidate]));
+}
+
+function auditModelPricingCoverage(repoRoot: string): PricingCoverageAudit | null {
+  const modelsFile = readRepoJsonFile(repoRoot, API_MODELS_SOURCE_FILE);
+  const modelRows = isPlainObjectRecord(modelsFile) && Array.isArray(modelsFile.data)
+    ? modelsFile.data
+    : Array.isArray(modelsFile)
+      ? modelsFile
+      : [];
+  if (modelRows.length === 0) return null;
+
+  const knownCoverage = buildKnownPricingCoverageMap(repoRoot);
+  const unresolvedModelIds: string[] = [];
+
+  for (const row of modelRows) {
+    if (!isPlainObjectRecord(row)) continue;
+    const modelId = typeof row.id === 'string' ? row.id.trim() : '';
+    if (!modelId || isFreePricingModelId(modelId)) continue;
+
+    const pricingValues = extractNumericPricingValues(row.pricing);
+    const hasPlaceholderPricing = !isPlainObjectRecord(row.pricing)
+      || pricingValues.length === 0
+      || pricingValues.every((value) => value === 0);
+    if (!hasPlaceholderPricing) continue;
+    if (hasKnownPricingCoverage(modelId, knownCoverage)) continue;
+
+    unresolvedModelIds.push(modelId);
+  }
+
+  return {
+    unresolvedCount: unresolvedModelIds.length,
+    sampleModelIds: unresolvedModelIds.slice(0, 6),
+  };
+}
+
 const SAFE_EXPERIMENTAL_DEPLOY_COMMAND = 'sudo systemctl restart anygpt-experimental';
 const SAFE_PRODUCTION_DEPLOY_COMMAND = 'sudo systemctl restart anygpt.service';
 const AUTO_RESTART_PRODUCTION_AFTER_REPAIR = parseBooleanEnv('CONTROL_PLANE_AUTO_RESTART_PRODUCTION', false);
@@ -1725,6 +1933,8 @@ const MCP_CLIENT_VERSION = '0.1.0';
 const DEFAULT_LOG_TAIL_LINE_COUNT = parsePositiveIntegerEnv('CONTROL_PLANE_LOG_TAIL_LINES', 40, 4);
 const MCP_INSPECTION_TIMEOUT_MS = parsePositiveIntegerEnv('CONTROL_PLANE_MCP_INSPECTION_TIMEOUT_MS', 8_000, 1_000);
 const MCP_MAX_TOOL_PAGES = 20;
+const CODEQL_RESULT_FILE_LIMIT = parsePositiveIntegerEnv('CONTROL_PLANE_CODEQL_RESULT_FILE_LIMIT', 4, 1);
+const CODEQL_RESULT_LINE_LIMIT = parsePositiveIntegerEnv('CONTROL_PLANE_CODEQL_RESULT_LINE_LIMIT', 12, 1);
 const AI_AGENT_REQUEST_TIMEOUT_MS = parsePositiveIntegerEnv('CONTROL_PLANE_AI_AGENT_TIMEOUT_MS', 40_000, 5_000);
 const AI_NOTES_AGENT_REQUEST_TIMEOUT_MS = parsePositiveIntegerEnv('CONTROL_PLANE_AI_NOTES_TIMEOUT_MS', 20_000, 1_000);
 const AI_AGENT_NOTE_LIMIT = 8;
@@ -1741,6 +1951,11 @@ const AI_CODE_EDIT_PAYLOAD_STRING_MAX_CHARS = parsePositiveIntegerEnv('CONTROL_P
 const AI_CODE_EDIT_AGENT_PARALLELISM = parsePositiveIntegerEnv('CONTROL_PLANE_AI_CODE_EDIT_AGENT_PARALLELISM', 6, 1);
 const CONTROL_PLANE_NOTE_HISTORY_LIMIT = parsePositiveIntegerEnv('CONTROL_PLANE_NOTE_HISTORY_LIMIT', 120, 20);
 const CONTROL_PLANE_TYPECHECK_COMMAND = 'bash ./bun.sh run -F anygpt-langgraph-control-plane typecheck';
+const CODEQL_AUTORUN_ENABLED = parseBooleanEnv('CONTROL_PLANE_CODEQL_AUTORUN', true);
+const CODEQL_REFRESH_MS = parsePositiveIntegerEnv('CONTROL_PLANE_CODEQL_REFRESH_MS', 30 * 60 * 1000, 60_000);
+const REDIS_CLONE_CONNECT_TIMEOUT_MS = parsePositiveIntegerEnv('CONTROL_PLANE_REDIS_CLONE_CONNECT_TIMEOUT_MS', 15_000, 1_000);
+const REDIS_CLONE_SCAN_TIMEOUT_MS = parsePositiveIntegerEnv('CONTROL_PLANE_REDIS_CLONE_SCAN_TIMEOUT_MS', 60_000, 1_000);
+const REDIS_CLONE_COMMAND_TIMEOUT_MS = parsePositiveIntegerEnv('CONTROL_PLANE_REDIS_CLONE_COMMAND_TIMEOUT_MS', 30_000, 1_000);
 const REPAIR_SMOKE_JOB_LIMIT = 2;
 const REPAIR_SMOKE_TIMEOUT_MS = parsePositiveIntegerEnv('CONTROL_PLANE_REPAIR_SMOKE_TIMEOUT_MS', 120_000, 5_000);
 const POST_REPAIR_VALIDATION_JOB_LIMIT = 2;
@@ -1756,6 +1971,8 @@ const DEFAULT_EXPERIMENTAL_API_PORT = 3310;
 const CONTROL_PLANE_SIGNAL_FRESHNESS_WINDOW_MS = parsePositiveIntegerEnv('CONTROL_PLANE_SIGNAL_FRESHNESS_WINDOW_MS', 12 * 60 * 60 * 1000, 60_000);
 const AUTONOMOUS_FULL_COVERAGE_SCOPES = ['repo', 'api', 'api-experimental', 'control-plane', 'repo-surface'] as const;
 const EXPANSIVE_SCOPE_ALIASES = new Set(['all', 'everything', 'adaptive', '*']);
+const API_FAMILY_SCOPES = new Set(['api', 'api-experimental', 'api-routing', 'api-runtime', 'api-data', 'api-platform']);
+const REPO_SURFACE_FAMILY_SCOPES = new Set(['repo-surface', 'workspace-surface', 'homepage-surface', 'ui-surface']);
 
 const EXPLICIT_SENSITIVE_KEYS = new Set([
   'apikey',
@@ -1776,6 +1993,9 @@ const SCOPE_COMMANDS: Record<string, { build?: string; test?: string }> = {
     test: 'bash ./bun.sh run test',
   },
   'repo-surface': {},
+  'workspace-surface': {},
+  'homepage-surface': {},
+  'ui-surface': {},
   api: {
     build: API_EXPERIMENTAL_BUILD_COMMAND,
     test: API_EXPERIMENTAL_TEST_COMMAND,
@@ -1784,11 +2004,33 @@ const SCOPE_COMMANDS: Record<string, { build?: string; test?: string }> = {
     build: API_EXPERIMENTAL_BUILD_COMMAND,
     test: API_EXPERIMENTAL_TEST_COMMAND,
   },
+  'api-routing': {},
+  'api-runtime': {},
+  'api-data': {},
+  'api-platform': {
+    build: API_EXPERIMENTAL_BUILD_COMMAND,
+    test: API_EXPERIMENTAL_TEST_COMMAND,
+  },
   'control-plane': {
     build: 'bash ./bun.sh run -F anygpt-langgraph-control-plane build',
     test: 'bash ./bun.sh run -F anygpt-langgraph-control-plane typecheck',
   },
 };
+
+function hasScopeFamily(scopes: Iterable<string>, family: Set<string>): boolean {
+  for (const scope of scopes) {
+    if (family.has(String(scope || '').trim().toLowerCase())) return true;
+  }
+  return false;
+}
+
+function hasApiFamilyScope(scopes: Iterable<string>): boolean {
+  return hasScopeFamily(scopes, API_FAMILY_SCOPES);
+}
+
+function hasRepoSurfaceFamilyScope(scopes: Iterable<string>): boolean {
+  return hasScopeFamily(scopes, REPO_SURFACE_FAMILY_SCOPES);
+}
 
 function normalizeKeyName(key: string): string {
   return String(key || '').replace(/[^a-z0-9]/gi, '').toLowerCase();
@@ -3365,6 +3607,13 @@ function resolveMcpConfigPath(state: ControlPlaneState): string {
   return path.resolve(state.repoRoot, '.roo', 'mcp.json');
 }
 
+function splitConfiguredRepoPaths(value: string | undefined): string[] {
+  return String(value || '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
 function readTailLines(filePath: string, maxLines: number = 20): string[] {
   if (!fs.existsSync(filePath)) return [];
   try {
@@ -3384,6 +3633,218 @@ function getFileModifiedTimeMs(filePath: string): number {
     return fs.statSync(filePath).mtimeMs || 0;
   } catch {
     return 0;
+  }
+}
+
+function listRecentSarifFiles(directoryPath: string, maxFiles: number): string[] {
+  if (!fs.existsSync(directoryPath)) return [];
+  try {
+    return fs.readdirSync(directoryPath, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && /\.(?:sarif|sarif\.json)$/i.test(entry.name))
+      .map((entry) => path.resolve(directoryPath, entry.name))
+      .sort((left, right) => getFileModifiedTimeMs(right) - getFileModifiedTimeMs(left))
+      .slice(0, maxFiles);
+  } catch {
+    return [];
+  }
+}
+
+function listRecentCodeQlCandidatePaths(state: ControlPlaneState): string[] {
+  const configuredCandidates = splitConfiguredRepoPaths(
+    process.env.CONTROL_PLANE_CODEQL_RESULTS
+    || process.env.CONTROL_PLANE_CODEQL_SARIF
+    || process.env.CONTROL_PLANE_SARIF_RESULTS,
+  ).map((candidate) => path.resolve(state.repoRoot, candidate));
+  const seededCandidates = [
+    path.resolve(state.repoRoot, 'codeql-results.sarif'),
+    path.resolve(state.repoRoot, 'codeql-results.sarif.json'),
+    path.resolve(state.repoRoot, 'reports', 'codeql-results.sarif'),
+    path.resolve(state.repoRoot, 'reports', 'codeql-results.sarif.json'),
+    path.resolve(state.repoRoot, 'logs', 'codeql-results.sarif'),
+    path.resolve(state.repoRoot, 'logs', 'codeql-results.sarif.json'),
+    path.resolve(state.repoRoot, '.github', 'codeql-results.sarif'),
+    path.resolve(state.repoRoot, '.github', 'codeql-results.sarif.json'),
+    path.resolve(state.repoRoot, 'apps', 'langgraph-control-plane', '.control-plane', 'codeql-results.sarif'),
+    path.resolve(state.repoRoot, 'apps', 'langgraph-control-plane', '.control-plane', 'codeql-results.sarif.json'),
+  ];
+  const discoveredCandidates = [
+    ...listRecentSarifFiles(path.resolve(state.repoRoot, 'reports'), CODEQL_RESULT_FILE_LIMIT),
+    ...listRecentSarifFiles(path.resolve(state.repoRoot, 'logs'), CODEQL_RESULT_FILE_LIMIT),
+    ...listRecentSarifFiles(path.resolve(state.repoRoot, '.github'), CODEQL_RESULT_FILE_LIMIT),
+    ...listRecentSarifFiles(path.resolve(state.repoRoot, 'apps', 'langgraph-control-plane', '.control-plane'), CODEQL_RESULT_FILE_LIMIT),
+  ];
+
+  return Array.from(new Set([...configuredCandidates, ...seededCandidates, ...discoveredCandidates]))
+    .filter((candidatePath) => fs.existsSync(candidatePath))
+    .sort((left, right) => getFileModifiedTimeMs(right) - getFileModifiedTimeMs(left))
+    .slice(0, CODEQL_RESULT_FILE_LIMIT);
+}
+
+function shouldAutoRunCodeQl(state: ControlPlaneState): boolean {
+  if (!CODEQL_AUTORUN_ENABLED) return false;
+  const scopes = new Set(getEffectiveScopes(state));
+  return scopes.has('repo') || scopes.has('control-plane');
+}
+
+function resolveAutomaticCodeQlResultPath(state: ControlPlaneState): string {
+  const configured = String(process.env.CONTROL_PLANE_CODEQL_RESULT_PATH || '').trim();
+  if (configured) return path.resolve(state.repoRoot, configured);
+  return path.resolve(state.repoRoot, 'apps', 'langgraph-control-plane', '.control-plane', 'codeql-results.sarif');
+}
+
+function resolveAutomaticCodeQlDatabasePath(state: ControlPlaneState): string {
+  const configured = String(process.env.CONTROL_PLANE_CODEQL_DATABASE_PATH || '').trim();
+  if (configured) return path.resolve(state.repoRoot, configured);
+  return path.resolve(state.repoRoot, 'apps', 'langgraph-control-plane', '.control-plane', 'codeql-db-javascript');
+}
+
+function countCodeQlSarifFindings(filePath: string): number {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8')) as Record<string, any>;
+    const runs = Array.isArray(parsed?.runs) ? parsed.runs : [];
+    return runs.reduce((total, run) => total + (Array.isArray(run?.results) ? run.results.length : 0), 0);
+  } catch {
+    return 0;
+  }
+}
+
+function shellEscapeCommandArg(value: string): string {
+  return JSON.stringify(String(value));
+}
+
+async function ensureAutomaticCodeQlSarif(state: ControlPlaneState): Promise<string[]> {
+  if (!shouldAutoRunCodeQl(state)) return [];
+
+  const resultPath = resolveAutomaticCodeQlResultPath(state);
+  const resultRelativePath = path.relative(state.repoRoot, resultPath).replace(/\\/g, '/');
+  const resultAgeMs = Date.now() - getFileModifiedTimeMs(resultPath);
+  if (fs.existsSync(resultPath) && resultAgeMs >= 0 && resultAgeMs <= CODEQL_REFRESH_MS) {
+    const findingCount = countCodeQlSarifFindings(resultPath);
+    return [`CodeQL autorun: reusing fresh SARIF at ${resultRelativePath} (${findingCount} finding(s)).`];
+  }
+
+  const codeqlBinary = String(process.env.CONTROL_PLANE_CODEQL_BIN || 'codeql').trim() || 'codeql';
+  const queryPack = String(process.env.CONTROL_PLANE_CODEQL_QUERY_PACK || 'codeql/javascript-queries').trim() || 'codeql/javascript-queries';
+  const language = String(process.env.CONTROL_PLANE_CODEQL_LANGUAGE || 'javascript').trim() || 'javascript';
+  const databasePath = resolveAutomaticCodeQlDatabasePath(state);
+  fs.mkdirSync(path.dirname(resultPath), { recursive: true });
+  fs.rmSync(databasePath, { recursive: true, force: true });
+
+  const command = [
+    `rm -rf ${shellEscapeCommandArg(databasePath)}`,
+    `${shellEscapeCommandArg(codeqlBinary)} database create ${shellEscapeCommandArg(databasePath)} --language=${shellEscapeCommandArg(language)} --build-mode=none --source-root=${shellEscapeCommandArg(state.repoRoot)}`,
+    `${shellEscapeCommandArg(codeqlBinary)} database analyze ${shellEscapeCommandArg(databasePath)} ${shellEscapeCommandArg(queryPack)} --format=sarifv2.1.0 --output=${shellEscapeCommandArg(resultPath)} --threads=0 --download --no-print-diagnostics-summary --no-print-metrics-summary --sarif-category=${shellEscapeCommandArg('control-plane-autonomous')}`,
+  ].join(' && ');
+
+  const result = await runShellCommand(command, path.resolve(state.repoRoot), {
+    timeoutMs: parsePositiveIntegerEnv('CONTROL_PLANE_CODEQL_TIMEOUT_MS', 20 * 60 * 1000, 60_000),
+  });
+
+  if (result.exitCode !== 0 || result.timedOut || !fs.existsSync(resultPath)) {
+    const failurePreview = sanitizeLogLine(result.output).slice(0, 320);
+    return [
+      `CodeQL autorun failed for ${resultRelativePath}${result.timedOut ? ' (timed out)' : ''}: ${failurePreview || `exit ${result.exitCode}`}`,
+    ];
+  }
+
+  const findingCount = countCodeQlSarifFindings(resultPath);
+  return [`CodeQL autorun: generated ${resultRelativePath} with ${findingCount} finding(s).`];
+}
+
+function normalizeCodeQlFindingPath(repoRoot: string, sarifPath: string, rawUri: string | undefined): string {
+  const uri = String(rawUri || '').trim();
+  if (!uri) return '';
+
+  let resolvedPath = '';
+  try {
+    if (uri.startsWith('file://')) {
+      resolvedPath = fileURLToPath(uri);
+    } else if (path.isAbsolute(uri)) {
+      resolvedPath = uri;
+    } else {
+      const decoded = decodeURIComponent(uri);
+      const fromRepoRoot = path.resolve(repoRoot, decoded);
+      resolvedPath = fs.existsSync(fromRepoRoot)
+        ? fromRepoRoot
+        : path.resolve(path.dirname(sarifPath), decoded);
+    }
+  } catch {
+    return '';
+  }
+
+  const relativePath = path.relative(repoRoot, resolvedPath).replace(/\\/g, '/');
+  if (!relativePath || relativePath.startsWith('..')) return '';
+  return relativePath;
+}
+
+function summarizeCodeQlSarif(state: ControlPlaneState, sarifPath: string): LogInsight | null {
+  try {
+    const raw = fs.readFileSync(sarifPath, 'utf8');
+    const parsed = JSON.parse(raw) as Record<string, any>;
+    const runs = Array.isArray(parsed?.runs) ? parsed.runs : [];
+    const lines: string[] = [];
+    const seen = new Set<string>();
+
+    for (const run of runs) {
+      const rules = new Map<string, any>(
+        Array.isArray(run?.tool?.driver?.rules)
+          ? run.tool.driver.rules
+              .map((rule: any) => [String(rule?.id || '').trim(), rule] as const)
+              .filter(([ruleId]: readonly [string, any]) => Boolean(ruleId))
+          : [],
+      );
+      const results = Array.isArray(run?.results) ? run.results : [];
+      for (const result of results) {
+        const message = sanitizeLogLine(
+          typeof result?.message?.text === 'string'
+            ? result.message.text
+            : typeof result?.message?.markdown === 'string'
+              ? result.message.markdown
+              : '',
+        );
+        const ruleId = String(result?.ruleId || '').trim();
+        const rule = ruleId ? rules.get(ruleId) : undefined;
+        const level = String(
+          result?.level
+          || rule?.defaultConfiguration?.level
+          || 'warning',
+        ).trim().toLowerCase() || 'warning';
+        const primaryLocation = Array.isArray(result?.locations) ? result.locations[0] : undefined;
+        const physicalLocation = primaryLocation?.physicalLocation;
+        const findingPath = normalizeCodeQlFindingPath(
+          state.repoRoot,
+          sarifPath,
+          typeof physicalLocation?.artifactLocation?.uri === 'string'
+            ? physicalLocation.artifactLocation.uri
+            : '',
+        );
+        const lineNumber = typeof physicalLocation?.region?.startLine === 'number'
+          ? physicalLocation.region.startLine
+          : null;
+        const ruleLabel = String(
+          rule?.shortDescription?.text
+          || rule?.name
+          || ruleId
+          || 'unnamed-rule',
+        ).trim();
+        const pathLabel = findingPath || path.relative(state.repoRoot, sarifPath).replace(/\\/g, '/');
+        const lineLabel = lineNumber ? `:${lineNumber}` : '';
+        const summary = `CodeQL ${level} ${ruleId || ruleLabel} at ${pathLabel}${lineLabel} — ${message || ruleLabel}`;
+        if (seen.has(summary)) continue;
+        seen.add(summary);
+        lines.push(summary);
+        if (lines.length >= CODEQL_RESULT_LINE_LIMIT) break;
+      }
+      if (lines.length >= CODEQL_RESULT_LINE_LIMIT) break;
+    }
+
+    if (lines.length === 0) return null;
+    return LogInsightSchema.parse({
+      file: `codeql:${path.relative(state.repoRoot, sarifPath).replace(/\\/g, '/')}`,
+      lines,
+    });
+  } catch {
+    return null;
   }
 }
 
@@ -3409,10 +3870,14 @@ function listRecentLogCandidatePaths(state: ControlPlaneState): string[] {
 }
 
 function resolveLogInsights(state: ControlPlaneState): LogInsight[] {
-  return listRecentLogCandidatePaths(state)
+  const codeQlInsights = listRecentCodeQlCandidatePaths(state)
+    .map((filePath) => summarizeCodeQlSarif(state, filePath))
+    .filter((entry): entry is LogInsight => Boolean(entry));
+  const fileLogInsights = listRecentLogCandidatePaths(state)
     .map((filePath) => ({ file: path.relative(state.repoRoot, filePath), lines: readTailLines(filePath, DEFAULT_LOG_TAIL_LINE_COUNT) }))
     .filter((entry) => entry.lines.length > 0)
     .map((entry) => LogInsightSchema.parse(entry));
+  return [...codeQlInsights, ...fileLogInsights];
 }
 
 function buildRecentFailedAutonomousEditsPayload(state: ControlPlaneState): Array<Record<string, unknown>> {
@@ -3643,7 +4108,7 @@ function buildAutonomousEditAgentWorkloads(
   }
 
   const effectiveScopes = new Set(getEffectiveScopes(state));
-  if (effectiveScopes.has('api') || effectiveScopes.has('api-experimental') || effectiveScopes.has('repo')) {
+  if (hasApiFamilyScope(effectiveScopes) || effectiveScopes.has('repo')) {
     addWorkload(
       'api-hot-paths',
       operationMode === 'repair'
@@ -3663,7 +4128,7 @@ function buildAutonomousEditAgentWorkloads(
     );
   }
 
-  if (effectiveScopes.has('repo')) {
+  if (effectiveScopes.has('repo') || hasRepoSurfaceFamilyScope(effectiveScopes)) {
     addWorkload(
       'repo-surface',
       'Look specifically for a small repo/workspace/homepage/UI cleanup or developer-workflow hardening improvement.',
@@ -3709,14 +4174,26 @@ async function cloneProductionRedisToExperimental(): Promise<string> {
   let copyMethod: 'copy' | 'dump-restore' = 'copy';
 
   try {
-    await source.connect();
-    await target.connect();
-    await target.flushDb();
+    await withTimeout(source.connect(), REDIS_CLONE_CONNECT_TIMEOUT_MS, `Redis source connect DB ${sourceDb}`);
+    await withTimeout(target.connect(), REDIS_CLONE_CONNECT_TIMEOUT_MS, `Redis target connect DB ${targetDb}`);
+    await withTimeout(target.flushDb(), REDIS_CLONE_COMMAND_TIMEOUT_MS, `Redis target flush DB ${targetDb}`);
 
-    for await (const key of source.scanIterator()) {
+    const iterator = source.scanIterator()[Symbol.asyncIterator]();
+    while (true) {
+      const nextKey = await withTimeout(
+        iterator.next(),
+        REDIS_CLONE_SCAN_TIMEOUT_MS,
+        `Redis clone scan DB ${sourceDb}`,
+      );
+      if (nextKey.done) break;
+      const key = nextKey.value;
       if (copyMethod === 'copy') {
         try {
-          const copiedResult = await source.sendCommand<number>(['COPY', key, key, 'DB', targetDb, 'REPLACE']);
+          const copiedResult = await withTimeout(
+            source.sendCommand<number>(['COPY', key, key, 'DB', targetDb, 'REPLACE']),
+            REDIS_CLONE_COMMAND_TIMEOUT_MS,
+            `Redis COPY ${key}`,
+          );
           if (copiedResult === 1) copied += 1;
           continue;
         } catch {
@@ -3725,20 +4202,32 @@ async function cloneProductionRedisToExperimental(): Promise<string> {
       }
 
       try {
-        const serializedValue = await source.sendCommand<Buffer | Uint8Array | ArrayBuffer | null>(
-          ['DUMP', key],
-          commandOptions({ returnBuffers: true }),
+        const serializedValue = await withTimeout(
+          source.sendCommand<Buffer | Uint8Array | ArrayBuffer | null>(
+            ['DUMP', key],
+            commandOptions({ returnBuffers: true }),
+          ),
+          REDIS_CLONE_COMMAND_TIMEOUT_MS,
+          `Redis DUMP ${key}`,
         );
         if (!serializedValue) continue;
         const serializedBuffer = normalizeRedisDumpPayload(serializedValue);
-        const ttlMs = await source.sendCommand<number>(['PTTL', key]);
-        await target.sendCommand([
-          'RESTORE',
-          key,
-          ttlMs > 0 ? String(ttlMs) : '0',
-          serializedBuffer,
-          'REPLACE',
-        ]);
+        const ttlMs = await withTimeout(
+          source.sendCommand<number>(['PTTL', key]),
+          REDIS_CLONE_COMMAND_TIMEOUT_MS,
+          `Redis PTTL ${key}`,
+        );
+        await withTimeout(
+          target.sendCommand([
+            'RESTORE',
+            key,
+            ttlMs > 0 ? String(ttlMs) : '0',
+            serializedBuffer,
+            'REPLACE',
+          ]),
+          REDIS_CLONE_COMMAND_TIMEOUT_MS,
+          `Redis RESTORE ${key}`,
+        );
         copied += 1;
       } catch (restoreError: any) {
         const serializedRestoreError = restoreError?.stack
@@ -3793,7 +4282,7 @@ function isUnsafeProductionDeployCommand(command: string): boolean {
 
 function getDefaultDeployCommand(state: ControlPlaneState): string {
   const scopes = getEffectiveScopes(state);
-  if (scopes.includes('api') || scopes.includes('api-experimental')) {
+  if (hasApiFamilyScope(scopes)) {
     return SAFE_EXPERIMENTAL_DEPLOY_COMMAND;
   }
   return 'echo "No default deploy command for this scope. Provide --deploy-command to enable execution."';
@@ -3883,6 +4372,7 @@ async function inspectMcpNode(state: ControlPlaneState, runtime?: Runtime): Prom
   const mcpServerConfigs = loadMcpServers(configPath);
   const mcpServers = mcpServerConfigs.map((config) => sanitizeMcpServer(config));
   const mcpInspections: McpInspection[] = [];
+  const codeQlNotes = await ensureAutomaticCodeQlSarif(state);
   const logInsights = resolveLogInsights(state);
   const langSmithConfig = resolveLangSmithRuntimeConfig();
   const evaluationGatePolicy = resolveStateEvaluationGatePolicy(state);
@@ -3935,6 +4425,7 @@ async function inspectMcpNode(state: ControlPlaneState, runtime?: Runtime): Prom
   const plannerNotes = mcpServers.length > 0
     ? [`MCP config detected at ${configPath} with servers: ${mcpServers.map((server) => server.name).join(', ')}`]
     : [`No MCP config found at ${configPath}; workflow will use shell jobs only.`];
+  plannerNotes.push(...codeQlNotes);
 
   if (langSmithConfig) {
     try {
@@ -4441,7 +4932,7 @@ async function plannerAgentNode(state: ControlPlaneState): Promise<Partial<Contr
   if (state.scopeExpansionReason.trim()) {
     notes.push(`Adaptive scope expansion: ${state.scopeExpansionReason}`);
   }
-  if (scopes.includes('api') || scopes.includes('api-experimental')) {
+  if (hasApiFamilyScope(scopes)) {
     notes.push(`API jobs are pinned to experimental-safe build/test defaults and isolated control-plane data files under ${CONTROL_PLANE_DATA_DIR}.`);
     notes.push(`Default deploy target is ${SAFE_EXPERIMENTAL_DEPLOY_COMMAND}; production service restarts targeting anygpt.service are intentionally blocked.`);
     notes.push(`Experimental test jobs clone Redis/Dragonfly DB ${CONTROL_PLANE_SOURCE_REDIS_DB} into DB ${CONTROL_PLANE_TARGET_REDIS_DB} before execution by default.`);

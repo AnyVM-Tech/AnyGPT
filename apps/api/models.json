@@ -6,7 +6,7 @@
       "object": "model",
       "created": 1772393604097,
       "owned_by": "deepseek",
-      "providers": 68,
+      "providers": 66,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -26,7 +26,7 @@
       "object": "model",
       "created": 1772393604098,
       "owned_by": "deepseek",
-      "providers": 68,
+      "providers": 66,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -44,7 +44,7 @@
       "object": "model",
       "created": 1772412521755,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -61,7 +61,7 @@
       "object": "model",
       "created": 1772412521755,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -78,7 +78,7 @@
       "object": "model",
       "created": 1772412521755,
       "owned_by": "openai",
-      "providers": 128,
+      "providers": 116,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -95,7 +95,7 @@
       "object": "model",
       "created": 1772412521755,
       "owned_by": "openai",
-      "providers": 126,
+      "providers": 114,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -112,7 +112,7 @@
       "object": "model",
       "created": 1772412521755,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -130,7 +130,7 @@
       "object": "model",
       "created": 1772412521755,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -150,7 +150,7 @@
       "object": "model",
       "created": 1772412521755,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -171,7 +171,7 @@
       "object": "model",
       "created": 1772412521755,
       "owned_by": "openai",
-      "providers": 126,
+      "providers": 114,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -188,7 +188,7 @@
       "object": "model",
       "created": 1772412521755,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -205,7 +205,7 @@
       "object": "model",
       "created": 1772412521755,
       "owned_by": "openai",
-      "providers": 126,
+      "providers": 114,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -222,7 +222,7 @@
       "object": "model",
       "created": 1772412521755,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -238,7 +238,7 @@
       "object": "model",
       "created": 1772412521755,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -254,7 +254,7 @@
       "object": "model",
       "created": 1772412521755,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -271,7 +271,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 126,
+      "providers": 114,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -288,7 +288,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 128,
+      "providers": 116,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -305,7 +305,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 127,
+      "providers": 115,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -322,7 +322,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 126,
+      "providers": 114,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -339,7 +339,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 129,
+      "providers": 117,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -358,7 +358,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 126,
+      "providers": 114,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -376,7 +376,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 127,
+      "providers": 115,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -394,7 +394,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 136,
+      "providers": 124,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -412,7 +412,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 127,
+      "providers": 115,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -430,7 +430,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 126,
+      "providers": 114,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -452,7 +452,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 126,
+      "providers": 114,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -473,7 +473,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -489,7 +489,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 126,
+      "providers": 114,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -510,7 +510,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 126,
+      "providers": 114,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -532,7 +532,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 126,
+      "providers": 114,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -553,7 +553,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 126,
+      "providers": 114,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -575,7 +575,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -593,7 +593,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -611,7 +611,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 126,
+      "providers": 114,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -632,7 +632,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 126,
+      "providers": 114,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -654,7 +654,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -671,7 +671,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -688,7 +688,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 127,
+      "providers": 115,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -706,7 +706,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 126,
+      "providers": 114,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -723,7 +723,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 126,
+      "providers": 114,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -740,7 +740,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -758,7 +758,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -776,7 +776,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -794,7 +794,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -812,7 +812,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -830,7 +830,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -848,7 +848,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 126,
+      "providers": 114,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -866,7 +866,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 125,
+      "providers": 113,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -884,7 +884,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 126,
+      "providers": 114,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -902,7 +902,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 126,
+      "providers": 114,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -920,7 +920,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 126,
+      "providers": 114,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -938,7 +938,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 126,
+      "providers": 114,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -956,7 +956,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 126,
+      "providers": 114,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -977,7 +977,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 126,
+      "providers": 114,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -999,7 +999,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -1018,7 +1018,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -1036,25 +1036,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 124,
-      "throughput": 50,
-      "capabilities": [
-        "text",
-        "image_input",
-        "tool_calling"
-      ],
-      "pricing": {
-        "input": 0.067104,
-        "output": 0.268416,
-        "unit": "per_million_tokens"
-      }
-    },
-    {
-      "id": "gpt-5",
-      "object": "model",
-      "created": 1772412521756,
-      "owned_by": "openai",
-      "providers": 125,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -1072,7 +1054,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 125,
+      "providers": 113,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -1090,7 +1072,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 113,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -1108,25 +1090,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 125,
-      "throughput": 50,
-      "capabilities": [
-        "text",
-        "image_input",
-        "tool_calling"
-      ],
-      "pricing": {
-        "input": 0.00671,
-        "output": 0.026842,
-        "unit": "per_million_tokens"
-      }
-    },
-    {
-      "id": "gpt-5-nano",
-      "object": "model",
-      "created": 1772412521756,
-      "owned_by": "openai",
-      "providers": 122,
+      "providers": 113,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -1144,7 +1108,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -1165,7 +1129,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -1185,7 +1149,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -1205,7 +1169,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -1226,7 +1190,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -1244,7 +1208,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -1261,7 +1225,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -1278,7 +1242,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -1299,7 +1263,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -1320,7 +1284,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -1337,7 +1301,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -1357,7 +1321,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -1377,7 +1341,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -1394,7 +1358,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -1412,7 +1376,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -1430,7 +1394,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -1448,7 +1412,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -1466,7 +1430,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -1484,7 +1448,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -1502,7 +1466,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -1520,7 +1484,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 125,
+      "providers": 113,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -1538,7 +1502,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -1556,7 +1520,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -1574,7 +1538,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -1592,7 +1556,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -1612,7 +1576,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -1633,7 +1597,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -1651,7 +1615,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 126,
+      "providers": 114,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -1668,7 +1632,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -1684,7 +1648,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 32,
+      "providers": 27,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -1702,7 +1666,7 @@
       "object": "model",
       "created": 1772412521756,
       "owned_by": "openai",
-      "providers": 32,
+      "providers": 27,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -1720,7 +1684,7 @@
       "object": "model",
       "created": 1772412521757,
       "owned_by": "openai",
-      "providers": 32,
+      "providers": 27,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -1738,7 +1702,7 @@
       "object": "model",
       "created": 1772412521757,
       "owned_by": "openai",
-      "providers": 32,
+      "providers": 27,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -1752,27 +1716,11 @@
       }
     },
     {
-      "id": "gpt-4-0314",
-      "object": "model",
-      "created": 1772420537898,
-      "owned_by": "openai",
-      "providers": 2,
-      "throughput": 50,
-      "capabilities": [
-        "text"
-      ],
-      "pricing": {
-        "input": 0.29125,
-        "output": 0.5825,
-        "unit": "per_million_tokens"
-      }
-    },
-    {
       "id": "gpt-image-1",
       "object": "model",
       "created": 1772839064425,
       "owned_by": "openai",
-      "providers": 120,
+      "providers": 108,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -1790,7 +1738,7 @@
       "object": "model",
       "created": 1772839064426,
       "owned_by": "openai",
-      "providers": 119,
+      "providers": 107,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -1808,7 +1756,7 @@
       "object": "model",
       "created": 1772839064426,
       "owned_by": "openai",
-      "providers": 119,
+      "providers": 107,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -1826,7 +1774,7 @@
       "object": "model",
       "created": 1772839064426,
       "owned_by": "openai",
-      "providers": 119,
+      "providers": 107,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -1844,7 +1792,7 @@
       "object": "model",
       "created": 1772839064426,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -1862,7 +1810,7 @@
       "object": "model",
       "created": 1772839064426,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -1880,7 +1828,7 @@
       "object": "model",
       "created": 1772854704044,
       "owned_by": "openai",
-      "providers": 112,
+      "providers": 48,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -1890,8 +1838,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.067104,
-        "output": 0.268416,
+        "input": 0.047931,
+        "output": 0.287589,
         "unit": "per_million_tokens"
       }
     },
@@ -1900,7 +1848,7 @@
       "object": "model",
       "created": 1773005411389,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -1920,7 +1868,7 @@
       "object": "model",
       "created": 1773005411389,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -1930,8 +1878,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.067104,
-        "output": 0.268416,
+        "input": 0.047931,
+        "output": 0.287589,
         "unit": "per_million_tokens"
       }
     },
@@ -1940,7 +1888,7 @@
       "object": "model",
       "created": 1773005411389,
       "owned_by": "openai",
-      "providers": 122,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -1950,8 +1898,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.1398,
-        "output": 0.5592,
+        "input": 0.119829,
+        "output": 0.718971,
         "unit": "per_million_tokens"
       }
     },
@@ -1960,7 +1908,7 @@
       "object": "model",
       "created": 1773005411389,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -1970,8 +1918,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.1398,
-        "output": 0.5592,
+        "input": 0.119829,
+        "output": 0.718971,
         "unit": "per_million_tokens"
       }
     },
@@ -1980,14 +1928,14 @@
       "object": "model",
       "created": 1773005411389,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.03495,
+        "output": 0.03495,
         "unit": "per_million_tokens"
       }
     },
@@ -1996,14 +1944,14 @@
       "object": "model",
       "created": 1773005411389,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.016776,
+        "output": 0.016776,
         "unit": "per_million_tokens"
       }
     },
@@ -2012,14 +1960,14 @@
       "object": "model",
       "created": 1773005411389,
       "owned_by": "openai",
-      "providers": 126,
+      "providers": 114,
       "throughput": 50,
       "capabilities": [
         "text"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.029957,
+        "output": 0.039943,
         "unit": "per_million_tokens"
       }
     },
@@ -2028,14 +1976,14 @@
       "object": "model",
       "created": 1773005411389,
       "owned_by": "openai",
-      "providers": 126,
+      "providers": 114,
       "throughput": 50,
       "capabilities": [
         "text"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.029957,
+        "output": 0.039943,
         "unit": "per_million_tokens"
       }
     },
@@ -2044,14 +1992,14 @@
       "object": "model",
       "created": 1773005411389,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
         "audio_output"
       ],
       "pricing": {
-        "input": 0,
+        "input": 0.16776,
         "output": 0,
         "unit": "per_million_tokens"
       }
@@ -2061,14 +2009,14 @@
       "object": "model",
       "created": 1773005411389,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
         "audio_output"
       ],
       "pricing": {
-        "input": 0,
+        "input": 0.08388,
         "output": 0,
         "unit": "per_million_tokens"
       }
@@ -2078,14 +2026,14 @@
       "object": "model",
       "created": 1773005411389,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
         "audio_output"
       ],
       "pricing": {
-        "input": 0,
+        "input": 0.16776,
         "output": 0,
         "unit": "per_million_tokens"
       }
@@ -2095,7 +2043,7 @@
       "object": "model",
       "created": 1773005411389,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -2111,15 +2059,16 @@
       "object": "model",
       "created": 1773005411389,
       "owned_by": "openai",
-      "providers": 126,
+      "providers": 114,
       "throughput": 50,
       "capabilities": [
         "text",
         "audio_input"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.033552,
+        "output": 0.134208,
+        "audio_input": 0.3,
         "unit": "per_million_tokens"
       }
     },
@@ -2128,7 +2077,7 @@
       "object": "model",
       "created": 1773005411389,
       "owned_by": "openai",
-      "providers": 126,
+      "providers": 114,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -2145,7 +2094,7 @@
       "object": "model",
       "created": 1773005411389,
       "owned_by": "openai",
-      "providers": 126,
+      "providers": 114,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -2162,7 +2111,7 @@
       "object": "model",
       "created": 1773005411389,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -2179,7 +2128,7 @@
       "object": "model",
       "created": 1773005411389,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -2196,7 +2145,7 @@
       "object": "model",
       "created": 1773005411389,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -2213,7 +2162,7 @@
       "object": "model",
       "created": 1773005411389,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -2230,14 +2179,14 @@
       "object": "model",
       "created": 1773005411389,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
         "audio_output"
       ],
       "pricing": {
-        "input": 0,
+        "input": 0.08388,
         "output": 0,
         "unit": "per_million_tokens"
       }
@@ -2247,13 +2196,14 @@
       "object": "model",
       "created": 1773005411389,
       "owned_by": "openai",
-      "providers": 126,
+      "providers": 114,
       "throughput": 50,
       "capabilities": [
         "text",
         "audio_input"
       ],
       "pricing": {
+        "audio_input": 0.0003,
         "input": 0,
         "output": 0,
         "unit": "per_million_tokens"
@@ -2264,15 +2214,15 @@
       "object": "model",
       "created": 1773005411389,
       "owned_by": "openai",
-      "providers": 91,
+      "providers": 81,
       "throughput": 50,
       "capabilities": [
         "text",
         "tool_calling"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.033552,
+        "output": 0.134208,
         "unit": "per_million_tokens"
       }
     },
@@ -2281,15 +2231,15 @@
       "object": "model",
       "created": 1773005411389,
       "owned_by": "openai",
-      "providers": 32,
+      "providers": 27,
       "throughput": 50,
       "capabilities": [
         "text",
         "tool_calling"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.1398,
+        "output": 0.5592,
         "unit": "per_million_tokens"
       }
     },
@@ -2298,15 +2248,15 @@
       "object": "model",
       "created": 1773005411389,
       "owned_by": "openai",
-      "providers": 32,
+      "providers": 27,
       "throughput": 50,
       "capabilities": [
         "text",
         "tool_calling"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.1398,
+        "output": 0.5592,
         "unit": "per_million_tokens"
       }
     },
@@ -2315,15 +2265,15 @@
       "object": "model",
       "created": 1773005411389,
       "owned_by": "openai",
-      "providers": 91,
+      "providers": 81,
       "throughput": 50,
       "capabilities": [
         "text",
         "tool_calling"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.033552,
+        "output": 0.134208,
         "unit": "per_million_tokens"
       }
     },
@@ -2332,7 +2282,7 @@
       "object": "model",
       "created": 1773175017735,
       "owned_by": "google",
-      "providers": 216,
+      "providers": 215,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -2351,7 +2301,7 @@
       "object": "model",
       "created": 1773175017735,
       "owned_by": "google",
-      "providers": 216,
+      "providers": 215,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -2370,7 +2320,7 @@
       "object": "model",
       "created": 1773175017736,
       "owned_by": "google",
-      "providers": 216,
+      "providers": 215,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -2388,7 +2338,7 @@
       "object": "model",
       "created": 1773175017736,
       "owned_by": "google",
-      "providers": 216,
+      "providers": 215,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -2406,7 +2356,7 @@
       "object": "model",
       "created": 1773175017736,
       "owned_by": "google",
-      "providers": 216,
+      "providers": 215,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -2424,7 +2374,7 @@
       "object": "model",
       "created": 1773175017736,
       "owned_by": "google",
-      "providers": 216,
+      "providers": 215,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -2442,15 +2392,16 @@
       "object": "model",
       "created": 1773175017736,
       "owned_by": "google",
-      "providers": 213,
+      "providers": 212,
       "throughput": 50,
       "capabilities": [
         "text",
         "audio_output"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.00671,
+        "output": 0.026842,
+        "audio_output": 0.6,
         "unit": "per_million_tokens"
       }
     },
@@ -2459,15 +2410,16 @@
       "object": "model",
       "created": 1773175017736,
       "owned_by": "google",
-      "providers": 213,
+      "providers": 212,
       "throughput": 50,
       "capabilities": [
         "text",
         "audio_output"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.01864,
+        "output": 0.14912,
+        "audio_output": 1,
         "unit": "per_million_tokens"
       }
     },
@@ -2476,7 +2428,7 @@
       "object": "model",
       "created": 1773175017736,
       "owned_by": "google",
-      "providers": 216,
+      "providers": 215,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -2493,7 +2445,7 @@
       "object": "model",
       "created": 1773175017736,
       "owned_by": "google",
-      "providers": 216,
+      "providers": 215,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -2511,7 +2463,7 @@
       "object": "model",
       "created": 1773175017736,
       "owned_by": "google",
-      "providers": 216,
+      "providers": 215,
       "throughput": 50,
       "capabilities": [],
       "pricing": {
@@ -2525,7 +2477,7 @@
       "object": "model",
       "created": 1773175017736,
       "owned_by": "google",
-      "providers": 216,
+      "providers": 215,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -2543,7 +2495,7 @@
       "object": "model",
       "created": 1773175017736,
       "owned_by": "google",
-      "providers": 216,
+      "providers": 215,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -2559,7 +2511,7 @@
       "object": "model",
       "created": 1773175017736,
       "owned_by": "google",
-      "providers": 216,
+      "providers": 215,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -2576,7 +2528,7 @@
       "object": "model",
       "created": 1773175017736,
       "owned_by": "google",
-      "providers": 216,
+      "providers": 215,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -2594,7 +2546,7 @@
       "object": "model",
       "created": 1773175017736,
       "owned_by": "google",
-      "providers": 216,
+      "providers": 215,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -2612,7 +2564,7 @@
       "object": "model",
       "created": 1773175017736,
       "owned_by": "google",
-      "providers": 216,
+      "providers": 215,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -2630,7 +2582,7 @@
       "object": "model",
       "created": 1773175017736,
       "owned_by": "google",
-      "providers": 216,
+      "providers": 215,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -2648,7 +2600,7 @@
       "object": "model",
       "created": 1773175017736,
       "owned_by": "google",
-      "providers": 216,
+      "providers": 215,
       "throughput": 50,
       "capabilities": [
         "image_input",
@@ -2666,8 +2618,8 @@
       "object": "model",
       "created": 1773175017736,
       "owned_by": "google",
-      "providers": 194,
-      "throughput": 102,
+      "providers": 197,
+      "throughput": 105,
       "capabilities": [
         "text",
         "image_input",
@@ -2684,7 +2636,7 @@
       "object": "model",
       "created": 1773175017736,
       "owned_by": "google",
-      "providers": 216,
+      "providers": 215,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -2702,8 +2654,8 @@
       "object": "model",
       "created": 1773175017736,
       "owned_by": "google",
-      "providers": 216,
-      "throughput": 28,
+      "providers": 213,
+      "throughput": 25,
       "capabilities": [
         "text",
         "image_input"
@@ -2719,7 +2671,7 @@
       "object": "model",
       "created": 1773175017736,
       "owned_by": "google",
-      "providers": 216,
+      "providers": 215,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -2738,7 +2690,7 @@
       "object": "model",
       "created": 1773175017736,
       "owned_by": "google",
-      "providers": 216,
+      "providers": 215,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -2757,7 +2709,7 @@
       "object": "model",
       "created": 1773175017736,
       "owned_by": "google",
-      "providers": 216,
+      "providers": 215,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -2766,8 +2718,9 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.005991,
+        "output": 0.035949,
+        "per_image": 5e-8,
         "unit": "per_million_tokens"
       }
     },
@@ -2776,7 +2729,7 @@
       "object": "model",
       "created": 1773175017736,
       "owned_by": "google",
-      "providers": 216,
+      "providers": 215,
       "throughput": 50,
       "capabilities": [
         "image_input",
@@ -2794,15 +2747,15 @@
       "object": "model",
       "created": 1773175017736,
       "owned_by": "google",
-      "providers": 216,
+      "providers": 215,
       "throughput": 50,
       "capabilities": [
         "image_input",
         "image_output"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.009986,
+        "output": 0.059914,
         "unit": "per_million_tokens"
       }
     },
@@ -2811,7 +2764,7 @@
       "object": "model",
       "created": 1773175017736,
       "owned_by": "google",
-      "providers": 216,
+      "providers": 215,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -2819,8 +2772,8 @@
         "audio_input"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.033552,
+        "output": 0.134208,
         "unit": "per_million_tokens"
       }
     },
@@ -2829,7 +2782,7 @@
       "object": "model",
       "created": 1773175017736,
       "owned_by": "google",
-      "providers": 216,
+      "providers": 215,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -2847,7 +2800,7 @@
       "object": "model",
       "created": 1773175017736,
       "owned_by": "openai",
-      "providers": 216,
+      "providers": 215,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -2864,7 +2817,7 @@
       "object": "model",
       "created": 1773175017736,
       "owned_by": "google",
-      "providers": 216,
+      "providers": 215,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -2880,7 +2833,7 @@
       "object": "model",
       "created": 1773175017736,
       "owned_by": "google",
-      "providers": 216,
+      "providers": 215,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -2896,7 +2849,7 @@
       "object": "model",
       "created": 1773175017736,
       "owned_by": "google",
-      "providers": 216,
+      "providers": 215,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -2914,7 +2867,7 @@
       "object": "model",
       "created": 1773175017736,
       "owned_by": "google",
-      "providers": 216,
+      "providers": 215,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -2932,7 +2885,7 @@
       "object": "model",
       "created": 1773175017736,
       "owned_by": "google",
-      "providers": 216,
+      "providers": 215,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -2950,7 +2903,7 @@
       "object": "model",
       "created": 1773175017736,
       "owned_by": "google",
-      "providers": 216,
+      "providers": 215,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -2968,7 +2921,7 @@
       "object": "model",
       "created": 1773175017736,
       "owned_by": "google",
-      "providers": 216,
+      "providers": 215,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -2986,7 +2939,7 @@
       "object": "model",
       "created": 1773175017736,
       "owned_by": "google",
-      "providers": 216,
+      "providers": 215,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -3004,7 +2957,7 @@
       "object": "model",
       "created": 1773175017736,
       "owned_by": "google",
-      "providers": 216,
+      "providers": 215,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -3022,7 +2975,7 @@
       "object": "model",
       "created": 1773175017736,
       "owned_by": "google",
-      "providers": 216,
+      "providers": 215,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -3040,7 +2993,7 @@
       "object": "model",
       "created": 1773175017736,
       "owned_by": "google",
-      "providers": 216,
+      "providers": 215,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -3060,7 +3013,7 @@
       "object": "model",
       "created": 1773175017736,
       "owned_by": "google",
-      "providers": 216,
+      "providers": 215,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -3080,7 +3033,7 @@
       "object": "model",
       "created": 1773175017736,
       "owned_by": "google",
-      "providers": 216,
+      "providers": 215,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -3100,7 +3053,7 @@
       "object": "model",
       "created": 1773175017736,
       "owned_by": "google",
-      "providers": 216,
+      "providers": 215,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -3116,7 +3069,7 @@
       "object": "model",
       "created": 1773674664372,
       "owned_by": "google",
-      "providers": 213,
+      "providers": 211,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -3135,7 +3088,7 @@
       "object": "model",
       "created": 1773770426344,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -3145,8 +3098,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.01398,
-        "output": 0.05592,
+        "input": 0.009986,
+        "output": 0.059914,
         "unit": "per_million_tokens"
       }
     },
@@ -3155,7 +3108,7 @@
       "object": "model",
       "created": 1773770426344,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -3165,8 +3118,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.00671,
-        "output": 0.026842,
+        "input": 0.005785,
+        "output": 0.036155,
         "unit": "per_million_tokens"
       }
     },
@@ -3175,7 +3128,7 @@
       "object": "model",
       "created": 1773770426345,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -3185,8 +3138,8 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.00671,
-        "output": 0.026842,
+        "input": 0.005785,
+        "output": 0.036155,
         "unit": "per_million_tokens"
       }
     },
@@ -3195,7 +3148,7 @@
       "object": "model",
       "created": 1773770426345,
       "owned_by": "openai",
-      "providers": 124,
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -3205,53 +3158,17 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.01398,
-        "output": 0.05592,
-        "unit": "per_million_tokens"
-      }
-    },
-    {
-      "id": "dall-e-3",
-      "object": "model",
-      "created": 1774078793449,
-      "owned_by": "openai",
-      "providers": 124,
-      "throughput": 50,
-      "capabilities": [
-        "text",
-        "image_output"
-      ],
-      "pricing": {
-        "per_image": 0.008,
-        "input": 0,
-        "output": 0,
-        "unit": "per_million_tokens"
-      }
-    },
-    {
-      "id": "dall-e-2",
-      "object": "model",
-      "created": 1774078793450,
-      "owned_by": "openai",
-      "providers": 126,
-      "throughput": 50,
-      "capabilities": [
-        "text",
-        "image_output"
-      ],
-      "pricing": {
-        "per_image": 0.004,
-        "input": 0,
-        "output": 0,
+        "input": 0.009986,
+        "output": 0.059914,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "xiaomi/mimo-v2-omni",
       "object": "model",
-      "created": 1774079535295,
+      "created": 1774082760311,
       "owned_by": "xiaomi",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -3259,49 +3176,85 @@
         "audio_input"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.012621,
+        "output": 0.063104,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "xiaomi/mimo-v2-pro",
       "object": "model",
-      "created": 1774079535295,
+      "created": 1774082760311,
       "owned_by": "xiaomi",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.018931,
+        "output": 0.056794,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "minimax/minimax-m2.7",
       "object": "model",
-      "created": 1774079535295,
+      "created": 1774082760311,
       "owned_by": "minimax",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.009087,
+        "output": 0.036348,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "openai/gpt-5.4-nano",
       "object": "model",
-      "created": 1774079535295,
+      "created": 1774082760311,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
+      "throughput": 50,
+      "capabilities": [
+        "text",
+        "image_input",
+        "tool_calling"
+      ],
+      "pricing": {
+        "input": 0.006267,
+        "output": 0.039168,
+        "unit": "per_million_tokens"
+      }
+    },
+    {
+      "id": "openai/gpt-5.4-mini",
+      "object": "model",
+      "created": 1774082760311,
+      "owned_by": "openai",
+      "providers": 1,
+      "throughput": 50,
+      "capabilities": [
+        "text",
+        "image_input",
+        "tool_calling"
+      ],
+      "pricing": {
+        "input": 0.010818,
+        "output": 0.064907,
+        "unit": "per_million_tokens"
+      }
+    },
+    {
+      "id": "mistralai/mistral-small-2603",
+      "object": "model",
+      "created": 1774082760311,
+      "owned_by": "mistral.ai",
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -3315,80 +3268,44 @@
       }
     },
     {
-      "id": "openai/gpt-5.4-mini",
-      "object": "model",
-      "created": 1774079535295,
-      "owned_by": "openai",
-      "providers": 10,
-      "throughput": 50,
-      "capabilities": [
-        "text",
-        "image_input",
-        "tool_calling"
-      ],
-      "pricing": {
-        "input": 0.015145,
-        "output": 0.06058,
-        "unit": "per_million_tokens"
-      }
-    },
-    {
-      "id": "mistralai/mistral-small-2603",
-      "object": "model",
-      "created": 1774079535295,
-      "owned_by": "mistral.ai",
-      "providers": 10,
-      "throughput": 50,
-      "capabilities": [
-        "text",
-        "image_input",
-        "tool_calling"
-      ],
-      "pricing": {
-        "input": 0,
-        "output": 0,
-        "unit": "per_million_tokens"
-      }
-    },
-    {
       "id": "z-ai/glm-5-turbo",
       "object": "model",
-      "created": 1774079535296,
+      "created": 1774082760312,
       "owned_by": "z.ai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.017475,
+        "output": 0.05825,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "x-ai/grok-4.20-multi-agent-beta",
       "object": "model",
-      "created": 1774079535296,
+      "created": 1774082760312,
       "owned_by": "xai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
         "image_input"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.045435,
+        "output": 0.136305,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "x-ai/grok-4.20-beta",
       "object": "model",
-      "created": 1774079535296,
+      "created": 1774082760312,
       "owned_by": "xai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -3396,17 +3313,17 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.045435,
+        "output": 0.136305,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "nvidia/nemotron-3-super-120b-a12b:free",
       "object": "model",
-      "created": 1774079535296,
+      "created": 1774082760312,
       "owned_by": "nvidia",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -3421,42 +3338,42 @@
     {
       "id": "nvidia/nemotron-3-super-120b-a12b",
       "object": "model",
-      "created": 1774079535296,
+      "created": 1774082760312,
       "owned_by": "nvidia",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.006058,
+        "output": 0.03029,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "bytedance-seed/seed-2.0-lite",
       "object": "model",
-      "created": 1774079535296,
+      "created": 1774082760312,
       "owned_by": "bytedance",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
         "image_input"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.008414,
+        "output": 0.067311,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "qwen/qwen3.5-9b",
       "object": "model",
-      "created": 1774079535296,
+      "created": 1774082760312,
       "owned_by": "alibaba",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -3464,17 +3381,17 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.009087,
+        "output": 0.027261,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "openai/gpt-5.4-pro",
       "object": "model",
-      "created": 1774079535296,
+      "created": 1774082760312,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -3482,17 +3399,17 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.15145,
-        "output": 0.6058,
+        "input": 0.129814,
+        "output": 0.778886,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "openai/gpt-5.4",
       "object": "model",
-      "created": 1774079535296,
+      "created": 1774082760312,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -3500,33 +3417,33 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.072696,
-        "output": 0.290784,
+        "input": 0.051926,
+        "output": 0.311554,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "inception/mercury-2",
       "object": "model",
-      "created": 1774079535296,
+      "created": 1774082760312,
       "owned_by": "inception",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.009087,
+        "output": 0.027261,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "openai/gpt-5.3-chat",
       "object": "model",
-      "created": 1774079535296,
+      "created": 1774082760312,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -3542,9 +3459,9 @@
     {
       "id": "google/gemini-3.1-flash-lite-preview",
       "object": "model",
-      "created": 1774079535296,
+      "created": 1774082760312,
       "owned_by": "google",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -3553,51 +3470,52 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.006491,
+        "output": 0.038944,
+        "per_image": 5e-8,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "bytedance-seed/seed-2.0-mini",
       "object": "model",
-      "created": 1774079535296,
+      "created": 1774082760312,
       "owned_by": "bytedance",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
         "image_input"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.00727,
+        "output": 0.029078,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "google/gemini-3.1-flash-image-preview",
       "object": "model",
-      "created": 1774079535296,
+      "created": 1774082760312,
       "owned_by": "google",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "image_input",
         "image_output"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.010818,
+        "output": 0.064907,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "qwen/qwen3.5-35b-a3b",
       "object": "model",
-      "created": 1774079535296,
+      "created": 1774082760312,
       "owned_by": "alibaba",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -3605,17 +3523,17 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.005048,
+        "output": 0.040387,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "qwen/qwen3.5-27b",
       "object": "model",
-      "created": 1774079535296,
+      "created": 1774082760312,
       "owned_by": "alibaba",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -3623,17 +3541,17 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.005048,
+        "output": 0.040387,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "qwen/qwen3.5-122b-a10b",
       "object": "model",
-      "created": 1774079535296,
+      "created": 1774082760312,
       "owned_by": "alibaba",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -3641,50 +3559,50 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.008414,
+        "output": 0.067311,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "qwen/qwen3.5-flash-02-23",
       "object": "model",
-      "created": 1774079535296,
+      "created": 1774082760312,
       "owned_by": "alibaba",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
         "image_input"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.00727,
+        "output": 0.029078,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "liquid/lfm-2-24b-a2b",
       "object": "model",
-      "created": 1774079535296,
+      "created": 1774082760312,
       "owned_by": "liquid",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.00727,
+        "output": 0.029078,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "google/gemini-3.1-pro-preview-customtools",
       "object": "model",
-      "created": 1774079535296,
+      "created": 1774082760312,
       "owned_by": "google",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -3701,9 +3619,9 @@
     {
       "id": "openai/gpt-5.3-codex",
       "object": "model",
-      "created": 1774079535296,
+      "created": 1774082760312,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -3719,25 +3637,25 @@
     {
       "id": "aion-labs/aion-2.0",
       "object": "model",
-      "created": 1774079535296,
+      "created": 1774082760313,
       "owned_by": "aion-labs",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.025242,
+        "output": 0.050483,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "google/gemini-3.1-pro-preview",
       "object": "model",
-      "created": 1774079535296,
+      "created": 1774082760313,
       "owned_by": "google",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -3754,10 +3672,10 @@
     {
       "id": "anthropic/claude-sonnet-4.6",
       "object": "model",
-      "created": 1774079535296,
+      "created": 1774082760313,
       "owned_by": "anthropic",
-      "providers": 10,
-      "throughput": 50,
+      "providers": 1,
+      "throughput": 7,
       "capabilities": [
         "text",
         "image_input",
@@ -3772,9 +3690,9 @@
     {
       "id": "qwen/qwen3.5-plus-02-15",
       "object": "model",
-      "created": 1774079535296,
+      "created": 1774082760313,
       "owned_by": "alibaba",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -3789,9 +3707,9 @@
     {
       "id": "qwen/qwen3.5-397b-a17b",
       "object": "model",
-      "created": 1774079535296,
+      "created": 1774082760313,
       "owned_by": "alibaba",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -3807,10 +3725,11 @@
     {
       "id": "minimax/minimax-m2.5:free",
       "object": "model",
-      "created": 1774079535296,
+      "created": 1774082760313,
       "owned_by": "minimax",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
+      "capabilities": [],
       "pricing": {
         "input": 0,
         "output": 0,
@@ -3820,43 +3739,43 @@
     {
       "id": "minimax/minimax-m2.5",
       "object": "model",
-      "created": 1774079535296,
+      "created": 1774082760313,
       "owned_by": "minimax",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.008965,
-        "output": 0.03647,
+        "input": 0.006633,
+        "output": 0.038802,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "z-ai/glm-5",
       "object": "model",
-      "created": 1774079535296,
+      "created": 1774082760313,
       "owned_by": "z.ai",
-      "providers": 10,
-      "throughput": 50,
+      "providers": 1,
+      "throughput": 10,
       "capabilities": [
         "text",
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.01803,
-        "output": 0.057695,
+        "input": 0.018054,
+        "output": 0.057671,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "qwen/qwen3-max-thinking",
       "object": "model",
-      "created": 1774079535296,
+      "created": 1774082760313,
       "owned_by": "alibaba",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -3871,27 +3790,27 @@
     {
       "id": "anthropic/claude-opus-4.6",
       "object": "model",
-      "created": 1774079535296,
+      "created": 1774082760313,
       "owned_by": "anthropic",
-      "providers": 10,
-      "throughput": 43,
+      "providers": 1,
+      "throughput": 22,
       "capabilities": [
         "text",
         "image_input",
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.06058,
-        "output": 0.3029,
+        "input": 0.06524,
+        "output": 0.3262,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "qwen/qwen3-coder-next",
       "object": "model",
-      "created": 1774079535296,
+      "created": 1774082760313,
       "owned_by": "alibaba",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -3906,9 +3825,9 @@
     {
       "id": "openrouter/free",
       "object": "model",
-      "created": 1774079535296,
+      "created": 1774082760313,
       "owned_by": "openrouter",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -3924,9 +3843,9 @@
     {
       "id": "stepfun/step-3.5-flash:free",
       "object": "model",
-      "created": 1774079535296,
+      "created": 1774082760313,
       "owned_by": "stepfun",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -3941,9 +3860,9 @@
     {
       "id": "stepfun/step-3.5-flash",
       "object": "model",
-      "created": 1774079535296,
+      "created": 1774082760313,
       "owned_by": "stepfun",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -3958,9 +3877,9 @@
     {
       "id": "arcee-ai/trinity-large-preview:free",
       "object": "model",
-      "created": 1774079535296,
+      "created": 1774082760313,
       "owned_by": "arcee",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -3974,9 +3893,9 @@
     {
       "id": "moonshotai/kimi-k2.5",
       "object": "model",
-      "created": 1774079535296,
+      "created": 1774082760313,
       "owned_by": "moonshot",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -3992,26 +3911,26 @@
     {
       "id": "upstage/solar-pro-3",
       "object": "model",
-      "created": 1774079535296,
+      "created": 1774082760313,
       "owned_by": "upstage",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
         "tool_calling"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.00727,
+        "output": 0.029078,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "minimax/minimax-m2-her",
       "object": "model",
-      "created": 1774079535296,
+      "created": 1774082760313,
       "owned_by": "minimax",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -4025,9 +3944,9 @@
     {
       "id": "writer/palmyra-x5",
       "object": "model",
-      "created": 1774079535296,
+      "created": 1774082760313,
       "owned_by": "writer",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -4041,9 +3960,9 @@
     {
       "id": "liquid/lfm-2.5-1.2b-thinking:free",
       "object": "model",
-      "created": 1774079535296,
+      "created": 1774082760313,
       "owned_by": "liquid",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -4057,9 +3976,9 @@
     {
       "id": "liquid/lfm-2.5-1.2b-instruct:free",
       "object": "model",
-      "created": 1774079535296,
+      "created": 1774082760313,
       "owned_by": "liquid",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -4073,9 +3992,9 @@
     {
       "id": "openai/gpt-audio",
       "object": "model",
-      "created": 1774079535296,
+      "created": 1774082760313,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -4092,9 +4011,9 @@
     {
       "id": "openai/gpt-audio-mini",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760313,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -4111,9 +4030,9 @@
     {
       "id": "z-ai/glm-4.7-flash",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760313,
       "owned_by": "z.ai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -4128,9 +4047,9 @@
     {
       "id": "openai/gpt-5.2-codex",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760313,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -4144,28 +4063,11 @@
       }
     },
     {
-      "id": "allenai/molmo-2-8b",
-      "object": "model",
-      "created": 1774079535297,
-      "owned_by": "allenai",
-      "providers": 10,
-      "throughput": 50,
-      "capabilities": [
-        "text",
-        "image_input"
-      ],
-      "pricing": {
-        "input": 0.018174,
-        "output": 0.018174,
-        "unit": "per_million_tokens"
-      }
-    },
-    {
       "id": "allenai/olmo-3.1-32b-instruct",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760313,
       "owned_by": "allenai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -4180,9 +4082,9 @@
     {
       "id": "bytedance-seed/seed-1.6-flash",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760313,
       "owned_by": "bytedance",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -4198,9 +4100,9 @@
     {
       "id": "bytedance-seed/seed-1.6",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760313,
       "owned_by": "bytedance",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -4216,9 +4118,9 @@
     {
       "id": "minimax/minimax-m2.1",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760313,
       "owned_by": "minimax",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -4233,27 +4135,27 @@
     {
       "id": "z-ai/glm-4.7",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760313,
       "owned_by": "z.ai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.008018,
-        "output": 0.037417,
+        "input": 0.0138,
+        "output": 0.061925,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "google/gemini-3-flash-preview",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "google",
-      "providers": 10,
-      "throughput": 50,
+      "providers": 1,
+      "throughput": 48,
       "capabilities": [
         "text",
         "image_input",
@@ -4269,9 +4171,9 @@
     {
       "id": "mistralai/mistral-small-creative",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "mistral.ai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -4286,9 +4188,9 @@
     {
       "id": "allenai/olmo-3.1-32b-think",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "allenai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -4302,9 +4204,9 @@
     {
       "id": "xiaomi/mimo-v2-flash",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "xiaomi",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -4319,9 +4221,9 @@
     {
       "id": "nvidia/nemotron-3-nano-30b-a3b:free",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "nvidia",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -4335,9 +4237,9 @@
     {
       "id": "nvidia/nemotron-3-nano-30b-a3b",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "nvidia",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -4352,9 +4254,9 @@
     {
       "id": "openai/gpt-5.2-chat",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -4370,9 +4272,9 @@
     {
       "id": "openai/gpt-5.2-pro",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -4388,9 +4290,9 @@
     {
       "id": "openai/gpt-5.2",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -4406,9 +4308,9 @@
     {
       "id": "mistralai/devstral-2512",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "mistral.ai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -4423,9 +4325,9 @@
     {
       "id": "relace/relace-search",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "relace",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -4439,9 +4341,9 @@
     {
       "id": "z-ai/glm-4.6v",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "z.ai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -4457,9 +4359,9 @@
     {
       "id": "nex-agi/deepseek-v3.1-nex-n1",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "nex-agi",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -4474,9 +4376,9 @@
     {
       "id": "essentialai/rnj-1-instruct",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "essentialai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -4491,9 +4393,9 @@
     {
       "id": "openrouter/bodybuilder",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "openrouter",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -4507,9 +4409,9 @@
     {
       "id": "openai/gpt-5.1-codex-max",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -4525,9 +4427,9 @@
     {
       "id": "amazon/nova-2-lite-v1",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "amazon",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -4543,9 +4445,9 @@
     {
       "id": "mistralai/ministral-14b-2512",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "mistral.ai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -4561,9 +4463,9 @@
     {
       "id": "mistralai/ministral-8b-2512",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "mistral.ai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -4579,9 +4481,9 @@
     {
       "id": "mistralai/ministral-3b-2512",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "mistral.ai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -4597,9 +4499,9 @@
     {
       "id": "mistralai/mistral-large-2512",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "mistral.ai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -4615,9 +4517,9 @@
     {
       "id": "arcee-ai/trinity-mini:free",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "arcee",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -4632,9 +4534,9 @@
     {
       "id": "arcee-ai/trinity-mini",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "arcee",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -4649,9 +4551,9 @@
     {
       "id": "deepseek/deepseek-v3.2-speciale",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "deepseek",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -4665,26 +4567,26 @@
     {
       "id": "deepseek/deepseek-v3.2",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "deepseek",
-      "providers": 10,
-      "throughput": 50,
+      "providers": 1,
+      "throughput": 3,
       "capabilities": [
         "text",
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.01398,
-        "output": 0.022368,
+        "input": 0.014766,
+        "output": 0.021582,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "prime-intellect/intellect-3",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "prime-intellect",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -4699,9 +4601,9 @@
     {
       "id": "anthropic/claude-opus-4.5",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "anthropic",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -4717,9 +4619,9 @@
     {
       "id": "allenai/olmo-3-32b-think",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "allenai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -4731,44 +4633,12 @@
       }
     },
     {
-      "id": "allenai/olmo-3-7b-instruct",
-      "object": "model",
-      "created": 1774079535297,
-      "owned_by": "allenai",
-      "providers": 10,
-      "throughput": 50,
-      "capabilities": [
-        "text"
-      ],
-      "pricing": {
-        "input": 0.012116,
-        "output": 0.024232,
-        "unit": "per_million_tokens"
-      }
-    },
-    {
-      "id": "allenai/olmo-3-7b-think",
-      "object": "model",
-      "created": 1774079535297,
-      "owned_by": "allenai",
-      "providers": 10,
-      "throughput": 50,
-      "capabilities": [
-        "text"
-      ],
-      "pricing": {
-        "input": 0.013631,
-        "output": 0.022718,
-        "unit": "per_million_tokens"
-      }
-    },
-    {
       "id": "google/gemini-3-pro-image-preview",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "google",
-      "providers": 10,
-      "throughput": 50,
+      "providers": 1,
+      "throughput": 39,
       "capabilities": [
         "image_input",
         "image_output"
@@ -4783,9 +4653,9 @@
     {
       "id": "x-ai/grok-4.1-fast",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "xai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -4801,9 +4671,9 @@
     {
       "id": "google/gemini-3-pro-preview",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "google",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -4820,9 +4690,9 @@
     {
       "id": "deepcogito/cogito-v2.1-671b",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "deepcogito",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -4836,9 +4706,9 @@
     {
       "id": "openai/gpt-5.1",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -4854,9 +4724,9 @@
     {
       "id": "openai/gpt-5.1-chat",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -4872,9 +4742,9 @@
     {
       "id": "openai/gpt-5.1-codex",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -4890,9 +4760,9 @@
     {
       "id": "openai/gpt-5.1-codex-mini",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -4908,9 +4778,9 @@
     {
       "id": "kwaipilot/kat-coder-pro",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "kwaipilot",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -4925,9 +4795,9 @@
     {
       "id": "moonshotai/kimi-k2-thinking",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "moonshot",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -4942,9 +4812,9 @@
     {
       "id": "amazon/nova-premier-v1",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "amazon",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -4960,9 +4830,9 @@
     {
       "id": "perplexity/sonar-pro-search",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "perplexity",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -4977,9 +4847,9 @@
     {
       "id": "mistralai/voxtral-small-24b-2507",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "mistral.ai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -4995,9 +4865,9 @@
     {
       "id": "openai/gpt-oss-safeguard-20b",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -5012,9 +4882,9 @@
     {
       "id": "nvidia/nemotron-nano-12b-v2-vl:free",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "nvidia",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -5029,9 +4899,9 @@
     {
       "id": "nvidia/nemotron-nano-12b-v2-vl",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "nvidia",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -5046,9 +4916,9 @@
     {
       "id": "minimax/minimax-m2",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "minimax",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -5063,9 +4933,9 @@
     {
       "id": "qwen/qwen3-vl-32b-instruct",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "alibaba",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -5080,9 +4950,9 @@
     {
       "id": "liquid/lfm2-8b-a1b",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "liquid",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -5096,9 +4966,9 @@
     {
       "id": "liquid/lfm-2.2-6b",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "liquid",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -5112,9 +4982,9 @@
     {
       "id": "ibm-granite/granite-4.0-h-micro",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "ibm",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -5128,10 +4998,10 @@
     {
       "id": "openai/gpt-5-image-mini",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "openai",
-      "providers": 10,
-      "throughput": 50,
+      "providers": 1,
+      "throughput": 98,
       "capabilities": [
         "text",
         "image_input",
@@ -5147,9 +5017,9 @@
     {
       "id": "anthropic/claude-haiku-4.5",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "anthropic",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -5165,9 +5035,9 @@
     {
       "id": "qwen/qwen3-vl-8b-thinking",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "alibaba",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -5183,9 +5053,9 @@
     {
       "id": "qwen/qwen3-vl-8b-instruct",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "alibaba",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -5201,10 +5071,10 @@
     {
       "id": "openai/gpt-5-image",
       "object": "model",
-      "created": 1774079535297,
+      "created": 1774082760314,
       "owned_by": "openai",
-      "providers": 10,
-      "throughput": 50,
+      "providers": 1,
+      "throughput": 63,
       "capabilities": [
         "text",
         "image_input",
@@ -5220,10 +5090,10 @@
     {
       "id": "openai/o3-deep-research",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760314,
       "owned_by": "openai",
-      "providers": 10,
-      "throughput": 50,
+      "providers": 1,
+      "throughput": 132,
       "capabilities": [
         "text",
         "image_input",
@@ -5238,9 +5108,9 @@
     {
       "id": "openai/o4-mini-deep-research",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760314,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -5256,9 +5126,9 @@
     {
       "id": "nvidia/llama-3.3-nemotron-super-49b-v1.5",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760314,
       "owned_by": "nvidia",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -5273,9 +5143,9 @@
     {
       "id": "baidu/ernie-4.5-21b-a3b-thinking",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "baidu",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -5289,10 +5159,10 @@
     {
       "id": "google/gemini-2.5-flash-image",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "google",
-      "providers": 10,
-      "throughput": 50,
+      "providers": 1,
+      "throughput": 243,
       "capabilities": [
         "image_input",
         "image_output"
@@ -5307,9 +5177,9 @@
     {
       "id": "qwen/qwen3-vl-30b-a3b-thinking",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "alibaba",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -5317,17 +5187,17 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.00727,
-        "output": 0.029078,
+        "input": 0.003495,
+        "output": 0.04194,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "qwen/qwen3-vl-30b-a3b-instruct",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "alibaba",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -5343,9 +5213,9 @@
     {
       "id": "openai/gpt-5-pro",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -5360,9 +5230,9 @@
     {
       "id": "z-ai/glm-4.6",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "z.ai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -5377,10 +5247,10 @@
     {
       "id": "anthropic/claude-sonnet-4.5",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "anthropic",
-      "providers": 10,
-      "throughput": 50,
+      "providers": 1,
+      "throughput": 27,
       "capabilities": [
         "text",
         "image_input",
@@ -5395,9 +5265,9 @@
     {
       "id": "deepseek/deepseek-v3.2-exp",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "deepseek",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -5412,9 +5282,9 @@
     {
       "id": "thedrummer/cydonia-24b-v4.1",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "thedrummer",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -5428,9 +5298,9 @@
     {
       "id": "relace/relace-apply-3",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "relace",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -5444,9 +5314,9 @@
     {
       "id": "google/gemini-2.5-flash-lite-preview-09-2025",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "google",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -5463,9 +5333,9 @@
     {
       "id": "qwen/qwen3-vl-235b-a22b-thinking",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "alibaba",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -5473,17 +5343,17 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.008414,
-        "output": 0.037021,
+        "input": 0.006884,
+        "output": 0.068841,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "qwen/qwen3-vl-235b-a22b-instruct",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "alibaba",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -5499,26 +5369,26 @@
     {
       "id": "qwen/qwen3-max",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "alibaba",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.03029,
-        "output": 0.15145,
+        "input": 0.012621,
+        "output": 0.063104,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "qwen/qwen3-coder-plus",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "alibaba",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -5533,9 +5403,9 @@
     {
       "id": "openai/gpt-5-codex",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -5551,9 +5421,9 @@
     {
       "id": "deepseek/deepseek-v3.1-terminus",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "deepseek",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -5568,9 +5438,9 @@
     {
       "id": "x-ai/grok-4-fast",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "xai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -5586,9 +5456,9 @@
     {
       "id": "alibaba/tongyi-deepresearch-30b-a3b",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "alibaba",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -5603,9 +5473,9 @@
     {
       "id": "qwen/qwen3-coder-flash",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "alibaba",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -5620,26 +5490,26 @@
     {
       "id": "qwen/qwen3-next-80b-a3b-thinking",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "alibaba",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.005048,
-        "output": 0.040387,
+        "input": 0.004039,
+        "output": 0.032309,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "qwen/qwen3-next-80b-a3b-instruct:free",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "alibaba",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -5654,9 +5524,9 @@
     {
       "id": "qwen/qwen3-next-80b-a3b-instruct",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "alibaba",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -5671,9 +5541,9 @@
     {
       "id": "meituan/longcat-flash-chat",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "meituan",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -5688,10 +5558,10 @@
     {
       "id": "qwen/qwen-plus-2025-07-28:thinking",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "alibaba",
-      "providers": 10,
-      "throughput": 50,
+      "providers": 1,
+      "throughput": 36,
       "capabilities": [
         "text",
         "tool_calling"
@@ -5705,9 +5575,9 @@
     {
       "id": "qwen/qwen-plus-2025-07-28",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "alibaba",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -5722,9 +5592,9 @@
     {
       "id": "nvidia/nemotron-nano-9b-v2:free",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "nvidia",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -5739,9 +5609,9 @@
     {
       "id": "nvidia/nemotron-nano-9b-v2",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "nvidia",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -5756,9 +5626,9 @@
     {
       "id": "moonshotai/kimi-k2-0905",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "moonshot",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -5773,26 +5643,26 @@
     {
       "id": "qwen/qwen3-30b-a3b-thinking-2507",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "alibaba",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.004741,
-        "output": 0.031607,
+        "input": 0.006058,
+        "output": 0.03029,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "x-ai/grok-code-fast-1",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "xai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -5807,9 +5677,9 @@
     {
       "id": "nousresearch/hermes-4-70b",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "nous",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -5823,9 +5693,9 @@
     {
       "id": "nousresearch/hermes-4-405b",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "nous",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -5839,10 +5709,10 @@
     {
       "id": "deepseek/deepseek-chat-v3.1",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "deepseek",
-      "providers": 10,
-      "throughput": 50,
+      "providers": 1,
+      "throughput": 5,
       "capabilities": [
         "text",
         "tool_calling"
@@ -5856,9 +5726,9 @@
     {
       "id": "openai/gpt-4o-audio-preview",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -5875,9 +5745,9 @@
     {
       "id": "mistralai/mistral-medium-3.1",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "mistral.ai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -5893,9 +5763,9 @@
     {
       "id": "baidu/ernie-4.5-21b-a3b",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "baidu",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -5909,9 +5779,9 @@
     {
       "id": "baidu/ernie-4.5-vl-28b-a3b",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "baidu",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -5926,9 +5796,9 @@
     {
       "id": "z-ai/glm-4.5v",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "z.ai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -5944,9 +5814,9 @@
     {
       "id": "ai21/jamba-large-1.7",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "ai21",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -5961,9 +5831,9 @@
     {
       "id": "openai/gpt-5-chat",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -5978,10 +5848,10 @@
     {
       "id": "openai/gpt-5",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "openai",
-      "providers": 10,
-      "throughput": 50,
+      "providers": 1,
+      "throughput": 24,
       "capabilities": [
         "text",
         "image_input",
@@ -5996,9 +5866,9 @@
     {
       "id": "openai/gpt-5-mini",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -6014,9 +5884,9 @@
     {
       "id": "openai/gpt-5-nano",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -6032,9 +5902,9 @@
     {
       "id": "openai/gpt-oss-120b:free",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "tool_calling"
@@ -6048,9 +5918,9 @@
     {
       "id": "openai/gpt-oss-120b",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -6065,10 +5935,11 @@
     {
       "id": "openai/gpt-oss-20b:free",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
+      "capabilities": [],
       "pricing": {
         "input": 0,
         "output": 0,
@@ -6078,26 +5949,26 @@
     {
       "id": "openai/gpt-oss-20b",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.006414,
-        "output": 0.029934,
+        "input": 0.007789,
+        "output": 0.028559,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "anthropic/claude-opus-4.1",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "anthropic",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -6113,9 +5984,9 @@
     {
       "id": "mistralai/codestral-2508",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "mistral.ai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -6130,9 +6001,9 @@
     {
       "id": "qwen/qwen3-coder-30b-a3b-instruct",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "alibaba",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -6147,9 +6018,9 @@
     {
       "id": "qwen/qwen3-30b-a3b-instruct-2507",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "alibaba",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -6164,10 +6035,10 @@
     {
       "id": "z-ai/glm-4.5",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "z.ai",
-      "providers": 10,
-      "throughput": 50,
+      "providers": 1,
+      "throughput": 15,
       "capabilities": [
         "text",
         "tool_calling"
@@ -6181,9 +6052,9 @@
     {
       "id": "z-ai/glm-4.5-air:free",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "z.ai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -6197,9 +6068,9 @@
     {
       "id": "z-ai/glm-4.5-air",
       "object": "model",
-      "created": 1774079535298,
+      "created": 1774082760315,
       "owned_by": "z.ai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -6214,26 +6085,26 @@
     {
       "id": "qwen/qwen3-235b-a22b-thinking-2507",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760315,
       "owned_by": "alibaba",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.015092,
-        "output": 0.021256,
+        "input": 0.00413,
+        "output": 0.041305,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "z-ai/glm-4-32b",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760315,
       "owned_by": "z.ai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -6247,9 +6118,9 @@
     {
       "id": "qwen/qwen3-coder:free",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760315,
       "owned_by": "alibaba",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "tool_calling"
@@ -6263,9 +6134,9 @@
     {
       "id": "qwen/qwen3-coder",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760315,
       "owned_by": "alibaba",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -6280,9 +6151,9 @@
     {
       "id": "bytedance/ui-tars-1.5-7b",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760315,
       "owned_by": "bytedance",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -6297,10 +6168,10 @@
     {
       "id": "google/gemini-2.5-flash-lite",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760315,
       "owned_by": "google",
-      "providers": 10,
-      "throughput": 50,
+      "providers": 1,
+      "throughput": 1,
       "capabilities": [
         "text",
         "image_input",
@@ -6316,9 +6187,9 @@
     {
       "id": "qwen/qwen3-235b-a22b-2507",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760315,
       "owned_by": "alibaba",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -6333,22 +6204,23 @@
     {
       "id": "switchpoint/router",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760315,
       "owned_by": "switchpoint",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
+      "capabilities": [],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.015145,
+        "output": 0.06058,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "moonshotai/kimi-k2",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760315,
       "owned_by": "moonshot",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -6363,9 +6235,9 @@
     {
       "id": "mistralai/devstral-medium",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760315,
       "owned_by": "mistral.ai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -6380,9 +6252,9 @@
     {
       "id": "mistralai/devstral-small",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760315,
       "owned_by": "mistral.ai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -6397,9 +6269,9 @@
     {
       "id": "cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760315,
       "owned_by": "cognitivecomputations",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -6413,9 +6285,9 @@
     {
       "id": "x-ai/grok-4",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760315,
       "owned_by": "xai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -6431,9 +6303,9 @@
     {
       "id": "google/gemma-3n-e2b-it:free",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760315,
       "owned_by": "google",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -6447,9 +6319,9 @@
     {
       "id": "tencent/hunyuan-a13b-instruct",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760315,
       "owned_by": "tencent",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -6463,22 +6335,23 @@
     {
       "id": "tngtech/deepseek-r1t2-chimera",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760316,
       "owned_by": "tngtech",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
+      "capabilities": [],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.009736,
+        "output": 0.035699,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "morph/morph-v3-large",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760316,
       "owned_by": "morph",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -6492,9 +6365,9 @@
     {
       "id": "morph/morph-v3-fast",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760316,
       "owned_by": "morph",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -6508,9 +6381,9 @@
     {
       "id": "baidu/ernie-4.5-vl-424b-a47b",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760316,
       "owned_by": "baidu",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -6525,9 +6398,9 @@
     {
       "id": "baidu/ernie-4.5-300b-a47b",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760316,
       "owned_by": "baidu",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -6541,9 +6414,9 @@
     {
       "id": "inception/mercury",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760316,
       "owned_by": "inception",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -6558,9 +6431,9 @@
     {
       "id": "mistralai/mistral-small-3.2-24b-instruct",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760316,
       "owned_by": "mistral.ai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -6568,17 +6441,17 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.009087,
-        "output": 0.027261,
+        "input": 0.009913,
+        "output": 0.026435,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "minimax/minimax-m1",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760316,
       "owned_by": "minimax",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -6593,10 +6466,10 @@
     {
       "id": "google/gemini-2.5-flash",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760316,
       "owned_by": "google",
-      "providers": 10,
-      "throughput": 50,
+      "providers": 1,
+      "throughput": 101,
       "capabilities": [
         "text",
         "image_input",
@@ -6612,10 +6485,10 @@
     {
       "id": "google/gemini-2.5-pro",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760316,
       "owned_by": "google",
-      "providers": 10,
-      "throughput": 50,
+      "providers": 1,
+      "throughput": 107,
       "capabilities": [
         "text",
         "image_input",
@@ -6631,9 +6504,9 @@
     {
       "id": "openai/o3-pro",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760316,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -6649,9 +6522,9 @@
     {
       "id": "x-ai/grok-3-mini",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760316,
       "owned_by": "xai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -6666,9 +6539,9 @@
     {
       "id": "x-ai/grok-3",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760316,
       "owned_by": "xai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -6683,9 +6556,9 @@
     {
       "id": "google/gemini-2.5-pro-preview",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760316,
       "owned_by": "google",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -6703,9 +6576,9 @@
     {
       "id": "deepseek/deepseek-r1-0528",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760316,
       "owned_by": "deepseek",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -6720,9 +6593,9 @@
     {
       "id": "anthropic/claude-opus-4",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760316,
       "owned_by": "anthropic",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -6738,9 +6611,9 @@
     {
       "id": "anthropic/claude-sonnet-4",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760316,
       "owned_by": "anthropic",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -6756,9 +6629,9 @@
     {
       "id": "google/gemma-3n-e4b-it:free",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760316,
       "owned_by": "google",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -6772,9 +6645,9 @@
     {
       "id": "google/gemma-3n-e4b-it",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760316,
       "owned_by": "google",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -6788,9 +6661,9 @@
     {
       "id": "mistralai/mistral-medium-3",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760316,
       "owned_by": "mistral.ai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -6806,9 +6679,9 @@
     {
       "id": "google/gemini-2.5-pro-preview-05-06",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760316,
       "owned_by": "google",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -6826,64 +6699,67 @@
     {
       "id": "arcee-ai/spotlight",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760316,
       "owned_by": "arcee",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
+      "capabilities": [],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.018174,
+        "output": 0.018174,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "arcee-ai/maestro-reasoning",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760316,
       "owned_by": "arcee",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
+      "capabilities": [],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.016227,
+        "output": 0.059498,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "arcee-ai/virtuoso-large",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760316,
       "owned_by": "arcee",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
+      "capabilities": [],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.017475,
+        "output": 0.02796,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "arcee-ai/coder-large",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760316,
       "owned_by": "arcee",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.017475,
+        "output": 0.02796,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "inception/mercury-coder",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760316,
       "owned_by": "inception",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -6898,10 +6774,11 @@
     {
       "id": "qwen/qwen3-4b:free",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760316,
       "owned_by": "alibaba",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
+      "capabilities": [],
       "pricing": {
         "input": 0,
         "output": 0,
@@ -6911,9 +6788,9 @@
     {
       "id": "meta-llama/llama-guard-4-12b",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760316,
       "owned_by": "meta",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -6928,9 +6805,9 @@
     {
       "id": "qwen/qwen3-30b-a3b",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760316,
       "owned_by": "alibaba",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -6945,9 +6822,9 @@
     {
       "id": "qwen/qwen3-8b",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760316,
       "owned_by": "alibaba",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -6961,10 +6838,10 @@
     {
       "id": "qwen/qwen3-14b",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760316,
       "owned_by": "alibaba",
-      "providers": 10,
-      "throughput": 50,
+      "providers": 1,
+      "throughput": 71,
       "capabilities": [
         "text"
       ],
@@ -6977,10 +6854,10 @@
     {
       "id": "qwen/qwen3-32b",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760316,
       "owned_by": "alibaba",
-      "providers": 10,
-      "throughput": 50,
+      "providers": 1,
+      "throughput": 91,
       "capabilities": [
         "text",
         "tool_calling"
@@ -6994,9 +6871,9 @@
     {
       "id": "qwen/qwen3-235b-a22b",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760316,
       "owned_by": "alibaba",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -7010,9 +6887,9 @@
     {
       "id": "openai/o4-mini-high",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760316,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -7028,9 +6905,9 @@
     {
       "id": "openai/o3",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760316,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -7046,9 +6923,9 @@
     {
       "id": "openai/o4-mini",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760316,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -7064,9 +6941,9 @@
     {
       "id": "qwen/qwen2.5-coder-7b-instruct",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760316,
       "owned_by": "alibaba",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -7080,9 +6957,9 @@
     {
       "id": "openai/gpt-4.1",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760316,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -7098,9 +6975,9 @@
     {
       "id": "openai/gpt-4.1-mini",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760316,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -7116,10 +6993,10 @@
     {
       "id": "openai/gpt-4.1-nano",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760316,
       "owned_by": "openai",
-      "providers": 10,
-      "throughput": 50,
+      "providers": 1,
+      "throughput": 89,
       "capabilities": [
         "text",
         "image_input",
@@ -7134,9 +7011,9 @@
     {
       "id": "eleutherai/llemma_7b",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760316,
       "owned_by": "eleutherai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -7150,9 +7027,9 @@
     {
       "id": "alfredpros/codellama-7b-instruct-solidity",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760316,
       "owned_by": "alfredpros",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -7166,9 +7043,9 @@
     {
       "id": "x-ai/grok-3-mini-beta",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760316,
       "owned_by": "xai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -7183,9 +7060,9 @@
     {
       "id": "x-ai/grok-3-beta",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760316,
       "owned_by": "xai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -7200,9 +7077,9 @@
     {
       "id": "meta-llama/llama-4-maverick",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760316,
       "owned_by": "meta",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -7218,9 +7095,9 @@
     {
       "id": "meta-llama/llama-4-scout",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760316,
       "owned_by": "meta",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -7236,9 +7113,9 @@
     {
       "id": "qwen/qwen2.5-vl-32b-instruct",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760316,
       "owned_by": "alibaba",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -7253,9 +7130,9 @@
     {
       "id": "deepseek/deepseek-chat-v3-0324",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760316,
       "owned_by": "deepseek",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -7270,9 +7147,9 @@
     {
       "id": "openai/o1-pro",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760316,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -7286,9 +7163,9 @@
     {
       "id": "mistralai/mistral-small-3.1-24b-instruct:free",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760316,
       "owned_by": "mistral.ai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -7303,9 +7180,9 @@
     {
       "id": "mistralai/mistral-small-3.1-24b-instruct",
       "object": "model",
-      "created": 1774079535299,
+      "created": 1774082760316,
       "owned_by": "mistral.ai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -7313,30 +7190,31 @@
         "image_output"
       ],
       "pricing": {
-        "input": 0.01398,
-        "output": 0.022368,
+        "input": 0.007789,
+        "output": 0.028559,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "allenai/olmo-2-0325-32b-instruct",
       "object": "model",
-      "created": 1774079535300,
+      "created": 1774082760316,
       "owned_by": "allenai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
+      "capabilities": [],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.00727,
+        "output": 0.029078,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "google/gemma-3-4b-it:free",
       "object": "model",
-      "created": 1774079535300,
+      "created": 1774082760316,
       "owned_by": "google",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -7351,9 +7229,9 @@
     {
       "id": "google/gemma-3-4b-it",
       "object": "model",
-      "created": 1774079535300,
+      "created": 1774082760316,
       "owned_by": "google",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -7368,10 +7246,11 @@
     {
       "id": "google/gemma-3-12b-it:free",
       "object": "model",
-      "created": 1774079535300,
+      "created": 1774082760317,
       "owned_by": "google",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
+      "capabilities": [],
       "pricing": {
         "input": 0,
         "output": 0,
@@ -7381,9 +7260,9 @@
     {
       "id": "google/gemma-3-12b-it",
       "object": "model",
-      "created": 1774079535300,
+      "created": 1774082760317,
       "owned_by": "google",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -7398,25 +7277,25 @@
     {
       "id": "cohere/command-a",
       "object": "model",
-      "created": 1774079535300,
+      "created": 1774082760317,
       "owned_by": "cohere",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.036348,
+        "output": 0.145392,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "openai/gpt-4o-mini-search-preview",
       "object": "model",
-      "created": 1774079535300,
+      "created": 1774082760317,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -7430,9 +7309,9 @@
     {
       "id": "openai/gpt-4o-search-preview",
       "object": "model",
-      "created": 1774079535300,
+      "created": 1774082760317,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -7446,10 +7325,11 @@
     {
       "id": "google/gemma-3-27b-it:free",
       "object": "model",
-      "created": 1774079535300,
+      "created": 1774082760317,
       "owned_by": "google",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
+      "capabilities": [],
       "pricing": {
         "input": 0,
         "output": 0,
@@ -7459,9 +7339,9 @@
     {
       "id": "google/gemma-3-27b-it",
       "object": "model",
-      "created": 1774079535300,
+      "created": 1774082760317,
       "owned_by": "google",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -7476,93 +7356,93 @@
     {
       "id": "thedrummer/skyfall-36b-v2",
       "object": "model",
-      "created": 1774079535300,
+      "created": 1774082760317,
       "owned_by": "thedrummer",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.018511,
+        "output": 0.026924,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "perplexity/sonar-reasoning-pro",
       "object": "model",
-      "created": 1774079535300,
+      "created": 1774082760317,
       "owned_by": "perplexity",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
         "image_input"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.036348,
+        "output": 0.145392,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "perplexity/sonar-pro",
       "object": "model",
-      "created": 1774079535300,
+      "created": 1774082760317,
       "owned_by": "perplexity",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
         "image_input"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.06058,
+        "output": 0.3029,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "perplexity/sonar-deep-research",
       "object": "model",
-      "created": 1774079535300,
+      "created": 1774082760317,
       "owned_by": "perplexity",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
         "tool_calling"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.036348,
+        "output": 0.145392,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "qwen/qwq-32b",
       "object": "model",
-      "created": 1774079535300,
+      "created": 1774082760317,
       "owned_by": "alibaba",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
         "tool_calling"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.007469,
+        "output": 0.028879,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "google/gemini-2.0-flash-lite-001",
       "object": "model",
-      "created": 1774079535300,
+      "created": 1774082760317,
       "owned_by": "google",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -7579,9 +7459,9 @@
     {
       "id": "anthropic/claude-3.7-sonnet",
       "object": "model",
-      "created": 1774079535300,
+      "created": 1774082760317,
       "owned_by": "anthropic",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -7589,17 +7469,17 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.06058,
+        "output": 0.3029,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "anthropic/claude-3.7-sonnet:thinking",
       "object": "model",
-      "created": 1774079535300,
+      "created": 1774082760317,
       "owned_by": "anthropic",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -7607,67 +7487,67 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.06058,
+        "output": 0.3029,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "mistralai/mistral-saba",
       "object": "model",
-      "created": 1774079535300,
+      "created": 1774082760317,
       "owned_by": "mistral.ai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
         "tool_calling"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.009087,
+        "output": 0.027261,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "meta-llama/llama-guard-3-8b",
       "object": "model",
-      "created": 1774079535300,
+      "created": 1774082760317,
       "owned_by": "meta",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.009087,
+        "output": 0.027261,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "openai/o3-mini-high",
       "object": "model",
-      "created": 1774079535300,
+      "created": 1774082760317,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
         "tool_calling"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.015145,
+        "output": 0.06058,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "google/gemini-2.0-flash-001",
       "object": "model",
-      "created": 1774079535300,
+      "created": 1774082760317,
       "owned_by": "google",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -7684,74 +7564,74 @@
     {
       "id": "qwen/qwen-vl-plus",
       "object": "model",
-      "created": 1774079535300,
+      "created": 1774082760317,
       "owned_by": "alibaba",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
         "image_input"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.009087,
+        "output": 0.027261,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "aion-labs/aion-1.0",
       "object": "model",
-      "created": 1774079535300,
+      "created": 1774082760317,
       "owned_by": "aion-labs",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.06058,
+        "output": 0.12116,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "aion-labs/aion-1.0-mini",
       "object": "model",
-      "created": 1774079535300,
+      "created": 1774082760317,
       "owned_by": "aion-labs",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.015145,
+        "output": 0.03029,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "aion-labs/aion-rp-llama-3.1-8b",
       "object": "model",
-      "created": 1774079535300,
+      "created": 1774082760317,
       "owned_by": "aion-labs",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.025242,
+        "output": 0.050483,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "qwen/qwen-vl-max",
       "object": "model",
-      "created": 1774079535300,
+      "created": 1774082760317,
       "owned_by": "alibaba",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -7759,85 +7639,85 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.015145,
+        "output": 0.06058,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "qwen/qwen-turbo",
       "object": "model",
-      "created": 1774079535300,
+      "created": 1774082760317,
       "owned_by": "alibaba",
-      "providers": 10,
-      "throughput": 50,
+      "providers": 1,
+      "throughput": 22,
       "capabilities": [
         "text",
         "tool_calling"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.007829,
+        "output": 0.031315,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "qwen/qwen2.5-vl-72b-instruct",
       "object": "model",
-      "created": 1774079535300,
+      "created": 1774082760317,
       "owned_by": "alibaba",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
         "image_input"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.022718,
+        "output": 0.022718,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "qwen/qwen-plus",
       "object": "model",
-      "created": 1774079535300,
+      "created": 1774082760317,
       "owned_by": "alibaba",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
         "tool_calling"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.009087,
+        "output": 0.027261,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "qwen/qwen-max",
       "object": "model",
-      "created": 1774079535300,
+      "created": 1774082760317,
       "owned_by": "alibaba",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
         "tool_calling"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.015145,
+        "output": 0.06058,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "openai/o3-mini",
       "object": "model",
-      "created": 1774079535300,
+      "created": 1774082760317,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -7852,174 +7732,157 @@
     {
       "id": "mistralai/mistral-small-24b-instruct-2501",
       "object": "model",
-      "created": 1774079535300,
+      "created": 1774082760317,
       "owned_by": "mistral.ai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
         "tool_calling"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.01398,
+        "output": 0.022368,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "deepseek/deepseek-r1-distill-qwen-32b",
       "object": "model",
-      "created": 1774079535300,
+      "created": 1774082760317,
       "owned_by": "deepseek",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.018174,
+        "output": 0.018174,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "perplexity/sonar",
       "object": "model",
-      "created": 1774079535300,
+      "created": 1774082760317,
       "owned_by": "perplexity",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
         "image_input"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.022718,
+        "output": 0.022718,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "deepseek/deepseek-r1-distill-llama-70b",
       "object": "model",
-      "created": 1774079535300,
+      "created": 1774082760317,
       "owned_by": "deepseek",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
-        "unit": "per_million_tokens"
-      }
-    },
-    {
-      "id": "deepseek/deepseek-r1",
-      "object": "model",
-      "created": 1774079535300,
-      "owned_by": "deepseek",
-      "providers": 10,
-      "throughput": 50,
-      "capabilities": [
-        "text",
-        "tool_calling"
-      ],
-      "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.021203,
+        "output": 0.024232,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "minimax/minimax-01",
       "object": "model",
-      "created": 1774079535300,
+      "created": 1774082760317,
       "owned_by": "minimax",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
         "image_input"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.00699,
+        "output": 0.038445,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "microsoft/phi-4",
       "object": "model",
-      "created": 1774079535300,
+      "created": 1774082760317,
       "owned_by": "microsoft",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.011525,
+        "output": 0.024823,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "sao10k/l3.1-70b-hanami-x1",
       "object": "model",
-      "created": 1774079535300,
+      "created": 1774082760317,
       "owned_by": "sao10k",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.037863,
+        "output": 0.037863,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "deepseek/deepseek-chat",
       "object": "model",
-      "created": 1774079535300,
+      "created": 1774082760317,
       "owned_by": "deepseek",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.012116,
-        "output": 0.024232,
+        "input": 0.008954,
+        "output": 0.036481,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "sao10k/l3.3-euryale-70b",
       "object": "model",
-      "created": 1774079535300,
+      "created": 1774082760317,
       "owned_by": "sao10k",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.021095,
+        "output": 0.02434,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "openai/o1",
       "object": "model",
-      "created": 1774079535300,
+      "created": 1774082760317,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -8035,25 +7898,25 @@
     {
       "id": "cohere/command-r7b-12-2024",
       "object": "model",
-      "created": 1774079535300,
+      "created": 1774082760317,
       "owned_by": "cohere",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.00727,
+        "output": 0.029078,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "meta-llama/llama-3.3-70b-instruct:free",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760317,
       "owned_by": "meta",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -8068,26 +7931,26 @@
     {
       "id": "meta-llama/llama-3.3-70b-instruct",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760317,
       "owned_by": "meta",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
         "tool_calling"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.008654,
+        "output": 0.027694,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "amazon/nova-lite-v1",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760317,
       "owned_by": "amazon",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -8095,34 +7958,34 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.00727,
+        "output": 0.029078,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "amazon/nova-micro-v1",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760317,
       "owned_by": "amazon",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
         "tool_calling"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.00727,
+        "output": 0.029078,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "amazon/nova-pro-v1",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760317,
       "owned_by": "amazon",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -8130,17 +7993,17 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.015145,
+        "output": 0.06058,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "openai/gpt-4o-2024-11-20",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760317,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -8156,43 +8019,43 @@
     {
       "id": "mistralai/mistral-large-2411",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760317,
       "owned_by": "mistral.ai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
         "tool_calling"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.045435,
+        "output": 0.136305,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "mistralai/mistral-large-2407",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760317,
       "owned_by": "mistral.ai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
         "tool_calling"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.045435,
+        "output": 0.136305,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "mistralai/pixtral-large-2411",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760317,
       "owned_by": "mistral.ai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -8200,82 +8063,82 @@
         "tool_calling"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.045435,
+        "output": 0.136305,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "qwen/qwen-2.5-coder-32b-instruct",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760317,
       "owned_by": "alibaba",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.018065,
+        "output": 0.02737,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "thedrummer/unslopnemo-12b",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760317,
       "owned_by": "thedrummer",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.018174,
+        "output": 0.018174,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "anthropic/claude-3.5-haiku",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760317,
       "owned_by": "anthropic",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
         "tool_calling"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.012621,
+        "output": 0.063104,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "anthracite-org/magnum-v4-72b",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760317,
       "owned_by": "anthracite-org",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
       ],
       "pricing": {
-        "input": 0.03442,
-        "output": 0.041305,
+        "input": 0.068153,
+        "output": 0.113588,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "anthropic/claude-3.5-sonnet",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760317,
       "owned_by": "anthropic",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -8285,49 +8148,48 @@
       "pricing": {
         "input": 0.06058,
         "output": 0.3029,
-        "per_image": 0.000912,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "qwen/qwen-2.5-7b-instruct",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760317,
       "owned_by": "alibaba",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.018174,
-        "output": 0.018174,
+        "input": 0.010385,
+        "output": 0.025963,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "nvidia/llama-3.1-nemotron-70b-instruct",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760317,
       "owned_by": "nvidia",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
       ],
       "pricing": {
-        "input": 0.016962,
-        "output": 0.019386,
+        "input": 0.037863,
+        "output": 0.037863,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "inflection/inflection-3-pi",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760317,
       "owned_by": "inflection",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -8341,9 +8203,9 @@
     {
       "id": "inflection/inflection-3-productivity",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760318,
       "owned_by": "inflection",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -8357,25 +8219,25 @@
     {
       "id": "thedrummer/rocinante-12b",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760318,
       "owned_by": "thedrummer",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
       ],
       "pricing": {
-        "input": 0.012116,
-        "output": 0.024232,
+        "input": 0.010299,
+        "output": 0.026049,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "meta-llama/llama-3.2-3b-instruct:free",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760318,
       "owned_by": "meta",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -8389,41 +8251,41 @@
     {
       "id": "meta-llama/llama-3.2-3b-instruct",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760318,
       "owned_by": "meta",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
       ],
       "pricing": {
-        "input": 0.013631,
-        "output": 0.022718,
+        "input": 0.004741,
+        "output": 0.031607,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "meta-llama/llama-3.2-1b-instruct",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760318,
       "owned_by": "meta",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
       ],
       "pricing": {
-        "input": 0.012116,
-        "output": 0.024232,
+        "input": 0.004323,
+        "output": 0.032025,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "meta-llama/llama-3.2-11b-vision-instruct",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760318,
       "owned_by": "meta",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -8432,33 +8294,32 @@
       "pricing": {
         "input": 0.018174,
         "output": 0.018174,
-        "per_image": 0.0000151,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "qwen/qwen-2.5-72b-instruct",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760318,
       "owned_by": "alibaba",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.016962,
-        "output": 0.019386,
+        "input": 0.008552,
+        "output": 0.027796,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "cohere/command-r-08-2024",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760318,
       "owned_by": "cohere",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -8473,9 +8334,9 @@
     {
       "id": "cohere/command-r-plus-08-2024",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760318,
       "owned_by": "cohere",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -8490,43 +8351,44 @@
     {
       "id": "sao10k/l3.1-euryale-70b",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760318,
       "owned_by": "sao10k",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
       ],
       "pricing": {
-        "input": 0.016962,
-        "output": 0.019386,
+        "input": 0.022718,
+        "output": 0.022718,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "qwen/qwen-2.5-vl-7b-instruct",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760318,
       "owned_by": "alibaba",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
         "image_input"
       ],
       "pricing": {
-        "input": 0,
-        "output": 0,
+        "input": 0.018174,
+        "output": 0.018174,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "nousresearch/hermes-3-llama-3.1-70b",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760318,
       "owned_by": "nous",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
+      "capabilities": [],
       "pricing": {
         "input": 0.018174,
         "output": 0.018174,
@@ -8536,9 +8398,9 @@
     {
       "id": "nousresearch/hermes-3-llama-3.1-405b:free",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760318,
       "owned_by": "nous",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -8552,41 +8414,41 @@
     {
       "id": "nousresearch/hermes-3-llama-3.1-405b",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760318,
       "owned_by": "nous",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
       ],
       "pricing": {
-        "input": 0.03167,
-        "output": 0.044055,
+        "input": 0.022718,
+        "output": 0.022718,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "sao10k/l3-lunaris-8b",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760318,
       "owned_by": "sao10k",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
       ],
       "pricing": {
-        "input": 0.037863,
-        "output": 0.037863,
+        "input": 0.016155,
+        "output": 0.020193,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "openai/gpt-4o-2024-08-06",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760318,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -8596,16 +8458,150 @@
       "pricing": {
         "input": 0.036348,
         "output": 0.145392,
-        "per_image": 0.00068637,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "meta-llama/llama-3.1-405b",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760318,
       "owned_by": "meta",
-      "providers": 10,
+      "providers": 1,
+      "throughput": 50,
+      "capabilities": [
+        "text"
+      ],
+      "pricing": {
+        "input": 0.09087,
+        "output": 0.09087,
+        "unit": "per_million_tokens"
+      }
+    },
+    {
+      "id": "meta-llama/llama-3.1-8b-instruct",
+      "object": "model",
+      "created": 1774082760318,
+      "owned_by": "meta",
+      "providers": 1,
+      "throughput": 50,
+      "capabilities": [
+        "text",
+        "tool_calling"
+      ],
+      "pricing": {
+        "input": 0.010385,
+        "output": 0.025963,
+        "unit": "per_million_tokens"
+      }
+    },
+    {
+      "id": "meta-llama/llama-3.1-70b-instruct",
+      "object": "model",
+      "created": 1774082760318,
+      "owned_by": "meta",
+      "providers": 1,
+      "throughput": 50,
+      "capabilities": [
+        "text",
+        "tool_calling"
+      ],
+      "pricing": {
+        "input": 0.018174,
+        "output": 0.018174,
+        "unit": "per_million_tokens"
+      }
+    },
+    {
+      "id": "mistralai/mistral-nemo",
+      "object": "model",
+      "created": 1774082760318,
+      "owned_by": "mistral.ai",
+      "providers": 1,
+      "throughput": 50,
+      "capabilities": [
+        "text",
+        "tool_calling"
+      ],
+      "pricing": {
+        "input": 0.012116,
+        "output": 0.024232,
+        "unit": "per_million_tokens"
+      }
+    },
+    {
+      "id": "openai/gpt-4o-mini-2024-07-18",
+      "object": "model",
+      "created": 1774082760318,
+      "owned_by": "openai",
+      "providers": 1,
+      "throughput": 50,
+      "capabilities": [
+        "text",
+        "image_input",
+        "tool_calling"
+      ],
+      "pricing": {
+        "input": 0.00727,
+        "output": 0.029078,
+        "unit": "per_million_tokens"
+      }
+    },
+    {
+      "id": "openai/gpt-4o-mini",
+      "object": "model",
+      "created": 1774082760318,
+      "owned_by": "openai",
+      "providers": 1,
+      "throughput": 50,
+      "capabilities": [
+        "text",
+        "image_input",
+        "tool_calling"
+      ],
+      "pricing": {
+        "input": 0.00727,
+        "output": 0.029078,
+        "unit": "per_million_tokens"
+      }
+    },
+    {
+      "id": "google/gemma-2-27b-it",
+      "object": "model",
+      "created": 1774082760318,
+      "owned_by": "google",
+      "providers": 1,
+      "throughput": 50,
+      "capabilities": [
+        "text"
+      ],
+      "pricing": {
+        "input": 0.022718,
+        "output": 0.022718,
+        "unit": "per_million_tokens"
+      }
+    },
+    {
+      "id": "google/gemma-2-9b-it",
+      "object": "model",
+      "created": 1774082760318,
+      "owned_by": "google",
+      "providers": 1,
+      "throughput": 50,
+      "capabilities": [
+        "text"
+      ],
+      "pricing": {
+        "input": 0.009087,
+        "output": 0.027261,
+        "unit": "per_million_tokens"
+      }
+    },
+    {
+      "id": "sao10k/l3-euryale-70b",
+      "object": "model",
+      "created": 1774082760318,
+      "owned_by": "sao10k",
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -8617,148 +8613,11 @@
       }
     },
     {
-      "id": "meta-llama/llama-3.1-8b-instruct",
-      "object": "model",
-      "created": 1774079535301,
-      "owned_by": "meta",
-      "providers": 10,
-      "throughput": 50,
-      "capabilities": [
-        "text",
-        "tool_calling"
-      ],
-      "pricing": {
-        "input": 0.018174,
-        "output": 0.018174,
-        "unit": "per_million_tokens"
-      }
-    },
-    {
-      "id": "meta-llama/llama-3.1-70b-instruct",
-      "object": "model",
-      "created": 1774079535301,
-      "owned_by": "meta",
-      "providers": 10,
-      "throughput": 50,
-      "capabilities": [
-        "text",
-        "tool_calling"
-      ],
-      "pricing": {
-        "input": 0.016962,
-        "output": 0.019386,
-        "unit": "per_million_tokens"
-      }
-    },
-    {
-      "id": "mistralai/mistral-nemo",
-      "object": "model",
-      "created": 1774079535301,
-      "owned_by": "mistral.ai",
-      "providers": 10,
-      "throughput": 50,
-      "capabilities": [
-        "text",
-        "tool_calling"
-      ],
-      "pricing": {
-        "input": 0.018174,
-        "output": 0.018174,
-        "unit": "per_million_tokens"
-      }
-    },
-    {
-      "id": "openai/gpt-4o-mini-2024-07-18",
-      "object": "model",
-      "created": 1774079535301,
-      "owned_by": "openai",
-      "providers": 10,
-      "throughput": 50,
-      "capabilities": [
-        "text",
-        "image_input",
-        "tool_calling"
-      ],
-      "pricing": {
-        "input": 0.00727,
-        "output": 0.029078,
-        "per_image": 0.00137275,
-        "unit": "per_million_tokens"
-      }
-    },
-    {
-      "id": "openai/gpt-4o-mini",
-      "object": "model",
-      "created": 1774079535301,
-      "owned_by": "openai",
-      "providers": 10,
-      "throughput": 50,
-      "capabilities": [
-        "text",
-        "image_input",
-        "tool_calling"
-      ],
-      "pricing": {
-        "input": 0.00727,
-        "output": 0.029078,
-        "per_image": 0.00137275,
-        "unit": "per_million_tokens"
-      }
-    },
-    {
-      "id": "google/gemma-2-27b-it",
-      "object": "model",
-      "created": 1774079535301,
-      "owned_by": "google",
-      "providers": 10,
-      "throughput": 50,
-      "capabilities": [
-        "text"
-      ],
-      "pricing": {
-        "input": 0.018174,
-        "output": 0.018174,
-        "unit": "per_million_tokens"
-      }
-    },
-    {
-      "id": "google/gemma-2-9b-it",
-      "object": "model",
-      "created": 1774079535301,
-      "owned_by": "google",
-      "providers": 10,
-      "throughput": 50,
-      "capabilities": [
-        "text"
-      ],
-      "pricing": {
-        "input": 0.018174,
-        "output": 0.018174,
-        "unit": "per_million_tokens"
-      }
-    },
-    {
-      "id": "sao10k/l3-euryale-70b",
-      "object": "model",
-      "created": 1774079535301,
-      "owned_by": "sao10k",
-      "providers": 10,
-      "throughput": 50,
-      "capabilities": [
-        "text"
-      ],
-      "pricing": {
-        "input": 0.016962,
-        "output": 0.019386,
-        "unit": "per_million_tokens"
-      }
-    },
-    {
       "id": "nousresearch/hermes-2-pro-llama-3-8b",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760318,
       "owned_by": "nous",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -8772,9 +8631,9 @@
     {
       "id": "openai/gpt-4o-2024-05-13",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760318,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -8784,16 +8643,15 @@
       "pricing": {
         "input": 0.09087,
         "output": 0.27261,
-        "per_image": 0.00137275,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "openai/gpt-4o",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760318,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -8803,16 +8661,16 @@
       "pricing": {
         "input": 0.036348,
         "output": 0.145392,
-        "per_image": 0.00068637,
+        "image_input": 0.0003826,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "openai/gpt-4o:extended",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760318,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -8821,52 +8679,67 @@
       "pricing": {
         "input": 0.09087,
         "output": 0.27261,
-        "per_image": 0.00137275,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "meta-llama/llama-3-70b-instruct",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760318,
       "owned_by": "meta",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
       ],
       "pricing": {
-        "input": 0.016962,
-        "output": 0.019386,
+        "input": 0.018537,
+        "output": 0.026898,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "meta-llama/llama-3-8b-instruct",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760318,
       "owned_by": "meta",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
       ],
       "pricing": {
-        "input": 0.018174,
-        "output": 0.018174,
+        "input": 0.015578,
+        "output": 0.02077,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "mistralai/mixtral-8x22b-instruct",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760318,
       "owned_by": "mistral.ai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
         "tool_calling"
+      ],
+      "pricing": {
+        "input": 0.045435,
+        "output": 0.136305,
+        "unit": "per_million_tokens"
+      }
+    },
+    {
+      "id": "microsoft/wizardlm-2-8x22b",
+      "object": "model",
+      "created": 1774082760318,
+      "owned_by": "microsoft",
+      "providers": 1,
+      "throughput": 50,
+      "capabilities": [
+        "text"
       ],
       "pricing": {
         "input": 0.022718,
@@ -8875,45 +8748,28 @@
       }
     },
     {
-      "id": "microsoft/wizardlm-2-8x22b",
-      "object": "model",
-      "created": 1774079535301,
-      "owned_by": "microsoft",
-      "providers": 10,
-      "throughput": 50,
-      "capabilities": [
-        "text"
-      ],
-      "pricing": {
-        "input": 0.018174,
-        "output": 0.018174,
-        "unit": "per_million_tokens"
-      }
-    },
-    {
       "id": "openai/gpt-4-turbo",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760318,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.09087,
-        "output": 0.27261,
-        "per_image": 0.0027455,
+        "input": 0.189313,
+        "output": 0.567938,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "anthropic/claude-3-haiku",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760318,
       "owned_by": "anthropic",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -8923,16 +8779,15 @@
       "pricing": {
         "input": 0.007573,
         "output": 0.037863,
-        "per_image": 0.000076,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "mistralai/mistral-large",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760318,
       "owned_by": "mistral.ai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -8947,76 +8802,76 @@
     {
       "id": "openai/gpt-3.5-turbo-0613",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760318,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.025242,
-        "output": 0.050483,
+        "input": 0.018931,
+        "output": 0.056794,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "openai/gpt-4-turbo-preview",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760318,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.09087,
-        "output": 0.27261,
+        "input": 0.189313,
+        "output": 0.567938,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "mistralai/mixtral-8x7b-instruct",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760318,
       "owned_by": "mistral.ai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.018174,
-        "output": 0.018174,
+        "input": 0.022718,
+        "output": 0.022718,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "alpindale/goliath-120b",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760318,
       "owned_by": "alpindale",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
       ],
       "pricing": {
-        "input": 0.18174,
-        "output": 0.18174,
+        "input": 0.06058,
+        "output": 0.12116,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "openrouter/auto",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760318,
       "owned_by": "openrouter",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -9034,26 +8889,26 @@
     {
       "id": "openai/gpt-4-1106-preview",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760318,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.09087,
-        "output": 0.27261,
+        "input": 0.189313,
+        "output": 0.567938,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "openai/gpt-3.5-turbo-instruct",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760318,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "pricing": {
         "input": 0.032454,
@@ -9064,25 +8919,25 @@
     {
       "id": "mistralai/mistral-7b-instruct-v0.1",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760318,
       "owned_by": "mistral.ai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
       ],
       "pricing": {
-        "input": 0.018174,
-        "output": 0.018174,
+        "input": 0.013328,
+        "output": 0.02302,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "openai/gpt-3.5-turbo-16k",
       "object": "model",
-      "created": 1774079535301,
+      "created": 1774082760318,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -9097,41 +8952,41 @@
     {
       "id": "mancer/weaver",
       "object": "model",
-      "created": 1774079535302,
+      "created": 1774082760318,
       "owned_by": "mancer",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
       ],
       "pricing": {
-        "input": 0.03442,
-        "output": 0.041305,
+        "input": 0.019472,
+        "output": 0.025963,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "undi95/remm-slerp-l2-13b",
       "object": "model",
-      "created": 1774079535302,
+      "created": 1774082760318,
       "owned_by": "undi95",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
       ],
       "pricing": {
-        "input": 0.037863,
-        "output": 0.037863,
+        "input": 0.018587,
+        "output": 0.026848,
         "unit": "per_million_tokens"
       }
     },
     {
       "id": "gryphe/mythomax-l2-13b",
       "object": "model",
-      "created": 1774079535302,
+      "created": 1774082760318,
       "owned_by": "gryphe",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -9145,9 +9000,9 @@
     {
       "id": "openai/gpt-4-0314",
       "object": "model",
-      "created": 1774079535302,
+      "created": 1774082760318,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text"
@@ -9161,9 +9016,9 @@
     {
       "id": "openai/gpt-4",
       "object": "model",
-      "created": 1774079535302,
+      "created": 1774082760318,
       "owned_by": "openai",
-      "providers": 10,
+      "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
@@ -9178,293 +9033,119 @@
     {
       "id": "openai/gpt-3.5-turbo",
       "object": "model",
-      "created": 1774079535302,
+      "created": 1774082760318,
       "owned_by": "openai",
-      "providers": 10,
-      "throughput": 50,
-      "capabilities": [
-        "text",
-        "tool_calling"
-      ],
-      "pricing": {
-        "input": 0.011359,
-        "output": 0.034076,
-        "unit": "per_million_tokens"
-      }
-    },
-    {
-      "id": "grok-3",
-      "object": "model",
-      "created": 1774079535302,
-      "owned_by": "xai",
       "providers": 1,
       "throughput": 50,
       "capabilities": [
         "text",
-        "image_output",
-        "audio_input",
-        "audio_output",
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.07456,
-        "output": 0.3728,
+        "input": 0.018931,
+        "output": 0.056794,
         "unit": "per_million_tokens"
       }
     },
     {
-      "id": "grok-3-mini",
+      "id": "gpt-5-nano",
       "object": "model",
-      "created": 1774079535302,
-      "owned_by": "xai",
-      "providers": 1,
-      "throughput": 4,
-      "capabilities": [
-        "text",
-        "image_output",
-        "audio_input",
-        "audio_output",
-        "tool_calling"
-      ],
-      "pricing": {
-        "input": 0.016776,
-        "output": 0.02796,
-        "unit": "per_million_tokens"
-      }
-    },
-    {
-      "id": "grok-4-0709",
-      "object": "model",
-      "created": 1774079535302,
-      "owned_by": "xai",
-      "providers": 1,
+      "created": 1774127781902,
+      "owned_by": "openai",
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
         "image_input",
-        "image_output",
-        "audio_input",
-        "audio_output",
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.11184,
-        "output": 0.33552,
+        "input": 0.00671,
+        "output": 0.026842,
         "unit": "per_million_tokens"
       }
     },
     {
-      "id": "grok-4-1-fast-non-reasoning",
+      "id": "nvidia/llama-3.1-nemotron-ultra-253b-v1",
       "object": "model",
-      "created": 1774079535302,
-      "owned_by": "xai",
+      "created": 1774134211012,
+      "owned_by": "nvidia",
       "providers": 1,
+      "throughput": 50,
+      "capabilities": [
+        "text"
+      ],
+      "pricing": {
+        "input": 0.018931,
+        "output": 0.056794,
+        "unit": "per_million_tokens"
+      }
+    },
+    {
+      "id": "gpt-4-0314",
+      "object": "model",
+      "created": 1774151022888,
+      "owned_by": "openai",
+      "providers": 2,
+      "throughput": 50,
+      "capabilities": [
+        "text"
+      ],
+      "pricing": {
+        "input": 0.29125,
+        "output": 0.5825,
+        "unit": "per_million_tokens"
+      }
+    },
+    {
+      "id": "gpt-5",
+      "object": "model",
+      "created": 1774204739614,
+      "owned_by": "openai",
+      "providers": 66,
       "throughput": 50,
       "capabilities": [
         "text",
         "image_input",
-        "image_output",
-        "audio_input",
-        "audio_output",
         "tool_calling"
       ],
       "pricing": {
-        "input": 0.07456,
-        "output": 0.3728,
+        "input": 0.067104,
+        "output": 0.268416,
         "unit": "per_million_tokens"
       }
     },
     {
-      "id": "grok-4-1-fast-reasoning",
+      "id": "dall-e-3",
       "object": "model",
-      "created": 1774079535302,
-      "owned_by": "xai",
-      "providers": 1,
-      "throughput": 50,
-      "capabilities": [
-        "text",
-        "image_input",
-        "image_output",
-        "audio_input",
-        "audio_output",
-        "tool_calling"
-      ],
-      "pricing": {
-        "input": 0.07456,
-        "output": 0.3728,
-        "unit": "per_million_tokens"
-      }
-    },
-    {
-      "id": "grok-4-fast-non-reasoning",
-      "object": "model",
-      "created": 1774079535302,
-      "owned_by": "xai",
-      "providers": 1,
-      "throughput": 50,
-      "capabilities": [
-        "text",
-        "image_input",
-        "image_output",
-        "audio_input",
-        "audio_output",
-        "tool_calling"
-      ],
-      "pricing": {
-        "input": 0.07456,
-        "output": 0.3728,
-        "unit": "per_million_tokens"
-      }
-    },
-    {
-      "id": "grok-4-fast-reasoning",
-      "object": "model",
-      "created": 1774079535302,
-      "owned_by": "xai",
-      "providers": 1,
-      "throughput": 50,
-      "capabilities": [
-        "text",
-        "image_input",
-        "image_output",
-        "audio_input",
-        "audio_output",
-        "tool_calling"
-      ],
-      "pricing": {
-        "input": 0.07456,
-        "output": 0.3728,
-        "unit": "per_million_tokens"
-      }
-    },
-    {
-      "id": "grok-4.20-0309-non-reasoning",
-      "object": "model",
-      "created": 1774079535302,
-      "owned_by": "xai",
-      "providers": 1,
-      "throughput": 50,
-      "capabilities": [
-        "text",
-        "image_input",
-        "image_output",
-        "audio_output",
-        "tool_calling"
-      ],
-      "pricing": {
-        "input": 0,
-        "output": 0,
-        "unit": "per_million_tokens"
-      }
-    },
-    {
-      "id": "grok-4.20-0309-reasoning",
-      "object": "model",
-      "created": 1774079535302,
-      "owned_by": "xai",
-      "providers": 1,
-      "throughput": 50,
-      "capabilities": [
-        "text",
-        "image_input",
-        "image_output",
-        "audio_output",
-        "tool_calling"
-      ],
-      "pricing": {
-        "input": 0,
-        "output": 0,
-        "unit": "per_million_tokens"
-      }
-    },
-    {
-      "id": "grok-4.20-multi-agent-0309",
-      "object": "model",
-      "created": 1774079535302,
-      "owned_by": "xai",
-      "providers": 1,
-      "throughput": 50,
-      "capabilities": [
-        "text",
-        "image_input",
-        "image_output",
-        "audio_output"
-      ],
-      "pricing": {
-        "input": 0,
-        "output": 0,
-        "unit": "per_million_tokens"
-      }
-    },
-    {
-      "id": "grok-code-fast-1",
-      "object": "model",
-      "created": 1774079535302,
-      "owned_by": "xai",
-      "providers": 1,
-      "throughput": 50,
-      "capabilities": [
-        "text",
-        "image_output",
-        "audio_input",
-        "audio_output",
-        "tool_calling"
-      ],
-      "pricing": {
-        "input": 0.01864,
-        "output": 0.07456,
-        "unit": "per_million_tokens"
-      }
-    },
-    {
-      "id": "grok-imagine-image",
-      "object": "model",
-      "created": 1774079535302,
-      "owned_by": "xai",
-      "providers": 1,
+      "created": 1774232840395,
+      "owned_by": "openai",
+      "providers": 112,
       "throughput": 50,
       "capabilities": [
         "text",
         "image_output"
       ],
       "pricing": {
-        "per_image": 0.014,
+        "per_image": 0.008,
         "input": 0,
         "output": 0,
         "unit": "per_million_tokens"
       }
     },
     {
-      "id": "grok-imagine-image-pro",
+      "id": "dall-e-2",
       "object": "model",
-      "created": 1774079535302,
-      "owned_by": "xai",
-      "providers": 1,
+      "created": 1774232840396,
+      "owned_by": "openai",
+      "providers": 114,
       "throughput": 50,
       "capabilities": [
         "text",
         "image_output"
       ],
       "pricing": {
-        "per_image": 0.028,
-        "input": 0,
-        "output": 0,
-        "unit": "per_million_tokens"
-      }
-    },
-    {
-      "id": "grok-imagine-video",
-      "object": "model",
-      "created": 1774079535302,
-      "owned_by": "xai",
-      "providers": 1,
-      "throughput": 50,
-      "capabilities": [
-        "text",
-        "image_output"
-      ],
-      "pricing": {
-        "per_request": 0.1,
+        "per_image": 0.004,
         "input": 0,
         "output": 0,
         "unit": "per_million_tokens"
