@@ -9,6 +9,7 @@ import {
 } from '../modules/userData.js';
 import { RequestTimestampStore } from '../modules/rateLimit.js';
 import { runAuthMiddleware, runRateLimitMiddleware, extractBearerToken } from '../modules/middlewareFactory.js';
+import { buildModelAccessError, isModelAllowedForTier } from '../modules/planAccess.js';
 
 dotenv.config();
 
@@ -79,6 +80,10 @@ router.post('/v5/api/chat', authAndUsageMiddleware, rateLimitMiddleware, async (
              return response.status(400).json({ error: 'Missing or invalid \'messages\' array.' });
         }
         const modelId = requestBody.model;
+        if (!isModelAllowedForTier(modelId, request.tierLimits)) {
+             const errDetail = buildModelAccessError(modelId, request.tierLimits);
+             return response.status(errDetail.statusCode).json({ error: errDetail });
+        }
         
         // --- Map to internal format ---
         const formattedMessages: IMessage[] = requestBody.messages.map((msg: any) => ({

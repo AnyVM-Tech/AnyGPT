@@ -109,9 +109,12 @@ const PROVIDER_FAMILY_RAW = providerFamilyArg
 const MODEL_FILTERS = parseList(MODEL_FILTER_RAW);
 const PROVIDER_FILTERS = parseList(PROVIDER_FILTER_RAW);
 const PROVIDER_FAMILIES = parseList(PROVIDER_FAMILY_RAW);
-
-const PROBE_LOG_PATH = path.resolve('logs', 'probe-errors.jsonl');
-const PROBE_TESTED_PATH = path.resolve('logs', 'probe-tested.json');
+const configuredLogDirectory = (process.env.ANYGPT_LOG_DIR || '').trim();
+const LOG_DIRECTORY = configuredLogDirectory
+  ? path.resolve(configuredLogDirectory)
+  : path.resolve('logs');
+const PROBE_LOG_PATH = path.join(LOG_DIRECTORY, 'probe-errors.jsonl');
+const PROBE_TESTED_PATH = path.join(LOG_DIRECTORY, 'probe-tested.json');
 
 type EndpointHint = 'chat' | 'responses' | 'interactions';
 type CapabilitySkipMap = Partial<Record<ModelCapability, string>>;

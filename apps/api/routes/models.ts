@@ -3,6 +3,8 @@ import { dataManager, ModelsFileStructure } from '../modules/dataManager.js'; //
 import { logError } from '../modules/errorLogger.js'; // Changed import
 import { enforceInMemoryRateLimit, RequestTimestampStore } from '../modules/rateLimit.js';
 import { extractBearerToken, readTierRateLimitsFromEnv, runAuthMiddleware, runIpRateLimitMiddleware } from '../modules/middlewareFactory.js';
+import { validateApiKeyAndUsage } from '../modules/userData.js';
+import { buildPublicPlanPayload, filterModelsForTier } from '../modules/planAccess.js';
 
 const modelsRouter = new HyperExpress.Router();
 
@@ -105,7 +107,43 @@ if (debugIpRouteEnabled) {
 async function sendModelsResponse(request: any, response: any) {
     try {
         const modelsData = await dataManager.load<ModelsFileStructure>('models');
-        response.json(modelsData);
+        const authHeader = request.headers['authorization'] || request.headers['Authorization'];
+        const bearer = extractBearerToken(typeof authHeader === 'string' ? authHeader : null);
+        const apiKey =
+            bearer
+            || (typeof request.headers['x-api-key'] === 'string' ? request.headers['x-api-key'] : null)
+            || (typeof request.headers['api-key'] === 'string' ? request.headers['api-key'] : null);
+        const includePlan = request.query?.include_plan === '1' || request.query?.includePlan === '1';
+
+        if (!apiKey) {
+            return response.json(modelsData);
+        }
+
+        const validation = await validateApiKeyAndUsage(apiKey);
+        if (!validation.valid || !validation.userData || !validation.tierLimits) {
+            const statusCode = validation.error?.includes('limit reached') ? 429 : 401;
+            return response.status(statusCode).json({
+                error: statusCode === 429 ? 'Rate limit exceeded' : 'Unauthorized',
+                message: validation.error || 'Invalid API key.',
+                timestamp: new Date().toISOString(),
+            });
+        }
+
+        const tierId = validation.userData.tier;
+        const tier = validation.tierLimits;
+        const filtered = filterModelsForTier(modelsData, tier);
+        response.setHeader('Cache-Control', 'private, no-store');
+        response.setHeader('X-AnyGPT-Plan', tierId);
+        response.setHeader('X-AnyGPT-Visible-Models', String(Array.isArray(filtered.data) ? filtered.data.length : 0));
+        if (includePlan) {
+            return response.json({
+                ...filtered,
+                plan: buildPublicPlanPayload(tierId, tier, {
+                    visibleModelCount: Array.isArray(filtered.data) ? filtered.data.length : 0,
+                }),
+            });
+        }
+        response.json(filtered);
     } catch (error) {
         await logError(error, request);
         console.error('Error serving models.json:', error);

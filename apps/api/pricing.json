@@ -638,7 +638,7 @@
       "output": 0,
       "source": "official",
       "updated_at": "2026-03-23T06:57:36.802Z",
-      "per_image": 0.1
+      "per_image": 0.003125
     },
     "sora-2-pro": {
       "input": 0,
@@ -975,28 +975,28 @@
       "output": 0,
       "source": "official",
       "updated_at": "2026-03-23T06:57:36.802Z",
-      "per_request": 0.5
+      "per_image": 0.0625
     },
     "veo-3.0-fast-generate-001": {
       "input": 0,
       "output": 0,
       "source": "official",
       "updated_at": "2026-03-23T06:57:36.802Z",
-      "per_request": 0.25
+      "per_image": 0.03125
     },
     "veo-3.1-generate-preview": {
       "input": 0,
       "output": 0,
       "source": "official",
       "updated_at": "2026-03-23T06:57:36.802Z",
-      "per_request": 0.5
+      "per_image": 0.0625
     },
     "veo-3.1-fast-generate-preview": {
       "input": 0,
       "output": 0,
       "source": "official",
       "updated_at": "2026-03-23T06:57:36.802Z",
-      "per_request": 0.25
+      "per_image": 0.03125
     },
     "gemini-2.5-flash-native-audio-latest": {
       "input": 0.15,

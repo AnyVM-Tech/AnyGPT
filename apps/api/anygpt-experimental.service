@@ -4,16 +4,17 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/home/skullcmd/AnyGPT/apps/api
+WorkingDirectory=%h/AnyGPT/apps/api
 Environment=NODE_ENV=experimental
 Environment=API_DIST_DIR=dist/experimental
 Environment=PORT=3310
 Environment=CLUSTER_WORKERS=1
 Environment=PORT_RETRY_COUNT=0
-ExecStartPre=/usr/bin/bash -lc '/home/skullcmd/AnyGPT/apps/api/dev/cleanupExperimentalPort.sh 3310'
-ExecStartPre=/usr/bin/bash -lc '/home/skullcmd/.bun/bin/bun run build:experimental'
-ExecStart=/usr/bin/bash -lc '/home/skullcmd/.bun/bin/bun run start:experimental'
+ExecStartPre=/usr/bin/bash -c './dev/cleanupExperimentalPort.sh 3310'
+ExecStartPre=/usr/bin/bash -c '../../bun.sh run build:experimental'
+ExecStart=/usr/bin/bash -c '../../bun.sh run start:experimental'
 Restart=always
+RestartPreventExitStatus=75
 RestartSec=5
 User=skullcmd
 

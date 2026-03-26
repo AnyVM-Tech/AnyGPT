@@ -107,6 +107,11 @@ export interface LoadedProviderData {
     avg_provider_latency: number | null;
     errors: number;
     provider_score: number | null;
+    lastError?: string;
+    lastErrorCode?: string;
+    lastStatus?: number | null;
+    lastErrorAt?: number;
+    disabled_reason?: string;
 }
 // FIX: Add export
 export type LoadedProviders = LoadedProviderData[];
@@ -117,9 +122,16 @@ export interface UserData {
     userId: string;
     tokenUsage: number;
     requestCount: number;
+    dailyRequestCount?: number;
+    dailyRequestDate?: string;
     role: 'admin' | 'user';
     tier: string;
     estimatedCost?: number;
+    paidTokenUsage?: number;
+    paidRequestCount?: number;
+    paidEstimatedCost?: number;
+    billingPeriodStartedAt?: string;
+    lastBillingSettlementAt?: string;
 }
 export interface KeysFile { 
     [apiKey: string]: UserData; 
@@ -550,6 +562,37 @@ class DataManager {
             models[modelId] = this.normalizeProviderModelData(modelData as Partial<ProviderModelData>, modelId);
         }
 
+        const lastErrorRaw = typeof (raw as any)?.lastError === 'string'
+            ? (raw as any).lastError
+            : (typeof (raw as any)?.last_error === 'string' ? (raw as any).last_error : undefined);
+        const lastError = typeof lastErrorRaw === 'string' && lastErrorRaw.trim().length > 0
+            ? lastErrorRaw.slice(0, 4000)
+            : undefined;
+        const lastErrorCodeRaw = typeof (raw as any)?.lastErrorCode === 'string'
+            ? (raw as any).lastErrorCode
+            : (typeof (raw as any)?.last_error_code === 'string' ? (raw as any).last_error_code : undefined);
+        const lastErrorCode = typeof lastErrorCodeRaw === 'string' && lastErrorCodeRaw.trim().length > 0
+            ? lastErrorCodeRaw.slice(0, 200)
+            : undefined;
+        const lastStatusRaw = typeof (raw as any)?.lastStatus === 'number'
+            ? (raw as any).lastStatus
+            : (typeof (raw as any)?.last_status === 'number' ? (raw as any).last_status : null);
+        const lastStatus = typeof lastStatusRaw === 'number' && Number.isFinite(lastStatusRaw) && lastStatusRaw > 0
+            ? Math.floor(lastStatusRaw)
+            : null;
+        const lastErrorAtRaw = typeof (raw as any)?.lastErrorAt === 'number'
+            ? (raw as any).lastErrorAt
+            : (typeof (raw as any)?.last_error_at === 'number' ? (raw as any).last_error_at : undefined);
+        const lastErrorAt = typeof lastErrorAtRaw === 'number' && Number.isFinite(lastErrorAtRaw) && lastErrorAtRaw > 0
+            ? Math.floor(lastErrorAtRaw)
+            : undefined;
+        const disabledReasonRaw = typeof (raw as any)?.disabled_reason === 'string'
+            ? (raw as any).disabled_reason
+            : (typeof (raw as any)?.disabledReason === 'string' ? (raw as any).disabledReason : undefined);
+        const disabled_reason = typeof disabledReasonRaw === 'string' && disabledReasonRaw.trim().length > 0
+            ? disabledReasonRaw.slice(0, 4000)
+            : undefined;
+
         return {
             id: typeof raw?.id === 'string' && raw.id ? raw.id : providerId,
             apiKey: typeof raw?.apiKey === 'string' ? raw.apiKey : null,
@@ -562,6 +605,11 @@ class DataManager {
             avg_provider_latency: typeof raw?.avg_provider_latency === 'number' ? raw.avg_provider_latency : null,
             errors: typeof raw?.errors === 'number' && !Number.isNaN(raw.errors) ? Math.max(0, raw.errors) : 0,
             provider_score: typeof raw?.provider_score === 'number' ? raw.provider_score : null,
+            ...(lastError ? { lastError } : {}),
+            ...(lastErrorCode ? { lastErrorCode } : {}),
+            ...(lastStatus !== null ? { lastStatus } : {}),
+            ...(lastErrorAt !== undefined ? { lastErrorAt } : {}),
+            ...(disabled_reason ? { disabled_reason } : {}),
         };
     }
 
@@ -587,6 +635,11 @@ class DataManager {
             const hasFilesystemProvider = fsMap.has(providerId);
             const baseFs = this.normalizeProviderData(fsProvider, providerId);
             const baseRedis = this.normalizeProviderData(redisProvider, providerId);
+            const fsLastErrorAt = typeof baseFs.lastErrorAt === 'number' ? baseFs.lastErrorAt : 0;
+            const redisLastErrorAt = typeof baseRedis.lastErrorAt === 'number' ? baseRedis.lastErrorAt : 0;
+            const latestErrorSource = redisLastErrorAt >= fsLastErrorAt ? baseRedis : baseFs;
+            const fallbackErrorSource = latestErrorSource === baseRedis ? baseFs : baseRedis;
+            const mergedLastErrorAt = Math.max(fsLastErrorAt, redisLastErrorAt) || undefined;
 
             const modelIds = new Set<string>([
                 ...Object.keys(baseFs.models || {}),
@@ -609,6 +662,20 @@ class DataManager {
                 avg_provider_latency: baseRedis.avg_provider_latency ?? baseFs.avg_provider_latency,
                 errors: Math.max(baseFs.errors || 0, baseRedis.errors || 0),
                 provider_score: baseRedis.provider_score ?? baseFs.provider_score,
+                ...((latestErrorSource.lastError || fallbackErrorSource.lastError)
+                    ? { lastError: latestErrorSource.lastError || fallbackErrorSource.lastError }
+                    : {}),
+                ...((latestErrorSource.lastErrorCode || fallbackErrorSource.lastErrorCode)
+                    ? { lastErrorCode: latestErrorSource.lastErrorCode || fallbackErrorSource.lastErrorCode }
+                    : {}),
+                ...(((latestErrorSource.lastStatus ?? fallbackErrorSource.lastStatus) !== null
+                    && (latestErrorSource.lastStatus ?? fallbackErrorSource.lastStatus) !== undefined)
+                    ? { lastStatus: latestErrorSource.lastStatus ?? fallbackErrorSource.lastStatus }
+                    : {}),
+                ...(mergedLastErrorAt !== undefined ? { lastErrorAt: mergedLastErrorAt } : {}),
+                ...((baseRedis.disabled_reason || baseFs.disabled_reason)
+                    ? { disabled_reason: baseRedis.disabled_reason || baseFs.disabled_reason }
+                    : {}),
             });
         }
 
@@ -739,6 +806,23 @@ class DataManager {
     private normalizeKeysSchema(keys: KeysFile): { normalized: KeysFile; changed: boolean } {
         let changed = false;
         const normalized: KeysFile = {};
+        const nowIso = new Date().toISOString();
+        const nowDayBucket = nowIso.slice(0, 10);
+        const isValidTimestamp = (value: unknown): value is string =>
+            typeof value === 'string' && value.trim().length > 0 && Number.isFinite(Date.parse(value));
+        const isValidDayBucket = (value: unknown): value is string =>
+            typeof value === 'string'
+            && /^\d{4}-\d{2}-\d{2}$/.test(value)
+            && Number.isFinite(Date.parse(`${value}T00:00:00.000Z`));
+        const normalizeCounter = (value: unknown): number => {
+            const num = typeof value === 'number' ? value : Number(value);
+            return Number.isFinite(num) && num >= 0 ? Math.floor(num) : 0;
+        };
+        const normalizeCost = (value: unknown): number => {
+            const num = typeof value === 'number' ? value : Number(value);
+            if (!Number.isFinite(num) || num < 0) return 0;
+            return Math.round(num * 1_000_000) / 1_000_000;
+        };
 
         for (const [apiKey, rawUser] of Object.entries(keys || {})) {
             const user = { ...(rawUser as any) };
@@ -753,6 +837,25 @@ class DataManager {
                 changed = true;
             }
 
+            if (typeof user.dailyRequestCount !== 'undefined') {
+                const normalizedDailyRequestCount = normalizeCounter(user.dailyRequestCount);
+                if (normalizedDailyRequestCount !== user.dailyRequestCount) {
+                    user.dailyRequestCount = normalizedDailyRequestCount;
+                    changed = true;
+                }
+            }
+
+            if (typeof user.dailyRequestDate !== 'undefined' && !isValidDayBucket(user.dailyRequestDate)) {
+                user.dailyRequestDate = nowDayBucket;
+                user.dailyRequestCount = 0;
+                changed = true;
+            }
+
+            if (typeof user.dailyRequestCount !== 'undefined' && typeof user.dailyRequestDate === 'undefined') {
+                user.dailyRequestDate = nowDayBucket;
+                changed = true;
+            }
+
             if (user.role !== 'admin' && user.role !== 'user') {
                 user.role = 'user';
                 changed = true;
@@ -761,6 +864,79 @@ class DataManager {
             if (typeof user.tier !== 'string' || !user.tier) {
                 user.tier = 'free';
                 changed = true;
+            }
+
+            if (typeof user.estimatedCost !== 'undefined') {
+                const normalizedEstimatedCost = normalizeCost(user.estimatedCost);
+                if (normalizedEstimatedCost !== user.estimatedCost) {
+                    user.estimatedCost = normalizedEstimatedCost;
+                    changed = true;
+                }
+            }
+
+            const totalTokenUsage = normalizeCounter(user.tokenUsage);
+            const totalRequestCount = normalizeCounter(user.requestCount);
+            const totalEstimatedCost = typeof user.estimatedCost === 'number'
+                ? normalizeCost(user.estimatedCost)
+                : 0;
+            const hasExplicitBillingState =
+                typeof user.paidTokenUsage !== 'undefined'
+                || typeof user.paidRequestCount !== 'undefined'
+                || typeof user.paidEstimatedCost !== 'undefined'
+                || typeof user.billingPeriodStartedAt !== 'undefined'
+                || typeof user.lastBillingSettlementAt !== 'undefined';
+
+            if (!hasExplicitBillingState) {
+                // Treat historical totals as already settled so enabling pay-as-you-go
+                // billing does not retroactively mark old usage as unpaid.
+                user.paidTokenUsage = totalTokenUsage;
+                user.paidRequestCount = totalRequestCount;
+                user.paidEstimatedCost = totalEstimatedCost;
+                user.billingPeriodStartedAt = nowIso;
+                user.lastBillingSettlementAt = nowIso;
+                changed = true;
+            } else {
+                const normalizedPaidTokenUsage = Math.min(
+                    totalTokenUsage,
+                    normalizeCounter(user.paidTokenUsage)
+                );
+                if (normalizedPaidTokenUsage !== user.paidTokenUsage) {
+                    user.paidTokenUsage = normalizedPaidTokenUsage;
+                    changed = true;
+                }
+
+                const normalizedPaidRequestCount = Math.min(
+                    totalRequestCount,
+                    normalizeCounter(user.paidRequestCount)
+                );
+                if (normalizedPaidRequestCount !== user.paidRequestCount) {
+                    user.paidRequestCount = normalizedPaidRequestCount;
+                    changed = true;
+                }
+
+                const normalizedPaidEstimatedCost = Math.min(
+                    totalEstimatedCost,
+                    normalizeCost(user.paidEstimatedCost)
+                );
+                if (normalizedPaidEstimatedCost !== user.paidEstimatedCost) {
+                    user.paidEstimatedCost = normalizedPaidEstimatedCost;
+                    changed = true;
+                }
+
+                if (!isValidTimestamp(user.billingPeriodStartedAt)) {
+                    user.billingPeriodStartedAt = isValidTimestamp(user.lastBillingSettlementAt)
+                        ? user.lastBillingSettlementAt
+                        : nowIso;
+                    changed = true;
+                }
+
+                if (
+                    typeof user.lastBillingSettlementAt !== 'undefined'
+                    && !isValidTimestamp(user.lastBillingSettlementAt)
+                ) {
+                    user.lastBillingSettlementAt = user.billingPeriodStartedAt;
+                    changed = true;
+                }
             }
 
             normalized[apiKey] = user as UserData;
@@ -1072,8 +1248,14 @@ class DataManager {
                         currentRaw = await txClient.get(legacyRedisKey);
                     }
 
-                    const currentData = currentRaw ? (JSON.parse(currentRaw) as T) : (defaultEmptyData[dataType] as T);
-                    const updated = await updater(this.cloneData(currentData));
+                    let currentData = currentRaw ? (JSON.parse(currentRaw) as T) : (defaultEmptyData[dataType] as T);
+                    if (dataType === 'keys') {
+                        currentData = this.normalizeKeysSchema(currentData as KeysFile).normalized as T;
+                    }
+                    let updated = await updater(this.cloneData(currentData));
+                    if (dataType === 'keys') {
+                        updated = this.normalizeKeysSchema(updated as KeysFile).normalized as T;
+                    }
 
                     const tx = txClient.multi();
                     tx.hset(redisHashKey, redisField, JSON.stringify(updated));
@@ -1110,7 +1292,10 @@ class DataManager {
         }
 
         const current = await this.load<T>(dataType);
-        const updated = await updater(this.cloneData(current));
+        let updated = await updater(this.cloneData(current));
+        if (dataType === 'keys') {
+            updated = this.normalizeKeysSchema(updated as KeysFile).normalized as T;
+        }
         await this.save<T>(dataType, updated);
         return updated;
     }
@@ -1173,6 +1358,10 @@ class DataManager {
         if (dataType === 'providers' && Array.isArray(data) && data.length === 0) {
             console.error('[DataManager] Refusing to save providers.json because data array is empty. Aborting save to prevent destruction.');
             return;
+        }
+
+        if (dataType === 'keys') {
+            data = this.normalizeKeysSchema(data as KeysFile).normalized as T;
         }
 
         if (dataType === 'keys' && dataSourcePreference === 'redis') {

@@ -27,16 +27,25 @@ import { adminRouter } from './routes/admin.js'; // Import the admin router
 // import { groqRouter } from './routes/groq.js';
 // import { ollamaRouter } from './routes/ollama.js';
 import { logError } from './modules/errorLogger.js'; // Import the logger
-import { initializeHandlerData } from './providers/handler.js';
+import { initializeHandlerData, getProviderStatsQueueSnapshots } from './providers/handler.js';
 import { refreshProviderCountsInModelsFile } from './modules/modelUpdater.js';
 import { validateApiKeyAndUsage, TierData, generateUserApiKey, UserData } from './modules/userData.js'; // For generalAuthMiddleware
 import { extractBearerToken, normalizeApiKey } from './modules/middlewareFactory.js';
 import { dataManager, LoadedProviders, LoadedProviderData } from './modules/dataManager.js'; // Added LoadedProviders and LoadedProviderData
 import { redisReadyPromise } from './modules/db.js'; // Import the redisReadyPromise
 import { startAdminKeySyncScheduler } from './modules/adminKeySync.js';
+import { syncTiersBetweenRedisAndFilesystem } from './modules/tierManager.js';
+import {
+    getLocalInstanceId,
+    isFleetDraining,
+    setFleetLifecycleState,
+    startFleetCoordinator,
+    stopFleetCoordinator,
+} from './modules/fleetCoordinator.js';
+import { getLocalRequestQueueSnapshots } from './modules/requestQueue.js';
 
 // Import Routers
-import openaiRouter from './routes/openai.js';
+import openaiRouter, { getOpenAiAdmissionQueueSnapshots } from './routes/openai.js';
 import anthropicRouter from './routes/anthropic.js';
 import geminiRouter from './routes/gemini.js';
 import groqRouter from './routes/groq.js';
@@ -237,6 +246,89 @@ const MAX_BODY_LENGTH = (() => {
     return 1024 * 1024 * 50;
 })();
 
+const SHUTDOWN_GRACE_MS = (() => {
+    const raw = Number(process.env.SHUTDOWN_GRACE_MS ?? 15_000);
+    if (!Number.isFinite(raw) || raw < 1000) return 15_000;
+    return Math.floor(raw);
+})();
+
+let activeHttpRequests = 0;
+let serverReadyForTraffic = false;
+let shutdownInProgress = false;
+let currentApp: InstanceType<typeof HyperExpress.Server> | null = null;
+let currentBoundPort: number | null = null;
+let signalHandlersRegistered = false;
+
+function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isHealthRoute(pathname: string): boolean {
+    return pathname === '/healthz'
+        || pathname === '/readyz'
+        || pathname === '/livez'
+        || pathname === '/api/healthz'
+        || pathname === '/api/readyz'
+        || pathname === '/api/livez';
+}
+
+function getFleetQueueSnapshots(): Array<Record<string, unknown>> {
+    return [
+        ...getLocalRequestQueueSnapshots(),
+        ...getOpenAiAdmissionQueueSnapshots(),
+        ...getProviderStatsQueueSnapshots().map((snapshot, index) => ({
+            lane: `provider-stats-${index + 1}`,
+            ...snapshot,
+        })),
+    ];
+}
+
+function buildServerStatusPayload() {
+    return {
+        instanceId: getLocalInstanceId(),
+        port: currentBoundPort,
+        ready: serverReadyForTraffic && !shutdownInProgress,
+        draining: isFleetDraining() || shutdownInProgress,
+        activeRequests: activeHttpRequests,
+        uptimeSeconds: Math.floor(process.uptime()),
+        timestamp: new Date().toISOString(),
+    };
+}
+
+async function initiateShutdown(signal: NodeJS.Signals): Promise<void> {
+    if (shutdownInProgress) return;
+    shutdownInProgress = true;
+    serverReadyForTraffic = false;
+    setFleetLifecycleState('draining', {
+        drainingReason: `signal:${signal}`,
+    });
+
+    const shutdownDeadline = Date.now() + SHUTDOWN_GRACE_MS;
+    while (activeHttpRequests > 0 && Date.now() < shutdownDeadline) {
+        await sleep(200);
+    }
+
+    try {
+        currentApp?.stop();
+    } catch {
+        // Ignore stop errors during shutdown.
+    }
+
+    await stopFleetCoordinator(true);
+    process.exit(0);
+}
+
+function registerSignalHandlers(): void {
+    if (signalHandlersRegistered) return;
+    signalHandlersRegistered = true;
+    process.on('SIGINT', () => {
+        void initiateShutdown('SIGINT');
+    });
+    process.on('SIGTERM', () => {
+        void initiateShutdown('SIGTERM');
+    });
+}
+
 async function startServer() {
     console.log('Starting API server...');
 
@@ -249,6 +341,7 @@ async function startServer() {
         await dataManager.runStartupRedisMigration();
         await dataManager.syncKeysBetweenRedisAndFilesystem();
         await dataManager.syncProvidersBetweenRedisAndFilesystem();
+        await syncTiersBetweenRedisAndFilesystem();
         await dataManager.waitForRedisReadyAndBackfill();
     };
 
@@ -278,6 +371,76 @@ async function startServer() {
         idle_timeout: Number.isFinite(Number(process.env.BUN_IDLE_TIMEOUT_SECONDS))
             ? Math.max(0, Math.floor(Number(process.env.BUN_IDLE_TIMEOUT_SECONDS)))
             : 120
+    });
+    currentApp = app;
+    registerSignalHandlers();
+
+    app.get('/healthz', async (_request: Request, response: Response) => {
+        response.status(200).json({
+            ok: true,
+            ...buildServerStatusPayload(),
+        });
+    });
+    app.get('/livez', async (_request: Request, response: Response) => {
+        response.status(200).json({
+            ok: true,
+            ...buildServerStatusPayload(),
+        });
+    });
+    app.get('/readyz', async (_request: Request, response: Response) => {
+        const status = buildServerStatusPayload();
+        response.status(status.ready ? 200 : 503).json({
+            ok: status.ready,
+            ...status,
+        });
+    });
+    app.get('/api/healthz', async (_request: Request, response: Response) => {
+        response.status(200).json({
+            ok: true,
+            ...buildServerStatusPayload(),
+        });
+    });
+    app.get('/api/livez', async (_request: Request, response: Response) => {
+        response.status(200).json({
+            ok: true,
+            ...buildServerStatusPayload(),
+        });
+    });
+    app.get('/api/readyz', async (_request: Request, response: Response) => {
+        const status = buildServerStatusPayload();
+        response.status(status.ready ? 200 : 503).json({
+            ok: status.ready,
+            ...status,
+        });
+    });
+
+    app.use(async (request: Request, response: Response, next: () => Promise<void>) => {
+        response.setHeader('X-AnyGPT-Instance-Id', getLocalInstanceId());
+        const healthRoute = isHealthRoute(request.path);
+
+        if ((shutdownInProgress || isFleetDraining()) && !healthRoute) {
+            response.setHeader('Retry-After', String(Math.max(1, Math.ceil(SHUTDOWN_GRACE_MS / 1000))));
+            if (!response.completed) {
+                return response.status(503).json({
+                    error: 'Service Unavailable',
+                    message: 'This API instance is draining for restart. Retry shortly.',
+                    ...buildServerStatusPayload(),
+                });
+            }
+            return;
+        }
+
+        if (healthRoute) {
+            await next();
+            return;
+        }
+
+        activeHttpRequests += 1;
+        try {
+            await next();
+        } finally {
+            activeHttpRequests = Math.max(0, activeHttpRequests - 1);
+        }
     });
 
     // Ensure JSON files and initial admin key are set up AFTER Redis check
@@ -468,6 +631,20 @@ async function startServer() {
     if (boundPort === null) {
         process.exit(1);
     }
+
+    currentBoundPort = boundPort;
+    startFleetCoordinator(() => ({
+        port: currentBoundPort,
+        activeRequests: activeHttpRequests,
+        queueSnapshots: getFleetQueueSnapshots(),
+        metadata: {
+            clusterWorker: process.env.CLUSTER_WORKER === '1',
+            clusterWorkerIndex: process.env.CLUSTER_WORKER_INDEX ?? null,
+            clusterWorkerCount: process.env.CLUSTER_WORKER_COUNT ?? null,
+        },
+    }));
+    serverReadyForTraffic = true;
+    setFleetLifecycleState('ready');
 
     console.log(`\n🚀 API Server successfully started.`);
     console.log(`Listening on port: ${boundPort}`);

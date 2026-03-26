@@ -1,7 +1,7 @@
 import { RequestContext, WSWrapper } from '../lib/uws-compat.js';
 import { messageHandler } from '../providers/handler.js';
 import type { IMessage } from '../providers/interfaces.js';
-import { validateApiKeyAndUsage, updateUserTokenUsage } from '../modules/userData.js';
+import { normalizeTierRateLimits, validateApiKeyAndUsage, updateUserTokenUsage } from '../modules/userData.js';
 import { normalizeApiKey } from '../modules/middlewareFactory.js';
 import { logError } from '../modules/errorLogger.js';
 import redis from '../modules/db.js';
@@ -443,7 +443,7 @@ export function attachWebSocket(app: { ws: (path: string, handler: (ws: WSWrappe
             ctx.apiKey = apiKey;
             ctx.userId = validation.userData.userId;
             ctx.userTier = validation.userData.tier;
-            ctx.tierLimits = validation.tierLimits;
+            ctx.tierLimits = normalizeTierRateLimits(validation.tierLimits);
             ctx.authenticated = true;
             return send({ type: 'auth.ok', tier: validation.userData.tier, role: validation.userData.role });
           } catch (err) {

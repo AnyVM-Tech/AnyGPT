@@ -11,6 +11,7 @@ import {
 import { RequestTimestampStore } from '../modules/rateLimit.js';
 import { runAuthMiddleware, runRateLimitMiddleware, extractBearerToken } from '../modules/middlewareFactory.js';
 import crypto from 'crypto';
+import { buildModelAccessError, isModelAllowedForTier } from '../modules/planAccess.js';
 
 dotenv.config();
 
@@ -123,6 +124,10 @@ router.post('/v6/chat/completions', authAndUsageMiddleware, rateLimitMiddleware,
             return response
                 .status(400)
                 .json({ error: { message: 'Invalid \'model\' value in request body.', code: 'invalid_model' } });
+        }
+        if (!isModelAllowedForTier(originalModelId, request.tierLimits)) {
+            const errDetail = buildModelAccessError(originalModelId, request.tierLimits);
+            return response.status(errDetail.statusCode).json({ error: errDetail });
         }
 
         // --- Map to internal format using BASE model ID ---

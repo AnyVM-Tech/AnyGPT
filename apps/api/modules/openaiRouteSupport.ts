@@ -1,31 +1,18 @@
 import type { Request, Response } from '../lib/uws-compat.js';
-import redis from './db.js';
-import { incrementSharedRateLimitCounters } from './rateLimitRedis.js';
-import { evaluateSharedRateLimit, type RequestTimestampStore } from './rateLimit.js';
+import type { RequestTimestampStore } from './rateLimit.js';
 import { runAuthMiddleware, runRateLimitMiddleware, extractBearerToken, normalizeApiKey } from './middlewareFactory.js';
 import { dataManager } from './dataManager.js';
 import { logError } from './errorLogger.js';
 import { logger } from './logger.js';
 import { redactAuthorizationHeader, redactToken } from './redaction.js';
-import type { KeysFile, TierData } from './userData.js';
-import tiersData from '../tiers.json' with { type: 'json' };
-
-const RATE_LIMIT_KEY_PREFIX = 'api:ratelimit:';
+import { normalizeTierRateLimits, type KeysFile, type TierData } from './userData.js';
+import { loadTiers } from './tierManager.js';
 
 declare module '../lib/uws-compat.js' {
   interface Request {
     apiKey?: string; userId?: string; userRole?: string;
     userTokenUsage?: number; userTier?: string;
     tierLimits?: TierData;
-  }
-}
-
-export async function incrementSharedCounters(apiKey: string) {
-  try {
-    return await incrementSharedRateLimitCounters(redis, RATE_LIMIT_KEY_PREFIX, apiKey);
-  } catch (err) {
-    console.warn('[RateLimit] Shared counter failure, falling back to in-memory.', err);
-    return null;
   }
 }
 
@@ -99,7 +86,10 @@ export async function authKeyOnlyMiddleware(request: Request, response: Response
       });
     }
 
-    const keys = await dataManager.load<KeysFile>('keys');
+    const [keys, tiers] = await Promise.all([
+      dataManager.load<KeysFile>('keys'),
+      loadTiers(),
+    ]);
     const userData = keys[apiKey];
     if (!userData) {
       return response.status(401).json({
@@ -108,8 +98,8 @@ export async function authKeyOnlyMiddleware(request: Request, response: Response
       });
     }
 
-    const tierLimits = tiersData[userData.tier as keyof typeof tiersData];
-    if (!tierLimits) {
+    const tierDefinition = tiers[userData.tier];
+    if (!tierDefinition) {
       return response.status(401).json({
         error: 'Unauthorized: Invalid API key configuration.',
         timestamp: new Date().toISOString(),
@@ -121,7 +111,7 @@ export async function authKeyOnlyMiddleware(request: Request, response: Response
     request.userRole = userData.role;
     request.userTokenUsage = userData.tokenUsage;
     request.userTier = userData.tier;
-    request.tierLimits = tierLimits;
+    request.tierLimits = normalizeTierRateLimits(tierDefinition);
 
     next();
   } catch (error: any) {
@@ -154,11 +144,6 @@ export function createRateLimitMiddleware(requestTimestamps: RequestTimestampSto
           const windowLabel = details.window.toUpperCase();
           logError({ message: `Rate limit exceeded: Max ${details.limit} ${windowLabel}.`, apiKey: redactToken(req.apiKey) }, req).catch(e => console.error('Failed background log:', e));
           return { status: 429, body: { error: `Rate limit exceeded: Max ${details.limit} ${windowLabel}.`, timestamp: new Date().toISOString() } };
-        },
-        sharedDecisionProvider: async (_req, apiKey, limits) => {
-          const sharedCounts = await incrementSharedCounters(apiKey);
-          if (!sharedCounts) return null;
-          return evaluateSharedRateLimit(sharedCounts, limits);
         },
       }
     );

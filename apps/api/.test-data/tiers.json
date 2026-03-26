@@ -1,21 +1,11 @@
 {
-  "free": {
-    "rps": 30,
-    "rpm": 1500,
-    "rpd": 25000,
-    "max_tokens": 1000000,
-    "min_provider_score": 0,
-    "max_provider_score": 70 
-  },
-  "forbiele_5m_500rpd": {
-    "rps": 0,
-    "rpm": 0,
-    "rpd": 600,
-    "soft_rpd": 500,
-    "billing_period_request_target": 15000,
-    "max_tokens": 5000000,
-    "min_provider_score": 0,
-    "max_provider_score": 70
+  "enterprise": {
+    "rps": 10000,
+    "rpm": 500000,
+    "rpd": 5000000,
+    "max_tokens": null,
+    "min_provider_score": 85,
+    "max_provider_score": null
   },
   "forbiele_2_sora2_300rpd": {
     "rps": 0,
@@ -36,28 +26,38 @@
     "min_provider_score": 0,
     "max_provider_score": 70
   },
+  "forbiele_5m_500rpd": {
+    "rps": 0,
+    "rpm": 0,
+    "rpd": 600,
+    "soft_rpd": 500,
+    "billing_period_request_target": 15000,
+    "max_tokens": 5000000,
+    "min_provider_score": 0,
+    "max_provider_score": 70
+  },
+  "free": {
+    "rps": 30,
+    "rpm": 1500,
+    "rpd": 25000,
+    "max_tokens": 1000000,
+    "min_provider_score": 0,
+    "max_provider_score": 70
+  },
   "pro": {
     "rps": 120,
     "rpm": 12000,
     "rpd": 250000,
     "max_tokens": null,
     "min_provider_score": 50,
-    "max_provider_score": null 
+    "max_provider_score": null
   },
   "pro_130m": {
     "rps": 80,
-    "rpm": 0,
-    "rpd": 0,
+    "rpm": 4800,
+    "rpd": 2000000,
     "max_tokens": null,
     "min_provider_score": 50,
-    "max_provider_score": null 
-  },
-  "enterprise": {
-    "rps": 10000,
-    "rpm": 500000,
-    "rpd": 5000000,
-    "max_tokens": null,
-    "min_provider_score": 85,
-    "max_provider_score": null 
+    "max_provider_score": null
   }
 }

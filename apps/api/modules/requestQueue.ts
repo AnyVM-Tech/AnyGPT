@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import os from 'node:os';
-import tiersData from '../tiers.json' with { type: 'json' };
+import { getCachedTiers } from './tierManager.js';
 
 export type RequestQueueSnapshot = {
 	label: string;
@@ -628,7 +628,7 @@ export class RequestQueue {
 }
 
 function getBaselineTierRps(): number {
-	const values = Object.values(tiersData as Record<string, any>)
+	const values = Object.values(getCachedTiers() as Record<string, any>)
 		.map(tier => Number(tier?.rps))
 		.filter(value => Number.isFinite(value) && value > 0);
 	if (values.length === 0) return 20;
@@ -840,6 +840,23 @@ export const responsesQueue = new RequestQueue(RESPONSES_QUEUE_CONCURRENCY, {
 	maxWaitMs: RESPONSES_QUEUE_MAX_WAIT_MS,
 	memoryPressureGuard: true
 });
+
+export function getLocalRequestQueueSnapshots(): Array<Record<string, unknown>> {
+	return [
+		{
+			lane: 'shared',
+			...requestQueue.snapshot()
+		},
+		{
+			lane: 'responses',
+			...responsesQueue.snapshot()
+		},
+		{
+			lane: 'request-body-read',
+			...requestBodyReadQueue.snapshot()
+		}
+	];
+}
 
 export function getRequestQueueForLane(lane: RequestQueueLane = 'shared'): RequestQueue {
 	return lane === 'responses' ? responsesQueue : requestQueue;

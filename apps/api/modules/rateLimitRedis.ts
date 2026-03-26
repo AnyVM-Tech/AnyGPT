@@ -14,6 +14,9 @@ local secBucket = ARGV[1]
 local minBucket = ARGV[2]
 local dayBucket = ARGV[3]
 local ttl = tonumber(ARGV[4])
+local incSecond = ARGV[5] == '1'
+local incMinute = ARGV[6] == '1'
+local incDay = ARGV[7] == '1'
 
 local s_ts = redis.call('HGET', key, 's_ts')
 local m_ts = redis.call('HGET', key, 'm_ts')
@@ -24,27 +27,53 @@ local m_count = 0
 local d_count = 0
 
 if s_ts == secBucket then
-  s_count = redis.call('HINCRBY', key, 's_count', 1)
+  s_count = tonumber(redis.call('HGET', key, 's_count') or '0')
 else
-  redis.call('HSET', key, 's_ts', secBucket, 's_count', 1)
-  s_count = 1
+  s_count = 0
 end
 
 if m_ts == minBucket then
-  m_count = redis.call('HINCRBY', key, 'm_count', 1)
+  m_count = tonumber(redis.call('HGET', key, 'm_count') or '0')
 else
-  redis.call('HSET', key, 'm_ts', minBucket, 'm_count', 1)
-  m_count = 1
+  m_count = 0
 end
 
 if d_ts == dayBucket then
-  d_count = redis.call('HINCRBY', key, 'd_count', 1)
+  d_count = tonumber(redis.call('HGET', key, 'd_count') or '0')
 else
-  redis.call('HSET', key, 'd_ts', dayBucket, 'd_count', 1)
-  d_count = 1
+  d_count = 0
 end
 
-redis.call('EXPIRE', key, ttl)
+if incSecond then
+  if s_ts == secBucket then
+    s_count = redis.call('HINCRBY', key, 's_count', 1)
+  else
+    redis.call('HSET', key, 's_ts', secBucket, 's_count', 1)
+    s_count = 1
+  end
+end
+
+if incMinute then
+  if m_ts == minBucket then
+    m_count = redis.call('HINCRBY', key, 'm_count', 1)
+  else
+    redis.call('HSET', key, 'm_ts', minBucket, 'm_count', 1)
+    m_count = 1
+  end
+end
+
+if incDay then
+  if d_ts == dayBucket then
+    d_count = redis.call('HINCRBY', key, 'd_count', 1)
+  else
+    redis.call('HSET', key, 'd_ts', dayBucket, 'd_count', 1)
+    d_count = 1
+  end
+end
+
+if incSecond or incMinute or incDay then
+  redis.call('EXPIRE', key, ttl)
+end
 return {s_count, m_count, d_count}
 `;
 
@@ -132,10 +161,17 @@ function hashApiKey(apiKey: string): string {
   return derived;
 }
 
-export async function incrementSharedRateLimitCounters(
+export interface SharedRateLimitIncrementOptions {
+  rps?: boolean;
+  rpm?: boolean;
+  rpd?: boolean;
+}
+
+async function readOrIncrementSharedRateLimitCounters(
   redisClient: Redis | null,
   keyPrefix: string,
   apiKey: string,
+  options: SharedRateLimitIncrementOptions,
 ): Promise<SharedRateCounts | null> {
   if (!redisClient || redisClient.status !== 'ready') return null;
 
@@ -144,6 +180,9 @@ export async function incrementSharedRateLimitCounters(
   const minuteBucket = Math.floor(nowMs / 60_000).toString();
   const dayBucket = Math.floor(nowMs / 86_400_000).toString();
   const key = `${keyPrefix}${hashApiKey(apiKey)}`;
+  const incrementRps = options.rps === true ? '1' : '0';
+  const incrementRpm = options.rpm === true ? '1' : '0';
+  const incrementRpd = options.rpd === true ? '1' : '0';
 
   try {
     const result = await redisClient.eval(
@@ -154,6 +193,9 @@ export async function incrementSharedRateLimitCounters(
       minuteBucket,
       dayBucket,
       '90000',
+      incrementRps,
+      incrementRpm,
+      incrementRpd,
     );
 
     if (!Array.isArray(result) || result.length < 3) return null;
@@ -165,4 +207,25 @@ export async function incrementSharedRateLimitCounters(
   } catch {
     return null;
   }
+}
+
+export async function incrementSharedRateLimitCounters(
+  redisClient: Redis | null,
+  keyPrefix: string,
+  apiKey: string,
+  options: SharedRateLimitIncrementOptions = { rps: true, rpm: true, rpd: true },
+): Promise<SharedRateCounts | null> {
+  return readOrIncrementSharedRateLimitCounters(redisClient, keyPrefix, apiKey, options);
+}
+
+export async function readSharedRateLimitCounters(
+  redisClient: Redis | null,
+  keyPrefix: string,
+  apiKey: string,
+): Promise<SharedRateCounts | null> {
+  return readOrIncrementSharedRateLimitCounters(redisClient, keyPrefix, apiKey, {
+    rps: false,
+    rpm: false,
+    rpd: false,
+  });
 }

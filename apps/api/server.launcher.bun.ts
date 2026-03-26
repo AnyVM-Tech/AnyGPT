@@ -26,11 +26,18 @@ const RESTART_DELAY_MS = (() => {
 	const safe = Number.isFinite(parsed) ? parsed : 1000;
 	return Math.max(0, safe);
 })();
+const SERVER_SHUTDOWN_GRACE_MS = (() => {
+	const raw = process.env.SHUTDOWN_GRACE_MS;
+	const parsed = raw !== undefined ? Number(raw) : 15_000;
+	const safe = Number.isFinite(parsed) ? parsed : 15_000;
+	return Math.max(1_000, safe);
+})();
 const SHUTDOWN_TIMEOUT_MS = (() => {
 	const raw = process.env.SHUTDOWN_TIMEOUT_MS;
-	const parsed = raw !== undefined ? Number(raw) : 5000;
-	const safe = Number.isFinite(parsed) ? parsed : 5000;
-	return Math.max(0, safe);
+	const fallback = SERVER_SHUTDOWN_GRACE_MS + 5_000;
+	const parsed = raw !== undefined ? Number(raw) : fallback;
+	const safe = Number.isFinite(parsed) ? parsed : fallback;
+	return Math.max(SERVER_SHUTDOWN_GRACE_MS, safe);
 })();
 const PORT_STRIDE = Math.max(0, Number(process.env.CLUSTER_PORT_STRIDE || 0));
 const BASE_PORT = Number(process.env.PORT || 3000) || 3000;
@@ -43,7 +50,12 @@ const SCRIPT_PATH = DIST_SERVER_PATH && fs.existsSync(DIST_SERVER_PATH)
   : SOURCE_SCRIPT_PATH;
 const SERVER_MODULE_URL = pathToFileURL(SCRIPT_PATH).href;
 const BUN_BIN = process.execPath;
-const LAUNCH_LOCK_DIR = path.resolve(SCRIPT_DIR, '.control-plane');
+const configuredRuntimeDir = String(
+	process.env.ANYGPT_RUNTIME_DIR || process.env.ANYGPT_LAUNCH_LOCK_DIR || ''
+).trim();
+const LAUNCH_LOCK_DIR = configuredRuntimeDir
+	? path.resolve(configuredRuntimeDir)
+	: path.resolve(SCRIPT_DIR, '.control-plane');
 const LAUNCH_LOCK_FILE = path.join(
 	LAUNCH_LOCK_DIR,
 	`server-launcher.${String(process.env.NODE_ENV || 'development').trim() || 'development'}.${BASE_PORT}.lock.json`,

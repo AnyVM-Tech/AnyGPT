@@ -52,9 +52,13 @@ function createValidationFailure(code: ValidationFailureCode, message: string): 
 }
 
 const DEFAULT_SPEED = 50;
-const ADMIN_KEYS_PATH = path.resolve('logs/admin-keys.jsonl');
-const PROBE_TESTED_PATH = path.resolve('logs/probe-tested.json');
-const PROBE_LOG_PATH = path.resolve('logs/probe-errors.jsonl');
+const configuredLogDirectory = (process.env.ANYGPT_LOG_DIR || '').trim();
+const LOG_DIRECTORY = configuredLogDirectory
+  ? path.resolve(configuredLogDirectory)
+  : path.resolve('logs');
+const ADMIN_KEYS_PATH = path.join(LOG_DIRECTORY, 'admin-keys.jsonl');
+const PROBE_TESTED_PATH = path.join(LOG_DIRECTORY, 'probe-tested.json');
+const PROBE_LOG_PATH = path.join(LOG_DIRECTORY, 'probe-errors.jsonl');
 const args = process.argv.slice(2);
 const dryRun = args.includes('--dry-run');
 const limitArg = args.find((arg) => arg.startsWith('--limit='));
@@ -800,7 +804,7 @@ async function main() {
     console.log('Failed keys:');
     failures.forEach((f) => console.log(`- ${f.provider}: ${f.reason}`));
 
-    const failLogPath = path.resolve('logs/key-transfer-failures.json');
+    const failLogPath = path.join(LOG_DIRECTORY, 'key-transfer-failures.json');
     try {
       fs.writeFileSync(failLogPath, JSON.stringify(failures, null, 2));
       console.log(`Detailed failure log written to ${failLogPath}`);

@@ -1,5 +1,6 @@
 import { validateApiKeyAndUsage } from './userData.js';
 import { enforceInMemoryRateLimit, RateLimitDecision, RequestTimestampStore, TierRateLimits } from './rateLimit.js';
+import { evaluateCompletionRateLimit, readCompletionRateLimitCounters } from './completionRateLimit.js';
 
 const API_KEY_MIN_LENGTH = (() => {
   const raw = Number(process.env.API_KEY_MIN_LENGTH);
@@ -152,7 +153,7 @@ export async function runRateLimitMiddleware(
   request: any,
   response: any,
   next: () => void,
-  store: RequestTimestampStore,
+  _store: RequestTimestampStore,
   handlers: RateLimitHandlers
 ) {
   const apiKey = normalizeApiKeyValue(typeof request.apiKey === 'string' ? request.apiKey : null);
@@ -162,20 +163,8 @@ export async function runRateLimitMiddleware(
     return sendJsonIfOpen(response, await handlers.onMissingContext(request));
   }
 
-  if (handlers.sharedDecisionProvider) {
-    const sharedDecision = await handlers.sharedDecisionProvider(request, apiKey, tierLimits);
-    if (sharedDecision && !sharedDecision.allowed && sharedDecision.window) {
-      const retryAfterSeconds = sharedDecision.retryAfterSeconds ?? 1;
-      response.setHeader('Retry-After', String(retryAfterSeconds));
-      return sendJsonIfOpen(response, await handlers.onDenied(request, {
-        window: sharedDecision.window,
-        limit: sharedDecision.limit ?? tierLimits[sharedDecision.window],
-        retryAfterSeconds,
-      }));
-    }
-  }
-
-  const decision = enforceInMemoryRateLimit(store, apiKey, tierLimits);
+  const completionCounts = await readCompletionRateLimitCounters(apiKey);
+  const decision = evaluateCompletionRateLimit(completionCounts, tierLimits);
   if (!decision.allowed && decision.window) {
     const retryAfterSeconds = decision.retryAfterSeconds ?? 1;
     response.setHeader('Retry-After', String(retryAfterSeconds));

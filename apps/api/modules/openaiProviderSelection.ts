@@ -233,7 +233,15 @@ export type VideoGenerationProviderSelection = {
   providerId: string;
   apiKey: string;
   baseUrl: string;
-  kind: 'openai' | 'xai';
+  kind: 'openai' | 'xai' | 'gemini';
+};
+
+export type VideoGenerationProviderKind = VideoGenerationProviderSelection['kind'] | 'other';
+
+export type VideoGenerationProviderAvailability = {
+  providers: VideoGenerationProviderSelection[];
+  totalMatches: number;
+  kindCounts: Partial<Record<VideoGenerationProviderKind, number>>;
 };
 
 function shuffleArray<T>(items: T[]): T[] {
@@ -276,6 +284,17 @@ function mapImageGenerationProviderSelection(provider: LoadedProviderData): Imag
 }
 
 function mapVideoGenerationProviderSelection(provider: LoadedProviderData): VideoGenerationProviderSelection {
+  if (isGeminiLikeProviderId(provider.id)) {
+    return {
+      providerId: provider.id,
+      apiKey: provider.apiKey!,
+      baseUrl: extractApiBase(
+        provider.provider_url || 'https://generativelanguage.googleapis.com/v1beta',
+        'https://generativelanguage.googleapis.com/v1beta',
+      ),
+      kind: 'gemini',
+    };
+  }
   if (provider.id.includes('xai')) {
     return {
       providerId: provider.id,
@@ -492,27 +511,69 @@ export async function pickVideoGenProviderKey(
   return providers[0] ?? null;
 }
 
-export async function listVideoGenProviders(
+function classifyVideoGenerationProviderKind(provider: LoadedProviderData): VideoGenerationProviderKind {
+  if (String(provider.id || '').includes('openai')) return 'openai';
+  if (String(provider.id || '').includes('xai')) return 'xai';
+  if (
+    isGeminiLikeProviderId(String(provider.id || ''))
+    || String((provider as any)?.provider || '').includes('gemini')
+    || String((provider as any)?.type || '').includes('gemini')
+  ) {
+    return 'gemini';
+  }
+  return 'other';
+}
+
+export async function inspectVideoGenProviderAvailability(
   modelId: string
-): Promise<VideoGenerationProviderSelection[]> {
+): Promise<VideoGenerationProviderAvailability> {
   const providers = await dataManager.load<LoadedProviders>('providers');
   const modelIdVariants = normalizeModelIdVariants(modelId);
   const matches = providers.filter((p: LoadedProviderData) =>
     !p.disabled &&
-    (p.id.includes('xai') || p.id.includes('openai')) &&
-    !hasInvalidOpenAiKeySignal(p) &&
     p.apiKey &&
     p.models &&
     modelIdVariants.some((variant) => variant in p.models)
   );
-  if (matches.length === 0) return [];
-  const healthyMatches = matches.filter(
+  const kindCounts = matches.reduce<Partial<Record<VideoGenerationProviderKind, number>>>((acc, provider) => {
+    const kind = classifyVideoGenerationProviderKind(provider);
+    acc[kind] = (acc[kind] || 0) + 1;
+    return acc;
+  }, {});
+  const supportedMatches = matches.filter((provider) =>
+    (
+      provider.id.includes('xai') ||
+      provider.id.includes('openai') ||
+      isGeminiLikeProviderId(provider.id)
+    ) &&
+    !hasInvalidOpenAiKeySignal(provider) &&
+    !hasRecentGeminiCatalogAuthFailureSignal(provider)
+  );
+  if (supportedMatches.length === 0) {
+    return {
+      providers: [],
+      totalMatches: matches.length,
+      kindCounts,
+    };
+  }
+  const healthyMatches = supportedMatches.filter(
     (provider) =>
       !hasRecentRateLimitOrTimeoutSignal(provider) &&
       !hasOpenRouterBillingFailureSignal(provider)
   );
-  const pickFrom = healthyMatches.length > 0 ? healthyMatches : matches;
-  return shuffleArray(pickFrom).map(mapVideoGenerationProviderSelection);
+  const pickFrom = healthyMatches.length > 0 ? healthyMatches : supportedMatches;
+  return {
+    providers: shuffleArray(pickFrom).map(mapVideoGenerationProviderSelection),
+    totalMatches: matches.length,
+    kindCounts,
+  };
+}
+
+export async function listVideoGenProviders(
+  modelId: string
+): Promise<VideoGenerationProviderSelection[]> {
+  const availability = await inspectVideoGenProviderAvailability(modelId);
+  return availability.providers;
 }
 
 function hasRecentUnsupportedToolCallingSignal(provider: LoadedProviderData): boolean {

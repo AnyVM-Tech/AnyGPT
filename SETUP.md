@@ -59,6 +59,7 @@ Choose between three options:
 3. **Self-Hosted Redis**
    - Manual configuration
    - For custom Redis installations
+   - Dragonfly works here too because AnyGPT uses the Redis protocol
 
 ##### Redis Cloud Setup
 
@@ -76,6 +77,21 @@ The setup script will automatically:
 - Configure error logging
 
 ⚠️ **Important**: Only use the Redis Cloud option for cloud-hosted Redis. For self-hosted instances, use manual configuration.
+
+##### Self-Hosted Dragonfly Setup
+
+For a local Dragonfly deployment, start from [`apps/api/dragonfly-anygpt.flags.example`](/home/skullcmd/AnyGPT/apps/api/dragonfly-anygpt.flags.example) and keep your API env aligned with it:
+
+```env
+DATA_SOURCE_PREFERENCE=redis
+REDIS_URL=127.0.0.1:6380
+REDIS_USERNAME=default
+REDIS_PASSWORD=replace-with-apps-api-redis-password
+REDIS_DB=0
+REDIS_TLS=false
+```
+
+That preset binds Dragonfly to localhost, uses `6380`, disables the HTTP console on the main Redis port, and reserves two logical DBs so the control plane can keep using DB `1` for clone-based experimental runs.
 
 ##### Other Configuration Options
 - **Log Level**: debug, info, warn, error (default: info)

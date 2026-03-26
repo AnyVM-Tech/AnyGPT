@@ -694,7 +694,9 @@
     },
     "/v1/videos/generations": {
       "post": {
-        "summary": "Video generation",
+        "summary": "Create video (legacy alias)",
+        "description": "Deprecated alias for POST /v1/videos.",
+        "deprecated": true,
         "security": [
           {
             "BearerAuth": []
@@ -730,6 +732,7 @@
     "/v1/videos": {
       "get": {
         "summary": "List videos",
+        "description": "Lists recently generated video jobs.",
         "security": [
           {
             "BearerAuth": []
@@ -771,7 +774,8 @@
         }
       },
       "post": {
-        "summary": "Video generation",
+        "summary": "Create video",
+        "description": "Creates a video generation job. Use POST on this path; GET /v1/videos lists jobs.",
         "security": [
           {
             "BearerAuth": []

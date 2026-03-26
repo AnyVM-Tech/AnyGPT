@@ -1,0 +1,10 @@
+--bind=127.0.0.1
+--port=6380
+--requirepass=replace-with-apps-api-redis-password
+--dbnum=2
+--cache_mode=false
+--dir=/var/lib/dragonfly
+--dbfilename=anygpt-{timestamp}
+--snapshot_cron=*/15 * * * *
+--primary_port_http_enabled=false
+--admin_port=0

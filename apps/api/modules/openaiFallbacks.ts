@@ -19,8 +19,24 @@ import { ImagenAI } from '../providers/imagen.js';
 import { updateUserTokenUsage } from './userData.js';
 import { isInsufficientCreditsError, isRateLimitOrQuotaError } from './errorClassification.js';
 import { formatGeneratedImageMarkdown } from './generatedImageStore.js';
-import { enforceModelCapabilities, listImageGenProviders, listVideoGenProviders, type ImageGenerationProviderSelection, type VideoGenerationProviderSelection } from './openaiProviderSelection.js';
+import {
+  enforceModelCapabilities,
+  inspectVideoGenProviderAvailability,
+  listImageGenProviders,
+  type ImageGenerationProviderSelection,
+  type VideoGenerationProviderAvailability,
+  type VideoGenerationProviderSelection,
+} from './openaiProviderSelection.js';
+import {
+  requestGeminiVideoGeneration,
+  type VideoRetryProvider,
+  type VideoRequestCacheProvider,
+} from './geminiVideo.js';
 import { resolveSoraVideoModelId } from './openaiRouteUtils.js';
+import {
+  buildVideoRequestCacheProvider,
+  resolveVideoRequestCacheTtlMs,
+} from './videoRequestCache.js';
 
 type FallbackSource = 'chat' | 'responses';
 
@@ -32,10 +48,88 @@ type ImageGenerationResult = {
 type VideoGenerationResult = {
   responseJson: Record<string, any>;
   requestId: string;
-  provider: { apiKey: string; baseUrl: string };
+  provider: VideoRequestCacheProvider;
 };
 
 const SORA_VIDEO_REMIX_MARKER_RE = /<!--\s*sora2video:([a-z0-9_-]+)\s*-->/i;
+
+const DEFAULT_VIDEO_ASYNC_RETRY_MAX_ATTEMPTS = 3;
+const DEFAULT_VIDEO_RETRY_REQUEST_MAX_BYTES = 64 * 1024;
+
+function buildOpenAIVideoCacheProvider(
+  provider: VideoGenerationProviderSelection,
+  kind: 'openai' | 'xai',
+  payload?: Record<string, any>,
+  options: {
+    activeRequestId?: string;
+    retryState?: VideoRequestCacheProvider['retryState'];
+  } = {}
+): VideoRequestCacheProvider {
+  return buildVideoRequestCacheProvider(
+    {
+      apiKey: provider.apiKey,
+      baseUrl: provider.baseUrl,
+      kind,
+      ...(options.activeRequestId ? { activeRequestId: options.activeRequestId } : {}),
+      ...(options.retryState ? { retryState: options.retryState } : {}),
+    },
+    payload,
+    resolveVideoRequestCacheTtlMs(process.env.VIDEO_REQUEST_CACHE_TTL_MS)
+  );
+}
+
+function resolveVideoAsyncRetryMaxAttempts(): number {
+  const parsed = Number(process.env.VIDEO_ASYNC_RETRY_MAX_ATTEMPTS ?? DEFAULT_VIDEO_ASYNC_RETRY_MAX_ATTEMPTS);
+  return Number.isFinite(parsed) && parsed > 0
+    ? Math.max(1, Math.floor(parsed))
+    : DEFAULT_VIDEO_ASYNC_RETRY_MAX_ATTEMPTS;
+}
+
+function resolveVideoRetryRequestMaxBytes(): number {
+  const parsed = Number(process.env.VIDEO_RETRY_REQUEST_MAX_BYTES ?? DEFAULT_VIDEO_RETRY_REQUEST_MAX_BYTES);
+  return Number.isFinite(parsed) && parsed > 0
+    ? Math.max(1024, Math.floor(parsed))
+    : DEFAULT_VIDEO_RETRY_REQUEST_MAX_BYTES;
+}
+
+function cloneVideoRetryRequestBody(requestBody: any): any | undefined {
+  if (requestBody === undefined) return {};
+  try {
+    const serialized = JSON.stringify(requestBody);
+    if (!serialized) return {};
+    if (Buffer.byteLength(serialized, 'utf8') > resolveVideoRetryRequestMaxBytes()) {
+      return undefined;
+    }
+    const cloned = JSON.parse(serialized);
+    if (cloned && typeof cloned === 'object' && !Array.isArray(cloned)) {
+      delete cloned.stream;
+    }
+    return cloned;
+  } catch {
+    return undefined;
+  }
+}
+
+function buildStoredVideoRetryState(params: {
+  modelId: string;
+  prompt: string;
+  imageUrl?: string | null;
+  requestBody: any;
+  provider: VideoRetryProvider;
+}): VideoRequestCacheProvider['retryState'] | undefined {
+  const { modelId, prompt, imageUrl, requestBody, provider } = params;
+  const clonedRequestBody = cloneVideoRetryRequestBody(requestBody);
+  if (clonedRequestBody === undefined) return undefined;
+  return {
+    modelId,
+    prompt,
+    ...(imageUrl ? { imageUrl } : {}),
+    requestBody: clonedRequestBody,
+    attemptCount: 1,
+    maxAttempts: resolveVideoAsyncRetryMaxAttempts(),
+    attemptedProviders: [{ apiKey: provider.apiKey, baseUrl: provider.baseUrl }],
+  };
+}
 
 function parseDataUrl(value: string | undefined): { mimeType: string; base64: string } | null {
   const match = String(value || '').match(/^data:([^;]+);base64,(.+)$/);
@@ -150,28 +244,112 @@ function shouldTryNextVideoGenerationProvider(error: any): boolean {
     || normalized.includes('insufficient_quota');
 }
 
+function buildUnavailableVideoProviderError(
+  modelId: string,
+  availability?: VideoGenerationProviderAvailability,
+  options: { openAiCompatibleOnly?: boolean } = {}
+): Error {
+  const kindCounts = availability?.kindCounts || {};
+  const totalMatches = Number(availability?.totalMatches || 0);
+  const geminiMatches = Number(kindCounts.gemini || 0);
+  const openAiMatches = Number(kindCounts.openai || 0);
+  const xaiMatches = Number(kindCounts.xai || 0);
+  const matchesOnlyGemini = totalMatches > 0 && geminiMatches === totalMatches;
+
+  let message = 'No available provider for video generation';
+  let statusCode = 503;
+  if (options.openAiCompatibleOnly && matchesOnlyGemini) {
+    message = `Video model '${modelId}' uses Gemini long-running video generation and does not support OpenAI-compatible multipart /v1/videos requests. Send application/json to /v1/videos instead.`;
+    statusCode = 400;
+  }
+
+  const error = new Error(message) as Error & Record<string, any>;
+  error.statusCode = statusCode;
+  error.modelId = modelId;
+  error.matchingVideoProviderCount = totalMatches;
+  error.availableVideoProviderKinds = kindCounts;
+  error.openAiVideoProviderCount = openAiMatches;
+  error.xaiVideoProviderCount = xaiMatches;
+  error.geminiVideoProviderCount = geminiMatches;
+  return error;
+}
+
+function getAliasedFieldValue(source: any, aliases: string[]): any {
+  if (!source || typeof source !== 'object') return undefined;
+  for (const alias of aliases) {
+    if (Object.prototype.hasOwnProperty.call(source, alias)) {
+      const value = (source as Record<string, any>)[alias];
+      if (value !== undefined) return value;
+    }
+  }
+  return undefined;
+}
+
+function getAliasedTrimmedString(source: any, aliases: string[]): string {
+  const value = getAliasedFieldValue(source, aliases);
+  return typeof value === 'string' && value.trim() ? value.trim() : '';
+}
+
 function resolveVideoSize(requestBody: any, defaultSize?: string): string | undefined {
-  if (typeof requestBody?.size === 'string' && requestBody.size.trim()) return requestBody.size.trim();
-  if (typeof requestBody?.resolution === 'string' && requestBody.resolution.trim()) return requestBody.resolution.trim();
-  const aspectRatio = typeof requestBody?.aspect_ratio === 'string'
-    ? requestBody.aspect_ratio.trim()
-    : '';
+  const size = getAliasedTrimmedString(requestBody, ['size']);
+  if (size) return size;
+
+  const resolution = getAliasedTrimmedString(requestBody, ['resolution']);
+  if (resolution) return resolution;
+
+  const aspectRatio = getAliasedTrimmedString(requestBody, ['aspect_ratio', 'aspectRatio']);
   if (aspectRatio === '16:9') return '1280x720';
   if (aspectRatio === '9:16') return '720x1280';
   return typeof defaultSize === 'string' && defaultSize.trim() ? defaultSize.trim() : undefined;
 }
 
 function resolveVideoSeconds(requestBody: any): string | undefined {
-  if (typeof requestBody?.seconds === 'string' && requestBody.seconds.trim()) {
-    return requestBody.seconds.trim();
+  const secondsValue = getAliasedFieldValue(requestBody, ['seconds']);
+  if (typeof secondsValue === 'string' && secondsValue.trim()) {
+    return secondsValue.trim();
   }
-  if (typeof requestBody?.seconds === 'number' && Number.isFinite(requestBody.seconds) && requestBody.seconds > 0) {
-    return String(Math.floor(requestBody.seconds));
+  if (typeof secondsValue === 'number' && Number.isFinite(secondsValue) && secondsValue > 0) {
+    return String(Math.floor(secondsValue));
   }
-  if (typeof requestBody?.duration === 'number' && Number.isFinite(requestBody.duration) && requestBody.duration > 0) {
-    return String(Math.floor(requestBody.duration));
+
+  const durationValue = getAliasedFieldValue(requestBody, ['duration', 'duration_seconds', 'durationSeconds']);
+  if (typeof durationValue === 'number' && Number.isFinite(durationValue) && durationValue > 0) {
+    return String(Math.floor(durationValue));
+  }
+  if (typeof durationValue === 'string' && durationValue.trim()) {
+    const parsed = Number(durationValue.trim());
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return String(Math.floor(parsed));
+    }
   }
   return undefined;
+}
+
+function parsePositiveNumericField(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+    return value;
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value.trim());
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
+  return undefined;
+}
+
+function resolveRequestedImageCount(requestBody: any): number {
+  const requested = parsePositiveNumericField(requestBody?.n);
+  return typeof requested === 'number' ? Math.max(1, Math.ceil(requested)) : 1;
+}
+
+function resolveVideoBillingQuantity(requestBody: any): number {
+  const requestedSeconds = resolveVideoSeconds(requestBody);
+  const parsedSeconds = parsePositiveNumericField(requestedSeconds);
+  if (typeof parsedSeconds === 'number') {
+    return parsedSeconds;
+  }
+  return 1;
 }
 
 type OpenAIVideoInputReference = {
@@ -271,13 +449,16 @@ function resolveOpenAIVideoInputReferenceUrl(value: any): string {
   }
   if (!value || typeof value !== 'object') return '';
 
-  for (const key of ['image_url', 'url']) {
+  for (const key of ['image_url', 'imageUrl', 'url']) {
     const candidate = (value as Record<string, any>)[key];
     if (typeof candidate === 'string' && candidate.trim()) {
       return candidate.trim();
     }
-    if (candidate && typeof candidate === 'object' && typeof candidate.url === 'string' && candidate.url.trim()) {
-      return candidate.url.trim();
+    if (candidate && typeof candidate === 'object') {
+      const nestedUrl = getAliasedTrimmedString(candidate, ['url', 'image_url', 'imageUrl']);
+      if (nestedUrl) {
+        return nestedUrl;
+      }
     }
   }
 
@@ -292,11 +473,7 @@ function resolveOpenAIVideoInputReferenceBase64(value: any): { data: string; mim
     if (typeof candidate === 'string' && candidate.trim()) {
       return {
         data: candidate.trim(),
-        mimeType: typeof (value as Record<string, any>).media_type === 'string'
-          ? (value as Record<string, any>).media_type
-          : typeof (value as Record<string, any>).mime_type === 'string'
-            ? (value as Record<string, any>).mime_type
-            : undefined,
+        mimeType: getAliasedTrimmedString(value, ['media_type', 'mediaType', 'mime_type', 'mimeType']) || undefined,
       };
     }
   }
@@ -305,8 +482,9 @@ function resolveOpenAIVideoInputReferenceBase64(value: any): { data: string; mim
 }
 
 function buildOpenAIVideoInputReference(requestBody: any, imageUrl?: string | null): OpenAIVideoReferencePayload | undefined {
-  if (requestBody?.input_reference !== undefined) {
-    const value = requestBody.input_reference;
+  const directInputReference = getAliasedFieldValue(requestBody, ['input_reference', 'inputReference', 'inputreference']);
+  if (directInputReference !== undefined) {
+    const value = directInputReference;
     if (typeof value === 'string' && value.trim()) {
       if (value.trim().startsWith('data:')) {
         return { multipart: buildMultipartVideoReferenceFromDataUrl(value.trim()) };
@@ -321,8 +499,9 @@ function buildOpenAIVideoInputReference(requestBody: any, imageUrl?: string | nu
       throw error;
     }
 
-    if (typeof value.file_id === 'string' && value.file_id.trim()) {
-      return { json: { file_id: value.file_id.trim() } };
+    const fileId = getAliasedTrimmedString(value, ['file_id', 'fileId']);
+    if (fileId) {
+      return { json: { file_id: fileId } };
     }
 
     const inputImageUrl = resolveOpenAIVideoInputReferenceUrl(value);
@@ -353,7 +532,9 @@ function buildOpenAIVideoInputReference(requestBody: any, imageUrl?: string | nu
     throw error;
   }
 
-  const explicitImageUrl = typeof imageUrl === 'string' && imageUrl.trim() ? imageUrl.trim() : '';
+  const explicitImageUrl =
+    getAliasedTrimmedString(requestBody, ['image_url', 'imageUrl'])
+    || (typeof imageUrl === 'string' && imageUrl.trim() ? imageUrl.trim() : '');
   if (explicitImageUrl) {
     if (explicitImageUrl.startsWith('data:')) {
       return { multipart: buildMultipartVideoReferenceFromDataUrl(explicitImageUrl) };
@@ -855,6 +1036,16 @@ async function requestVideoGenerationWithProvider(params: {
   upstreamTimeoutMs: number;
 }): Promise<VideoGenerationResult> {
   const { provider, modelId, prompt, imageUrl, requestBody, upstreamTimeoutMs } = params;
+  if (provider.kind === 'gemini') {
+    return await requestGeminiVideoGeneration({
+      provider,
+      modelId,
+      prompt,
+      imageUrl,
+      requestBody,
+      upstreamTimeoutMs,
+    });
+  }
   const soraModel = provider.kind === 'openai' ? resolveSoraVideoModelId(modelId) : null;
   const upstreamModelId = provider.kind === 'openai' && soraModel?.providerModelId
     ? soraModel.providerModelId
@@ -902,7 +1093,7 @@ async function requestVideoGenerationWithProvider(params: {
       return {
         responseJson,
         requestId: String(requestId),
-        provider: { apiKey: provider.apiKey, baseUrl: provider.baseUrl },
+        provider: buildOpenAIVideoCacheProvider(provider, 'openai', responseJson),
       };
     }
 
@@ -961,7 +1152,7 @@ async function requestVideoGenerationWithProvider(params: {
     return {
       responseJson,
       requestId: String(requestId),
-      provider: { apiKey: provider.apiKey, baseUrl: provider.baseUrl },
+      provider: buildOpenAIVideoCacheProvider(provider, 'openai', responseJson),
     };
   }
 
@@ -1010,7 +1201,7 @@ async function requestVideoGenerationWithProvider(params: {
   return {
     responseJson,
     requestId: String(requestId),
-    provider: { apiKey: provider.apiKey, baseUrl: provider.baseUrl },
+    provider: buildOpenAIVideoCacheProvider(provider, 'xai', responseJson),
   };
 }
 
@@ -1020,18 +1211,25 @@ export async function requestVideoGeneration(params: {
   imageUrl?: string | null;
   requestBody: any;
   upstreamTimeoutMs: number;
+  excludeProviders?: VideoRetryProvider[];
 }): Promise<VideoGenerationResult> {
-  const { modelId, prompt, imageUrl, requestBody, upstreamTimeoutMs } = params;
-  const providers = await listVideoGenProviders(modelId);
+  const { modelId, prompt, imageUrl, requestBody, upstreamTimeoutMs, excludeProviders } = params;
+  const availability = await inspectVideoGenProviderAvailability(modelId);
+  const excludedSignatures = new Set(
+    (excludeProviders || []).map((provider) => `${provider.baseUrl}\u0000${provider.apiKey}`)
+  );
+  const providers = availability.providers.filter(
+    (provider) => !excludedSignatures.has(`${provider.baseUrl}\u0000${provider.apiKey}`)
+  );
   if (providers.length === 0) {
-    throw new Error('No available provider for video generation');
+    throw buildUnavailableVideoProviderError(modelId, availability);
   }
 
   let lastError: any = null;
   for (let index = 0; index < providers.length; index += 1) {
     const provider = providers[index];
     try {
-      return await requestVideoGenerationWithProvider({
+      const result = await requestVideoGenerationWithProvider({
         provider,
         modelId,
         prompt,
@@ -1039,6 +1237,25 @@ export async function requestVideoGeneration(params: {
         requestBody,
         upstreamTimeoutMs,
       });
+      const retryState = buildStoredVideoRetryState({
+        modelId,
+        prompt,
+        imageUrl,
+        requestBody,
+        provider: { apiKey: result.provider.apiKey, baseUrl: result.provider.baseUrl },
+      });
+      return {
+        ...result,
+        provider: buildVideoRequestCacheProvider(
+          {
+            ...result.provider,
+            activeRequestId: result.requestId,
+            ...(retryState ? { retryState } : {}),
+          },
+          result.responseJson,
+          resolveVideoRequestCacheTtlMs(process.env.VIDEO_REQUEST_CACHE_TTL_MS)
+        ),
+      };
     } catch (error: any) {
       lastError = error;
       const hasMoreProviders = index < providers.length - 1;
@@ -1100,7 +1317,7 @@ async function requestOpenAICompatibleVideoGenerationMultipart(params: {
   return {
     responseJson,
     requestId: String(requestId),
-    provider: { apiKey: provider.apiKey, baseUrl: provider.baseUrl },
+    provider: buildOpenAIVideoCacheProvider(provider, 'openai', responseJson),
   };
 }
 
@@ -1111,9 +1328,12 @@ export async function requestVideoGenerationMultipart(params: {
   upstreamTimeoutMs: number;
 }): Promise<VideoGenerationResult> {
   const { modelId, contentType, body, upstreamTimeoutMs } = params;
-  const providers = (await listVideoGenProviders(modelId)).filter((provider) => provider.kind === 'openai');
+  const availability = await inspectVideoGenProviderAvailability(modelId);
+  const providers = availability.providers.filter((provider) => provider.kind === 'openai');
   if (providers.length === 0) {
-    throw new Error('No available provider for video generation');
+    throw buildUnavailableVideoProviderError(modelId, availability, {
+      openAiCompatibleOnly: true,
+    });
   }
 
   let lastError: any = null;
@@ -1370,7 +1590,12 @@ export async function handleImageGenFallbackFromChatOrResponses(params: {
   }
 
   const tokenEstimate = Math.ceil(prompt.length / 4) + 500;
-  await updateUserTokenUsage(tokenEstimate, request.apiKey!);
+  const imageCount = resolveRequestedImageCount(requestBody);
+  await updateUserTokenUsage(tokenEstimate, request.apiKey!, {
+    modelId,
+    pricingMetric: 'per_image',
+    pricingQuantity: imageCount,
+  });
 }
 
 export async function handleVideoGenFallbackFromChatOrResponses(params: {
@@ -1378,12 +1603,13 @@ export async function handleVideoGenFallbackFromChatOrResponses(params: {
   prompt: string;
   imageUrl?: string | null;
   requestBody: any;
+  request: Request;
   response: Response;
   source: FallbackSource;
   upstreamTimeoutMs: number;
-  setVideoRequestCache: (requestId: string, provider: { apiKey: string; baseUrl: string }) => void;
+  setVideoRequestCache: (requestId: string, provider: VideoRequestCacheProvider) => Promise<void>;
 }) {
-  const { modelId, prompt, imageUrl, requestBody, response, source, upstreamTimeoutMs, setVideoRequestCache } = params;
+  const { modelId, prompt, imageUrl, requestBody, request, response, source, upstreamTimeoutMs, setVideoRequestCache } = params;
 
   if (!prompt) {
     if (!(response as any).completed) {
@@ -1401,7 +1627,7 @@ export async function handleVideoGenFallbackFromChatOrResponses(params: {
   }
 
   let requestId: string;
-  let provider: { apiKey: string; baseUrl: string };
+  let provider: VideoRequestCacheProvider;
   try {
     const result = await requestVideoGeneration({
       modelId,
@@ -1422,7 +1648,7 @@ export async function handleVideoGenFallbackFromChatOrResponses(params: {
     }
     return;
   }
-  setVideoRequestCache(String(requestId), provider);
+  await setVideoRequestCache(String(requestId), provider);
 
   const contentText = buildVideoGenerationStartedContent(requestId);
   const wantsStream = Boolean(requestBody?.stream);
@@ -1454,34 +1680,41 @@ export async function handleVideoGenFallbackFromChatOrResponses(params: {
       };
       response.write(`data: ${JSON.stringify(finalChunk)}\n\n`);
       response.write(`data: [DONE]\n\n`);
-      return response.end();
+      response.end();
+    } else {
+      const openaiResponse = {
+        id: `chatcmpl-${Date.now()}-${Math.random().toString(36).substring(2)}`,
+        object: 'chat.completion',
+        created: Math.floor(Date.now() / 1000),
+        model: modelId,
+        choices: [{
+          index: 0,
+          message: { role: 'assistant', content: contentText },
+          logprobs: null,
+          finish_reason: 'stop',
+        }],
+        usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+      };
+
+      if (!(response as any).completed) response.json(openaiResponse);
     }
-
-    const openaiResponse = {
-      id: `chatcmpl-${Date.now()}-${Math.random().toString(36).substring(2)}`,
-      object: 'chat.completion',
-      created: Math.floor(Date.now() / 1000),
-      model: modelId,
-      choices: [{
-        index: 0,
-        message: { role: 'assistant', content: contentText },
-        logprobs: null,
-        finish_reason: 'stop',
-      }],
-      usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
-    };
-
-    if (!(response as any).completed) response.json(openaiResponse);
-    return;
+  } else {
+    const promptTokens = Math.ceil(prompt.length / 4);
+    const totalTokens = promptTokens + 1;
+    sendResponsesTextResult({
+      response,
+      modelId,
+      contentText,
+      usage: { input_tokens: promptTokens, output_tokens: 1, total_tokens: totalTokens },
+      stream: wantsStream,
+    });
   }
 
-  const promptTokens = Math.ceil(prompt.length / 4);
-  const totalTokens = promptTokens + 1;
-  sendResponsesTextResult({
-    response,
+  const tokenEstimate = Math.ceil(prompt.length / 4) + 500;
+  const videoSeconds = resolveVideoBillingQuantity(requestBody);
+  await updateUserTokenUsage(tokenEstimate, request.apiKey!, {
     modelId,
-    contentText,
-    usage: { input_tokens: promptTokens, output_tokens: 1, total_tokens: totalTokens },
-    stream: wantsStream,
+    pricingMetric: 'per_image',
+    pricingQuantity: videoSeconds,
   });
 }

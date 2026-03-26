@@ -11,6 +11,7 @@ import { logError } from '../modules/errorLogger.js'; // Changed import
 import { RequestTimestampStore } from '../modules/rateLimit.js';
 import { runAuthMiddleware, runRateLimitMiddleware, normalizeApiKey } from '../modules/middlewareFactory.js';
 import { redactToken } from '../modules/redaction.js';
+import { buildModelAccessError, isModelAllowedForTier } from '../modules/planAccess.js';
 
 dotenv.config();
 
@@ -111,6 +112,12 @@ router.post('/v3/messages', authAndUsageMiddleware, rateLimitMiddleware, async (
              } else { return; }
         }
         const modelId = body.model;
+        if (!isModelAllowedForTier(modelId, request.tierLimits)) {
+             const errDetail = buildModelAccessError(modelId, request.tierLimits);
+             if (!response.completed) {
+               return response.status(errDetail.statusCode).json({ type: 'error', error: errDetail, timestamp });
+             } else { return; }
+        }
         
         // --- Map to internal format ---
         const formattedMessages: IMessage[] = body.messages.map((msg: any) => ({

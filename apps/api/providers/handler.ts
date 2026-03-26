@@ -39,6 +39,7 @@ import {
 	UserData, // Assuming this is exported from userData
 	TierData // Assuming this is exported from userData
 } from '../modules/userData.js';
+import { assertModelAllowedForTier } from '../modules/planAccess.js';
 import { isExcludedError } from '../modules/errorExclusion.js';
 import redis from '../modules/db.js';
 import { hashToken } from '../modules/redaction.js';
@@ -451,6 +452,35 @@ function markProviderFastSkip(
 function clearProviderFastSkip(providerId: string): void {
 	if (!providerId) return;
 	providerFastSkips.delete(providerId);
+}
+
+function summarizeProviderStateErrorMessage(error: any): string | undefined {
+	const raw =
+		typeof error?.message === 'string' && error.message.trim().length > 0
+			? error.message
+			: (typeof error === 'string' && error.trim().length > 0
+				? error
+				: '');
+	if (!raw) return undefined;
+	return raw.length <= 4000 ? raw : `${raw.slice(0, 3997)}...`;
+}
+
+function getProviderStateErrorCode(error: any): string | undefined {
+	const raw = error?.code ?? error?.errorDetails?.code;
+	if (raw === undefined || raw === null) return undefined;
+	const code = String(raw).trim();
+	return code.length > 0 ? code.slice(0, 200) : undefined;
+}
+
+function getProviderStateErrorStatus(error: any): number | null {
+	const raw = Number(
+		error?.status ??
+			error?.statusCode ??
+			error?.response?.status ??
+			error?.errorDetails?.statusCode ??
+			0
+	);
+	return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : null;
 }
 
 function isSharedRateLimitProvider(providerId: string): boolean {
@@ -1647,11 +1677,15 @@ export class MessageHandler {
 				(p: LoadedProviderData) =>
 					p.disabled && p.models && modelId in p.models
 			);
-			if (disabledSupporting.length > 0) {
+			const reenableableSupporting = disabledSupporting.filter(
+				(p: LoadedProviderData) =>
+					!shouldSkipGeminiProviderForMessage(p, null)
+			);
+			if (reenableableSupporting.length > 0) {
 				console.warn(
-					`All providers disabled; temporarily re-enabling ${disabledSupporting.length} provider(s) for model ${modelId}.`
+					`All providers disabled; temporarily re-enabling ${reenableableSupporting.length} provider(s) for model ${modelId}.`
 				);
-				activeProviders = disabledSupporting.map(p => ({
+				activeProviders = reenableableSupporting.map(p => ({
 					...p,
 					disabled: false
 				}));
@@ -1722,11 +1756,15 @@ export class MessageHandler {
 					(p: LoadedProviderData) =>
 						p.disabled && p.models && modelId in p.models
 				);
-				if (disabledSupporting.length > 0) {
+				const reenableableSupporting = disabledSupporting.filter(
+					(p: LoadedProviderData) =>
+						!shouldSkipGeminiProviderForMessage(p, null)
+				);
+				if (reenableableSupporting.length > 0) {
 					console.warn(
-						`Re-enabling ${disabledSupporting.length} disabled provider(s) for model ${modelId}.`
+						`Re-enabling ${reenableableSupporting.length} disabled provider(s) for model ${modelId}.`
 					);
-					compatibleProviders = disabledSupporting
+					compatibleProviders = reenableableSupporting
 						.map(p => ({ ...p, disabled: false }))
 						.filter((p: LoadedProviderData) => {
 							const modelData = p.models?.[modelId];
@@ -2091,6 +2129,28 @@ export class MessageHandler {
 
 		// Update consecutive errors and disabled status
 		if (isError) {
+			const errorMessage = summarizeProviderStateErrorMessage(
+				attemptError
+			);
+			const errorCode = getProviderStateErrorCode(attemptError);
+			const errorStatus = getProviderStateErrorStatus(attemptError);
+			if (errorMessage) {
+				(providerData as any).lastError = errorMessage;
+			} else {
+				delete (providerData as any).lastError;
+			}
+			if (errorCode) {
+				(providerData as any).lastErrorCode = errorCode;
+			} else {
+				delete (providerData as any).lastErrorCode;
+			}
+			if (errorStatus !== null) {
+				(providerData as any).lastStatus = errorStatus;
+			} else {
+				delete (providerData as any).lastStatus;
+			}
+			(providerData as any).lastErrorAt = Date.now();
+
 			if (this.isRateLimitOrQuotaError(attemptError)) {
 				const rateLimitMessage = String(
 					attemptError?.message || attemptError || ''
@@ -2160,6 +2220,8 @@ export class MessageHandler {
 					);
 				}
 				providerData.disabled = true;
+				(providerData as any).disabled_reason =
+					errorMessage || 'zero quota';
 				modelData.disabled = true;
 				modelData.consecutive_errors = this.CONSECUTIVE_ERROR_THRESHOLD;
 				modelData.disabled_at = Date.now();
@@ -2184,6 +2246,8 @@ export class MessageHandler {
 					);
 				}
 				providerData.disabled = true;
+				(providerData as any).disabled_reason =
+					errorMessage || 'invalid provider credentials';
 				modelData.consecutive_errors = this.CONSECUTIVE_ERROR_THRESHOLD;
 				modelData.disabled_at = Date.now();
 				modelData.disable_count = (modelData.disable_count || 0) + 1;
@@ -2228,6 +2292,9 @@ export class MessageHandler {
 									`Disabling provider ${providerId} after ${disabledModels} models were disabled due to consecutive errors.`
 								);
 								providerData.disabled = true;
+								(providerData as any).disabled_reason =
+									errorMessage ||
+									'consecutive provider model failures';
 							}
 						}
 					}
@@ -2236,6 +2303,11 @@ export class MessageHandler {
 		} else {
 			// Reset consecutive errors on success for this specific model
 			modelData.consecutive_errors = 0;
+			delete (providerData as any).lastError;
+			delete (providerData as any).lastErrorCode;
+			delete (providerData as any).lastStatus;
+			delete (providerData as any).lastErrorAt;
+			delete (providerData as any).disabled_reason;
 			if (modelData.disabled) {
 				console.log(
 					`Re-enabling model ${modelId} in provider ${providerId} after successful request.`
@@ -2340,6 +2412,7 @@ export class MessageHandler {
 			const userData: UserData = validationResult.userData;
 			const tierLimits: TierData = validationResult.tierLimits;
 			const userTierName = userData.tier;
+			assertModelAllowedForTier(modelId, tierLimits);
 			const allProvidersOriginal =
 				await dataManager.load<LoadedProviders>('providers');
 			let candidateProviders = this.prepareCandidateProviders(
@@ -2353,6 +2426,13 @@ export class MessageHandler {
 				modelId,
 				requiredCaps
 			);
+			const filteredGeminiProviders = candidateProviders.filter(
+				(provider: LoadedProviderData) =>
+					!shouldSkipGeminiProviderForMessage(provider, messages)
+			);
+			if (filteredGeminiProviders.length > 0) {
+				candidateProviders = filteredGeminiProviders;
+			}
 			if (candidateProviders.length === 0) {
 				throw new Error(
 					`No providers available for model ${modelId} after capability filtering.`
@@ -3110,6 +3190,7 @@ export class MessageHandler {
 		const userData: UserData = validationResult.userData;
 		const tierLimits: TierData = validationResult.tierLimits;
 		const userTierName = userData.tier;
+		assertModelAllowedForTier(modelId, tierLimits);
 
 		const allProvidersOriginal =
 			await dataManager.load<LoadedProviders>('providers');
@@ -3124,6 +3205,13 @@ export class MessageHandler {
 			modelId,
 			requiredCaps
 		);
+		const filteredGeminiProviders = candidateProviders.filter(
+			(provider: LoadedProviderData) =>
+				!shouldSkipGeminiProviderForMessage(provider, messages)
+		);
+		if (filteredGeminiProviders.length > 0) {
+			candidateProviders = filteredGeminiProviders;
+		}
 		if (candidateProviders.length === 0) {
 			throw new Error(
 				`No providers available for model ${modelId} after capability filtering.`
@@ -4054,6 +4142,22 @@ function messageContainsRemoteMediaUrl(message: any): boolean {
 	return collectRemoteMediaUrls(message).length > 0;
 }
 
+function hasCooldownManagedProviderFailureSignal(provider: any): boolean {
+	const lastError = String(
+		provider?.lastError || provider?.last_error || provider?.error || ''
+	);
+	const disabledReason = String(
+		provider?.disabled_reason || provider?.disabledReason || ''
+	);
+	const code = provider?.lastErrorCode || provider?.last_error_code;
+	const status = Number(provider?.lastStatus || provider?.last_status || 0);
+	return isRateLimitOrQuotaErrorShared({
+		message: `${lastError} ${disabledReason}`.trim(),
+		code,
+		status,
+	});
+}
+
 function shouldSkipGeminiProviderForMessage(
 	provider: any,
 	message: any
@@ -4063,60 +4167,88 @@ function shouldSkipGeminiProviderForMessage(
 		provider?.provider || provider?.type || ''
 	).toLowerCase();
 	const isGeminiProvider =
-		providerId.includes('gemini') || providerType.includes('gemini');
+		providerId.includes('gemini') ||
+		providerId === 'google' ||
+		providerType.includes('gemini') ||
+		providerType.includes('google');
 	if (!isGeminiProvider) return false;
+	if (hasCooldownManagedProviderFailureSignal(provider)) return false;
 
 	const hasRemoteMedia = messageContainsRemoteMediaUrl(message);
 	const lastError = String(
 		provider?.lastError || provider?.last_error || provider?.error || ''
 	).toLowerCase();
+	const lastErrorCode = String(
+		provider?.lastErrorCode || provider?.last_error_code || ''
+	).toLowerCase();
+	const disabledReason = String(
+		provider?.disabled_reason || provider?.disabledReason || ''
+	).toLowerCase();
+	const lastStatus = Number(provider?.lastStatus || provider?.last_status || 0);
+	const lastErrorAt = Number(
+		provider?.lastErrorAt || provider?.last_error_at || 0
+	);
+	if (
+		lastErrorAt > 0 &&
+		Date.now() - lastErrorAt > PROVIDER_AUTH_FAILURE_FAST_SKIP_MS
+	) {
+		return false;
+	}
+	const combined = `${lastError} ${lastErrorCode} ${disabledReason}`;
 
 	if (
 		hasRemoteMedia &&
-		(lastError.includes('cannot fetch content from the provided url') ||
-			lastError.includes('unsupported_remote_media_url') ||
-			lastError.includes('gemini_unsupported_remote_media_url'))
+		(combined.includes('cannot fetch content from the provided url') ||
+			combined.includes('unsupported_remote_media_url') ||
+			combined.includes('gemini_unsupported_remote_media_url'))
 	) {
 		return true;
 	}
 
 	if (
-		lastError.includes(
+		combined.includes(
 			'generative language api has not been used in project'
 		) ||
-		lastError.includes('generative language api is disabled') ||
-		lastError.includes('service_disabled') ||
-		lastError.includes('accessnotconfigured') ||
-		lastError.includes('generativelanguage.googleapis.com') ||
-		lastError.includes('gemini_project_auth_failure') ||
-		lastError.includes('api key not valid') ||
-		lastError.includes('api_key_invalid') ||
-		lastError.includes('invalid api key') ||
-		lastError.includes('invalid_argument')
+		combined.includes('generative language api is disabled') ||
+		combined.includes('service_disabled') ||
+		combined.includes('accessnotconfigured') ||
+		combined.includes('generativelanguage.googleapis.com') ||
+		combined.includes('gemini_project_auth_failure') ||
+		combined.includes('api key not valid') ||
+		combined.includes('api key not found') ||
+		combined.includes('api key expired') ||
+		combined.includes('please renew the api key') ||
+		combined.includes('api_key_invalid') ||
+		combined.includes('invalid api key') ||
+		combined.includes('invalid_argument') ||
+		lastStatus === 401 ||
+		lastStatus === 403
 	) {
 		return true;
 	}
 
 	if (
-		lastError.includes('empty streaming response') ||
-		lastError.includes('returned an empty streaming response')
+		combined.includes('empty streaming response') ||
+		combined.includes('returned an empty streaming response')
 	) {
 		return true;
 	}
 
 	if (
-		lastError.includes('invalid_response_structure') ||
-		lastError.includes('invalid response structure') ||
-		lastError.includes('gemini:invalid_response_structure')
+		combined.includes('invalid_response_structure') ||
+		combined.includes('invalid response structure') ||
+		combined.includes('gemini:invalid_response_structure')
 	) {
 		return true;
 	}
 
 	if (
-		lastError.includes('invalid api key') ||
-		lastError.includes('incorrect api key provided') ||
-		lastError.includes('invalid_api_key') ||
-		lastError.includes('you can find your api key at https://platform.openai.com/account/api-keys')
+		combined.includes('invalid api key') ||
+		combined.includes('incorrect api key provided') ||
+		combined.includes('invalid_api_key') ||
+		combined.includes(
+			'you can find your api key at https://platform.openai.com/account/api-keys'
+		)
 	) {
 		return true;
 	}

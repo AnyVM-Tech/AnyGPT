@@ -11,6 +11,7 @@ import { logError } from '../modules/errorLogger.js'; // Changed import
 import { RequestTimestampStore } from '../modules/rateLimit.js';
 import { runAuthMiddleware, runRateLimitMiddleware, normalizeApiKey } from '../modules/middlewareFactory.js';
 import { redactToken } from '../modules/redaction.js';
+import { buildModelAccessError, isModelAllowedForTier } from '../modules/planAccess.js';
 import {
     createInteractionToken,
     executeGeminiInteraction,
@@ -157,6 +158,12 @@ router.post('/models/:modelId/generateContent', authAndUsageMiddleware, rateLimi
 
    const userApiKey = request.apiKey!;
    const modelId = request.params.modelId;
+   if (!isModelAllowedForTier(modelId, request.tierLimits)) {
+        const errDetail = buildModelAccessError(modelId, request.tierLimits);
+        if (!response.completed) {
+          return response.status(errDetail.statusCode).json({ error: errDetail, timestamp: routeTimestamp });
+        } else { return; }
+   }
 
    let body: any; // For use in error handling if body parsing fails or modelId isn't found from body
 

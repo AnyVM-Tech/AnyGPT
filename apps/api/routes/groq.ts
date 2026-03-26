@@ -12,6 +12,7 @@ import { logError } from '../modules/errorLogger.js'; // Changed import
 import { RequestTimestampStore } from '../modules/rateLimit.js';
 import { runAuthMiddleware, runRateLimitMiddleware, extractBearerToken } from '../modules/middlewareFactory.js';
 import { redactToken } from '../modules/redaction.js';
+import { buildModelAccessError, isModelAllowedForTier } from '../modules/planAccess.js';
 
 dotenv.config();
 
@@ -106,6 +107,12 @@ router.post('/v4/chat/completions', authAndUsageMiddleware, rateLimitMiddleware,
              } else { return; }
         }
         modelId = model;
+        if (!isModelAllowedForTier(modelId, request.tierLimits)) {
+            const errDetail = buildModelAccessError(modelId, request.tierLimits);
+            if (!response.completed) {
+               return response.status(errDetail.statusCode).json({ error: errDetail, timestamp: new Date().toISOString() });
+            } else { return; }
+        }
         
         const formattedMessages: IMessage[] = rawMessages.map((msg: any) => ({
             role: msg.role,

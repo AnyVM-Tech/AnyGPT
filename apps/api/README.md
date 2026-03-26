@@ -110,12 +110,25 @@ apps/api/
     
     ### Data Storage Configuration
     *   `DATA_SOURCE_PREFERENCE`: Set to `redis` or `filesystem` (default: `redis`).
-    *   `REDIS_URL`: Redis Cloud connection URL (format: `host:port`).
+    *   `REDIS_URL`: Redis-compatible host/port or URL. `host:port` is the simplest local format.
     *   `REDIS_USERNAME`: Redis username (default: `default`).
     *   `REDIS_PASSWORD`: Redis password.
     *   `REDIS_DB`: Redis database number (default: 0).
     *   `REDIS_TLS`: Set to `true` for SSL/TLS connections (default: `false`).
     *   `ERROR_LOG_TO_REDIS`: Enable error logging to Redis (default: `true`).
+
+    Self-hosted Dragonfly works with the same settings. A local preset is included at [`dragonfly-anygpt.flags.example`](/home/skullcmd/AnyGPT/apps/api/dragonfly-anygpt.flags.example) and matches:
+
+    ```env
+    DATA_SOURCE_PREFERENCE=redis
+    REDIS_URL=127.0.0.1:6380
+    REDIS_USERNAME=default
+    REDIS_PASSWORD=replace-with-apps-api-redis-password
+    REDIS_DB=0
+    REDIS_TLS=false
+    ```
+
+    The included Dragonfly preset exposes two logical databases so the main API can use DB `0` while the control plane can clone into DB `1`.
 
     ### Router Configuration
     *   `ENABLE_OPENAI_ROUTES`: Enable/disable OpenAI routes (default: `true`).
@@ -181,6 +194,7 @@ apps/api/
      *   `REQUEST_QUEUE_CONCURRENCY`: Concurrency for the shared request-handler queue used by `/v1/chat/completions` and `/v1/responses`.
      *   `REQUEST_QUEUE_MAX_PENDING`: Maximum pending requests allowed in the shared request-handler queue before overload responses are returned.
      *   `REQUEST_QUEUE_MAX_WAIT_MS`: Maximum time a request may wait in the shared request-handler queue before timing out.
+     *   `REQUEST_MEMORY_MIN_AVAILABLE_SYSTEM_MB`: Minimum `MemAvailable` headroom before the request admission guard starts returning memory-pressure `503`s. On large-memory hosts the fallback tops out at `3072`.
      *   `EMBEDDINGS_QUEUE_CONCURRENCY`: Concurrency for the dedicated embeddings admission queue.
      *   `EMBEDDINGS_QUEUE_MAX_PENDING`: Maximum pending requests for the embeddings admission queue.
      *   `PROVIDER_STATS_QUEUE_CONCURRENCY`: Concurrency per provider-stats worker queue.
@@ -233,10 +247,10 @@ apps/api/
 
 *   **Systemd Services:**
     ```bash
-    sudo systemctl status anygpt-api
+    sudo systemctl status anygpt
     sudo systemctl status anygpt-experimental
     ```
-    The experimental service uses a separate build output and default port (3000).
+    The main production unit is `anygpt.service`. Older deployments may still expose `anygpt-api.service` as a compatibility alias. The experimental service uses a separate build output and default port (3000).
 
 ## Testing
 
@@ -290,18 +304,22 @@ Common endpoints:
 *   `POST /v1/embeddings`
 *   `POST /v1/images/generations`
 *   `POST /v1/images/edits`
-*   `POST /v1/videos/generations`
+*   `GET /v1/videos`
+*   `POST /v1/videos`
+*   `POST /v1/videos/generations` (legacy alias)
 *   `GET /v1/videos/{requestId}`
 *   `POST /v1/audio/speech`
 *   `POST /v1/audio/transcriptions`
 *   `GET /v1/audio/voices`
 *   `GET /v1/audio/models`
 *   `GET /v1/keys/me` (key usage/metrics)
+*   `GET /v1/keys/me/live` (live key usage/metrics from Redis when available)
 *   `POST /v1/generate_key` (admin)
 *   `POST /v1/interactions` and `GET /v1/interactions/{interactionId}`
 
 Notes:
 *   [`/v1/responses`](apps/api/routes/openai.ts) is the preferred path for native OpenAI clients such as Roo Code.
+*   Video creation uses `POST /v1/videos`; `GET /v1/videos` lists existing jobs.
 *   Plain text Responses streams can use a passthrough fast path for lower latency; reasoning/tool-call cases may be normalized server-side to preserve OpenAI-native semantics.
 *   Text-capable Gemini, DeepSeek, xAI/Grok, and similar models can be served through `/v1/responses` when they behave like chat/text models.
 *   Media-only or dedicated non-chat models such as embeddings, TTS, STT, image generation, and video generation are redirected to their dedicated endpoints instead of `/v1/responses`.
@@ -320,6 +338,9 @@ Notes:
 
 ### Admin
 *   Admin endpoints live under `/api/admin` (providers, API keys, metrics) and are also exposed at `/admin`.
+*   API key summaries now include lifetime totals, paid totals, and current billing-period totals for tokens, requests, and estimated cost.
+*   `POST /api/admin/api-keys/settle-billing` marks the current billing period as paid for a selected key and starts a new billing period from the settlement timestamp.
+*   `POST /api/admin/api-keys/reset-usage` clears lifetime and billing counters for a selected key.
 *   `GET /api/admin/metrics/summary` returns aggregate provider/model/key counts, queue totals, and error log stats.
 *   `GET /api/admin/metrics/queues` returns live queue snapshots for:
     *   the shared request-handler queue used by `/v1/chat/completions` and `/v1/responses`
@@ -418,7 +439,7 @@ Set `DATA_SOURCE_PREFERENCE=redis` or `DATA_SOURCE_PREFERENCE=filesystem` in you
 *   API keys are managed in `keys.json` (filesystem) or Redis.
 *   User tiers and their associated rate limits (RPS, RPM, RPD) and provider score preferences are defined in `tiers.json`.
 *   The `generalAuthMiddleware` in `server.ts` handles initial API key validation, and specific middlewares in provider routes (`openai.ts`, etc.) or admin routes (`admin.ts`) enforce authentication and authorization.
-*   `GET /v1/keys/me` returns usage and tier info for the current key (validates the key even if token usage is exhausted).
+*   `GET /v1/keys/me` returns usage and tier info for the current key, including lifetime usage, paid usage, and current billing-period usage/cost (validates the key even if token usage is exhausted).
 *   Default admin users can be auto-created using the `DEFAULT_ADMIN_USER_ID` and `DEFAULT_ADMIN_API_KEY` environment variables.
 
 ## Logging & Monitoring

@@ -1,5 +1,3 @@
-# Legacy compatibility unit file.
-# New deployments should install and manage `anygpt.service`.
 [Unit]
 Description=AnyGPT API Service
 After=network.target
@@ -63,3 +61,4 @@ ReadWritePaths=/srv/anygpt/apps/api/dist /var/lib/anygpt /var/log/anygpt /run/an
 
 [Install]
 WantedBy=multi-user.target
+Alias=anygpt-api.service

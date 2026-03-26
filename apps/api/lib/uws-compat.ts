@@ -1,7 +1,7 @@
 import { STATUS_CODES } from 'http';
 import { randomUUID } from 'crypto';
 
-type NextFunction = () => void;
+type NextFunction = () => Promise<void>;
 type Handler = (request: Request, response: Response, next: NextFunction) => any;
 type ErrorHandler = (request: Request, response: Response, error: unknown) => any;
 type NotFoundHandler = (request: Request, response: Response) => any;
@@ -467,6 +467,7 @@ async function runHandlers(
         const next: NextFunction = () => {
             nextCalled = true;
             nextPromise = run(index + 1);
+            return nextPromise;
         };
         try {
             const maybe = fn(request, response, next);

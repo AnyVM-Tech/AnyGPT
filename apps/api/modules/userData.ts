@@ -3,14 +3,48 @@ import crypto from 'crypto';
 // import fs from 'fs';
 // Import the singleton DataManager instance
 import { dataManager, ModelsFileStructure } from './dataManager.js';
-// Import tiers data directly (static configuration)
-import tiersData from '../tiers.json' with { type: 'json' };
 import { logger } from './logger.js';
 import { hashToken } from './redaction.js';
 import { BASE64_DATA_URL_GLOBAL } from './tokenEstimation.js';
+import {
+  incrementCompletionRateLimitCounters,
+  logCompletionRateLimitIncrementFailure,
+} from './completionRateLimit.js';
+import {
+  getDefaultAdminTierId,
+  getFallbackUserTierId,
+  loadTiers,
+} from './tierManager.js';
+import type { TierData, TiersFile } from './tierManager.js';
+
+export type { TierData, TiersFile } from './tierManager.js';
 
 // --- Per-model pricing cache for estimatedCost ---
-interface ModelPricing { input: number; output: number; }
+type SpecialPricingMetric =
+  | 'per_image'
+  | 'per_request'
+  | 'image_input'
+  | 'audio_input'
+  | 'audio_output';
+
+interface ModelPricing {
+  input: number;
+  output: number;
+  per_image?: number;
+  per_request?: number;
+  image_input?: number;
+  audio_input?: number;
+  audio_output?: number;
+}
+
+const SPECIAL_PRICING_FIELDS: SpecialPricingMetric[] = [
+  'per_image',
+  'per_request',
+  'image_input',
+  'audio_input',
+  'audio_output',
+];
+
 let _pricingCache: Map<string, ModelPricing> = new Map();
 let _avgBlendedRate: number = 0;
 let _pricingLastUpdated = 0;
@@ -215,14 +249,25 @@ async function refreshPricingCache(): Promise<void> {
       if (!p) continue;
       const inp = typeof p.input === 'number' ? p.input : 0;
       const out = typeof p.output === 'number' ? p.output : 0;
+      const extraPricing: Partial<Record<SpecialPricingMetric, number>> = {};
+      for (const field of SPECIAL_PRICING_FIELDS) {
+        const value = typeof p[field] === 'number' ? p[field] : 0;
+        if (value > 0) {
+          extraPricing[field] = value;
+        }
+      }
+      if (inp > 0 || out > 0 || Object.keys(extraPricing).length > 0) {
+        next.set(m.id, { input: inp, output: out, ...extraPricing });
+      }
       if (inp > 0 || out > 0) {
-        next.set(m.id, { input: inp, output: out });
         blendedRates.push((inp + out) / 2);
       }
     }
     if (next.size > 0) {
       _pricingCache = next;
-      _avgBlendedRate = blendedRates.reduce((a, b) => a + b, 0) / blendedRates.length;
+      _avgBlendedRate = blendedRates.length > 0
+        ? blendedRates.reduce((a, b) => a + b, 0) / blendedRates.length
+        : 0;
       _pricingLastUpdated = now;
     }
   } catch {
@@ -234,10 +279,34 @@ function calculateRequestCost(
   totalTokens: number,
   modelId?: string,
   promptTokens?: number,
-  completionTokens?: number
+  completionTokens?: number,
+  pricingMetric?: SpecialPricingMetric,
+  pricingQuantity?: number
 ): number {
   if (modelId && _pricingCache.has(modelId)) {
     const pricing = _pricingCache.get(modelId)!;
+    if (pricingMetric) {
+      const unitRate = pricing[pricingMetric];
+      const quantity =
+        typeof pricingQuantity === 'number' && Number.isFinite(pricingQuantity) && pricingQuantity > 0
+          ? pricingQuantity
+          : pricingMetric === 'per_request'
+            ? 1
+            : 0;
+      if (typeof unitRate === 'number' && unitRate > 0 && quantity > 0) {
+        return unitRate * quantity;
+      }
+      // Some video models are billed once per request even when the route passes
+      // a duration-based video quantity. Fall back to per_request so tracked usage
+      // still reflects the configured model price instead of silently billing $0.
+      if (
+        pricingMetric === 'per_image'
+        && typeof pricing.per_request === 'number'
+        && pricing.per_request > 0
+      ) {
+        return pricing.per_request;
+      }
+    }
     const pTokens = typeof promptTokens === 'number' ? promptTokens : totalTokens;
     const cTokens = typeof completionTokens === 'number' ? completionTokens : 0;
     // pricing.input and pricing.output are $/M tokens
@@ -250,74 +319,188 @@ function calculateRequestCost(
   return 0;
 }
 
-// --- Type Definitions --- 
-// Export interfaces for use in other modules
-export interface TierData {
-  rps: number;
-  rpm: number;
-  rpd: number;
-  max_tokens: number | null; 
-  min_provider_score: number | null; 
-  max_provider_score: number | null; 
+function normalizeUsageCounter(value: unknown): number {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) return 0;
+  return Math.floor(parsed);
 }
-type TiersFile = Record<string, TierData>;
-const tiers: TiersFile = tiersData;
+
+function normalizeUsdAmount(value: unknown): number {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) return 0;
+  return Math.round(parsed * 1_000_000) / 1_000_000;
+}
+
+function normalizeOptionalCounter(value: unknown): number | null {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) return null;
+  return Math.floor(parsed);
+}
+
+export function normalizeRateLimitValue(value: unknown): number {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+  return Math.floor(parsed);
+}
+
+export type NormalizedTierRateLimits<T extends { rps: number | null; rpm: number | null; rpd: number | null }> =
+  Omit<T, 'rps' | 'rpm' | 'rpd'> & { rps: number; rpm: number; rpd: number };
+
+export function normalizeTierRateLimits<T extends { rps: number | null; rpm: number | null; rpd: number | null }>(
+  limits: T
+): NormalizedTierRateLimits<T> {
+  return {
+    ...limits,
+    rps: normalizeRateLimitValue(limits.rps),
+    rpm: normalizeRateLimitValue(limits.rpm),
+    rpd: normalizeRateLimitValue(limits.rpd),
+  } as NormalizedTierRateLimits<T>;
+}
+
+function getUtcDayBucket(date: Date = new Date()): string {
+  return date.toISOString().slice(0, 10);
+}
+
+function isValidUtcDayBucket(value: unknown): value is string {
+  return typeof value === 'string'
+    && /^\d{4}-\d{2}-\d{2}$/.test(value)
+    && Number.isFinite(Date.parse(`${value}T00:00:00.000Z`));
+}
+
+function getBillingPeriodTokenUsage(userData: Pick<UserData, 'tokenUsage' | 'paidTokenUsage'>): number {
+  const totalTokenUsage = normalizeUsageCounter(userData.tokenUsage);
+  const paidTokenUsage = Math.min(
+    totalTokenUsage,
+    normalizeUsageCounter(userData.paidTokenUsage)
+  );
+  return Math.max(0, totalTokenUsage - paidTokenUsage);
+}
 
 export interface UserData {
   userId: string;
   tokenUsage: number;
   requestCount: number;
+  dailyRequestCount?: number;
+  dailyRequestDate?: string;
   role: 'admin' | 'user';
   tier: keyof TiersFile; // Use keyof TiersFile for better type safety
   estimatedCost?: number;
+  paidTokenUsage?: number;
+  paidRequestCount?: number;
+  paidEstimatedCost?: number;
+  billingPeriodStartedAt?: string;
+  lastBillingSettlementAt?: string;
 }
 // Define KeysFile structure locally or import if shared
 export interface KeysFile { [apiKey: string]: UserData; }
 
-// --- Functions using DataManager --- 
+export function buildFreshUsageAccounting(startedAt: string = new Date().toISOString()): Pick<
+  UserData,
+  'tokenUsage' | 'requestCount' | 'dailyRequestCount' | 'dailyRequestDate' | 'estimatedCost' | 'paidTokenUsage' | 'paidRequestCount' | 'paidEstimatedCost' | 'billingPeriodStartedAt'
+> {
+  return {
+    tokenUsage: 0,
+    requestCount: 0,
+    dailyRequestCount: 0,
+    dailyRequestDate: getUtcDayBucket(),
+    estimatedCost: 0,
+    paidTokenUsage: 0,
+    paidRequestCount: 0,
+    paidEstimatedCost: 0,
+    billingPeriodStartedAt: startedAt,
+  };
+}
 
-export async function generateUserApiKey(userId: string, role: 'admin' | 'user' = 'user', tier: keyof TiersFile = 'free'): Promise<string> { 
+export function settleUserBillingPeriod(userData: UserData, settledAt: string = new Date().toISOString()): UserData {
+  const tokenUsage = normalizeUsageCounter(userData.tokenUsage);
+  const requestCount = normalizeUsageCounter(userData.requestCount);
+  const estimatedCost = normalizeUsdAmount(userData.estimatedCost);
+
+  return {
+    ...userData,
+    tokenUsage,
+    requestCount,
+    estimatedCost,
+    paidTokenUsage: tokenUsage,
+    paidRequestCount: requestCount,
+    paidEstimatedCost: estimatedCost,
+    billingPeriodStartedAt: settledAt,
+    lastBillingSettlementAt: settledAt,
+  };
+}
+
+export function resetUserUsageAccounting(userData: UserData, resetAt: string = new Date().toISOString()): UserData {
+  return {
+    ...userData,
+    tokenUsage: 0,
+    requestCount: 0,
+    dailyRequestCount: 0,
+    dailyRequestDate: getUtcDayBucket(new Date(resetAt)),
+    estimatedCost: 0,
+    paidTokenUsage: 0,
+    paidRequestCount: 0,
+    paidEstimatedCost: 0,
+    billingPeriodStartedAt: resetAt,
+    lastBillingSettlementAt: resetAt,
+  };
+}
+
+// --- Functions using DataManager ---
+
+export async function generateUserApiKey(
+  userId: string,
+  role: 'admin' | 'user' = 'user',
+  tier?: keyof TiersFile | string
+): Promise<string> {
   if (!userId) throw new Error('User ID required.');
   const apiKey = crypto.randomBytes(32).toString('hex');
-  const currentKeys = await dataManager.load<KeysFile>('keys'); 
+  const currentKeys = await dataManager.load<KeysFile>('keys');
+  const tiers = await loadTiers();
 
   if (Object.values(currentKeys).find(data => data.userId === userId)) {
-    throw new Error(`User ID '${userId}' already has an API key.`); // Keep this specific error
+    throw new Error(`User ID '${userId}' already has an API key.`);
   }
 
-  // Validate provided tier or default
-  const finalTier = tiers[tier] ? tier : 'free';
-  if (!tiers[finalTier]) {
-      // This case should ideally not be hit if 'free' tier is always present, but good for safety
-      console.warn(`Tier '${tier}' not found, and default 'free' tier also missing. Falling back to first available tier or erroring.`);
-      // Attempt to find any available tier if 'free' is somehow missing
-      const availableTiers = Object.keys(tiers) as (keyof TiersFile)[];
-      if(availableTiers.length === 0) throw new Error("Configuration error: No tiers defined (including 'free').");
-      // If you want to be super robust, you might pick the first available tier, but it's better if 'free' exists.
-      // For now, this indicates a critical config issue if 'free' is not found when 'tier' is also invalid.
-      if (finalTier === 'free') throw new Error("Configuration error: Default 'free' tier is missing in tiers.json.");
-      // If a custom tier was provided but not found, and 'free' is missing, this is also an issue.
+  const requestedTier = typeof tier === 'string' ? tier.trim() : '';
+  if (requestedTier && !tiers[requestedTier]) {
+    throw new Error(`Unknown tier '${requestedTier}'.`);
+  }
+  const fallbackTier = getFallbackUserTierId(tiers);
+  const finalTier = (requestedTier || fallbackTier || '') as keyof TiersFile;
+  if (!finalTier || !tiers[finalTier]) {
+    throw new Error('Configuration error: No tiers defined.');
   }
 
-  currentKeys[apiKey] = { userId, tokenUsage: 0, requestCount: 0, role: role, tier: finalTier };
-  await dataManager.save<KeysFile>('keys', currentKeys); 
-  console.log(`Generated key for ${userId} with role: ${role} and tier: ${finalTier}.`); 
+  currentKeys[apiKey] = {
+    userId,
+    role,
+    tier: finalTier,
+    ...buildFreshUsageAccounting(),
+  };
+  await dataManager.save<KeysFile>('keys', currentKeys);
+  console.log(`Generated key for ${userId} with role: ${role} and tier: ${finalTier}.`);
   return apiKey;
 }
 
-export async function generateAdminApiKey(userId: string): Promise<string> { // Made async
-   if (!userId) throw new Error('User ID required.');
-   const apiKey = crypto.randomBytes(32).toString('hex');
-   const currentKeys = await dataManager.load<KeysFile>('keys');
+export async function generateAdminApiKey(userId: string): Promise<string> {
+  if (!userId) throw new Error('User ID required.');
+  const apiKey = crypto.randomBytes(32).toString('hex');
+  const currentKeys = await dataManager.load<KeysFile>('keys');
+  const tiers = await loadTiers();
 
-   if (Object.values(currentKeys).find(data => data.userId === userId)) {
+  if (Object.values(currentKeys).find(data => data.userId === userId)) {
     throw new Error(`User ID '${userId}' already has API key.`);
   }
-   const adminTier: keyof TiersFile = tiers.enterprise ? 'enterprise' : (tiers.free ? 'free' : ''); 
-   if (!adminTier) throw new Error("Config error: No admin tier found.");
+  const adminTier = getDefaultAdminTierId(tiers) as keyof TiersFile | null;
+  if (!adminTier) throw new Error('Config error: No admin tier found.');
 
-  currentKeys[apiKey] = { userId, tokenUsage: 0, requestCount: 0, role: 'admin', tier: adminTier };
-  await dataManager.save<KeysFile>('keys', currentKeys); 
+  currentKeys[apiKey] = {
+    userId,
+    role: 'admin',
+    tier: adminTier,
+    ...buildFreshUsageAccounting(),
+  };
+  await dataManager.save<KeysFile>('keys', currentKeys);
   console.log(`Generated admin key for ${userId}.`);
   return apiKey;
 }
@@ -326,7 +509,10 @@ export async function generateAdminApiKey(userId: string): Promise<string> { // 
 export async function validateApiKeyAndUsage(apiKey: string): Promise<{ valid: boolean; userData?: UserData; tierLimits?: TierData, error?: string }> {
   const apiKeyHash = hashToken(apiKey).slice(0, 12);
   logger.debug(`[validateApiKeyAndUsage] Validating API key hash: ${apiKeyHash}`);
-  const currentKeys = await dataManager.load<KeysFile>('keys'); 
+  const [currentKeys, tiers] = await Promise.all([
+    dataManager.load<KeysFile>('keys'),
+    loadTiers(),
+  ]);
   logger.debug(`[validateApiKeyAndUsage] Loaded keys count: ${Object.keys(currentKeys).length}`);
   const userData = currentKeys[apiKey];
   logger.debug(`[validateApiKeyAndUsage] User data for API key hash: ${apiKeyHash} => ${userData ? 'found' : 'missing'}`);
@@ -336,24 +522,43 @@ export async function validateApiKeyAndUsage(apiKey: string): Promise<{ valid: b
       return { valid: false, error: 'API key not found.' };
   }
 
-    if (typeof userData.tokenUsage !== 'number' || Number.isNaN(userData.tokenUsage) || userData.tokenUsage < 0) {
+  if (typeof userData.tokenUsage !== 'number' || Number.isNaN(userData.tokenUsage) || userData.tokenUsage < 0) {
       userData.tokenUsage = 0;
     }
     if (typeof userData.requestCount !== 'number' || Number.isNaN(userData.requestCount) || userData.requestCount < 0) {
       userData.requestCount = 0;
     }
+    if (typeof userData.dailyRequestCount !== 'number' || Number.isNaN(userData.dailyRequestCount) || userData.dailyRequestCount < 0) {
+      userData.dailyRequestCount = 0;
+    }
+    if (typeof userData.dailyRequestDate !== 'undefined' && !isValidUtcDayBucket(userData.dailyRequestDate)) {
+      userData.dailyRequestDate = getUtcDayBucket();
+      userData.dailyRequestCount = 0;
+    }
+    if (typeof userData.paidTokenUsage !== 'number' || Number.isNaN(userData.paidTokenUsage) || userData.paidTokenUsage < 0) {
+      userData.paidTokenUsage = 0;
+    }
+    if (typeof userData.paidRequestCount !== 'number' || Number.isNaN(userData.paidRequestCount) || userData.paidRequestCount < 0) {
+      userData.paidRequestCount = 0;
+    }
+    if (typeof userData.paidEstimatedCost !== 'number' || Number.isNaN(userData.paidEstimatedCost) || userData.paidEstimatedCost < 0) {
+      userData.paidEstimatedCost = 0;
+    }
 
-  const tierLimits = tiers[userData.tier]; // tiers is static import
-  logger.debug(`[validateApiKeyAndUsage] Tier limits resolved for API key hash: ${apiKeyHash}`);
-
-  if (!tierLimits) {
+  const tierDefinition = tiers[userData.tier];
+  if (!tierDefinition) {
       const errorMsg = `Invalid tier ('${userData.tier}') for API key hash ${apiKeyHash}`;
       logger.warn(`[validateApiKeyAndUsage] ${errorMsg}`);
       return { valid: false, error: errorMsg, userData };
   }
 
-  if (tierLimits.max_tokens !== null && userData.tokenUsage >= tierLimits.max_tokens) {
-      const errorMsg = `Token limit (${tierLimits.max_tokens}) reached for API key hash ${apiKeyHash}`;
+  const tierLimits = normalizeTierRateLimits(tierDefinition);
+  logger.debug(`[validateApiKeyAndUsage] Tier limits resolved for API key hash: ${apiKeyHash}`);
+
+  const billingPeriodTokenUsage = getBillingPeriodTokenUsage(userData);
+
+  if (tierLimits.max_tokens !== null && billingPeriodTokenUsage >= tierLimits.max_tokens) {
+      const errorMsg = `Token limit (${tierLimits.max_tokens}) reached for current billing period for API key hash ${apiKeyHash}`;
       logger.warn(`[validateApiKeyAndUsage] ${errorMsg}`);
       return { valid: false, error: errorMsg, userData, tierLimits };
   }
@@ -364,12 +569,15 @@ export async function validateApiKeyAndUsage(apiKey: string): Promise<{ valid: b
 
 // Becomes async due to dataManager.load
 export async function getTierLimits(apiKey: string): Promise<TierData | null> {
-   const keys = await dataManager.load<KeysFile>('keys');
+   const [keys, tiers] = await Promise.all([
+    dataManager.load<KeysFile>('keys'),
+    loadTiers(),
+   ]);
    const userData = keys[apiKey];
    if (!userData) { return null; }
-   const limits = tiers[userData.tier]; // tiers is static import
-   if (!limits) { return null; }
-   return limits;
+   const tier = tiers[userData.tier];
+   if (!tier) { return null; }
+   return normalizeTierRateLimits(tier);
 }
 
 // Parse and validate request body for chat/completions; caller supplies the already-parsed body.
@@ -546,6 +754,8 @@ export async function updateUserTokenUsage(
     modelId?: string;
     promptTokens?: number;
     completionTokens?: number;
+    pricingMetric?: SpecialPricingMetric;
+    pricingQuantity?: number;
   } = {}
 ): Promise<void> {
   if (typeof numberOfTokens !== 'number' || isNaN(numberOfTokens) || numberOfTokens < 0) {
@@ -560,9 +770,12 @@ export async function updateUserTokenUsage(
     numberOfTokens,
     options.modelId,
     options.promptTokens,
-    options.completionTokens
+    options.completionTokens,
+    options.pricingMetric,
+    options.pricingQuantity
   );
 
+  const tiers = await loadTiers();
   let keyFound = false;
 
   await dataManager.updateWithLock<KeysFile>('keys', (currentKeys) => {
@@ -574,9 +787,37 @@ export async function updateUserTokenUsage(
     keyFound = true;
     userData.tokenUsage = (userData.tokenUsage || 0) + numberOfTokens;
     userData.requestCount = (userData.requestCount || 0) + (incrementRequest ? 1 : 0);
+    const todayBucket = getUtcDayBucket();
+    const currentBucket = isValidUtcDayBucket(userData.dailyRequestDate) ? userData.dailyRequestDate : null;
+    if (currentBucket !== todayBucket) {
+      userData.dailyRequestDate = todayBucket;
+      userData.dailyRequestCount = 0;
+    }
+    const previousDailyRequestCount = normalizeUsageCounter(userData.dailyRequestCount);
+    if (incrementRequest) {
+      userData.dailyRequestCount = previousDailyRequestCount + 1;
+      const currentTier = tiers[userData.tier];
+      const softRpd = normalizeOptionalCounter(currentTier?.soft_rpd);
+      if (softRpd !== null && previousDailyRequestCount <= softRpd && userData.dailyRequestCount > softRpd) {
+        const hardRpd = normalizeOptionalCounter(currentTier?.rpd);
+        logger.warn(
+          `[UsageWarning] API key ${hashToken(apiKey).slice(0, 12)} (${userData.userId}) exceeded its soft daily request target (${softRpd}) on ${todayBucket}. Current billed requests today: ${userData.dailyRequestCount}${hardRpd !== null ? ` / hard cap ${hardRpd}` : ''}.`
+        );
+      }
+    } else {
+      userData.dailyRequestCount = previousDailyRequestCount;
+    }
+    userData.paidTokenUsage = normalizeUsageCounter(userData.paidTokenUsage);
+    userData.paidRequestCount = normalizeUsageCounter(userData.paidRequestCount);
+    userData.paidEstimatedCost = normalizeUsdAmount(userData.paidEstimatedCost);
     if (requestCost > 0) {
       // Use 6 decimal places to avoid rounding away sub-cent per-request costs
-      userData.estimatedCost = Math.round(((userData.estimatedCost || 0) + requestCost) * 1_000_000) / 1_000_000;
+      userData.estimatedCost = normalizeUsdAmount((userData.estimatedCost || 0) + requestCost);
+    } else if (typeof userData.estimatedCost === 'undefined') {
+      userData.estimatedCost = 0;
+    }
+    if (!userData.billingPeriodStartedAt) {
+      userData.billingPeriodStartedAt = new Date().toISOString();
     }
     currentKeys[apiKey] = userData;
     return currentKeys;
@@ -584,5 +825,16 @@ export async function updateUserTokenUsage(
 
   if (!keyFound) {
     logger.warn(`Update token usage failed: key ${hashToken(apiKey).slice(0, 12)} not found.`);
+    return;
+  }
+
+  if (!incrementRequest) {
+    return;
+  }
+
+  try {
+    await incrementCompletionRateLimitCounters(apiKey);
+  } catch (error) {
+    logCompletionRateLimitIncrementFailure(apiKey, error);
   }
 }

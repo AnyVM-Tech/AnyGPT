@@ -4,7 +4,12 @@ import path from 'path';
 import { createInterface } from 'node:readline';
 import crypto from 'crypto';
 import { addOrUpdateProvider } from '../server/addProvider.js';
-import { generateUserApiKey } from '../modules/userData.js';
+import {
+    generateUserApiKey,
+    resetUserUsageAccounting,
+    settleUserBillingPeriod,
+    type TierData,
+} from '../modules/userData.js';
 import { logError } from '../modules/errorLogger.js';
 import { notifyAdminKeyReceived } from '../modules/adminKeySync.js';
 import {
@@ -19,15 +24,31 @@ import {
 import { redactToken } from '../modules/redaction.js';
 import { enforceInMemoryRateLimit, RequestTimestampStore } from '../modules/rateLimit.js';
 import { dataManager, type KeysFile, type LoadedProviders, type ModelsFileStructure } from '../modules/dataManager.js';
+import { deriveKeyUsageSnapshot } from '../modules/keyUsage.js';
+import { buildPublicPlanPayload } from '../modules/planAccess.js';
 import { refreshProviderCountsInModelsFile } from '../modules/modelUpdater.js';
 import { readTierRateLimitsFromEnv } from '../modules/middlewareFactory.js';
 import { getProviderStatsQueueSnapshots } from '../providers/handler.js';
 import { getOpenAiAdmissionQueueSnapshots } from './openai.js';
-import tiersData from '../tiers.json' with { type: 'json' };
+import { getFleetInstances } from '../modules/fleetCoordinator.js';
+import {
+    getFallbackUserTierId,
+    getTiersFilePath,
+    loadTiers,
+    mergeTierPatch,
+    normalizeTierData,
+    normalizeTiersFile,
+    saveTiers,
+    type TiersFile,
+} from '../modules/tierManager.js';
 
 const adminRouter = new HyperExpress.Router();
-const adminKeysLogPath = path.resolve('logs/admin-keys.jsonl');
-const legacyAdminKeysLogPath = path.resolve('logs/admin-keys.json');
+const configuredLogDirectory = (process.env.ANYGPT_LOG_DIR || '').trim();
+const logDirectory = configuredLogDirectory
+    ? path.resolve(configuredLogDirectory)
+    : path.resolve('logs');
+const adminKeysLogPath = path.join(logDirectory, 'admin-keys.jsonl');
+const legacyAdminKeysLogPath = path.join(logDirectory, 'admin-keys.json');
 const parsedMaxEntries = parseInt(process.env.ADMIN_KEYS_LOG_MAX_ENTRIES || '1000', 10);
 const parsedMaxBytes = parseInt(process.env.ADMIN_KEYS_LOG_MAX_BYTES || '5242880', 10);
 const adminKeysLogMaxEntries = Number.isFinite(parsedMaxEntries) ? Math.max(1, parsedMaxEntries) : 1000;
@@ -55,22 +76,52 @@ const adminKeyIngestStore: RequestTimestampStore = {};
 const adminProtectedRouteStore: RequestTimestampStore = {};
 const adminProtectedRouteRateLimits = readTierRateLimitsFromEnv('ADMIN_ROUTE_RATE_LIMIT', { rps: 10, rpm: 300, rpd: 5000 });
 
-const tiers = tiersData as Record<string, { rps: number; rpm: number; rpd: number; max_tokens: number | null }>;
-
-function normalizeTier(tier?: string): string | null {
+function normalizeTierId(tiers: TiersFile, tier?: string): string | null {
     if (!tier) return null;
-    return tiers[tier] ? tier : null;
+    const normalized = tier.trim();
+    if (!normalized) return null;
+    return tiers[normalized] ? normalized : null;
 }
 
-function summarizeApiKey(apiKey: string, user: { userId: string; role: string; tier: string; tokenUsage: number; requestCount: number }) {
+function summarizeApiKey(apiKey: string, user: KeysFile[string], tiers: TiersFile) {
+    const tier = tiers[user.tier];
+    const usage = deriveKeyUsageSnapshot(user, tier);
     return {
         apiKeyMasked: redactToken(apiKey),
         apiKeyHash: deriveApiKeyIdentifier(apiKey),
         userId: user.userId,
         role: user.role,
         tier: user.tier,
-        tokenUsage: user.tokenUsage,
-        requestCount: user.requestCount,
+        plan: buildPublicPlanPayload(user.tier, tier),
+        tokenUsage: usage.totalTokenUsage,
+        totalTokenUsage: usage.totalTokenUsage,
+        paidTokenUsage: usage.paidTokenUsage,
+        billingPeriodTokenUsage: usage.billingPeriodTokenUsage,
+        outstandingTokenUsage: usage.outstandingTokenUsage,
+        requestCount: usage.totalRequestCount,
+        totalRequestCount: usage.totalRequestCount,
+        paidRequestCount: usage.paidRequestCount,
+        billingPeriodRequestCount: usage.billingPeriodRequestCount,
+        outstandingRequestCount: usage.outstandingRequestCount,
+        currentDayRequestDate: usage.currentDayRequestDate,
+        currentDayRequestCount: usage.currentDayRequestCount,
+        dailyRequestTarget: usage.dailyRequestTarget,
+        dailyRequestTargetRemaining: usage.dailyRequestTargetRemaining,
+        dailyRequestHardCap: usage.dailyRequestHardCap,
+        dailyRequestHardCapRemaining: usage.dailyRequestHardCapRemaining,
+        dailyRequestWarningActive: usage.dailyRequestWarningActive,
+        dailyRequestWarningExceededBy: usage.dailyRequestWarningExceededBy,
+        billingPeriodRequestTarget: usage.billingPeriodRequestTarget,
+        billingPeriodRequestTargetRemaining: usage.billingPeriodRequestTargetRemaining,
+        estimatedCost: usage.totalEstimatedCost,
+        totalEstimatedCost: usage.totalEstimatedCost,
+        paidEstimatedCost: usage.paidEstimatedCost,
+        billingPeriodEstimatedCost: usage.billingPeriodEstimatedCost,
+        outstandingEstimatedCost: usage.outstandingEstimatedCost,
+        billingPeriodStartedAt: usage.billingPeriodStartedAt,
+        lastBillingSettlementAt: usage.lastBillingSettlementAt,
+        warnings: usage.warnings,
+        warningTicker: usage.warningTicker,
     };
 }
 
@@ -97,6 +148,52 @@ function resolveApiKeySelector(keys: KeysFile, selector: { apiKey?: string; user
         }
     }
     return null;
+}
+
+function buildTierUsageSummary(keys: KeysFile, tierId: string) {
+    let assignedKeys = 0;
+    let adminKeys = 0;
+    let userKeys = 0;
+    const sampleUserIds: string[] = [];
+
+    for (const user of Object.values(keys)) {
+        if (!user || user.tier !== tierId) continue;
+        assignedKeys += 1;
+        if (user.role === 'admin') adminKeys += 1;
+        if (user.role === 'user') userKeys += 1;
+        if (sampleUserIds.length < 10 && typeof user.userId === 'string' && user.userId.trim()) {
+            sampleUserIds.push(user.userId);
+        }
+    }
+
+    return {
+        assignedKeys,
+        adminKeys,
+        userKeys,
+        sampleUserIds,
+    };
+}
+
+function buildTierResponse(tierId: string, tier: TierData, keys: KeysFile) {
+    return {
+        id: tierId,
+        tier,
+        usage: buildTierUsageSummary(keys, tierId),
+    };
+}
+
+function unwrapTierPayload(body: any): unknown {
+    if (body && typeof body === 'object' && !Array.isArray(body) && 'tier' in body) {
+        return (body as Record<string, unknown>).tier;
+    }
+    return body;
+}
+
+function unwrapTiersPayload(body: any): unknown {
+    if (body && typeof body === 'object' && !Array.isArray(body) && 'tiers' in body) {
+        return (body as Record<string, unknown>).tiers;
+    }
+    return body;
 }
 
 function getRequestIp(request: Request): string {
@@ -236,6 +333,334 @@ const adminOnlyMiddleware = (request: Request, response: Response, next: () => v
     next();
 };
 
+adminRouter.get('/tiers', adminOnlyMiddleware, async (request: Request, response: Response) => {
+    try {
+        const [tiers, keys] = await Promise.all([
+            loadTiers(),
+            dataManager.load<KeysFile>('keys'),
+        ]);
+        const entries = Object.entries(tiers).map(([tierId, tier]) => buildTierResponse(tierId, tier, keys));
+        response.json({
+            filePath: getTiersFilePath(),
+            entries,
+            count: entries.length,
+            timestamp: new Date().toISOString(),
+        });
+    } catch (error: any) {
+        await logError(error, request);
+        if (!response.completed) {
+            response.status(500).json({
+                error: 'Internal Server Error',
+                reference: 'Failed to load tiers.',
+                timestamp: new Date().toISOString(),
+            });
+        }
+    }
+});
+
+adminRouter.put('/tiers', adminOnlyMiddleware, async (request: Request, response: Response) => {
+    try {
+        let payload: any;
+        try {
+            payload = await request.json();
+        } catch (parseError: any) {
+            await logError({ message: 'Bad Request: Invalid JSON payload for tiers replace', parseError: parseError?.message }, request);
+            return response.status(400).json({
+                error: 'Bad Request',
+                message: 'Invalid JSON payload.',
+                timestamp: new Date().toISOString(),
+            });
+        }
+
+        const normalized = normalizeTiersFile(unwrapTiersPayload(payload));
+        if (Object.keys(normalized).length === 0) {
+            return response.status(400).json({
+                error: 'Bad Request',
+                message: 'At least one tier is required.',
+                timestamp: new Date().toISOString(),
+            });
+        }
+
+        const keys = await dataManager.load<KeysFile>('keys');
+        const missingAssignedTierIds = [...new Set(
+            Object.values(keys)
+                .map((user) => user?.tier)
+                .filter((tierId): tierId is string => typeof tierId === 'string' && !!tierId && !normalized[tierId])
+        )];
+        if (missingAssignedTierIds.length > 0) {
+            return response.status(409).json({
+                error: 'Conflict',
+                message: 'Cannot replace tiers because one or more existing API keys would reference missing tiers.',
+                missingAssignedTierIds,
+                timestamp: new Date().toISOString(),
+            });
+        }
+
+        const saved = await saveTiers(normalized);
+        const entries = Object.entries(saved).map(([tierId, tier]) => buildTierResponse(tierId, tier, keys));
+        response.json({
+            message: 'Tiers replaced successfully.',
+            filePath: getTiersFilePath(),
+            entries,
+            count: entries.length,
+            timestamp: new Date().toISOString(),
+        });
+    } catch (error: any) {
+        await logError(error, request);
+        if (!response.completed) {
+            response.status(400).json({
+                error: 'Bad Request',
+                message: error?.message || 'Failed to replace tiers.',
+                timestamp: new Date().toISOString(),
+            });
+        }
+    }
+});
+
+adminRouter.get('/tiers/:tierId', adminOnlyMiddleware, async (request: Request, response: Response) => {
+    try {
+        const tierId = String(request.params.tierId || '').trim();
+        if (!tierId) {
+            return response.status(400).json({
+                error: 'Bad Request',
+                message: 'tierId is required.',
+                timestamp: new Date().toISOString(),
+            });
+        }
+
+        const [tiers, keys] = await Promise.all([
+            loadTiers(),
+            dataManager.load<KeysFile>('keys'),
+        ]);
+        const tier = tiers[tierId];
+        if (!tier) {
+            return response.status(404).json({
+                error: 'Not Found',
+                message: `Tier '${tierId}' not found.`,
+                timestamp: new Date().toISOString(),
+            });
+        }
+
+        response.json({
+            filePath: getTiersFilePath(),
+            entry: buildTierResponse(tierId, tier, keys),
+            timestamp: new Date().toISOString(),
+        });
+    } catch (error: any) {
+        await logError(error, request);
+        if (!response.completed) {
+            response.status(500).json({
+                error: 'Internal Server Error',
+                reference: 'Failed to load tier.',
+                timestamp: new Date().toISOString(),
+            });
+        }
+    }
+});
+
+adminRouter.put('/tiers/:tierId', adminOnlyMiddleware, async (request: Request, response: Response) => {
+    try {
+        const tierId = String(request.params.tierId || '').trim();
+        if (!tierId) {
+            return response.status(400).json({
+                error: 'Bad Request',
+                message: 'tierId is required.',
+                timestamp: new Date().toISOString(),
+            });
+        }
+
+        let payload: any;
+        try {
+            payload = await request.json();
+        } catch (parseError: any) {
+            await logError({ message: 'Bad Request: Invalid JSON payload for tier upsert', parseError: parseError?.message }, request);
+            return response.status(400).json({
+                error: 'Bad Request',
+                message: 'Invalid JSON payload.',
+                timestamp: new Date().toISOString(),
+            });
+        }
+
+        const [tiers, keys] = await Promise.all([
+            loadTiers(),
+            dataManager.load<KeysFile>('keys'),
+        ]);
+        const existed = Boolean(tiers[tierId]);
+        const nextTier = normalizeTierData(unwrapTierPayload(payload), tierId);
+        const saved = await saveTiers({
+            ...tiers,
+            [tierId]: nextTier,
+        });
+
+        response.status(existed ? 200 : 201).json({
+            message: existed ? 'Tier updated successfully.' : 'Tier created successfully.',
+            filePath: getTiersFilePath(),
+            entry: buildTierResponse(tierId, saved[tierId], keys),
+            timestamp: new Date().toISOString(),
+        });
+    } catch (error: any) {
+        await logError(error, request);
+        if (!response.completed) {
+            response.status(400).json({
+                error: 'Bad Request',
+                message: error?.message || 'Failed to save tier.',
+                timestamp: new Date().toISOString(),
+            });
+        }
+    }
+});
+
+adminRouter.patch('/tiers/:tierId', adminOnlyMiddleware, async (request: Request, response: Response) => {
+    try {
+        const tierId = String(request.params.tierId || '').trim();
+        if (!tierId) {
+            return response.status(400).json({
+                error: 'Bad Request',
+                message: 'tierId is required.',
+                timestamp: new Date().toISOString(),
+            });
+        }
+
+        let payload: any;
+        try {
+            payload = await request.json();
+        } catch (parseError: any) {
+            await logError({ message: 'Bad Request: Invalid JSON payload for tier patch', parseError: parseError?.message }, request);
+            return response.status(400).json({
+                error: 'Bad Request',
+                message: 'Invalid JSON payload.',
+                timestamp: new Date().toISOString(),
+            });
+        }
+
+        const [tiers, keys] = await Promise.all([
+            loadTiers(),
+            dataManager.load<KeysFile>('keys'),
+        ]);
+        const currentTier = tiers[tierId];
+        if (!currentTier) {
+            return response.status(404).json({
+                error: 'Not Found',
+                message: `Tier '${tierId}' not found.`,
+                timestamp: new Date().toISOString(),
+            });
+        }
+
+        const patchedTier = mergeTierPatch(currentTier, unwrapTierPayload(payload), tierId);
+        const saved = await saveTiers({
+            ...tiers,
+            [tierId]: patchedTier,
+        });
+
+        response.json({
+            message: 'Tier patched successfully.',
+            filePath: getTiersFilePath(),
+            entry: buildTierResponse(tierId, saved[tierId], keys),
+            timestamp: new Date().toISOString(),
+        });
+    } catch (error: any) {
+        await logError(error, request);
+        if (!response.completed) {
+            response.status(400).json({
+                error: 'Bad Request',
+                message: error?.message || 'Failed to patch tier.',
+                timestamp: new Date().toISOString(),
+            });
+        }
+    }
+});
+
+adminRouter.delete('/tiers/:tierId', adminOnlyMiddleware, async (request: Request, response: Response) => {
+    try {
+        const tierId = String(request.params.tierId || '').trim();
+        if (!tierId) {
+            return response.status(400).json({
+                error: 'Bad Request',
+                message: 'tierId is required.',
+                timestamp: new Date().toISOString(),
+            });
+        }
+
+        const tiers = await loadTiers();
+        const currentTier = tiers[tierId];
+        if (!currentTier) {
+            return response.status(404).json({
+                error: 'Not Found',
+                message: `Tier '${tierId}' not found.`,
+                timestamp: new Date().toISOString(),
+            });
+        }
+
+        if (Object.keys(tiers).length <= 1) {
+            return response.status(400).json({
+                error: 'Bad Request',
+                message: 'Cannot delete the last remaining tier.',
+                timestamp: new Date().toISOString(),
+            });
+        }
+
+        const keys = await dataManager.load<KeysFile>('keys');
+        const replacementTierRaw = typeof request.query?.replacementTier === 'string'
+            ? request.query.replacementTier
+            : typeof request.query?.replacement_tier === 'string'
+                ? request.query.replacement_tier
+                : '';
+        const replacementTierId = replacementTierRaw ? normalizeTierId(tiers, replacementTierRaw) : null;
+        if (replacementTierRaw && (!replacementTierId || replacementTierId === tierId)) {
+            return response.status(400).json({
+                error: 'Bad Request',
+                message: 'replacementTier must reference a different existing tier.',
+                timestamp: new Date().toISOString(),
+            });
+        }
+
+        const usage = buildTierUsageSummary(keys, tierId);
+        if (usage.assignedKeys > 0 && !replacementTierId) {
+            return response.status(409).json({
+                error: 'Conflict',
+                message: `Tier '${tierId}' is still assigned to ${usage.assignedKeys} API key(s). Provide replacementTier to migrate them before deletion.`,
+                usage,
+                timestamp: new Date().toISOString(),
+            });
+        }
+
+        let reassignedKeys = 0;
+        if (replacementTierId) {
+            await dataManager.updateWithLock<KeysFile>('keys', (currentKeys) => {
+                for (const user of Object.values(currentKeys)) {
+                    if (!user || user.tier !== tierId) continue;
+                    user.tier = replacementTierId;
+                    reassignedKeys += 1;
+                }
+                return currentKeys;
+            });
+        }
+
+        const nextTiers = { ...tiers };
+        delete nextTiers[tierId];
+        const saved = await saveTiers(nextTiers);
+
+        response.json({
+            message: 'Tier deleted successfully.',
+            filePath: getTiersFilePath(),
+            deletedTierId: tierId,
+            replacementTierId: replacementTierId ?? null,
+            reassignedKeys,
+            remainingTierCount: Object.keys(saved).length,
+            timestamp: new Date().toISOString(),
+        });
+    } catch (error: any) {
+        await logError(error, request);
+        if (!response.completed) {
+            response.status(500).json({
+                error: 'Internal Server Error',
+                reference: 'Failed to delete tier.',
+                timestamp: new Date().toISOString(),
+            });
+        }
+    }
+});
+
 // Endpoint to add or update a provider
 adminRouter.post('/providers', adminOnlyMiddleware, async (request: Request, response: Response) => {
     try {
@@ -331,18 +756,35 @@ adminRouter.post('/users/generate-key', adminOnlyMiddleware, async (request: Req
         }
 
         const { userId, tier, role } = payload;
-        const apiKey = await generateUserApiKey(userId, role, tier);
+        const tiers = await loadTiers();
+        const requestedTier = typeof tier === 'string' ? tier.trim() : '';
+        if (requestedTier && !normalizeTierId(tiers, requestedTier)) {
+            return response.status(400).json({
+                error: 'Bad Request',
+                message: `Unknown tier '${requestedTier}'.`,
+                timestamp: new Date().toISOString()
+            });
+        }
+
+        const apiKey = await generateUserApiKey(userId, role, requestedTier || undefined);
         response.json({
             message: `API key generated successfully for user ${userId}.`,
             userId,
             apiKey,
+            tier: requestedTier || getFallbackUserTierId(tiers),
             timestamp: new Date().toISOString()
         });
     } catch (error: any) {
         await logError(error, request);
         console.error('Admin generate key error:', error);
-        const referenceMessage = error.message.includes('already has an API key') ? error.message : 'Failed to generate API key.';
-        const statusCode = error.message.includes('already has an API key') ? 409 : 500;
+        const referenceMessage = error.message.includes('already has an API key') || error.message.includes('Unknown tier')
+            ? error.message
+            : 'Failed to generate API key.';
+        const statusCode = error.message.includes('already has an API key')
+            ? 409
+            : error.message.includes('Unknown tier')
+                ? 400
+                : 500;
 
         if (!response.completed) {
             response.status(statusCode).json({
@@ -514,7 +956,10 @@ adminRouter.get('/keys', adminOnlyMiddleware, async (_request: Request, response
 
 adminRouter.get('/api-keys', adminOnlyMiddleware, async (request: Request, response: Response) => {
     try {
-        const keys = await dataManager.load<KeysFile>('keys');
+        const [keys, tiers] = await Promise.all([
+            dataManager.load<KeysFile>('keys'),
+            loadTiers(),
+        ]);
         const roleFilter = typeof request.query?.role === 'string' ? request.query.role : null;
         const tierFilter = typeof request.query?.tier === 'string' ? request.query.tier : null;
         const userIdFilter = typeof request.query?.userId === 'string' ? request.query.userId : null;
@@ -523,7 +968,7 @@ adminRouter.get('/api-keys', adminOnlyMiddleware, async (request: Request, respo
             .filter(([, user]) => !roleFilter || user.role === roleFilter)
             .filter(([, user]) => !tierFilter || user.tier === tierFilter)
             .filter(([, user]) => !userIdFilter || user.userId === userIdFilter)
-            .map(([apiKey, user]) => summarizeApiKey(apiKey, user));
+            .map(([apiKey, user]) => summarizeApiKey(apiKey, user, tiers));
 
         response.json({
             entries,
@@ -572,9 +1017,10 @@ adminRouter.post('/api-keys/revoke', adminOnlyMiddleware, async (request: Reques
             return currentKeys;
         });
 
+        const tiers = await loadTiers();
         response.json({
             message: 'API key revoked.',
-            entry: summarizeApiKey(resolved.apiKey, resolved.user),
+            entry: summarizeApiKey(resolved.apiKey, resolved.user, tiers),
             timestamp: new Date().toISOString()
         });
     } catch (error: any) {
@@ -613,16 +1059,17 @@ adminRouter.post('/api-keys/reset-usage', adminOnlyMiddleware, async (request: R
             });
         }
 
-        const updatedUser = { ...resolved.user, tokenUsage: 0, requestCount: 0 };
+        const updatedUser = resetUserUsageAccounting(resolved.user, new Date().toISOString());
         await dataManager.updateWithLock<KeysFile>('keys', (currentKeys) => {
             if (!currentKeys[resolved.apiKey]) return currentKeys;
             currentKeys[resolved.apiKey] = updatedUser;
             return currentKeys;
         });
 
+        const tiers = await loadTiers();
         response.json({
             message: 'Usage counters reset.',
-            entry: summarizeApiKey(resolved.apiKey, updatedUser),
+            entry: summarizeApiKey(resolved.apiKey, updatedUser, tiers),
             timestamp: new Date().toISOString()
         });
     } catch (error: any) {
@@ -632,6 +1079,64 @@ adminRouter.post('/api-keys/reset-usage', adminOnlyMiddleware, async (request: R
             response.status(500).json({
                 error: 'Internal Server Error',
                 reference: 'Failed to reset usage.',
+                timestamp: new Date().toISOString()
+            });
+        }
+    }
+});
+
+adminRouter.post('/api-keys/settle-billing', adminOnlyMiddleware, async (request: Request, response: Response) => {
+    try {
+        const payload = await request.json();
+        if (!validateAdminApiKeySelector(payload)) {
+            const validationErrors = formatAjvErrors(validateAdminApiKeySelector.errors);
+            return response.status(400).json({
+                error: 'Bad Request',
+                message: 'Invalid selector payload.',
+                details: validationErrors,
+                timestamp: new Date().toISOString()
+            });
+        }
+
+        const beforeKeys = await dataManager.load<KeysFile>('keys');
+        const resolved = resolveApiKeySelector(beforeKeys, payload);
+        if (!resolved) {
+            return response.status(404).json({
+                error: 'Not Found',
+                message: 'API key not found.',
+                timestamp: new Date().toISOString()
+            });
+        }
+
+        const liveTiers = await loadTiers();
+        const settledAt = new Date().toISOString();
+        const beforeUsage = deriveKeyUsageSnapshot(resolved.user, liveTiers[resolved.user.tier]);
+        const updatedUser = settleUserBillingPeriod(resolved.user, settledAt);
+
+        await dataManager.updateWithLock<KeysFile>('keys', (currentKeys) => {
+            if (!currentKeys[resolved.apiKey]) return currentKeys;
+            currentKeys[resolved.apiKey] = updatedUser;
+            return currentKeys;
+        });
+
+        response.json({
+            message: 'Billing period settled.',
+            settledAt,
+            settled: {
+                tokenUsage: beforeUsage.billingPeriodTokenUsage,
+                requestCount: beforeUsage.billingPeriodRequestCount,
+                estimatedCost: beforeUsage.billingPeriodEstimatedCost,
+            },
+            entry: summarizeApiKey(resolved.apiKey, updatedUser, liveTiers),
+            timestamp: settledAt,
+        });
+    } catch (error: any) {
+        await logError(error, request);
+        console.error('Admin settle billing error:', error);
+        if (!response.completed) {
+            response.status(500).json({
+                error: 'Internal Server Error',
+                reference: 'Failed to settle billing period.',
                 timestamp: new Date().toISOString()
             });
         }
@@ -651,7 +1156,8 @@ adminRouter.post('/api-keys/update', adminOnlyMiddleware, async (request: Reques
             });
         }
 
-        if (payload.tier && !normalizeTier(payload.tier)) {
+        const tiers = await loadTiers();
+        if (payload.tier && !normalizeTierId(tiers, payload.tier)) {
             return response.status(400).json({
                 error: 'Bad Request',
                 message: `Unknown tier '${payload.tier}'.`,
@@ -681,7 +1187,7 @@ adminRouter.post('/api-keys/update', adminOnlyMiddleware, async (request: Reques
 
         response.json({
             message: 'API key updated.',
-            entry: summarizeApiKey(resolved.apiKey, updatedUser),
+            entry: summarizeApiKey(resolved.apiKey, updatedUser, tiers),
             timestamp: new Date().toISOString()
         });
     } catch (error: any) {
@@ -710,7 +1216,8 @@ adminRouter.post('/api-keys/rotate', adminOnlyMiddleware, async (request: Reques
             });
         }
 
-        if (payload.tier && !normalizeTier(payload.tier)) {
+        const tiers = await loadTiers();
+        if (payload.tier && !normalizeTierId(tiers, payload.tier)) {
             return response.status(400).json({
                 error: 'Bad Request',
                 message: `Unknown tier '${payload.tier}'.`,
@@ -756,7 +1263,7 @@ adminRouter.post('/api-keys/rotate', adminOnlyMiddleware, async (request: Reques
 
         response.json({
             message: 'API key rotated.',
-            entry: summarizeApiKey(newKey, updatedUser),
+            entry: summarizeApiKey(newKey, updatedUser, tiers),
             oldKeyMasked: redactToken(resolved.apiKey),
             newKey,
             timestamp: new Date().toISOString()
@@ -778,8 +1285,8 @@ adminRouter.post('/api-keys/rotate', adminOnlyMiddleware, async (request: Reques
 
 async function getErrorLogStats(): Promise<{ totalLines: number; lastTimestamp: string | null; fileBytes: number; truncated: boolean }> {
     const errorLogPaths = [
-        path.resolve('logs/api-errors.jsonl'),
-        path.resolve('logs/api-error.jsonl'),
+        path.join(logDirectory, 'api-errors.jsonl'),
+        path.join(logDirectory, 'api-error.jsonl'),
     ];
     const existingPaths: string[] = [];
     let fileBytes = 0;
@@ -872,11 +1379,13 @@ function buildQueueMetricsPayload() {
 
 adminRouter.get('/metrics/summary', adminOnlyMiddleware, async (request: Request, response: Response) => {
     try {
-        const [providers, models, keys, errorStats] = await Promise.all([
+        const [providers, models, keys, errorStats, tiers, fleetInstances] = await Promise.all([
             dataManager.load<LoadedProviders>('providers'),
             dataManager.load<ModelsFileStructure>('models'),
             dataManager.load<KeysFile>('keys'),
             getErrorLogStats(),
+            loadTiers(),
+            getFleetInstances(),
         ]);
         const queueMetrics = buildQueueMetricsPayload();
 
@@ -895,9 +1404,30 @@ adminRouter.get('/metrics/summary', adminOnlyMiddleware, async (request: Request
 
         const keysByRole: Record<string, number> = {};
         const keysByTier: Record<string, number> = {};
+        const keyUsageTotals = {
+            totalTokenUsage: 0,
+            paidTokenUsage: 0,
+            billingPeriodTokenUsage: 0,
+            totalRequestCount: 0,
+            paidRequestCount: 0,
+            billingPeriodRequestCount: 0,
+            totalEstimatedCost: 0,
+            paidEstimatedCost: 0,
+            billingPeriodEstimatedCost: 0,
+        };
         for (const user of Object.values(keys)) {
             keysByRole[user.role] = (keysByRole[user.role] || 0) + 1;
             keysByTier[user.tier] = (keysByTier[user.tier] || 0) + 1;
+            const usage = deriveKeyUsageSnapshot(user, tiers[user.tier]);
+            keyUsageTotals.totalTokenUsage += usage.totalTokenUsage;
+            keyUsageTotals.paidTokenUsage += usage.paidTokenUsage;
+            keyUsageTotals.billingPeriodTokenUsage += usage.billingPeriodTokenUsage;
+            keyUsageTotals.totalRequestCount += usage.totalRequestCount;
+            keyUsageTotals.paidRequestCount += usage.paidRequestCount;
+            keyUsageTotals.billingPeriodRequestCount += usage.billingPeriodRequestCount;
+            keyUsageTotals.totalEstimatedCost += usage.totalEstimatedCost;
+            keyUsageTotals.paidEstimatedCost += usage.paidEstimatedCost;
+            keyUsageTotals.billingPeriodEstimatedCost += usage.billingPeriodEstimatedCost;
         }
 
         response.json({
@@ -916,8 +1446,25 @@ adminRouter.get('/metrics/summary', adminOnlyMiddleware, async (request: Request
                 total: Object.keys(keys).length,
                 byRole: keysByRole,
                 byTier: keysByTier,
+                usage: {
+                    total_token_usage: keyUsageTotals.totalTokenUsage,
+                    paid_token_usage: keyUsageTotals.paidTokenUsage,
+                    billing_period_token_usage: keyUsageTotals.billingPeriodTokenUsage,
+                    total_request_count: keyUsageTotals.totalRequestCount,
+                    paid_request_count: keyUsageTotals.paidRequestCount,
+                    billing_period_request_count: keyUsageTotals.billingPeriodRequestCount,
+                    total_estimated_cost: Math.round(keyUsageTotals.totalEstimatedCost * 1_000_000) / 1_000_000,
+                    paid_estimated_cost: Math.round(keyUsageTotals.paidEstimatedCost * 1_000_000) / 1_000_000,
+                    billing_period_estimated_cost: Math.round(keyUsageTotals.billingPeriodEstimatedCost * 1_000_000) / 1_000_000,
+                },
             },
             queues: queueMetrics.summary,
+            fleet: {
+                total: fleetInstances.length,
+                ready: fleetInstances.filter((entry) => entry.state === 'ready').length,
+                draining: fleetInstances.filter((entry) => entry.state === 'draining').length,
+                starting: fleetInstances.filter((entry) => entry.state === 'starting').length,
+            },
             errorLog: errorStats,
         });
     } catch (error: any) {
@@ -927,6 +1474,27 @@ adminRouter.get('/metrics/summary', adminOnlyMiddleware, async (request: Request
             response.status(500).json({
                 error: 'Internal Server Error',
                 reference: 'Failed to load metrics summary.',
+                timestamp: new Date().toISOString()
+            });
+        }
+    }
+});
+
+adminRouter.get('/metrics/fleet', adminOnlyMiddleware, async (request: Request, response: Response) => {
+    try {
+        const entries = await getFleetInstances();
+        response.json({
+            entries,
+            count: entries.length,
+            timestamp: new Date().toISOString(),
+        });
+    } catch (error: any) {
+        await logError(error, request);
+        console.error('Admin metrics fleet error:', error);
+        if (!response.completed) {
+            response.status(500).json({
+                error: 'Internal Server Error',
+                reference: 'Failed to load fleet metrics.',
                 timestamp: new Date().toISOString()
             });
         }

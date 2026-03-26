@@ -276,6 +276,36 @@ export class Redis {
         return Number(result ?? 0);
     }
 
+    async hdel(key: string, ...fields: string[]): Promise<number> {
+        const result = await this.sendCommand('HDEL', key, ...fields);
+        return Number(result ?? 0);
+    }
+
+    async hgetall(key: string): Promise<Record<string, string>> {
+        const result = await this.sendCommand('HGETALL', key);
+        if (Array.isArray(result)) {
+            const record: Record<string, string> = {};
+            for (let index = 0; index < result.length; index += 2) {
+                const field = result[index];
+                const value = result[index + 1];
+                if (typeof field === 'string' && typeof value === 'string') {
+                    record[field] = value;
+                }
+            }
+            return record;
+        }
+        if (result && typeof result === 'object') {
+            const record: Record<string, string> = {};
+            for (const [field, value] of Object.entries(result as Record<string, unknown>)) {
+                if (typeof value === 'string') {
+                    record[field] = value;
+                }
+            }
+            return record;
+        }
+        return {};
+    }
+
     async lpush(key: string, value: string): Promise<number> {
         const result = await this.sendCommand('LPUSH', key, value);
         return Number(result ?? 0);

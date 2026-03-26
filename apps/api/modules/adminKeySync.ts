@@ -24,16 +24,24 @@ function findProjectRoot(startDir: string): string {
 }
 
 const BASE_DIR = findProjectRoot(__dirname);
+const configuredLogDirectory = (process.env.ANYGPT_LOG_DIR || '').trim();
+const LOG_DIR = configuredLogDirectory
+  ? path.resolve(configuredLogDirectory)
+  : path.resolve(BASE_DIR, 'logs');
+const configuredRuntimeDirectory = (process.env.ANYGPT_RUNTIME_DIR || '').trim();
+const RUNTIME_DIR = configuredRuntimeDirectory
+  ? path.resolve(configuredRuntimeDirectory)
+  : os.tmpdir();
 
-const ADMIN_KEYS_PATH = path.resolve(BASE_DIR, 'logs', 'admin-keys.jsonl');
+const ADMIN_KEYS_PATH = path.join(LOG_DIR, 'admin-keys.jsonl');
 const TSX_PATH = path.resolve(BASE_DIR, 'node_modules', '.bin', 'tsx');
 const NODE_PATH = process.execPath;
 const CURRENT_RUNTIME_IS_BUN = typeof (globalThis as any).Bun !== 'undefined';
 const RUNNER = String(process.env.ADMIN_KEY_SYNC_RUNNER || (CURRENT_RUNTIME_IS_BUN ? 'bun' : 'tsgo')).toLowerCase();
 const RUNNER_EXPLICIT = typeof process.env.ADMIN_KEY_SYNC_RUNNER === 'string' && process.env.ADMIN_KEY_SYNC_RUNNER.trim().length > 0;
 const LOCK_KEY = 'admin-key-sync:lock';
-const LOCK_FILE = path.join(os.tmpdir(), 'anygpt-admin-key-sync.lock');
-const PROBE_TESTED_PATH = path.resolve(BASE_DIR, 'logs', 'probe-tested.json');
+const LOCK_FILE = path.join(RUNTIME_DIR, 'anygpt-admin-key-sync.lock');
+const PROBE_TESTED_PATH = path.join(LOG_DIR, 'probe-tested.json');
 
 const SYNC_ENABLED = process.env.ADMIN_KEY_SYNC_ENABLED !== '0';
 const RUN_TRANSFER = process.env.ADMIN_KEY_SYNC_RUN_TRANSFER !== '0';
@@ -116,6 +124,7 @@ async function releaseRedisLock(): Promise<void> {
 function acquireFileLock(): boolean {
   const token = `${process.pid}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
   try {
+    fs.mkdirSync(path.dirname(LOCK_FILE), { recursive: true });
     const fd = fs.openSync(LOCK_FILE, 'wx');
     fs.writeFileSync(fd, JSON.stringify({ token, ts: Date.now() }), 'utf8');
     fs.closeSync(fd);

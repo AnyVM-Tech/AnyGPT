@@ -43,7 +43,10 @@ function sanitizeProviderErrorValue<T>(value: T): T {
 	return value;
 }
 
-const logDirectory = path.resolve(process.cwd(), 'logs'); // Logs at the workspace root
+const configuredLogDirectory = (process.env.ANYGPT_LOG_DIR || '').trim();
+const logDirectory = configuredLogDirectory
+	? path.resolve(configuredLogDirectory)
+	: path.resolve(process.cwd(), 'logs');
 const errorLogFilePath = path.join(logDirectory, 'api-errors.jsonl');
 const providerUniqueErrorLogFilePath = path.join(logDirectory, 'provider-unique-errors.jsonl');
 

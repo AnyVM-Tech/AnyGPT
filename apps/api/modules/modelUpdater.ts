@@ -52,10 +52,14 @@ let basePricingCache: Record<string, BasePricing> | null = null;
 let supplementalPricingCache: Record<string, BasePricing> | null = null;
 let competitorMultsCache: Record<string, number> | null = null;
 const API_WORKSPACE_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const configuredLogDirectory = (process.env.ANYGPT_LOG_DIR || '').trim();
+const LOG_DIR = configuredLogDirectory
+    ? path.resolve(configuredLogDirectory)
+    : path.resolve(API_WORKSPACE_DIR, 'logs');
 
 type CapabilitiesCache = Record<string, string[]>;
-const CAPABILITIES_CACHE_PATH = path.resolve(API_WORKSPACE_DIR, 'logs', 'model-capabilities.json');
-const PROBE_TESTED_PATH = path.resolve(API_WORKSPACE_DIR, 'logs', 'probe-tested.json');
+const CAPABILITIES_CACHE_PATH = path.join(LOG_DIR, 'model-capabilities.json');
+const PROBE_TESTED_PATH = path.join(LOG_DIR, 'probe-tested.json');
 
 type ProbeTestedFile = {
     data?: Record<string, Record<string, string>>;
@@ -65,7 +69,7 @@ type ProbeTestedFile = {
 type PricingCache = Record<string, Record<string, any>>;
 
 const CAPABILITY_ORDER = ['text', 'image_input', 'image_output', 'audio_input', 'audio_output', 'tool_calling'] as const;
-const PRICING_CACHE_PATH = path.resolve(API_WORKSPACE_DIR, 'logs', 'model-pricing.json');
+const PRICING_CACHE_PATH = path.join(LOG_DIR, 'model-pricing.json');
 const ROUTER_MODELS_PRICING_PATH = path.resolve(API_WORKSPACE_DIR, 'dev', 'routermodels.json');
 const BASE_PRICING_PATH = path.resolve(API_WORKSPACE_DIR, 'pricing.json');
 
