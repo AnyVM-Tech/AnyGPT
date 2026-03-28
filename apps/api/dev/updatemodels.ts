@@ -39,6 +39,14 @@ type ProviderModelMeta = {
   removal_reason?: string;
 };
 
+type AvailabilityMetadata = {
+  reason?: string;
+  unavailable_reason?: string;
+  removal_reason?: string;
+  capability_blocked?: string[];
+  capability_skips?: Record<string, string>;
+};
+
 type ProviderFile = Array<{
   id: string;
   disabled?: boolean;
@@ -74,7 +82,7 @@ function isNonChatModel(modelId: string): 'tts' | 'stt' | 'image-gen' | 'video-g
 function isAvailabilityConstraintReason(value: unknown): boolean {
   const normalized = String(value || '').trim().toLowerCase();
   if (!normalized) return false;
-  return /provider[_ -]?model[_ -]?removed|provider[_ -]?cap[_ -]?blocked|image generation unavailable|unavailable in provider region|unavailable in country|provider region|country|regional availability|unsupported image output/.test(normalized);
+  return /provider[_ -]?model[_ -]?removed|provider[_ -]?cap[_ -]?blocked|image generation unavailable|generation unavailable|unavailable in provider region|unavailable in country|provider region|provider-region|blocked in provider region|blocked in country|country|country-blocked|country blocked|regional availability|region(?:al)? availability|region-locked|region locked|geo(?:graph(?:ic)?)? restriction|geo(?:graph(?:ic)?)? restricted|geo-restricted|georestricted|country availability|unsupported image output|\bno access\b|access denied|not entitled|not enabled for (?:this )?(?:account|project)|permission denied|forbidden|not available to your account|not available for your account|not available in (?:your |this )?(?:region|country|location)|not available for (?:your |this )?(?:region|country|location)|not supported in (?:your |this )?(?:region|country|location)|blocked in (?:your |this )?(?:region|country|location)|unavailable in (?:your |this )?(?:region|country|location)|unavailable for (?:your |this )?(?:region|country|location)|(?:region|country|location) is unavailable|unavailable due to (?:region|country|location)|not available in the selected model|no allowed providers are available|model is not available/.test(normalized);
 }
 
 function collectAvailabilityConstraintMetadata(meta: ProviderModelMeta | null | undefined): {
@@ -90,11 +98,29 @@ function collectAvailabilityConstraintMetadata(meta: ProviderModelMeta | null | 
     };
   }
 
+  const normalizeCapabilityConstraintKey = (value: unknown): string => {
+    const normalized = String(value || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+    if (!normalized) return '';
+    if (
+      normalized === 'image'
+      || normalized === 'image_output'
+      || normalized === 'image_generation'
+      || normalized === 'image_gen'
+      || normalized === 'image_creation'
+    ) return 'image_output';
+    if (normalized === 'image_input' || normalized === 'vision') return 'image_input';
+    if (normalized === 'audio' || normalized === 'audio_output' || normalized === 'speech' || normalized === 'tts') return 'audio_output';
+    if (normalized === 'audio_input' || normalized === 'stt' || normalized === 'transcription') return 'audio_input';
+    if (normalized === 'tool' || normalized === 'tools' || normalized === 'tool_calling' || normalized === 'function_calling') return 'tool_calling';
+    if (normalized === 'text' || normalized === 'chat' || normalized === 'completion' || normalized === 'completions') return 'text';
+    return normalized;
+  };
+
   const blockedCapabilities = Array.from(new Set([
     ...(Array.isArray(meta.capability_blocked) ? meta.capability_blocked : []),
     ...(Array.isArray(meta.availability?.capability_blocked) ? meta.availability.capability_blocked : []),
   ]
-    .map((entry) => String(entry || '').trim().toLowerCase())
+    .map((entry) => normalizeCapabilityConstraintKey(entry))
     .filter(Boolean)));
 
   const capabilitySkips: Record<string, string> = {};
@@ -229,6 +255,7 @@ function main() {
   const activeProviderCounts: Record<string, number> = {};
   const availableModels = new Set<string>();
   const providerSeenModels = new Set<string>();
+  const constrainedCatalogModelIds = new Set<string>();
 
   const constrainedModelIds = new Set<string>();
 
@@ -239,6 +266,17 @@ function main() {
       providerSeenModels.add(modelId);
       if (hasAvailabilityConstraint(modelId, meta)) {
         constrainedModelIds.add(modelId);
+        if (
+          meta
+          && (
+            !provider.disabled
+            || meta.removed === true
+            || meta.unavailable === true
+            || meta.disabled === true
+          )
+        ) {
+          constrainedCatalogModelIds.add(modelId);
+        }
       }
 
       if (provider.disabled || !shouldCountProviderModel(modelId, meta)) continue;

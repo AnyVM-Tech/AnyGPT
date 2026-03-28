@@ -160,19 +160,39 @@ app.get('/api/live-metrics', spaLimiter, async (_req, res) => {
   }
 });
 
-app.get('/favicon.ico', (_req, res) => {
-  const publicDir = path.join(__dirname, 'public');
-  const iconCandidates = [
-    { filePath: path.join(publicDir, 'favicon.ico'), contentType: 'image/x-icon' },
-    { filePath: path.join(publicDir, 'AnyGPT.png'), contentType: 'image/png' },
-    { filePath: path.join(publicDir, 'favicon.svg'), contentType: 'image/svg+xml' },
-  ];
-  const icon = iconCandidates.find(({ filePath }) => existsSync(filePath));
+const publicDir = path.join(__dirname, 'public');
+const iconCandidates = [
+  { filePath: path.join(publicDir, 'favicon.ico'), contentType: 'image/x-icon' },
+  { filePath: path.join(publicDir, 'apple-touch-icon.png'), contentType: 'image/png' },
+  { filePath: path.join(publicDir, 'icon.png'), contentType: 'image/png' },
+  { filePath: path.join(publicDir, 'favicon.png'), contentType: 'image/png' },
+  { filePath: path.join(publicDir, 'AnyGPT.png'), contentType: 'image/png' },
+  { filePath: path.join(publicDir, 'favicon.svg'), contentType: 'image/svg+xml' },
+];
+const fallbackFaviconSvg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="AnyGPT favicon">
+  <defs>
+    <linearGradient id="anygpt-favicon-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00e7ff"/>
+      <stop offset="100%" stop-color="#d100ff"/>
+    </linearGradient>
+  </defs>
+  <rect x="6" y="6" width="52" height="52" rx="16" fill="#02081e"/>
+  <rect x="8" y="8" width="48" height="48" rx="14" fill="url(#anygpt-favicon-gradient)" opacity="0.18"/>
+  <path d="M32 16 18 24v16l14 8 14-8V24l-14-8Zm0 6.2 8.5 4.8v9.9L32 41.8l-8.5-4.9V27l8.5-4.8Z" fill="url(#anygpt-favicon-gradient)"/>
+  <circle cx="32" cy="32" r="4.5" fill="#f8fafc"/>
+</svg>`;
+
+function sendHomepageIcon(res, preferredContentType = null) {
+  const icon = iconCandidates.find(({ filePath, contentType }) => {
+    if (!existsSync(filePath)) return false;
+    return !preferredContentType || contentType === preferredContentType;
+  }) || iconCandidates.find(({ filePath }) => existsSync(filePath));
 
   res.set('Cache-Control', 'public, max-age=86400, immutable');
 
   if (!icon) {
-    res.status(204).end();
+    res.type('image/svg+xml').status(200).send(fallbackFaviconSvg);
     return;
   }
 
@@ -182,8 +202,93 @@ app.get('/favicon.ico', (_req, res) => {
     },
   }, (error) => {
     if (!error || res.headersSent) return;
-    res.status(204).end();
+    res.type('image/svg+xml').status(200).send(fallbackFaviconSvg);
   });
+}
+
+app.get([
+  '/favicon.ico',
+  '/favicon.ico.png',
+  '/favicon-16x16.ico',
+  '/favicon-32x32.ico',
+], (_req, res) => {
+  const hasIcoFavicon = iconCandidates.some(({ filePath, contentType }) => (
+    contentType === 'image/x-icon' && existsSync(filePath)
+  ));
+
+  if (!hasIcoFavicon) {
+    res.set('Cache-Control', 'public, max-age=86400, immutable');
+    res.type('image/svg+xml').status(200).send(fallbackFaviconSvg);
+    return;
+  }
+
+  sendHomepageIcon(res, 'image/x-icon');
+});
+
+app.get([
+  '/favicon.ico',
+  '/favicon.svg',
+  '/apple-touch-icon.png',
+  '/apple-touch-icon-precomposed.png',
+], (_req, res) => {
+  const preferredContentType = _req.path.endsWith('.svg') ? 'image/svg+xml' : 'image/png';
+  sendHomepageIcon(res, preferredContentType);
+});
+app.get([
+  '/site.webmanifest',
+  '/manifest.webmanifest',
+], (_req, res) => {
+  res.set('Cache-Control', 'public, max-age=86400, immutable');
+  res.type('application/manifest+json').status(200).send({
+    name: 'AnyGPT',
+    short_name: 'AnyGPT',
+    start_url: '/',
+    display: 'standalone',
+    background_color: '#010827',
+    theme_color: '#041140',
+    icons: [
+      {
+        src: '/favicon.svg',
+        sizes: 'any',
+        type: 'image/svg+xml',
+        purpose: 'any',
+      },
+    ],
+  });
+});
+
+app.get('/browserconfig.xml', (_req, res) => {
+  res.set('Cache-Control', 'public, max-age=86400, immutable');
+  res.type('application/xml').status(200).send(`<?xml version="1.0" encoding="utf-8"?>
+<browserconfig>
+  <msapplication>
+    <tile>
+      <square150x150logo src="/favicon.svg"/>
+      <TileColor>#041140</TileColor>
+    </tile>
+  </msapplication>
+</browserconfig>`);
+});
+
+app.get('/robots.txt', (_req, res) => {
+  res.set('Cache-Control', 'public, max-age=3600');
+  res.type('text/plain').status(200).send([
+    'User-agent: *',
+    'Allow: /',
+    'Sitemap: /sitemap.xml',
+  ].join('\n'));
+});
+
+app.get('/sitemap.xml', (_req, res) => {
+  res.set('Cache-Control', 'public, max-age=3600');
+  res.type('application/xml').status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>${ANYGPT_API_BASE_URL}/</loc>
+    <changefreq>daily</changefreq>
+    <priority>1.0</priority>
+  </url>
+</urlset>`);
 });
 
 app.use(express.static(path.join(__dirname, 'public')));

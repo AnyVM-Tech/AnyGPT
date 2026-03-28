@@ -906,6 +906,12 @@ export class OpenRouterAI implements IAIProvider {
         (wrappedError as any).providerSwitchWorthless = true;
         (wrappedError as any).requestRetryWorthless = true;
       }
+      if (isOpenRouterToolUseUnsupportedError(error)) {
+        (wrappedError as any).status = 404;
+        (wrappedError as any).retryable = false;
+        (wrappedError as any).providerSwitchWorthless = true;
+        (wrappedError as any).requestRetryWorthless = true;
+      }
       if (
         status === 401 ||
         /unauthorized|invalid api key|invalid_api_key|incorrect api key|authentication/i.test(msg)

@@ -15,6 +15,10 @@
             "created": { "type": "number" },
             "owned_by": { "type": "string" },
             "providers": { "type": "number" },
+            "active_providers": { "type": "number" },
+            "known_providers": { "type": "number" },
+            "cooling_down_providers": { "type": "number" },
+            "temporarily_unavailable_providers": { "type": "number" },
             "throughput": { "type": "number" },
             "capabilities": {
               "type": "array",

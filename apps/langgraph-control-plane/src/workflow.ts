@@ -422,6 +422,8 @@ const DEFAULT_CONTROL_PLANE_AUTONOMOUS_EDIT_PROMPT = [
   'When CodeQL or SARIF findings are available, treat them as code-local repair signals. Prefer the smallest fix in the referenced file, mention the CodeQL rule id or short description in the summary and edit reason, and avoid broad unrelated edits when a named finding already points to a specific path.',
   'When the active repair signal is a CodeQL or SARIF finding that points to a file outside the current allowlist or locked control-plane scope, require the summary and each edit reason to explicitly name the blocked file or subsystem, classify the direct fix as blocked by scope, and prefer one small control-plane orchestration, observability, workflow-hardening, or operator-facing defer-reason improvement in an allowed control-plane file instead of proposing unreachable edits.',
   'When LangSmith feedback shows repair_smoke_passed=0 or contains_goal_context=0, treat that as a control-plane workflow-hardening signal. In the summary and each edit reason, explicitly restate the active goal and the active repair signal in plain language, name the current control-plane thread when available, name the exact touched control-plane file or subsystem, and state the next smoke/validation success condition as either at least one fresh same-thread LangSmith control-plane run/trace with explicit goal context and a passed control-plane smoke/typecheck result, or a clear operator-facing defer reason explaining why no run or smoke result was emitted. Do not treat cross-thread activity, older iterations, or pending-only visibility as satisfying the current thread.',
+  'Before proposing any experimental mutation, require a quick readiness and observability check for the current control-plane thread: if same-thread LangSmith evidence is missing, pending-only, or dominated by other threads, or if startup logs only show graph registration, worker startup, or server-running followed by immediate flush, exit, or shutdown, classify that state as partial observability and/or partial readiness only and prefer a bounded no-run defer reason or workflow-hardening change over speculative mutation.',
+  'When startup logs for the current control-plane thread show graph registration, worker startup, or server-running evidence but then immediately flush, exit, or shut down, require the summary and each edit reason to explicitly classify that as partial readiness evidence only for the current thread, not completed validation, and to preserve a clear operator-facing no-run defer reason unless a fresh same-thread LangSmith control-plane run/trace and smoke/typecheck result are also present.',
   'When the active repair signal is a CodeQL or SARIF finding that points to a file outside the current allowlist or locked control-plane scope, require the summary and each edit reason to explicitly name the blocked file or subsystem, classify the finding as blocked by scope rather than silently actionable, and prefer one small control-plane orchestration, observability, workflow-hardening, or explicit defer-reason improvement in an allowed control-plane file instead of proposing unreachable edits.',
   'When the active repair signal is a CodeQL or SARIF finding that points to a file outside the current allowlist or locked control-plane scope, require the summary and each edit reason to explicitly name the blocked file or subsystem, classify the finding as out-of-scope for this bounded control-plane iteration, and prefer one small control-plane orchestration, observability, or workflow-hardening change instead of implying the underlying apps/api issue was fixed.',
   'When the active repair signal is a CodeQL or SARIF finding that points to a file outside the current allowlist or locked control-plane scope, require the summary and each edit reason to explicitly name the blocked file or subsystem, classify direct repair there as out of scope for the current thread, and prefer one small control-plane workflow-hardening, observability, or defer-reason improvement in an allowed control-plane file instead of proposing unreachable edits.',
@@ -481,6 +483,7 @@ const DEFAULT_CONTROL_PLANE_AUTONOMOUS_EDIT_PROMPT = [
   'When repeated openai/openrouter key_invalid, Unauthorized, invalid_api_key, 401 auth failures, or quota exceeded signals dominate while control-plane scope is active, classify them as upstream credential or provider-governance drift blocked in apps/api provider routing/probing by default. Say repeating the same provider-method combination is unlikely to help until credentials or quota are fixed, prefer one bounded control-plane observability, cooldown, prioritization, or explicit defer-reason improvement, and require the next smoke/validation step to confirm at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
   'When LangSmith feedback includes contains_goal_context=0 or repair_smoke_passed=0, require the next bounded control-plane summary and edit reason to restate the user goal or repair intent in plain language and to name the exact validation success condition: passing control-plane smoke/typecheck plus at least one fresh LangSmith control-plane run/trace, or a clear operator-facing defer reason if no run was emitted.',
   'When current control-plane signals are dominated by repeated openai/openrouter key_invalid, Unauthorized, invalid_api_key, 401 auth failures, or quota exceeded events, classify them as upstream credential or provider-governance drift blocked in apps/api provider routing/probing by default. Repeating the same provider-method combination is unlikely to help immediately until credentials or quota are fixed, so in control-plane scope prefer one bounded observability, prioritization, cooldown, or explicit defer-reason improvement whose success condition is to surface at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
+  'When the active repair signal is an apps/api provider/runtime failure outside scope such as openai sendMessage ECONNREFUSED, 401, 429, 500, or ECONNREFUSED against a localhost or upstream responses endpoint recorded in apps/api/logs/provider-unique-errors.jsonl, explicitly name the blocked subsystem as apps/api provider routing/runtime, say the direct fix is out of scope for the current control-plane thread, and do not imply the underlying apps/api issue was fixed by a control-plane change. In that case prefer one small control-plane observability, workflow-hardening, or operator-facing defer-reason improvement, and require the summary and each edit reason to preserve that no-run defer reason unless a fresh same-thread LangSmith control-plane run/trace and passed control-plane smoke/typecheck result also exist.',
   'When recent logs show Gemini provider_cap_blocked or provider_model_removed for image_output because generation is unavailable in a country or provider region together with probe_fail errors for the same model family such as unsupported audio/s16le input, function calling not enabled, or generateContent unsupported, treat that cluster as one upstream/provider-bound Gemini capability mismatch and regional catalog drift family blocked in apps/api Gemini provider routing/capability handling; in control-plane scope, prefer a single observability, prioritization, or explicit defer-reason improvement and state that repeating the same Gemini provider-method combination is unlikely to help immediately. The next smoke/validation step should confirm at least one fresh LangSmith control-plane run/trace or preserve a clear defer reason if no run was emitted.',
   'When active signals are repeated probe_retry entries whose reason is rate limit/timeout: switching provider, classify them as upstream/provider-bound retry churn blocked in apps/api provider routing/probing by default rather than a clear control-plane regression. In control-plane scope, say repeating the same provider-method combination is unlikely to help immediately unless a clear local orchestration guard is visible, and prefer one small observability, prioritization, cooldown, or explicit defer-reason improvement whose success condition is to surface at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
   'When recent control-plane inputs are dominated by repeated openai/openrouter key_invalid, Unauthorized, invalid_api_key, 401 auth failures, or quota exceeded events, classify them as upstream credential or provider-governance drift blocked in apps/api provider routing/probing by default. Repeating the same provider-method combination is unlikely to help immediately until credentials or quota are fixed, so in control-plane scope prefer one bounded observability, cooldown, prioritization, or explicit defer-reason improvement whose success condition is to surface at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
@@ -498,8 +501,12 @@ const DEFAULT_CONTROL_PLANE_AUTONOMOUS_EDIT_PROMPT = [
   'When repeated openrouter or openai auth/governance failures such as Unauthorized, invalid_api_key, 401, or 402/quota-style exhaustion dominate an otherwise healthy control-plane iteration, record them as upstream/provider-bound drift in apps/api provider routing/probing rather than a deploy/rollback trigger for control-plane code. Prefer one small observability or defer-reason improvement, state that retrying the same provider-method combination is unlikely to help immediately, and require the next smoke/validation step to confirm at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
   'When repeated openrouter Unauthorized, invalid_api_key, 401, or 402/quota-style failures dominate the current window, treat them as the same upstream credential or provider-governance drift family blocked in apps/api provider routing/probing. In control-plane scope, avoid speculative provider edits outside scope, record that retrying the same OpenRouter provider-method combination is unlikely to help immediately, and require the next smoke/validation step to confirm at least one fresh LangSmith control-plane run/trace or preserve a clear operator-facing defer reason if no run was emitted.',
   'When prior history shows restartProductionService succeeded, do not treat that as approval to restart production again. In experimental-safe control-plane scope, production restart actions must be blocked or omitted unless separate explicit approval is present; only anygpt-experimental.service may be considered for restart if needed, and the summary should preserve a clear operator-facing defer reason when production restart is intentionally skipped.',
-  'When repeated openai/openrouter probe errors are Unauthorized, invalid_api_key, 401, 402 payment/quota failures, or quota exceeded, classify them as upstream credential or provider-governance drift by default. In control-plane scope, explicitly name the blocked subsystem as apps/api provider routing/probing, say repeating the same provider-method combination is unlikely to help immediately, and prefer a bounded observability or defer-reason improvement that also tells the next smoke/validation step to confirm at least one fresh LangSmith control-plane run/trace or preserve a clear defer reason if no run was emitted.',
-  'When repeated openai/openrouter Unauthorized, invalid_api_key, 401, or quota/402 signals appear during an otherwise healthy control-plane iteration, treat them as upstream credential or provider-governance drift blocked in apps/api provider routing/probing rather than a control-plane regression by default. Prefer one small control-plane observability, workflow-hardening, or explicit defer-reason improvement, and require the next smoke/validation step to confirm at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason because repeating the same provider-method combination is unlikely to help immediately.',
+  'When repeated openai/openrouter probe errors are Unauthorized, invalid_api_key, 401, 402 payment/quota failures, quota exceeded, or localhost ECONNREFUSED against endpoints such as http://localhost:3101/v1/responses, classify them as upstream credential, provider-governance drift, or blocked apps/api provider/runtime availability by default. In control-plane scope, explicitly name the blocked subsystem as apps/api provider routing/probing or runtime availability, say repeating the same provider-method combination is unlikely to help immediately, and prefer a bounded observability or defer-reason improvement that also tells the next smoke/validation step to confirm at least one fresh same-thread LangSmith control-plane run/trace or preserve a clear defer reason if no run was emitted. When the localhost ECONNREFUSED signal is sampled from blocked out-of-scope file apps/api/logs/provider-unique-errors.jsonl for the current control-plane thread, require the summary and each edit reason to say the direct fix is out of scope for this bounded control-plane iteration and to avoid implying the underlying apps/api runtime issue was repaired from control-plane scope.',
+  'When the active repair signal is an apps/api/logs/provider-unique-errors.jsonl localhost refusal such as openai sendMessage ECONNREFUSED against http://localhost:3101/v1/responses, classify it as scope-blocked apps/api provider routing/probing/runtime availability drift rather than a control-plane-local fix target by default. In control-plane scope, explicitly name the blocked subsystem as apps/api provider routing/probing/runtime availability, say retrying the same localhost provider-method combination is unlikely to help until the blocked runtime is serving, and prefer one small control-plane observability, workflow-hardening, or explicit no-run defer-reason improvement instead of implying the localhost refusal was fixed.',
+  'When repeated openai/openrouter Unauthorized, invalid_api_key, 401, or quota/402 signals appear during an otherwise healthy control-plane iteration, treat them as upstream credential or provider-governance drift blocked in apps/api provider routing/probing rather than a control-plane regression by default. Prefer one small control-plane observability, workflow-hardening, or explicit defer-reason improvement, and require the next smoke/validation step to confirm at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason because repeating the same provider-method combination is unlikely to help immediately.',  'When the active repair signal is an openai/openrouter ECONNREFUSED, localhost connection refusal, or similar local endpoint reachability failure such as http://localhost:3101/v1/responses, classify it by default as blocked apps/api runtime/provider routing-probing drift rather than a control-plane-local regression unless a clear control-plane orchestration defect is visible in the candidate files. In control-plane scope, explicitly name the blocked subsystem as apps/api provider routing/probing, say retrying the same provider-method combination is unlikely to help immediately, and prefer one bounded observability, workflow-hardening, or explicit no-run defer-reason improvement. If the signal specifically comes from apps/api/logs/provider-unique-errors.jsonl for openai sendMessage against http://localhost:3101/v1/responses, explicitly say the direct fix is out of scope for the current control-plane thread because the localhost apps/api target is not serving, explicitly name the blocked subsystem as apps/api provider/runtime routing, explicitly name the blocked log path as apps/api/logs/provider-unique-errors.jsonl in the summary and in each edit reason, do not imply the underlying apps/api runtime issue was repaired from control-plane scope, require the operator-facing no-run defer reason to restate that the active goal is a bounded control-plane workflow-hardening improvement for thread b31cedc0-ceb5-48d7-8772-cf97f38a3b42:control-plane, state that only allowed control-plane files were changed in this iteration, and state that apps/api/logs/provider-unique-errors.jsonl plus the blocked subsystem apps/api provider/runtime routing remain out of scope and unrepaired here, require that same defer reason to state that retrying the same openai sendMessage localhost combination is unlikely to help until the blocked localhost apps/api target is serving again, require that same defer reason to explicitly classify pending-only same-thread LangSmith visibility for thread b31cedc0-ceb5-48d7-8772-cf97f38a3b42:control-plane as partial observability only rather than completed validation, require that same defer reason to explicitly classify graph registration, worker startup, or server-running logs followed by flushing, exit, or shutdown as partial readiness evidence only rather than completed validation, require that same defer reason to explicitly say that build or typecheck success is compile-time validation only and does not satisfy runtime validation by itself, require that same defer reason to explicitly preserve the prompt rollback reference anygpt-control-plane-agent:795656f0d31a78c81f973ac600fdfff02955e80d47d9cb7df48db7c6a3ef2b78 as the immediate prompt-level rollback context, require that same defer reason to explicitly say LangSmith prompt sync enabled without a returned URL and an unavailable live channel is prompt fallback drift risk only rather than rollout success, require that same defer reason to explicitly say cross-thread LangSmith activity does not satisfy validation for thread b31cedc0-ceb5-48d7-8772-cf97f38a3b42:control-plane, require that same defer reason to explicitly say pending or completed runs from sibling threads such as b31cedc0-ceb5-48d7-8772-cf97f38a3b42:api-data, b31cedc0-ceb5-48d7-8772-cf97f38a3b42:api-routing, and b31cedc0-ceb5-48d7-8772-cf97f38a3b42:ui-surface do not satisfy validation for b31cedc0-ceb5-48d7-8772-cf97f38a3b42:control-plane, require that same defer reason to explicitly say pending or completed runs from sibling threads such as b31cedc0-ceb5-48d7-8772-cf97f38a3b42:workspace-surface, b31cedc0-ceb5-48d7-8772-cf97f38a3b42:api-platform, b31cedc0-ceb5-48d7-8772-cf97f38a3b42:api-runtime, and b31cedc0-ceb5-48d7-8772-cf97f38a3b42:api-data do not satisfy validation for b31cedc0-ceb5-48d7-8772-cf97f38a3b42:control-plane, require that same defer reason to explicitly say pending runs from other threads such as b31cedc0-ceb5-48d7-8772-cf97f38a3b42:workspace-surface, b31cedc0-ceb5-48d7-8772-cf97f38a3b42:ui-surface, b31cedc0-ceb5-48d7-8772-cf97f38a3b42:homepage-surface, b31cedc0-ceb5-48d7-8772-cf97f38a3b42:api-platform, or b31cedc0-ceb5-48d7-8772-cf97f38a3b42:api-platform do not satisfy validation for b31cedc0-ceb5-48d7-8772-cf97f38a3b42:control-plane, require that same defer reason to explicitly say the iteration only changed allowed control-plane files and did not repair localhost apps/api runtime availability, require that same defer reason to explicitly preserve a clear operator-facing no-run defer reason unless at least one fresh same-thread LangSmith control-plane run/trace with explicit goal context plus a passed control-plane smoke/typecheck result exists for the touched path set, require that same defer reason to explicitly say pending same-thread visibility plus startup log flush/exit together are only partial observability plus partial readiness, not a successful validation run, and require that same defer reason to explicitly name the next success condition as at least one fresh same-thread LangSmith control-plane run/trace with explicit goal context plus a passed control-plane smoke/typecheck result for the touched path set, or a clear operator-facing no-run defer reason if no run was emitted. evidence together are partial observability plus partial readiness only rather than completed validation, require that same defer reason to explicitly say that if no fresh same-thread LangSmith control-plane run/trace with explicit goal context was emitted for thread 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane, the iteration must preserve a clear operator-facing no-run defer reason instead of claiming validation success, require that same defer reason to explicitly say pending same-thread visibility plus startup logs that register graphs, start workers, or report server-running before flushing/exiting is combined partial observability plus partial readiness only rather than completed validation, require that same defer reason to explicitly say recent-run-health passing or older runs from other threads do not satisfy this iteration for 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane, and require that same defer reason to state the next validation success condition exactly as at least one fresh same-thread LangSmith control-plane run/trace with explicit goal context plus a passed control-plane smoke/typecheck result for the touched path set, or a clear operator-facing no-run defer reason if no run was emitted. other threads do not satisfy this iteration for 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane, require that same defer reason to explicitly preserve the next validation success condition as at least one fresh same-thread LangSmith control-plane run/trace with explicit goal context plus a passed control-plane smoke/typecheck result for the touched path set, or a clear operator-facing no-run defer reason if no run was emitted, require that same defer reason to explicitly say that pending-only same-thread LangSmith visibility without a completed fresh same-thread run/trace is partial observability only and still does not satisfy validation for 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane, require that same defer reason to explicitly state that production restart of anygpt.service remains blocked without separate explicit approval and that only observational or experimental-safe control-plane handling is allowed in this iteration, require that same defer reason to explicitly restate the active goal in plain language as a bounded control-plane workflow-hardening improvement for thread 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane while apps/api/logs/provider-unique-errors.jsonl and the blocked subsystem apps/api provider/runtime routing remain out of scope and unrepaired here, require that same defer reason to explicitly mention the paired LangSmith feedback signal that contains_goal_context=0 and repair_smoke_passed=0 means this iteration must include explicit goal context and either a passed control-plane smoke/typecheck result plus a fresh same-thread LangSmith control-plane run/trace or a clear no-run defer reason, and require that same defer reason to explicitly state the next validation success condition: at least one fresh same-thread LangSmith control-plane run/trace with explicit goal context plus a passed control-plane smoke/typecheck result for the touched path set, or a clear operator-facing no-run defer reason if no run was emitted. Also require that defer reason to explicitly say the active goal is a bounded control-plane workflow-hardening improvement for thread 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane, that only allowed control-plane files were changed in this iteration, that apps/api/logs/provider-unique-errors.jsonl and the blocked subsystem apps/api provider/runtime routing remain out of scope and unrepaired here, that the prompt rollback reference anygpt-control-plane-agent:3a61868f505b2f04af50aef0a0cb0de0f1179f3f786c705504257bff551802ae remains the immediate prompt-level rollback context, that startup logs showing graph registration, worker startup, or server-running followed by immediate flush, exit, or shutdown are partial readiness evidence only, and that pending-only or cross-thread LangSmith activity does not satisfy validation for thread 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane. Also require the next validation success condition to be stated explicitly as at least one fresh same-thread LangSmith control-plane run/trace with explicit goal context plus a passed control-plane smoke/typecheck result for the touched control-plane path set, or a clear operator-facing no-run defer reason if no run was emitted. Also require that defer reason to explicitly preserve the prompt rollback reference anygpt-control-plane-agent:3a61868f505b2f04af50aef0a0cb0de0f1179f3f786c705504257bff551802ae, to say only allowed control-plane files were changed in this iteration, and to say that apps/api/logs/provider-unique-errors.jsonl plus the blocked subsystem apps/api provider/runtime routing remain out of scope and unrepaired here. Also require the defer reason to explicitly say that recent LangSmith activity from other threads or pending-only runs does not satisfy validation for thread 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane, and that startup logs showing graph registration, worker startup, or server-running followed by immediate flush, exit, or shutdown are partial readiness evidence only rather than completed validation. Also require the bounded control-plane summary and each edit reason to explicitly mention that only allowed control-plane files were changed in this iteration, that apps/api/logs/provider-unique-errors.jsonl and apps/api provider/runtime routing remain out of scope and unrepaired here, that the prompt rollback reference anygpt-control-plane-agent:3a61868f505b2f04af50aef0a0cb0de0f1179f3f786c705504257bff551802ae remains the immediate prompt-level rollback context, and that a clear operator-facing no-run defer reason must be preserved unless there is at least one fresh same-thread LangSmith control-plane run/trace with explicit goal context plus a passed control-plane smoke/typecheck result for thread 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane. Also require the defer reason to preserve the prompt rollback reference anygpt-control-plane-agent:3a61868f505b2f04af50aef0a0cb0de0f1179f3f786c705504257bff551802ae for immediate prompt-level rollback context, to explicitly say that only allowed control-plane files were changed in this iteration, to explicitly say that apps/api/logs/provider-unique-errors.jsonl and the blocked subsystem apps/api provider/runtime routing remain out of scope and were not repaired here, to restate the active goal in plain language as continuous safe control-plane monitoring and bounded improvement, and to explicitly classify startup logs that show graph registration, worker startup, or server-running followed by immediate flush, exit, or shutdown as partial readiness evidence only rather than completed validation. Also require that any bounded control-plane summary or edit reason explicitly says the iteration only changed allowed control-plane files and did not repair apps/api runtime availability, that pending-only or cross-thread LangSmith activity is partial observability only and does not satisfy validation for thread 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane, and that the no-run defer reason should mention both the blocked log path apps/api/logs/provider-unique-errors.jsonl and the blocked subsystem apps/api provider/runtime routing together, explicitly say cross-thread LangSmith activity does not satisfy thread 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane, and explicitly require one fresh same-thread LangSmith control-plane run/trace with explicit goal context plus a passed smoke/typecheck result before validation can be treated as complete when no such same-thread evidence exists. Also require the bounded control-plane summary or decision reason to call any graph registration, worker startup, or server-running logs followed by flush/exit/shutdown partial readiness evidence only, and to call pending-only or cross-thread LangSmith activity partial observability only that does not satisfy thread 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane. When LangSmith feedback for the current control-plane thread includes contains_goal_context=0 or repair_smoke_passed=0, require the summary and each edit reason to restate the active goal in plain language, explicitly say the iteration only made a bounded control-plane workflow-hardening or observability change in apps/langgraph-control-plane/src/workflow.ts unless a fresh same-thread LangSmith control-plane run/trace with explicit goal context plus a passed control-plane smoke/typecheck result exists, and preserve a clear operator-facing no-run defer reason whenever no such same-thread run was emitted. For thread 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane, require the summary and each edit reason to restate that the direct fix for apps/api/logs/provider-unique-errors.jsonl showing openai sendMessage ECONNREFUSED against http://localhost:3101/v1/responses is blocked in the out-of-scope apps/api provider/runtime routing subsystem, that this iteration only changed allowed control-plane files, and that no fresh same-thread LangSmith control-plane run/trace plus passed smoke/typecheck result means the operator-facing no-run defer reason must explicitly name both apps/api/logs/provider-unique-errors.jsonl and apps/api provider/runtime routing together. Also require the summary and each edit reason to say cross-thread LangSmith activity does not satisfy validation for 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane and that startup graph registration, worker startup, or server-running logs followed by flush, exit, or shutdown are partial readiness evidence only, not completed validation, unless a fresh same-thread LangSmith control-plane run/trace with explicit goal context plus a passed control-plane smoke/typecheck result also exists. For thread 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane, require the summary and each edit reason to restate that the direct fix for apps/api/logs/provider-unique-errors.jsonl showing openai sendMessage ECONNREFUSED against http://localhost:3101/v1/responses is blocked in the out-of-scope apps/api provider/runtime routing subsystem, to explicitly say the iteration only changed allowed control-plane files and did not repair localhost apps/api runtime availability, to preserve a clear operator-facing no-run defer reason that names both apps/api/logs/provider-unique-errors.jsonl and apps/api provider/runtime routing together, and to state that retrying the same openai sendMessage localhost combination is unlikely to help until the blocked localhost apps/api target is serving again. Also require the summary and each edit reason to classify graph registration, worker startup, or server-running logs followed by flushing, exit, or shutdown as partial readiness evidence only, and to classify pending-only or cross-thread LangSmith activity as partial observability only that does not satisfy thread 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane. The next validation success condition remains at least one fresh same-thread LangSmith control-plane run/trace with explicit goal context plus a passed control-plane smoke/typecheck result for the touched path set, or a clear operator-facing no-run defer reason if no run was emitted. For thread 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane, require the summary and each edit reason to restate that blocked apps/api subsystem, preserve a clear operator-facing no-run defer reason that explicitly names apps/api/logs/provider-unique-errors.jsonl and the blocked apps/api provider/runtime routing subsystem, explicitly say the iteration only made a bounded control-plane observability or workflow-hardening change in apps/langgraph-control-plane/src/workflow.ts unless a fresh same-thread LangSmith control-plane run/trace with explicit goal context plus a passed control-plane smoke/typecheck result exists, explicitly say zero fresh same-thread runs for this iteration is a monitoring gap rather than by itself a deploy or rollback trigger, and explicitly say retrying the same openai sendMessage localhost combination is unlikely to help until the blocked localhost apps/api target is serving again. If startup logs also show graph registration, worker startup, or server-running followed by an immediate flush, exit, or shutdown, classify that as partial readiness evidence only, not completed validation. If LangSmith visibility is pending-only, mostly from other threads, or lacks a fresh completed run for the current thread, classify that as partial observability only; cross-thread activity does not satisfy validation for the current control-plane thread. Require the summary and each edit reason to explicitly say when recent LangSmith activity is dominated by other threads, to explicitly say that pending or completed runs from sibling threads such as api-runtime, ui-surface, homepage-surface, api-data, api-platform, workspace-surface, or any other non-control-plane thread do not satisfy validation for 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane, and to preserve the operator-facing no-run defer reason until at least one fresh same-thread LangSmith control-plane run/trace with explicit goal context plus a passed control-plane smoke/typecheck result exists. Also require the summary and each edit reason to explicitly say that a same-thread run is still required for the current iteration even when governance, evaluation, or older smoke feedback is passing, because older or cross-thread evidence does not close the current no-run gap. When prompt sync is enabled but no sync URL is returned and the live channel is unavailable, classify that as prompt fallback drift risk only, not rollout success, and preserve the same no-run defer reason until same-thread validation exists.',
+  'When the active repair signal is apps/api/logs/provider-unique-errors.jsonl showing openai sendMessage ECONNREFUSED for http://localhost:3101/v1/responses, explicitly name the blocked subsystem as apps/api provider/runtime routing, classify the direct fix as out of scope for the current control-plane thread 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane, and say retrying the same openai sendMessage combination is unlikely to help until the localhost API target is serving again. In control-plane scope, prefer one small observability, workflow-hardening, or operator-facing defer-reason improvement in an allowed control-plane file instead of implying the apps/api issue was fixed. If startup logs show graph registration, worker startup, or server-running followed by flushing to persistent storage and exiting, classify that as partial readiness evidence only, not completed validation. If LangSmith visibility is pending-only or mostly from other threads, classify that as partial observability only; cross-thread activity does not satisfy validation for 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane. Preserve a clear operator-facing no-run defer reason unless a fresh same-thread LangSmith control-plane run/trace with explicit goal context and a passed control-plane smoke/typecheck result were emitted for this iteration.',
+  'When the active repair signal is apps/api/logs/provider-unique-errors.jsonl showing openai sendMessage ECONNREFUSED for http://localhost:3101/v1/responses, explicitly name the blocked subsystem as apps/api provider/runtime routing, classify the direct fix as out of scope for the current control-plane thread 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane, and say retrying the same openai sendMessage combination is unlikely to help until the localhost API target is serving again. In control-plane scope, prefer one small observability, workflow-hardening, or operator-facing defer-reason improvement in an allowed control-plane file instead of implying the apps/api issue was fixed. If startup logs show graph registration, worker startup, or server-running followed by flushing to persistent storage and exiting, classify that as partial readiness evidence only, not completed validation. If LangSmith visibility is pending-only or mostly from other threads, classify that as partial observability only; cross-thread activity does not satisfy validation for 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane. Preserve a clear operator-facing no-run defer reason unless a fresh same-thread LangSmith control-plane run/trace with explicit goal context and a passed control-plane smoke/typecheck result were emitted for this iteration.',
+  'When the active repair signal is apps/api/logs/provider-unique-errors.jsonl showing openai sendMessage ECONNREFUSED for http://localhost:3101/v1/responses, and the current control-plane thread is 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane, require the summary and each edit reason to explicitly say the direct fix is out of scope in the blocked apps/api provider/runtime routing subsystem, that retrying the same openai sendMessage combination is unlikely to help until the localhost API target is serving again, and that any control-plane-only change must preserve a clear operator-facing no-run defer reason unless a fresh same-thread LangSmith control-plane run/trace and passed control-plane smoke/typecheck result were emitted. The summary must also explicitly state whether the iteration ended with same-thread validation evidence or with a no-run defer reason. If startup logs show graph registration, worker startup, or server-running followed by flushing to persistent storage and exiting, classify that as partial readiness evidence only. If LangSmith visibility is pending-only or mostly from other threads, classify that as partial observability only; cross-thread activity does not satisfy validation for 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane.',
   'When prior history shows restartProductionService succeeded, do not treat that as approval to restart production again. In experimental-safe control-plane scope, production restart actions must be blocked or omitted unless separate explicit approval is present; only anygpt-experimental.service may be considered for restart if needed, and the summary should preserve a clear operator-facing defer reason when production restart is intentionally skipped.',
   'Even when governance is otherwise passing, prefer summaries and decision reasons that name the next validation success condition as at least one fresh control-plane LangSmith run, trace, or an operator-facing defer reason explaining why no run was emitted.',  'When control-plane signals include repeated key_invalid, Unauthorized, invalid_api_key, 401 auth failures, or quota exceeded events for openai/openrouter while apps/api provider files are outside scope, classify them as upstream credential or provider-governance drift blocked in apps/api provider routing/probing. In that case prefer one small control-plane observability, cooldown, prioritization, or explicit defer-reason improvement, say repeating the same provider-method combination is unlikely to help immediately, and require the next smoke/validation step to confirm at least one fresh LangSmith control-plane run or preserve a clear defer reason if no run was emitted.',
   'When repair or improvement signals are repeated key_invalid, Unauthorized, invalid_api_key, 401 auth failures, or key_no_quota/quota exceeded events for the same provider family, classify them as upstream credential or provider-governance drift by default. In control-plane scope, prefer one small observability, prioritization, cooldown, or explicit defer-reason improvement and say speculative provider edits in apps/api provider routing are blocked outside scope unless a clear local control-plane guard is visible.',
@@ -543,7 +550,8 @@ const DEFAULT_CONTROL_PLANE_AUTONOMOUS_EDIT_PROMPT = [
   'When active repair signals specifically pair Gemini image_output region/country blocking or provider_model_removed events with lyria-3-pro-preview probe failures such as unsupported audio/s16le input or function calling not enabled, require the summary or decision reason to classify them as the same upstream/provider-bound Gemini capability mismatch and regional catalog drift family blocked in apps/api Gemini provider routing/capability handling, and state that repeating the same Gemini provider-method combination is unlikely to help immediately.',
   'When active repair signals specifically pair Gemini image_output provider_cap_blocked/provider_model_removed region or country availability failures with lyria-3-pro-preview probe_fail outcomes like unsupported audio/s16le input or function calling not enabled, treat that as the same upstream/provider-bound Gemini capability mismatch and regional catalog drift family blocked in apps/api Gemini provider routing/capability handling; prefer one bounded control-plane observability or defer-reason improvement and state that repeating the same Gemini provider-method combination is unlikely to help immediately.',
   'When Gemini signals specifically pair image generation unavailable in country or provider region with unsupported audio mime types such as audio/s16le, treat them as the same upstream/provider-bound Gemini capability mismatch and regional catalog drift family blocked in apps/api Gemini provider routing/capability handling; in control-plane scope, prefer one bounded observability, prioritization, or defer-reason improvement and state that retrying the same Gemini provider-method combination is unlikely to help.',
-  'When recent logs show Gemini provider_cap_blocked or provider_model_removed for image_output because generation is unavailable in a country or provider region together with probe_fail errors for the same model family such as unsupported audio/s16le input, function calling not enabled, or generateContent unsupported, treat that cluster as one upstream/provider-bound Gemini capability mismatch and regional catalog drift family blocked in apps/api Gemini provider routing/capability handling; in control-plane scope, prefer a single observability, prioritization, or explicit defer-reason improvement, state that repeating the same Gemini provider-method combination is unlikely to help immediately, and require the next smoke/validation step to confirm at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason if no run was emitted.',].join(' ');
+  'When recent logs show Gemini provider_cap_blocked or provider_model_removed for image_output because generation is unavailable in a country or provider region together with probe_fail errors for the same model family such as unsupported audio/s16le input, function calling not enabled, or generateContent unsupported, treat that cluster as one upstream/provider-bound Gemini capability mismatch and regional catalog drift family blocked in apps/api Gemini provider routing/capability handling; in control-plane scope, prefer a single observability, prioritization, or explicit defer-reason improvement, state that repeating the same Gemini provider-method combination is unlikely to help immediately, and require the next smoke/validation step to confirm at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason if no run was emitted.',
+  'When the active repair signal is apps/api/logs/provider-unique-errors.jsonl showing openai sendMessage ECONNREFUSED for http://localhost:3101/v1/responses, explicitly name the blocked subsystem as apps/api provider/runtime routing, classify the direct fix as out of scope for the current control-plane thread, and say retrying the same openai sendMessage combination is unlikely to help until the localhost API target is serving again. In control-plane scope, prefer one bounded observability, workflow-hardening, or operator-facing defer-reason improvement instead of implying the apps/api issue was fixed. Require the summary and each edit reason to restate the active goal in plain language, name the current control-plane thread when available, name the exact touched control-plane file or subsystem, and preserve a clear operator-facing no-run defer reason whenever no fresh same-thread LangSmith control-plane run/trace and passed control-plane smoke/typecheck result were emitted for this iteration. If startup logs show graph registration, worker startup, or server-running evidence followed by immediate flush, exit, or shutdown, classify that as partial readiness evidence only, not completed validation. If LangSmith visibility is pending-only or mostly from other threads, classify that as partial observability only; cross-thread activity does not satisfy validation for the current control-plane thread. If pending same-thread LangSmith visibility appears together with graph registration, worker startup, or server-running evidence that immediately flushes, exits, or shuts down, require the summary and each edit reason to explicitly classify the state as combined partial observability plus partial readiness only and to preserve the operator-facing no-run defer reason instead of claiming successful validation. Also require the summary and each edit reason to explicitly say the iteration only changed allowed control-plane files and did not repair apps/api/logs/provider-unique-errors.jsonl or the blocked apps/api provider/runtime routing subsystem. The next validation success condition remains at least one fresh same-thread LangSmith control-plane run/trace with explicit goal context plus a passed control-plane smoke/typecheck result for the touched path set, or a clear operator-facing no-run defer reason if no run was emitted.',].join(' ');
 
 const DEFAULT_CONTROL_PLANE_PROMPT_BUNDLE = ControlPlanePromptBundleSchema.parse({
   planner: 'You are the planner agent for the AnyGPT LangGraph control plane. Produce concise, actionable planning notes based on logs, MCP findings, and requested scopes. Focus on priorities, risks, and safe next steps.',
@@ -1433,6 +1441,12 @@ function isApiDataSourceOfTruthPath(candidatePath: string): boolean {
     ].includes(normalizedPath);
 }
 
+function signalTextHasGeminiCapabilityDriftFocus(sourceText: string): boolean {
+  return /provider_cap_blocked|provider_model_removed|image generation unavailable|lyria-3-pro-preview|audio\/s16le|function calling is not enabled|tool_calling_not_enabled|unsupported input mime type/.test(
+    String(sourceText || '').toLowerCase(),
+  );
+}
+
 function scoreAutonomousEditPathFit(
   state: Pick<ControlPlaneState, 'repairSignals' | 'improvementSignals' | 'autonomousOperationMode' | 'scopes' | 'effectiveScopes'>,
   path: string,
@@ -1448,6 +1462,7 @@ function scoreAutonomousEditPathFit(
   const routingFocus = signalTextHasApiRoutingFocus(sourceText);
   const authDriftFocus = signalTextHasProviderAuthDriftFocus(sourceText);
   const capabilityAuditFocus = signalTextHasCapabilityAuditFocus(sourceText);
+  const geminiCapabilityDriftFocus = signalTextHasGeminiCapabilityDriftFocus(sourceText);
   const surfaceAssetFocus = signalTextHasSurfaceAssetFocus(sourceText);
   const platformFocus = /experimental service|experimental target|entrypoint|startup|openapi\.json|wsserver|websocket|service unit|server\.launcher|health check|platform health/.test(sourceText);
   const workspaceFocus = /workspace-surface|repo-surface|developer-workflow|operator payoff|frontend stack|sync-config|setup\.md|pnpm-workspace|tsconfig|bun\.sh|run-frontend-stack/.test(sourceText);
@@ -1531,6 +1546,10 @@ function scoreAutonomousEditPathFit(
   if (normalizedPath === 'apps/api/dev/checkModelCapabilities.ts' && capabilityAuditFocus) score += 3;
   if (normalizedPath === 'apps/api/dev/checkModelCapabilities.ts' && (pricingCoverageFocus || availabilityFocus)) score -= 4;
   if (normalizedPath.startsWith('apps/api/modules/openaiProviderSelection.ts') && /provider selection|provider switch|retry worthless|routing|model-availability|probe|tool-calling|tool_choice|unsupported(?:-| )tool|healthy selection/.test(sourceText)) score += 3;
+  if (normalizedPath.startsWith('apps/api/providers/handler.ts') && geminiCapabilityDriftFocus) score += 4;
+  if (normalizedPath.startsWith('apps/api/modules/geminiMediaValidation.ts') && geminiCapabilityDriftFocus) score += 6;
+  if (normalizedPath.startsWith('apps/api/providers/gemini.ts') && geminiCapabilityDriftFocus) score += 3;
+  if (normalizedPath.startsWith('apps/api/modules/openaiProviderSelection.ts') && geminiCapabilityDriftFocus) score -= 6;
   if (normalizedPath.startsWith('apps/api/modules/openaiRequestSupport.ts') && /heartbeat|keepalive|keep-alive|backpressure|response\.write|drain|sse|stream teardown|stream keepalive|premature stream/.test(sourceText)) score += 3;
   if (normalizedPath.startsWith('apps/api/providers/openai.ts') && /server_error|empty streaming response|responses endpoint|stream/.test(sourceText)) score += 2;
   if (normalizedPath === 'apps/homepage/public/index.html' && surfaceAssetFocus) score += 5;
@@ -2652,6 +2671,9 @@ const CONTROL_PLANE_TYPECHECK_COMMAND = 'bash ./bun.sh run -F anygpt-langgraph-c
 const CODEQL_AUTORUN_ENABLED = parseBooleanEnv('CONTROL_PLANE_CODEQL_AUTORUN', true);
 const CODEQL_REFRESH_MS = parsePositiveIntegerEnv('CONTROL_PLANE_CODEQL_REFRESH_MS', 30 * 60 * 1000, 60_000);
 const CODEQL_SOURCE_FRESHNESS_REFRESH_MS = parsePositiveIntegerEnv('CONTROL_PLANE_CODEQL_SOURCE_FRESHNESS_REFRESH_MS', 500, 250);
+const CODEQL_LOCK_POLL_MS = parsePositiveIntegerEnv('CONTROL_PLANE_CODEQL_LOCK_POLL_MS', 1_000, 100);
+const CODEQL_LOCK_STALE_MS = parsePositiveIntegerEnv('CONTROL_PLANE_CODEQL_LOCK_STALE_MS', 25 * 60 * 1000, 5_000);
+const CODEQL_LOCK_TIMEOUT_MS = parsePositiveIntegerEnv('CONTROL_PLANE_CODEQL_LOCK_TIMEOUT_MS', 30 * 60 * 1000, 60_000);
 const REDIS_CLONE_CONNECT_TIMEOUT_MS = parsePositiveIntegerEnv('CONTROL_PLANE_REDIS_CLONE_CONNECT_TIMEOUT_MS', 15_000, 1_000);
 const REDIS_CLONE_SCAN_TIMEOUT_MS = parsePositiveIntegerEnv('CONTROL_PLANE_REDIS_CLONE_SCAN_TIMEOUT_MS', 60_000, 1_000);
 const REDIS_CLONE_COMMAND_TIMEOUT_MS = parsePositiveIntegerEnv('CONTROL_PLANE_REDIS_CLONE_COMMAND_TIMEOUT_MS', 30_000, 1_000);
@@ -4784,6 +4806,15 @@ function listRecentCodeQlCandidatePaths(state: ControlPlaneState): string[] {
 
 type AutomaticCodeQlTarget = 'control-plane' | 'api' | 'repo' | null;
 
+type AutomaticCodeQlLockMetadata = {
+  pid: number;
+  threadId: string;
+  target: Exclude<AutomaticCodeQlTarget, null> | 'unknown';
+  resultPath: string;
+  sourceRoot: string;
+  acquiredAt: string;
+};
+
 function resolveAutomaticCodeQlTarget(state: ControlPlaneState): AutomaticCodeQlTarget {
   const scopes = new Set(getEffectiveScopes(state));
   const hasApiScope = (
@@ -4804,6 +4835,15 @@ function resolveAutomaticCodeQlTarget(state: ControlPlaneState): AutomaticCodeQl
 function shouldAutoRunCodeQl(state: ControlPlaneState): boolean {
   if (!CODEQL_AUTORUN_ENABLED) return false;
   return resolveAutomaticCodeQlTarget(state) !== null;
+}
+
+function resolveAutomaticCodeQlLockPath(state: ControlPlaneState): string {
+  const configured = String(process.env.CONTROL_PLANE_CODEQL_LOCK_PATH || '').trim();
+  if (configured) return path.resolve(state.repoRoot, configured);
+
+  const resultPath = resolveAutomaticCodeQlResultPath(state);
+  const parsed = path.parse(resultPath);
+  return path.resolve(parsed.dir, `${parsed.name}.lock`);
 }
 
 function resolveAutomaticCodeQlResultPath(state: ControlPlaneState): string {
@@ -4945,14 +4985,128 @@ function shellEscapeCommandArg(value: string): string {
   return JSON.stringify(String(value));
 }
 
-async function ensureAutomaticCodeQlSarif(state: ControlPlaneState): Promise<string[]> {
-  if (!shouldAutoRunCodeQl(state)) return [];
+function waitForMilliseconds(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, Math.max(0, ms));
+  });
+}
 
-  const resultPath = resolveAutomaticCodeQlResultPath(state);
-  const sourceRoot = resolveAutomaticCodeQlSourceRoot(state);
-  const resultRelativePath = path.relative(state.repoRoot, resultPath).replace(/\\/g, '/');
+function isProcessRunning(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error: any) {
+    return error?.code === 'EPERM';
+  }
+}
+
+function readAutomaticCodeQlLockMetadata(lockPath: string): AutomaticCodeQlLockMetadata | null {
+  try {
+    const raw = fs.readFileSync(lockPath, 'utf8');
+    if (!raw.trim()) return null;
+    return JSON.parse(raw) as AutomaticCodeQlLockMetadata;
+  } catch {
+    return null;
+  }
+}
+
+function releaseAutomaticCodeQlLock(lockPath: string): void {
+  try {
+    fs.rmSync(lockPath, { force: true });
+  } catch {
+    // Ignore best-effort lock cleanup failures.
+  }
+}
+
+function tryAcquireAutomaticCodeQlLock(lockPath: string, metadata: AutomaticCodeQlLockMetadata): boolean {
+  try {
+    const handle = fs.openSync(lockPath, 'wx');
+    try {
+      fs.writeFileSync(handle, JSON.stringify(metadata, null, 2), 'utf8');
+    } finally {
+      fs.closeSync(handle);
+    }
+    return true;
+  } catch (error: any) {
+    if (error?.code === 'EEXIST') return false;
+    throw error;
+  }
+}
+
+function isAutomaticCodeQlLockStale(
+  lockPath: string,
+  metadata: AutomaticCodeQlLockMetadata | null,
+  staleAfterMs: number,
+): boolean {
+  const modifiedTimeMs = getFileModifiedTimeMs(lockPath);
+  if (modifiedTimeMs <= 0) return true;
+  const ageMs = Date.now() - modifiedTimeMs;
+  const pid = Number(metadata?.pid ?? 0);
+  if (Number.isInteger(pid) && pid > 0) {
+    return !isProcessRunning(pid) || ageMs > staleAfterMs;
+  }
+  return ageMs > staleAfterMs;
+}
+
+async function acquireAutomaticCodeQlLock(
+  state: ControlPlaneState,
+  lockPath: string,
+  resultPath: string,
+  sourceRoot: string,
+  codeQlTimeoutMs: number,
+): Promise<{ acquired: true } | { acquired: false; reason: string }> {
+  fs.mkdirSync(path.dirname(lockPath), { recursive: true });
+
+  const staleAfterMs = Math.max(CODEQL_LOCK_STALE_MS, codeQlTimeoutMs + CODEQL_LOCK_POLL_MS);
+  const waitTimeoutMs = Math.max(CODEQL_LOCK_TIMEOUT_MS, staleAfterMs + CODEQL_LOCK_POLL_MS);
+  const startTimeMs = Date.now();
+  const metadata: AutomaticCodeQlLockMetadata = {
+    pid: process.pid,
+    threadId: String(state.threadId || ''),
+    target: resolveAutomaticCodeQlTarget(state) ?? 'unknown',
+    resultPath,
+    sourceRoot,
+    acquiredAt: new Date().toISOString(),
+  };
+
+  while (true) {
+    if (tryAcquireAutomaticCodeQlLock(lockPath, metadata)) {
+      return { acquired: true };
+    }
+
+    const ownerMetadata = readAutomaticCodeQlLockMetadata(lockPath);
+    if (isAutomaticCodeQlLockStale(lockPath, ownerMetadata, staleAfterMs)) {
+      releaseAutomaticCodeQlLock(lockPath);
+      continue;
+    }
+
+    if (Date.now() - startTimeMs >= waitTimeoutMs) {
+      const ownerLabel = ownerMetadata?.threadId
+        ? ` held by ${ownerMetadata.threadId}`
+        : '';
+      return {
+        acquired: false,
+        reason: `timed out waiting for CodeQL lock ${path.relative(state.repoRoot, lockPath).replace(/\\/g, '/')}${ownerLabel}`,
+      };
+    }
+
+    await waitForMilliseconds(CODEQL_LOCK_POLL_MS);
+  }
+}
+
+function describeAutomaticCodeQlFreshSarif(
+  state: ControlPlaneState,
+  resultPath: string,
+  sourceRoot: string,
+  resultRelativePath: string,
+): {
+  note: string | null;
+  trackedSourceState: { newestSourceMtimeMs: number; newestSourcePath: string } | null;
+  cachedSarifIsOlderThanTrackedSource: boolean;
+} {
   const resultModifiedTimeMs = getFileModifiedTimeMs(resultPath);
-  const resultAgeMs = Date.now() - getFileModifiedTimeMs(resultPath);
+  const resultAgeMs = Date.now() - resultModifiedTimeMs;
   const trackedSourceState = shouldTrackCodeQlSourceFreshness(state, sourceRoot)
     ? getNewestCodeQlSourceState(sourceRoot)
     : null;
@@ -4960,6 +5114,7 @@ async function ensureAutomaticCodeQlSarif(state: ControlPlaneState): Promise<str
     trackedSourceState
     && trackedSourceState.newestSourceMtimeMs > resultModifiedTimeMs,
   );
+
   if (
     fs.existsSync(resultPath)
     && resultAgeMs >= 0
@@ -4967,39 +5122,114 @@ async function ensureAutomaticCodeQlSarif(state: ControlPlaneState): Promise<str
     && !cachedSarifIsOlderThanTrackedSource
   ) {
     const findingCount = countCodeQlSarifFindings(resultPath);
-    return [`CodeQL autorun: reusing fresh SARIF at ${resultRelativePath} (${findingCount} finding(s)).`];
+    return {
+      note: `CodeQL autorun: reusing fresh SARIF at ${resultRelativePath} (${findingCount} finding(s)).`,
+      trackedSourceState,
+      cachedSarifIsOlderThanTrackedSource,
+    };
+  }
+
+  return {
+    note: null,
+    trackedSourceState,
+    cachedSarifIsOlderThanTrackedSource,
+  };
+}
+
+async function ensureAutomaticCodeQlSarif(state: ControlPlaneState): Promise<string[]> {
+  if (!shouldAutoRunCodeQl(state)) return [];
+
+  const resultPath = resolveAutomaticCodeQlResultPath(state);
+  const sourceRoot = resolveAutomaticCodeQlSourceRoot(state);
+  const resultRelativePath = path.relative(state.repoRoot, resultPath).replace(/\\/g, '/');
+  const freshSarifState = describeAutomaticCodeQlFreshSarif(
+    state,
+    resultPath,
+    sourceRoot,
+    resultRelativePath,
+  );
+  if (freshSarifState.note) {
+    return [freshSarifState.note];
   }
 
   const codeqlBinary = resolveCodeQlBinaryPath(state);
   const queryPack = String(process.env.CONTROL_PLANE_CODEQL_QUERY_PACK || 'codeql/javascript-queries').trim() || 'codeql/javascript-queries';
   const language = String(process.env.CONTROL_PLANE_CODEQL_LANGUAGE || 'javascript').trim() || 'javascript';
+  const codeQlTimeoutMs = parsePositiveIntegerEnv('CONTROL_PLANE_CODEQL_TIMEOUT_MS', 20 * 60 * 1000, 60_000);
   const databasePath = resolveAutomaticCodeQlDatabasePath(state);
+  const lockPath = resolveAutomaticCodeQlLockPath(state);
   fs.mkdirSync(path.dirname(resultPath), { recursive: true });
   fs.mkdirSync(path.dirname(databasePath), { recursive: true });
-  fs.rmSync(databasePath, { recursive: true, force: true });
+  const temporaryResultPath = `${resultPath}.tmp-${process.pid}-${Date.now()}`;
 
-  const command = [
-    `rm -rf ${shellEscapeCommandArg(databasePath)}`,
-    `${shellEscapeCommandArg(codeqlBinary)} database create ${shellEscapeCommandArg(databasePath)} --language=${shellEscapeCommandArg(language)} --build-mode=none --source-root=${shellEscapeCommandArg(sourceRoot)}`,
-    `${shellEscapeCommandArg(codeqlBinary)} database analyze ${shellEscapeCommandArg(databasePath)} ${shellEscapeCommandArg(queryPack)} --format=sarifv2.1.0 --output=${shellEscapeCommandArg(resultPath)} --threads=0 --download --no-print-diagnostics-summary --no-print-metrics-summary --sarif-category=${shellEscapeCommandArg('control-plane-autonomous')}`,
-  ].join(' && ');
-
-  const result = await runShellCommand(command, path.resolve(state.repoRoot), {
-    timeoutMs: parsePositiveIntegerEnv('CONTROL_PLANE_CODEQL_TIMEOUT_MS', 20 * 60 * 1000, 60_000),
-  });
-
-  if (result.exitCode !== 0 || result.timedOut || !fs.existsSync(resultPath)) {
-    const failurePreview = sanitizeLogLine(result.output).slice(0, 320);
-    return [
-      `CodeQL autorun failed for ${resultRelativePath}${result.timedOut ? ' (timed out)' : ''}: ${failurePreview || `exit ${result.exitCode}`}`,
-    ];
+  const lockResult = await acquireAutomaticCodeQlLock(
+    state,
+    lockPath,
+    resultPath,
+    sourceRoot,
+    codeQlTimeoutMs,
+  );
+  if (!lockResult.acquired) {
+    const freshAfterWait = describeAutomaticCodeQlFreshSarif(
+      state,
+      resultPath,
+      sourceRoot,
+      resultRelativePath,
+    );
+    if (freshAfterWait.note) {
+      return [freshAfterWait.note];
+    }
+    return [`CodeQL autorun failed for ${resultRelativePath}: ${lockResult.reason}`];
   }
 
-  const findingCount = countCodeQlSarifFindings(resultPath);
-  const freshnessSuffix = cachedSarifIsOlderThanTrackedSource
-    ? ` after source changes newer than the cached SARIF (${path.relative(state.repoRoot, trackedSourceState?.newestSourcePath || sourceRoot).replace(/\\/g, '/')})`
-    : '';
-  return [`CodeQL autorun: generated ${resultRelativePath} with ${findingCount} finding(s)${freshnessSuffix}.`];
+  try {
+    const freshAfterLock = describeAutomaticCodeQlFreshSarif(
+      state,
+      resultPath,
+      sourceRoot,
+      resultRelativePath,
+    );
+    if (freshAfterLock.note) {
+      return [freshAfterLock.note];
+    }
+
+    fs.rmSync(databasePath, { recursive: true, force: true });
+    fs.rmSync(temporaryResultPath, { force: true });
+
+    const command = [
+      `rm -rf ${shellEscapeCommandArg(databasePath)}`,
+      `${shellEscapeCommandArg(codeqlBinary)} database create ${shellEscapeCommandArg(databasePath)} --language=${shellEscapeCommandArg(language)} --build-mode=none --source-root=${shellEscapeCommandArg(sourceRoot)}`,
+      `${shellEscapeCommandArg(codeqlBinary)} database analyze ${shellEscapeCommandArg(databasePath)} ${shellEscapeCommandArg(queryPack)} --format=sarifv2.1.0 --output=${shellEscapeCommandArg(temporaryResultPath)} --threads=0 --download --no-print-diagnostics-summary --no-print-metrics-summary --sarif-category=${shellEscapeCommandArg('control-plane-autonomous')}`,
+    ].join(' && ');
+
+    const result = await runShellCommand(command, path.resolve(state.repoRoot), {
+      timeoutMs: codeQlTimeoutMs,
+    });
+
+    if (result.exitCode !== 0 || result.timedOut || !fs.existsSync(temporaryResultPath)) {
+      const failurePreview = sanitizeLogLine(result.output).slice(0, 320);
+      return [
+        `CodeQL autorun failed for ${resultRelativePath}${result.timedOut ? ' (timed out)' : ''}: ${failurePreview || `exit ${result.exitCode}`}`,
+      ];
+    }
+
+    fs.renameSync(temporaryResultPath, resultPath);
+
+    const postRunFreshSarifState = describeAutomaticCodeQlFreshSarif(
+      state,
+      resultPath,
+      sourceRoot,
+      resultRelativePath,
+    );
+    const findingCount = countCodeQlSarifFindings(resultPath);
+    const freshnessSuffix = postRunFreshSarifState.cachedSarifIsOlderThanTrackedSource
+      ? ` after source changes newer than the cached SARIF (${path.relative(state.repoRoot, postRunFreshSarifState.trackedSourceState?.newestSourcePath || sourceRoot).replace(/\\/g, '/')})`
+      : '';
+    return [`CodeQL autorun: generated ${resultRelativePath} with ${findingCount} finding(s)${freshnessSuffix}.`];
+  } finally {
+    fs.rmSync(temporaryResultPath, { force: true });
+    releaseAutomaticCodeQlLock(lockPath);
+  }
 }
 
 function resolveAutomaticCodeQlSourceRootForSarif(repoRoot: string, sarifPath: string): string {
@@ -5330,6 +5560,32 @@ function isCompileShapeAutonomousEditFailure(message: string): boolean {
   return /unused local symbols|declared but its value is never read|cannot redeclare block-scoped variable|duplicate identifier|duplicate function implementation|same-file typescript diagnostics|typecheck|build validation|compile validation/.test(normalized);
 }
 
+function collectRecentCompileShapeFailedPaths(
+  state: Pick<ControlPlaneState, 'appliedEdits'>,
+): Set<string> {
+  return new Set(
+    state.appliedEdits
+      .filter((edit) => edit.status === 'failed')
+      .filter((edit) => isCompileShapeAutonomousEditFailure(String(edit.message || '')))
+      .map((edit) => String(edit.path || '').trim())
+      .filter(Boolean),
+  );
+}
+
+function shouldPivotApiRoutingAwayFromGeminiValidation(
+  state: Pick<ControlPlaneState, 'repairSignals' | 'improvementSignals' | 'appliedEdits'>,
+): boolean {
+  const sourceText = [
+    ...state.repairSignals,
+    ...state.improvementSignals,
+  ].join(' | ').toLowerCase();
+  if (!signalTextHasGeminiCapabilityDriftFocus(sourceText)) {
+    return false;
+  }
+
+  return collectRecentCompileShapeFailedPaths(state).has('apps/api/modules/geminiMediaValidation.ts');
+}
+
 function reasonAcknowledgesCompileShapeFailure(reason: string): boolean {
   const normalized = String(reason || '').trim().toLowerCase();
   if (!normalized) return false;
@@ -5483,6 +5739,8 @@ function filterInvalidAutonomousEditProposals(
   const pricingCoverageFocus = signalTextHasPricingCoverageFocus(sourceText);
   const availabilityFocus = signalTextHasApiAvailabilityFocus(sourceText);
   const capabilityAuditFocus = signalTextHasCapabilityAuditFocus(sourceText);
+  const geminiCapabilityDriftFocus = signalTextHasGeminiCapabilityDriftFocus(sourceText);
+  const apiRoutingGeminiValidationPivot = shouldPivotApiRoutingAwayFromGeminiValidation(state);
   const contractPaths = state.autonomousContractPaths
     .map((entry) => String(entry || '').trim())
     .filter(Boolean);
@@ -5521,6 +5779,36 @@ function filterInvalidAutonomousEditProposals(
     if (contractPaths.length > 0 && !contractPaths.includes(check.normalizedPath)) {
       notes.push(`Skipped autonomous edit proposal for ${check.normalizedPath}: it falls outside the current autonomous contract paths (${contractPaths.join(', ')}).`);
       continue;
+    }
+
+    if (
+      geminiCapabilityDriftFocus &&
+      check.normalizedPath === 'apps/api/modules/openaiProviderSelection.ts'
+    ) {
+      const reasonText = String(edit.reason || '').toLowerCase();
+      if (
+        /provider_cap_blocked|provider_model_removed|image generation unavailable|lyria-3-pro-preview|audio\/s16le|function calling is not enabled|tool_calling_not_enabled/.test(
+          reasonText,
+        )
+      ) {
+        notes.push(
+          `Skipped autonomous edit proposal for ${check.normalizedPath}: the active api-routing signal is a Gemini capability/regional-drift family, so prefer apps/api/modules/geminiMediaValidation.ts or apps/api/providers/handler.ts over openaiProviderSelection.ts.`,
+        );
+        continue;
+      }
+    }
+
+    if (
+      apiRoutingGeminiValidationPivot
+      && check.normalizedPath === 'apps/api/modules/geminiMediaValidation.ts'
+    ) {
+      const reasonText = String(edit.reason || '').toLowerCase();
+      if (!reasonAcknowledgesCompileShapeFailure(reasonText)) {
+        notes.push(
+          `Skipped autonomous edit proposal for ${check.normalizedPath}: a recent api-routing attempt on this file failed with duplicate declarations, so pivot to apps/api/providers/handler.ts unless the next proposal explicitly removes stale declarations or duplicate symbols.`,
+        );
+        continue;
+      }
     }
 
     const priorPreflightFailure = rejectedPathPreflightMessages.get(check.normalizedPath);
@@ -5595,6 +5883,7 @@ function buildAutonomousEditAgentWorkloads(
   const aggressivePlanning = shouldUseAggressiveAutonomousPlanning(state);
   const maxAgents = Math.max(1, Math.min(aggressivePlanning ? AI_CODE_EDIT_AGENT_PARALLELISM : 1, candidateFiles.length));
   const workloads: AutonomousEditAgentWorkload[] = [];
+  const compileShapeFailedPaths = collectRecentCompileShapeFailedPaths(state);
 
   const addWorkload = (label: string, focus: string, files: ReturnType<typeof readAutonomousEditContext>): void => {
     if (workloads.length >= maxAgents) return;
@@ -5630,20 +5919,38 @@ function buildAutonomousEditAgentWorkloads(
   }
 
   if (effectiveScopes.has('api-routing')) {
+    const routingSourceText = [
+      ...state.repairSignals,
+      ...state.improvementSignals,
+      ...state.plannerNotes,
+    ].join(' | ').toLowerCase();
+    const geminiCapabilityDriftFocus = signalTextHasGeminiCapabilityDriftFocus(
+      routingSourceText,
+    );
+    const apiRoutingGeminiValidationPivot = geminiCapabilityDriftFocus
+      && compileShapeFailedPaths.has('apps/api/modules/geminiMediaValidation.ts');
     addWorkload(
       'api-routing',
       operationMode === 'repair'
-        ? 'Focus on routing-time capability gating, provider selection, skip reasons, and retry-worthlessness improvements.'
+        ? (
+            apiRoutingGeminiValidationPivot
+              ? 'Focus on routing-time capability gating, provider selection, skip reasons, and retry-worthlessness improvements. A recent geminiMediaValidation.ts attempt failed with duplicate declarations, so pivot to apps/api/providers/handler.ts or route-support hot paths instead of retrying the same stale replace block unless you are explicitly cleaning up duplicate symbols.'
+              : 'Focus on routing-time capability gating, provider selection, skip reasons, and retry-worthlessness improvements.'
+          )
         : 'Prefer small routing, selection, and compatibility-gating improvements in the API hot path.',
       candidateFiles.filter((file) => [
         'apps/api/providers/handler.ts',
         'apps/api/providers/gemini.ts',
         'apps/api/providers/openrouter.ts',
-        'apps/api/modules/openaiProviderSelection.ts',
+        ...(!geminiCapabilityDriftFocus
+          ? ['apps/api/modules/openaiProviderSelection.ts']
+          : []),
         'apps/api/modules/openaiRouteSupport.ts',
         'apps/api/modules/openaiRouteUtils.ts',
         'apps/api/modules/openaiResponsesFormat.ts',
-        'apps/api/modules/geminiMediaValidation.ts',
+        ...(!apiRoutingGeminiValidationPivot
+          ? ['apps/api/modules/geminiMediaValidation.ts']
+          : []),
         'apps/api/routes/openai.ts',
       ].includes(file.path)),
     );
@@ -5683,11 +5990,14 @@ function buildAutonomousEditAgentWorkloads(
     );
   }
 
-  if (failedPaths.size > 0) {
+  const refreshableFailedPaths = new Set(
+    Array.from(failedPaths).filter((candidatePath) => !compileShapeFailedPaths.has(candidatePath)),
+  );
+  if (refreshableFailedPaths.size > 0) {
     addWorkload(
       'refresh-failed-paths',
       'Revisit previously failing edit targets with the refreshed live blocks and propose a safer bounded patch.',
-      candidateFiles.filter((file) => failedPaths.has(file.path)),
+      candidateFiles.filter((file) => refreshableFailedPaths.has(file.path)),
     );
   }
 
@@ -7152,9 +7462,39 @@ async function autonomousEditPlannerNode(state: ControlPlaneState): Promise<Part
   );
   const failedRefreshContexts = buildFailedAutonomousEditRefreshContexts(state, failedEditAnchorHints);
   const failedPaths = new Set(Object.keys(failedEditAnchorHints));
+  const compileShapeFailedPaths = collectRecentCompileShapeFailedPaths(state);
+  const apiRoutingGeminiValidationPivot = shouldPivotApiRoutingAwayFromGeminiValidation(state);
   const currentThreadId = String(state.threadId || '').trim();
+  const localhostApiRefusalSignal = [...state.repairSignals, ...state.improvementSignals].some((signal) => {
+    const normalized = String(signal || '').toLowerCase();
+    return normalized.includes('apps/api/logs/provider-unique-errors.jsonl')
+      && normalized.includes('http://localhost:3101/v1/responses')
+      && normalized.includes('econnrefused');
+  });
+  const localhostTouchedPathSet = [
+    ...new Set([
+      ...candidateFiles.map((file) => String(file?.path || '').trim()).filter(Boolean),
+      'apps/langgraph-control-plane/src/workflow.ts',
+      ...Array.from(failedPaths).map((entry) => String(entry || '').trim()).filter(Boolean),
+    ]),
+  ];
+  const localhostTouchedPathSummary = localhostTouchedPathSet.length
+    ? localhostTouchedPathSet.join(', ')
+    : 'apps/langgraph-control-plane/src/workflow.ts';
+  const localhostApiNoRunDeferReason = localhostApiRefusalSignal
+    ? `Thread ${currentThreadId || 'current control-plane thread'} is carrying a bounded control-plane observability/workflow-hardening change only. The active goal remains to continuously monitor, fix, and improve AnyGPT with bounded safe control-plane changes, while the active repair signal is still apps/api/logs/provider-unique-errors.jsonl reporting openai sendMessage ECONNREFUSED at http://localhost:3101/v1/responses. The direct fix remains blocked out of scope in the apps/api provider/runtime routing subsystem because the localhost API target is not serving, and retrying the same openai sendMessage combination is unlikely to help until that blocked apps/api runtime is serving again. Treat apps/api/logs/provider-unique-errors.jsonl as monitoring evidence for this blocked subsystem, not proof that the underlying localhost apps/api issue was repaired from control-plane scope. This bounded control-plane iteration is touching or considering the following control-plane path set: ${localhostTouchedPathSummary}. Startup logs that register graphs, start workers, or report server-running before flushing to persistent storage and exiting are partial readiness evidence only, not completed validation. Pending-only LangSmith visibility for this thread, sibling-thread pending runs, pending same-thread runs without completion, or completed runs from other threads are partial observability only and do not satisfy this iteration for thread ${currentThreadId || 'current control-plane thread'}. Cross-thread LangSmith activity does not satisfy validation for this control-plane iteration, and sibling-thread pending-run growth should be surfaced as shared observability/readiness noise rather than treated as successful validation for this control-plane thread. No fresh same-thread LangSmith control-plane run/trace with explicit goal context or fresh same-thread control-plane smoke/typecheck result has been emitted for this bounded change yet, so do not treat governance pass, evaluation pass, startup readiness hints, pending-only visibility, or cross-thread activity as a substitute for validation. Preserve this clear operator-facing no-run defer reason unless and until this same thread emits at least one fresh LangSmith control-plane run/trace with explicit goal context and the touched control-plane path set passes smoke/typecheck; otherwise keep the defer reason visible instead of implying successful validation from partial readiness or partial observability alone.`
+    : '';
   const candidatePrioritySources = [
-    `Current control-plane thread priority: emit or surface at least one fresh LangSmith control-plane run/trace for thread ${currentThreadId || 'unknown'} with explicit goal context for this iteration before proposing broader improvement work; if no run can be emitted, preserve a clear operator-facing defer reason. Treat a missing fresh run for the current iteration as an observability gap, not by itself a deploy or rollback trigger. Do not count recent LangSmith runs from other threads or scopes as satisfying this iteration's control-plane observability success condition. When concurrent pending runs exist in other threads, require correlation by exact thread id before treating any sampled run as evidence for this iteration, and prefer the same-thread fresh run or an explicit no-run defer reason over broad speculative changes. If sampled recent runs are only from other threads or scopes, explicitly say that observability for thread ${currentThreadId || 'unknown'} is still unconfirmed and require either one fresh same-thread control-plane run/trace with explicit goal context or a clear no-run defer reason before calling the iteration successful. If sampled recent runs already include same-thread control-plane entries for ${currentThreadId || 'unknown'} but they are still pending, treat that as partial observability evidence rather than as zero-run health; explicitly surface that a same-thread run exists but has not completed yet, avoid claiming success from it, and preserve the next validation requirement as either one completed fresh same-thread control-plane run/trace with explicit goal context and passed smoke/typecheck or a clear operator-facing defer reason explaining why completion was not observed. If recent sampled runs are mostly from other threads or scopes while one or more same-thread control-plane runs for ${currentThreadId || 'unknown'} are pending or only indirectly visible in logs/embedded error context, explicitly call that out as same-thread pending-run visibility rather than summarizing the situation as zero recent runs; require the summary or defer reason to name that pending-run state so operators can distinguish observability lag from true no-run absence. When no fresh completed same-thread control-plane run is visible for ${currentThreadId || 'unknown'} in the current iteration, explicitly classify that as a same-thread control-plane observability gap or pending-run visibility gap, not as proof of runtime failure and not as a deploy/rollback trigger by itself; require the summary to mention any available readiness evidence such as graph registration, worker startup, server-running logs, LangSmith metadata wiring, prompt fallback telemetry, or pending-run visibility before choosing between a bounded edit and a no-run defer reason. When recent LangSmith samples are available, explicitly count how many sampled runs belong to the current thread ${currentThreadId || 'unknown'} and how many of those are pending versus completed; if sampled runs are mostly from other threads or same-thread runs are still pending, require the summary or defer reason to say that directly instead of collapsing the situation into a generic zero-run statement. When recent LangSmith samples are available, require the summary or defer reason to include a compact same-thread observability line in plain language for ${currentThreadId || 'unknown'} in the form same-thread sampled runs=<n>, completed=<n>, pending=<n>, other-thread sampled runs=<n>; if completed is 0, explicitly classify the situation as a same-thread observability gap or pending-run visibility gap rather than proof of runtime failure. When same-thread sampled runs are 0 for ${currentThreadId || 'unknown'}, require the summary and any no-op/defer outcome to say that older runs or runs from other threads do not satisfy this iteration's validation evidence, and require an explicit operator-facing no-run defer reason instead of implying success from cross-thread activity alone. When same-thread sampled runs are present but pending > 0 or completed is still 0 for ${currentThreadId || 'unknown'}, require the summary or defer reason to explicitly classify that state as partial observability evidence with pending-run visibility for the current thread, name the exact pending thread ${currentThreadId || 'unknown'}, include the compact same-thread observability line, and preserve a clear operator-facing no-run defer reason instead of claiming validation success from pending activity alone. When same-thread sampled runs are 0 for ${currentThreadId || 'unknown'} but other-thread sampled runs are present, require the summary and each edit reason to explicitly say that cross-thread activity does not satisfy this iteration's validation evidence for the current control-plane thread and to preserve a clear operator-facing no-run defer reason instead of implying success. When same-thread sampled runs are still 0 for ${currentThreadId || 'unknown'} but pending same-thread activity is visible, require the summary and each edit reason to name that exact current thread as partial observability evidence only, not completed validation, and to preserve a clear operator-facing no-run defer reason until at least one fresh same-thread LangSmith control-plane run/trace is completed with explicit goal context. If recent LangSmith activity is mostly from sibling or unrelated threads while ${currentThreadId || 'unknown'} still has no fresh completed control-plane run, require the summary and each edit reason to explicitly say that cross-thread activity does not satisfy validation for ${currentThreadId || 'unknown'} and to keep the same-thread no-run defer reason. When startup evidence shows graph registration, worker startup, or server-running logs but also shows early exit or flushing to persistent storage, require the summary to classify that as partial readiness evidence rather than completed validation and to keep the same-thread no-run defer requirement unless a fresh same-thread LangSmith control-plane run/trace is also present. When LangSmith feedback includes contains_goal_context=0 or repair_smoke_passed=0, restate the active user goal in plain language in the summary and in every edit reason, and do not treat a fresh run as sufficient unless that same-thread run/trace clearly carries the current control-plane goal context for this iteration. Before any experimental mutation, require a quick readiness check that the control-plane runtime is actually serving and that pending concurrent runners are not creating misleading health signals or shared-workspace contention; use known control-plane serving evidence such as graph registration, worker startup, server-running logs, or experimental API health when available. If logs also show the runtime exiting or flushing to persistent storage soon after startup, require the summary to classify that as partial readiness evidence rather than completed validation. If readiness is unclear, prefer a bounded operator-facing no-run defer reason over speculative mutation. When the current control-plane thread has no fresh completed LangSmith run/trace but sampled LangSmith data shows pending same-thread visibility, require the summary and each edit reason to name that exact pending thread as partial observability evidence only, not completed validation. When that pending same-thread visibility appears together with startup logs that show graph registration, worker startup, or server-running evidence followed by an immediate flush, exit, or shutdown, require the summary and each edit reason to explicitly classify the state as combined partial observability plus partial readiness only, and to preserve a clear operator-facing no-run defer reason for the current thread instead of claiming successful validation.`,   
+    ...(localhostApiRefusalSignal
+      ? [
+        'Active repair signal is a scope-blocked localhost API refusal in apps/api/logs/provider-unique-errors.jsonl: openai sendMessage ECONNREFUSED against http://localhost:3101/v1/responses. Treat the blocked subsystem as apps/api provider/runtime routing, avoid implying that apps/api was fixed from control-plane scope, and prefer one bounded control-plane observability, workflow-hardening, or explicit no-run defer-reason improvement. Retrying the same openai sendMessage combination is unlikely to help until the localhost API target is serving again.',
+        `Operator-facing no-run defer reason for this same-thread control-plane iteration: ${localhostApiNoRunDeferReason}`,
+      ]
+      : []),
+    ...(apiRoutingGeminiValidationPivot
+      ? ['Recent api-routing compile-shape failure in apps/api/modules/geminiMediaValidation.ts: pivot the next bounded repair toward apps/api/providers/handler.ts or apps/api/modules/openaiRouteSupport.ts instead of retrying the stale Gemini validation replace block unchanged.']
+      : []),
+    `Current control-plane thread priority: emit or surface at least one fresh LangSmith control-plane run/trace for thread ${currentThreadId || 'unknown'} with explicit goal context for this iteration before proposing broader improvement work; if no run can be emitted, preserve a clear operator-facing defer reason. Treat a missing fresh run for the current iteration as an observability gap, not by itself a deploy or rollback trigger. Do not count recent LangSmith runs from other threads or scopes as satisfying this iteration's control-plane observability success condition. When concurrent pending runs exist in other threads, require correlation by exact thread id before treating any sampled run as evidence for this iteration, and prefer the same-thread fresh run or an explicit no-run defer reason over broad speculative changes. If sampled recent runs are only from other threads or scopes, explicitly say that observability for thread ${currentThreadId || 'unknown'} is still unconfirmed and require either one fresh same-thread control-plane run/trace with explicit goal context or a clear no-run defer reason before calling the iteration successful. If sampled recent runs already include same-thread control-plane entries for ${currentThreadId || 'unknown'} but they are still pending, treat that as partial observability evidence rather than as zero-run health; explicitly surface that a same-thread run exists but has not completed yet, avoid claiming success from it, and preserve the next validation requirement as either one completed fresh same-thread control-plane run/trace with explicit goal context and passed smoke/typecheck or a clear operator-facing defer reason explaining why completion was not observed. If recent sampled runs are mostly from other threads or scopes while one or more same-thread control-plane runs for ${currentThreadId || 'unknown'} are pending or only indirectly visible in logs/embedded error context, explicitly call that out as same-thread pending-run visibility rather than summarizing the situation as zero recent runs; require the summary or defer reason to name that pending-run state so operators can distinguish observability lag from true no-run absence. When no fresh completed same-thread control-plane run is visible for ${currentThreadId || 'unknown'} in the current iteration, explicitly classify that as a same-thread control-plane observability gap or pending-run visibility gap, not as proof of runtime failure and not as a deploy/rollback trigger by itself; require the summary to mention any available readiness evidence such as graph registration, worker startup, server-running logs, LangSmith metadata wiring, prompt fallback telemetry, or pending-run visibility before choosing between a bounded edit and a no-run defer reason. When recent LangSmith samples are available, explicitly count how many sampled runs belong to the current thread ${currentThreadId || 'unknown'} and how many of those are pending versus completed; if sampled runs are mostly from other threads or same-thread runs are still pending, require the summary or defer reason to say that directly instead of collapsing the situation into a generic zero-run statement. When recent LangSmith samples are available, require the summary or defer reason to include a compact same-thread observability line in plain language for ${currentThreadId || 'unknown'} in the form same-thread sampled runs=<n>, completed=<n>, pending=<n>, other-thread sampled runs=<n>; if completed is 0, explicitly classify the situation as a same-thread observability gap or pending-run visibility gap rather than proof of runtime failure. When same-thread sampled runs are 0 for ${currentThreadId || 'unknown'}, require the summary and any no-op/defer outcome to say that older runs or runs from other threads do not satisfy this iteration's validation evidence, and require an explicit operator-facing no-run defer reason instead of implying success from cross-thread activity alone. When same-thread sampled runs are present but pending > 0 or completed is still 0 for ${currentThreadId || 'unknown'}, require the summary or defer reason to explicitly classify that state as partial observability evidence with pending-run visibility for the current thread, name the exact pending thread ${currentThreadId || 'unknown'}, include the compact same-thread observability line, and preserve a clear operator-facing no-run defer reason instead of claiming validation success from pending activity alone. When same-thread sampled runs are 0 for ${currentThreadId || 'unknown'} but other-thread sampled runs are present, require the summary and each edit reason to explicitly say that cross-thread activity does not satisfy this iteration's validation evidence for the current control-plane thread and to preserve a clear operator-facing no-run defer reason instead of implying success. When same-thread sampled runs are still 0 for ${currentThreadId || 'unknown'} but pending same-thread activity is visible, require the summary and each edit reason to name that exact current thread as partial observability evidence only, not completed validation, and to preserve a clear operator-facing no-run defer reason until at least one fresh same-thread LangSmith control-plane run/trace is completed with explicit goal context. If recent LangSmith activity is mostly from sibling or unrelated threads while ${currentThreadId || 'unknown'} still has no fresh completed control-plane run, require the summary and each edit reason to explicitly say that cross-thread activity does not satisfy validation for ${currentThreadId || 'unknown'} and to keep the same-thread no-run defer reason. When startup evidence shows graph registration, worker startup, or server-running logs but also shows early exit or flushing to persistent storage, require the summary to classify that as partial readiness evidence rather than completed validation and to keep the same-thread no-run defer requirement unless a fresh same-thread LangSmith control-plane run/trace is also present. When LangSmith feedback includes contains_goal_context=0 or repair_smoke_passed=0, restate the active user goal in plain language in the summary and in every edit reason, and do not treat a fresh run as sufficient unless that same-thread run/trace clearly carries the current control-plane goal context for this iteration. Before any experimental mutation, require a quick readiness check that the control-plane runtime is actually serving and that pending concurrent runners are not creating misleading health signals or shared-workspace contention; use known control-plane serving evidence such as graph registration, worker startup, server-running logs, or experimental API health when available. If logs also show the runtime exiting or flushing to persistent storage soon after startup, require the summary to classify that as partial readiness evidence rather than completed validation. If readiness is unclear, prefer a bounded operator-facing no-run defer reason over speculative mutation. When the current control-plane thread has no fresh completed LangSmith run/trace but sampled LangSmith data shows pending same-thread visibility, require the summary and each edit reason to name that exact pending thread as partial observability evidence only, not completed validation, and to include the compact same-thread observability line when it is available. When that pending same-thread visibility appears together with startup logs that show graph registration, worker startup, or server-running evidence followed by an immediate flush, exit, or shutdown, require the summary and each edit reason to explicitly classify the state as combined partial observability plus partial readiness only, to include the compact same-thread observability line when it is available, and to preserve a clear operator-facing no-run defer reason for the current thread instead of claiming successful validation. During quiet control-plane improvement iterations where governance is passing, no code-local repair target is present, and no fresh same-thread LangSmith control-plane run/trace exists yet for the current thread, prefer one smallest bounded README-only or operator-facing observability/workflow-hardening edit over speculative source mutations, and require the summary and each edit reason to say that this is a smoke-safer control-plane improvement chosen because same-thread validation is still missing. When the active repair signal is scope-blocked apps/api provider/runtime routing drift such as apps/api/logs/provider-unique-errors.jsonl showing openai sendMessage ECONNREFUSED for http://localhost:3101/v1/responses, and current-thread evidence is only partial readiness or partial observability, prefer a README-only or other operator-facing defer-reason improvement before broader source mutations unless a clear control-plane-local defect is visible in the candidate files. When that localhost ECONNREFUSED signal is active and apps/langgraph-control-plane/README.md is in the allowed candidate set, prefer that README-only/operator-facing defer-reason path first because it is the smoke-safer bounded control-plane improvement under missing same-thread validation. When that localhost ECONNREFUSED signal is active for thread 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane and no fresh same-thread LangSmith control-plane run/trace with explicit goal context plus passed smoke/typecheck exists yet, require the summary and each edit reason to explicitly say the blocked subsystem is apps/api provider/runtime routing, that the direct fix is out of scope for this bounded control-plane iteration, that startup logs with graph registration, worker startup, or server-running followed by flush/exit are partial readiness evidence only, and that pending-only or cross-thread LangSmith activity is partial observability only. In that state, prefer the smallest README-only or operator-facing defer-reason improvement in allowed control-plane files over source-code mutations unless a clear control-plane-local defect is visible.`,   
     currentThreadId
       ? `Current-thread observability guard: when summarizing recent LangSmith activity for this control-plane iteration, explicitly prefer runs whose threadId exactly matches ${currentThreadId}. If only other-thread or other-scope runs are fresh, record that as supporting context only and preserve a no-run defer reason for this control-plane thread instead of claiming observability success.`
       : 'Current-thread observability guard: if the control-plane threadId is unavailable, do not infer observability success from unrelated recent LangSmith runs; preserve a clear operator-facing defer reason explaining that no current-thread run identity was available for validation.',
@@ -7204,7 +7544,18 @@ async function autonomousEditPlannerNode(state: ControlPlaneState): Promise<Part
         return leftReferenced ? -1 : 1;
       }
       const rank = (candidatePath: string): number => {
-        if (failedPaths.has(candidatePath)) return -10;
+        if (apiRoutingGeminiValidationPivot && candidatePath === 'apps/api/providers/handler.ts') {
+          return -20;
+        }
+        if (failedPaths.has(candidatePath)) {
+          if (compileShapeFailedPaths.has(candidatePath)) {
+            if (apiRoutingGeminiValidationPivot && candidatePath === 'apps/api/modules/geminiMediaValidation.ts') {
+              return 40;
+            }
+            return 20;
+          }
+          return -10;
+        }
         if (signalReferencedCandidatePaths.has(candidatePath)) return -2;
         if (referencedCandidatePaths.has(candidatePath)) return 0;
         const hotPathIndex = [

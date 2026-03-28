@@ -52,12 +52,52 @@ function hasRecentRateLimitOrTimeoutSignal(provider: LoadedProviderData): boolea
     lastError.includes('active_runtime_mb=') ||
     lastError.includes('external_mb=') ||
     lastError.includes('heap_used_mb=');
+  const upstreamServerInstabilityLike =
+    status === 500 ||
+    status === 502 ||
+    status === 503 ||
+    status === 504 ||
+    code === 'ecconnreset' ||
+    code === 'econnreset' ||
+    code === 'etimedout' ||
+    code === 'econnaborted' ||
+    lastError.includes('timeout') ||
+    lastError.includes('timed out') ||
+    lastError.includes('econnaborted') ||
+    lastError.includes('server error') ||
+    lastError.includes('server_error') ||
+    lastError.includes('temporarily unavailable') ||
+    lastError.includes('bad gateway') ||
+    lastError.includes('gateway timeout') ||
+    lastError.includes('service unavailable') ||
+    lastError.includes('overloaded') ||
+    lastError.includes('overload');
+  const providerCapabilityBlockedLike =
+    code === 'provider_cap_blocked' ||
+    code === 'provider_model_removed' ||
+    lastError.includes('provider_cap_blocked') ||
+    lastError.includes('provider_model_removed') ||
+    lastError.includes('image generation unavailable in country') ||
+    lastError.includes('image generation unavailable in provider region') ||
+    lastError.includes('image generation unavailable in country') ||
+    lastError.includes('image generation unavailable in provider region') ||
+    lastError.includes('image generation unavailable in country') ||
+    lastError.includes('image generation unavailable in provider region') ||
+    lastError.includes('generation is unavailable in your country') ||
+    lastError.includes('generation is unavailable in your region') ||
+    lastError.includes('image generation unavailable in country') ||
+    lastError.includes('image generation unavailable in provider region');
   return (
     memoryPressureLike ||
+    upstreamServerInstabilityLike ||
+    providerCapabilityBlockedLike ||
+    code === 'econnaborted' ||
     status === 408 ||
     status === 409 ||
     status === 425 ||
     status === 429 ||
+    lastError.includes('timeout') ||
+    lastError.includes('timed out') ||
     lastError.includes('rate limit') ||
     lastError.includes('rate_limit') ||
     lastError.includes('too many requests') ||
@@ -300,11 +340,13 @@ export async function pickOpenAIProviderKey(
 ): Promise<{ apiKey: string; baseUrl: string } | null> {
   const providers = await dataManager.load<LoadedProviders>('providers');
   const requiresCaps = Array.isArray(requiredCaps) && requiredCaps.length > 0;
+  const requiresToolCalling = requiredCaps.includes('tool_calling');
   const matches = providers.filter((p: LoadedProviderData) =>
     !p.disabled &&
     p.id.includes('openai') &&
     !hasInvalidOpenAiKeySignal(p) &&
     !hasOpenRouterBillingFailureSignal(p) &&
+    (!requiresToolCalling || !hasRecentRateLimitOrTimeoutSignal(p)) &&
     p.apiKey &&
     p.models &&
     modelId in p.models
@@ -457,9 +499,14 @@ export async function inspectVideoGenProviderAvailability(
   const stableAuthHealthyMatches = authHealthyMatches.filter(
     (provider) => !hasRecentRateLimitOrTimeoutSignal(provider)
   );
+  const timeoutStableSupportedMatches = supportedMatches.filter(
+    (provider) => !hasRecentRateLimitOrTimeoutSignal(provider)
+  );
   const preferredAuthHealthyMatches =
     stableAuthHealthyMatches.length > 0
       ? stableAuthHealthyMatches
+      : timeoutStableSupportedMatches.length > 0
+        ? timeoutStableSupportedMatches
       : authHealthyMatches;
   const nonOpenRouterAuthHealthyMatches = preferredAuthHealthyMatches.filter(
     (provider) => !provider.id.includes('openrouter')

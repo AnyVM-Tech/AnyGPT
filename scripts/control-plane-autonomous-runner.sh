@@ -46,6 +46,62 @@ is_pid_alive() {
   kill -0 "$pid" 2>/dev/null
 }
 
+read_pid_file_value() {
+  local pid_file="$1"
+  if [[ ! -f "$pid_file" ]]; then
+    return 1
+  fi
+
+  local pid
+  pid="$(tr -d '[:space:]' < "$pid_file" 2>/dev/null || true)"
+  if [[ -z "$pid" ]]; then
+    return 1
+  fi
+  printf '%s\n' "$pid"
+}
+
+write_pid_file_value() {
+  local pid_file="$1"
+  local pid="$2"
+  if [[ -z "$pid_file" || -z "$pid" ]]; then
+    return 1
+  fi
+
+  mkdir -p "$(dirname "$pid_file")"
+  printf '%s\n' "$pid" > "$pid_file"
+}
+
+find_live_child_pid_for_status() {
+  local status_file="$1"
+  local pid_file="${2:-}"
+  local pid candidate
+
+  if [[ -n "$pid_file" ]]; then
+    pid="$(read_pid_file_value "$pid_file" 2>/dev/null || true)"
+    if [[ -n "$pid" ]] && is_pid_alive "$pid"; then
+      printf '%s\n' "$pid"
+      return 0
+    fi
+  fi
+
+  if ! command -v pgrep >/dev/null 2>&1; then
+    return 1
+  fi
+
+  while IFS= read -r candidate; do
+    candidate="$(printf '%s' "$candidate" | tr -d '[:space:]')"
+    if [[ -n "$candidate" ]] && is_pid_alive "$candidate"; then
+      if [[ -n "$pid_file" ]]; then
+        write_pid_file_value "$pid_file" "$candidate" || true
+      fi
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done < <(pgrep -f -- "--status-file=$status_file" 2>/dev/null || true)
+
+  return 1
+}
+
 user_systemd_available() {
   systemctl --user show-environment >/dev/null 2>&1
 }
@@ -62,11 +118,23 @@ direct_runner_pid() {
     return 0
   fi
 
-  local pid_file candidate
+  local pid_file candidate status_file
   shopt -s nullglob
   for pid_file in $CHILD_PID_GLOB; do
     candidate="$(tr -d '[:space:]' < "$pid_file" 2>/dev/null || true)"
     if [[ -n "$candidate" ]] && is_pid_alive "$candidate"; then
+      printf '%s\n' "$candidate"
+      shopt -u nullglob
+      return 0
+    fi
+  done
+  for status_file in $CHILD_STATUS_GLOB; do
+    if [[ "$status_file" == "$STATUS_FILE" || "$status_file" == *.previous ]]; then
+      continue
+    fi
+    pid_file="$(lane_pid_file_for_status "$status_file" 2>/dev/null || true)"
+    candidate="$(find_live_child_pid_for_status "$status_file" "$pid_file" 2>/dev/null || true)"
+    if [[ -n "$candidate" ]]; then
       printf '%s\n' "$candidate"
       shopt -u nullglob
       return 0
@@ -87,11 +155,22 @@ direct_runner_state() {
 }
 
 any_child_pid_files_alive() {
-  local pid_file pid
+  local pid_file pid status_file
   shopt -s nullglob
   for pid_file in $CHILD_PID_GLOB; do
     pid="$(tr -d '[:space:]' < "$pid_file" 2>/dev/null || true)"
     if [[ -n "$pid" ]] && is_pid_alive "$pid"; then
+      shopt -u nullglob
+      return 0
+    fi
+  done
+  for status_file in $CHILD_STATUS_GLOB; do
+    if [[ "$status_file" == "$STATUS_FILE" || "$status_file" == *.previous ]]; then
+      continue
+    fi
+    pid_file="$(lane_pid_file_for_status "$status_file" 2>/dev/null || true)"
+    pid="$(find_live_child_pid_for_status "$status_file" "$pid_file" 2>/dev/null || true)"
+    if [[ -n "$pid" ]]; then
       shopt -u nullglob
       return 0
     fi
@@ -137,11 +216,9 @@ normalize_stale_child_status_files() {
     fi
 
     pid_file="$(lane_pid_file_for_status "$status_file" 2>/dev/null || true)"
-    if [[ -n "$pid_file" && -f "$pid_file" ]]; then
-      pid="$(tr -d '[:space:]' < "$pid_file" 2>/dev/null || true)"
-      if [[ -n "$pid" ]] && is_pid_alive "$pid"; then
-        continue
-      fi
+    pid="$(find_live_child_pid_for_status "$status_file" "$pid_file" 2>/dev/null || true)"
+    if [[ -n "$pid" ]]; then
+      continue
     fi
 
     "$ROOT_DIR/bun.sh" -e '
@@ -181,16 +258,9 @@ normalize_stale_child_status_files() {
 }
 
 all_child_pid_files_dead() {
-  local pid_file pid
-  shopt -s nullglob
-  for pid_file in $CHILD_PID_GLOB; do
-    pid="$(tr -d '[:space:]' < "$pid_file" 2>/dev/null || true)"
-    if [[ -n "$pid" ]] && is_pid_alive "$pid"; then
-      shopt -u nullglob
-      return 1
-    fi
-  done
-  shopt -u nullglob
+  if any_child_pid_files_alive; then
+    return 1
+  fi
   return 0
 }
 
@@ -303,6 +373,9 @@ cleanup_stale_runtime_state() {
   pid="$(service_main_pid)"
 
   if [[ "$state" == "active" || "$state" == "activating" || "$state" == "deactivating" ]]; then
+    if [[ ! -f "$PID_FILE" && -n "$pid" && "$pid" != "0" ]] && is_pid_alive "$pid"; then
+      write_pid_file_value "$PID_FILE" "$pid" || true
+    fi
     if [[ ! -f "$PID_FILE" ]] && any_child_pid_files_alive; then
       normalize_active_child_status_file
     fi

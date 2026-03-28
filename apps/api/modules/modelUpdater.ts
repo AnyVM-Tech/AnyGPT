@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { isNonChatModel } from './openaiRouteUtils.js';
+import { extractRetryAfterMs } from './errorClassification.js';
 
 // --- Dynamic Pricing ---
 // Loads base pricing from pricing.json and adjusts based on provider count
@@ -67,10 +68,30 @@ type ProbeTestedFile = {
 
 type PricingCache = Record<string, Record<string, any>>;
 
+type LiveProviderCountSummary = {
+    providers: number;
+    active_providers: number;
+    known_providers: number;
+    cooling_down_providers: number;
+    temporarily_unavailable_providers: number;
+};
+
 const CAPABILITY_ORDER = ['text', 'image_input', 'image_output', 'audio_input', 'audio_output', 'tool_calling'] as const;
 const PRICING_CACHE_PATH = path.join(LOG_DIR, 'model-pricing.json');
 const ROUTER_MODELS_PRICING_PATH = path.resolve(API_WORKSPACE_DIR, 'dev', 'routermodels.json');
 const BASE_PRICING_PATH = path.resolve(API_WORKSPACE_DIR, 'pricing.json');
+const PROVIDER_COOLDOWN_MS = Math.max(0, Number(process.env.PROVIDER_COOLDOWN_MS ?? 60_000));
+const PROVIDER_AUTH_FAILURE_FAST_SKIP_MS = (() => {
+    const raw = process.env.PROVIDER_AUTH_FAILURE_FAST_SKIP_MS;
+    const parsed = raw !== undefined ? Number(raw) : NaN;
+    return Number.isFinite(parsed) && parsed > 0
+        ? Math.floor(parsed)
+        : 10 * 60 * 1000;
+})();
+const SHARED_PROVIDER_RETRY_AFTER_SAFETY_MS = (() => {
+    const raw = Number(process.env.SHARED_PROVIDER_RETRY_AFTER_SAFETY_MS ?? 350);
+    return Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : 350;
+})();
 
 function normalizeCapabilities(caps: Iterable<string>): string[] {
     const unique = new Set<string>();
@@ -128,6 +149,278 @@ function shouldCountProviderModel(modelId: string, modelData: any): boolean {
     return true;
 }
 
+function isSharedRateLimitProvider(providerId: string): boolean {
+    const normalized = String(providerId || '').toLowerCase();
+    if (!normalized) return true;
+    if (normalized.includes('ollama')) return false;
+    if (normalized.includes('mock')) return false;
+    if (normalized.includes('local')) return false;
+    return true;
+}
+
+function getProviderErrorSnapshot(provider: any): {
+    message: string;
+    code: string;
+    status: number | null;
+    lastErrorAt: number;
+} {
+    const message = String(
+        provider?.lastError
+        || provider?.last_error
+        || provider?.disabled_reason
+        || provider?.disabledReason
+        || ''
+    );
+    const code = String(provider?.lastErrorCode || provider?.last_error_code || '');
+    const statusRaw = Number(provider?.lastStatus || provider?.last_status || 0);
+    const lastErrorAtRaw = Number(provider?.lastErrorAt || provider?.last_error_at || 0);
+    return {
+        message,
+        code,
+        status: Number.isFinite(statusRaw) && statusRaw > 0 ? Math.floor(statusRaw) : null,
+        lastErrorAt: Number.isFinite(lastErrorAtRaw) && lastErrorAtRaw > 0 ? Math.floor(lastErrorAtRaw) : 0,
+    };
+}
+
+function isPersistedRateLimitSignal(message: string, code: string, status: number | null): boolean {
+    const combined = `${message} ${code}`.toLowerCase();
+    if (!combined && status === null) return false;
+    return (
+        status === 429
+        || status === 402
+        || combined.includes('too many requests')
+        || combined.includes('429 too many requests')
+        || combined.includes('quota exceeded')
+        || combined.includes('quota exhausted')
+        || combined.includes('quota limit reached')
+        || combined.includes('you exceeded your current quota')
+        || combined.includes('resource has been exhausted')
+        || combined.includes('resource_exhausted')
+        || combined.includes('resource exhausted')
+        || combined.includes('insufficient_quota')
+        || combined.includes('free tier')
+        || combined.includes('retrydelay')
+        || combined.includes('retry delay')
+        || combined.includes('retryinfo')
+        || combined.includes('payment required')
+        || combined.includes('generativelanguage.googleapis.com/generate_content')
+    );
+}
+
+function isPersistedAuthFailureSignal(message: string, code: string, status: number | null): boolean {
+    const combined = `${message} ${code}`.toLowerCase();
+    if (!combined && status === null) return false;
+    return (
+        status === 401
+        || status === 403
+        || combined.includes('api key not found')
+        || combined.includes('api key not valid')
+        || combined.includes('api key expired')
+        || combined.includes('please renew the api key')
+        || combined.includes('invalid api key')
+        || combined.includes('incorrect api key provided')
+        || combined.includes('invalid_api_key')
+        || combined.includes('service_disabled')
+        || combined.includes('accessnotconfigured')
+        || combined.includes('permission denied')
+        || combined.includes('forbidden')
+        || combined.includes('authentication failed')
+        || combined.includes('authentication error')
+        || combined.includes('generative language api has not been used in project')
+        || combined.includes('generative language api is disabled')
+        || combined.includes('gemini_api_disabled')
+        || combined.includes('gemini_project_auth_failure')
+    );
+}
+
+function isPersistedTemporarySkipSignal(message: string, code: string, status: number | null): boolean {
+    const combined = `${message} ${code}`.toLowerCase();
+    if (isPersistedRateLimitSignal(message, code, status)) return false;
+    if (isPersistedAuthFailureSignal(message, code, status)) return true;
+    return (
+        combined.includes('invalid_response_structure')
+        || combined.includes('invalid response structure')
+        || combined.includes('empty streaming response')
+        || combined.includes('returned an empty streaming response')
+        || combined.includes('request timed out after')
+        || combined.includes('aborterror')
+        || combined.includes('timed out')
+    );
+}
+
+function getPersistedProviderCooldownRemainingMs(provider: any, modelId: string, now: number): number | null {
+    const { message, code, status, lastErrorAt } = getProviderErrorSnapshot(provider);
+    if (lastErrorAt <= 0) return null;
+    if (!isPersistedRateLimitSignal(message, code, status)) return null;
+
+    const retryAfterMs = extractRetryAfterMs(message);
+    const modelData = provider?.models?.[modelId];
+    let cooldownMs = Number.isFinite(retryAfterMs as number) && (retryAfterMs as number) > 0
+        ? Math.max(1, Math.ceil(retryAfterMs as number))
+        : null;
+
+    if (!cooldownMs) {
+        const rateLimitWindowMs = Number(modelData?.rate_limit_window_ms ?? 0);
+        if (Number.isFinite(rateLimitWindowMs) && rateLimitWindowMs > 0) {
+            cooldownMs = Math.max(1_000, Math.min(PROVIDER_COOLDOWN_MS, Math.ceil(rateLimitWindowMs)));
+        }
+    }
+
+    if (!cooldownMs) {
+        const rateLimitRps = Number(modelData?.rate_limit_rps ?? 0);
+        if (Number.isFinite(rateLimitRps) && rateLimitRps > 0) {
+            cooldownMs = Math.min(
+                PROVIDER_COOLDOWN_MS,
+                Math.max(1_000, Math.ceil(1_000 / rateLimitRps))
+            );
+        }
+    }
+
+    if (!cooldownMs && PROVIDER_COOLDOWN_MS > 0) {
+        cooldownMs = PROVIDER_COOLDOWN_MS;
+    }
+
+    if (!cooldownMs || cooldownMs <= 0) return null;
+    if (isSharedRateLimitProvider(provider?.id)) {
+        cooldownMs += SHARED_PROVIDER_RETRY_AFTER_SAFETY_MS;
+    }
+
+    const remainingMs = lastErrorAt + cooldownMs - now;
+    return remainingMs > 0 ? remainingMs : null;
+}
+
+function classifyActiveProviderAvailability(
+    provider: any,
+    modelId: string,
+    now: number
+): 'usable' | 'cooling_down' | 'temporarily_unavailable' {
+    const { message, code, status, lastErrorAt } = getProviderErrorSnapshot(provider);
+    if (lastErrorAt <= 0) return 'usable';
+
+    const cooldownRemainingMs = getPersistedProviderCooldownRemainingMs(
+        provider,
+        modelId,
+        now
+    );
+    if (cooldownRemainingMs !== null) {
+        return 'cooling_down';
+    }
+
+    if (now - lastErrorAt > PROVIDER_AUTH_FAILURE_FAST_SKIP_MS) {
+        return 'usable';
+    }
+
+    if (isPersistedTemporarySkipSignal(message, code, status)) {
+        return 'temporarily_unavailable';
+    }
+
+    return 'usable';
+}
+
+function collectLiveProviderCountSummaries(
+    providersData: LoadedProviders,
+    modelIds?: Set<string>,
+    now: number = Date.now()
+): Record<string, LiveProviderCountSummary> {
+    const activeProviderCounts: Record<string, number> = {};
+    const usableProviderCounts: Record<string, number> = {};
+    const knownProviderCounts: Record<string, number> = {};
+    const coolingDownProviderCounts: Record<string, number> = {};
+    const temporarilyUnavailableProviderCounts: Record<string, number> = {};
+
+    for (const provider of providersData || []) {
+        if (!provider?.models || typeof provider.models !== 'object') continue;
+        for (const modelId of Object.keys(provider.models)) {
+            if (modelIds && !modelIds.has(modelId)) continue;
+            const modelData = provider.models[modelId] as any;
+            if (!shouldCountProviderModel(modelId, modelData)) continue;
+
+            knownProviderCounts[modelId] = (knownProviderCounts[modelId] || 0) + 1;
+
+            if (provider.disabled || modelData?.disabled === true) {
+                continue;
+            }
+
+            activeProviderCounts[modelId] = (activeProviderCounts[modelId] || 0) + 1;
+            const availabilityState = classifyActiveProviderAvailability(
+                provider,
+                modelId,
+                now
+            );
+
+            if (availabilityState === 'usable') {
+                usableProviderCounts[modelId] = (usableProviderCounts[modelId] || 0) + 1;
+            } else if (availabilityState === 'cooling_down') {
+                coolingDownProviderCounts[modelId] = (coolingDownProviderCounts[modelId] || 0) + 1;
+            } else {
+                temporarilyUnavailableProviderCounts[modelId] = (temporarilyUnavailableProviderCounts[modelId] || 0) + 1;
+            }
+        }
+    }
+
+    const allModelIds = new Set<string>([
+        ...Object.keys(knownProviderCounts),
+        ...Object.keys(activeProviderCounts),
+        ...Object.keys(usableProviderCounts),
+        ...Object.keys(coolingDownProviderCounts),
+        ...Object.keys(temporarilyUnavailableProviderCounts),
+        ...(modelIds ? [...modelIds] : []),
+    ]);
+
+    const summaries: Record<string, LiveProviderCountSummary> = {};
+    for (const modelId of allModelIds) {
+        summaries[modelId] = {
+            providers: usableProviderCounts[modelId] || 0,
+            active_providers: activeProviderCounts[modelId] || 0,
+            known_providers: knownProviderCounts[modelId] || 0,
+            cooling_down_providers: coolingDownProviderCounts[modelId] || 0,
+            temporarily_unavailable_providers:
+                temporarilyUnavailableProviderCounts[modelId] || 0,
+        };
+    }
+    return summaries;
+}
+
+export function applyLiveProviderCountsToModelsData(
+    modelsData: ModelsFileStructure,
+    providersData: LoadedProviders,
+    now: number = Date.now()
+): ModelsFileStructure {
+    const data = Array.isArray(modelsData?.data) ? modelsData.data : [];
+    const modelIds = new Set<string>(
+        data
+            .map((model) => (typeof model?.id === 'string' ? model.id : ''))
+            .filter(Boolean)
+    );
+    const summaries = collectLiveProviderCountSummaries(
+        providersData,
+        modelIds,
+        now
+    );
+
+    return {
+        ...modelsData,
+        data: data.map((model) => {
+            const summary = summaries[model.id] || {
+                providers: 0,
+                active_providers: 0,
+                known_providers: 0,
+                cooling_down_providers: 0,
+                temporarily_unavailable_providers: 0,
+            };
+            return {
+                ...model,
+                providers: summary.providers,
+                active_providers: summary.active_providers,
+                known_providers: summary.known_providers,
+                cooling_down_providers: summary.cooling_down_providers,
+                temporarily_unavailable_providers:
+                    summary.temporarily_unavailable_providers,
+            };
+        }),
+    };
+}
+
 function collectAvailabilityConstraintMetadata(modelData: any): {
     blocked: string[];
     skips: Record<string, string>;
@@ -141,21 +434,273 @@ function collectAvailabilityConstraintMetadata(modelData: any): {
         };
     }
 
+    const normalizeCapabilityConstraintKey = (key: unknown): string => {
+        const normalized = String(key || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+        if (!normalized) return '';
+        if (
+            normalized === 'image'
+            || normalized === 'image_output'
+            || normalized === 'image_generation'
+            || normalized === 'image_gen'
+            || normalized === 'image_output_generation'
+            || normalized === 'image_output_gen'
+            || normalized === 'image_output_only'
+            || normalized === 'image_output_create'
+            || normalized === 'image_output_create_only'
+            || normalized === 'image_creation'
+            || normalized === 'image_generation_unavailable'
+            || normalized === 'image_generation_unavailable_in_country'
+            || normalized === 'image_generation_unavailable_in_countries'
+            || normalized === 'image_generation_unavailable_in_region'
+            || normalized === 'image_generation_unavailable_in_regions'
+            || normalized === 'image_generation_unavailable_in_provider_region'
+            || normalized === 'image_generation_unavailable_in_provider_regions'
+            || normalized === 'image_generation_blocked_in_country'
+            || normalized === 'image_generation_blocked_in_region'
+            || normalized === 'image_generation_blocked_in_provider_region'
+            || normalized === 'image_generation_unavailable_in_region'
+            || normalized === 'image_generation_unavailable_in_regions'
+            || normalized === 'image_generation_unavailable_in_provider_region'
+            || normalized === 'image_generation_unavailable_in_provider_regions'
+            || normalized === 'generation_unavailable_in_country'
+            || normalized === 'generation_unavailable_in_countries'
+            || normalized === 'generation_unavailable_in_region'
+            || normalized === 'generation_unavailable_in_regions'
+            || normalized === 'generation_unavailable_in_provider_region'
+            || normalized === 'generation_unavailable_in_provider_regions'
+            || normalized === 'image_generation_unavailable_in_provider_region'
+            || normalized === 'generation_unavailable_in_country'
+            || normalized === 'generation_unavailable_in_region'
+            || normalized === 'generation_unavailable_in_provider_region'
+            || normalized === 'image_generation_unavailable_in_provider_region'
+            || normalized === 'image_generation_unavailable_in_provider_regions'
+            || normalized === 'image_output_unavailable_in_country'
+            || normalized === 'image_output_unavailable_in_region'
+            || normalized === 'image_output_unavailable_in_provider_region'
+            || normalized === 'image_output_unavailable_in_provider_regions'
+            || normalized === 'image_output_blocked_in_country'
+            || normalized === 'image_output_blocked_in_region'
+            || normalized === 'image_output_blocked_in_provider_region'
+            || normalized === 'image_output_blocked_in_provider_regions'
+            || normalized === 'image_generation_unavailable_in_country'
+            || normalized === 'image_generation_unavailable_in_provider_region'
+            || normalized === 'image_generation_unavailable_in_provider_regions'
+            || normalized === 'image_output_unavailable_in_country'
+            || normalized === 'image_output_unavailable_in_provider_region'
+            || normalized === 'image_output_unavailable_in_provider_regions'
+            || normalized === 'image_output_blocked_in_country'
+            || normalized === 'image_output_blocked_in_provider_region'
+            || normalized === 'image_output_blocked_in_provider_regions'
+            || normalized === 'image_generation_unavailable_in_provider_region'
+            || normalized === 'image_generation_unavailable_in_provider_regions'
+            || normalized === 'image_output_unavailable_in_country'
+            || normalized === 'image_output_unavailable_in_region'
+            || normalized === 'image_output_unavailable_in_provider_region'
+            || normalized === 'image_output_blocked_in_country'
+            || normalized === 'image_output_blocked_in_region'
+            || normalized === 'image_output_blocked_in_provider_region'
+            || normalized === 'image_generation_unavailable_in_provider_region'
+            || normalized === 'image_generation_unavailable_in_provider_regions'
+            || normalized === 'image_generation_unavailable_in_the_provider_region'
+            || normalized === 'image_generation_unavailable_in_the_provider_regions'
+            || normalized === 'image_generation_unavailable_in_your_country'
+            || normalized === 'image_generation_unavailable_in_your_region'
+            || normalized === 'image_generation_unavailable_for_your_country'
+            || normalized === 'image_generation_unavailable_for_your_region'
+            || normalized === 'image_generation_unavailable_in_provider_region'
+            || normalized === 'image_generation_unavailable_in_country'
+            || normalized === 'blocked_in_provider_region'
+            || normalized === 'blocked_in_country'
+            || normalized === 'provider_region_blocked'
+            || normalized === 'country_blocked'
+            || normalized === 'image_generation_unavailable_in_provider_region'
+            || normalized === 'image_generation_unavailable_in_provider_regions'
+            || normalized === 'image_output_unavailable_in_country'
+            || normalized === 'image_output_unavailable_in_region'
+            || normalized === 'image_output_unavailable_in_provider_region'
+            || normalized === 'image_output_unavailable_in_provider_regions'
+            || normalized === 'blocked_in_country'
+            || normalized === 'blocked_in_region'
+            || normalized === 'blocked_in_provider_region'
+            || normalized === 'image_generation_unavailable_in_provider_region'
+            || normalized === 'image_generation_unavailable_in_the_provider_region'
+            || normalized === 'image_generation_unavailable_in_your_country'
+            || normalized === 'image_generation_unavailable_in_your_region'
+            || normalized === 'image_generation_unavailable_for_your_region'
+            || normalized === 'image_generation_unavailable_for_your_country'
+            || normalized === 'image_generation_blocked_in_country'
+            || normalized === 'image_generation_blocked_in_region'
+            || normalized === 'image_generation_blocked_in_provider_region'
+            || normalized === 'image_output_unavailable_in_country'
+            || normalized === 'image_output_unavailable_in_region'
+            || normalized === 'image_output_unavailable_in_provider_region'
+            || normalized === 'image_output_blocked_in_country'
+            || normalized === 'image_output_blocked_in_region'
+            || normalized === 'image_output_blocked_in_provider_region'
+            || normalized === 'image_generation_unavailable_in_provider_region'
+            || normalized === 'image_generation_blocked_in_country'
+            || normalized === 'image_generation_blocked_in_region'
+            || normalized === 'image_generation_blocked_in_provider_region'
+            || normalized === 'blocked_in_country'
+            || normalized === 'blocked_in_region'
+            || normalized === 'blocked_in_provider_region'
+            || normalized === 'provider_region_blocked'
+            || normalized === 'country_blocked'
+            || normalized === 'region_blocked'
+            || normalized === 'image_generation_unavailable_in_provider_region'
+            || normalized === 'image_generation_blocked_in_country'
+            || normalized === 'image_generation_blocked_in_region'
+            || normalized === 'image_generation_blocked_in_provider_region'
+            || normalized === 'blocked_in_country'
+            || normalized === 'blocked_in_region'
+            || normalized === 'blocked_in_provider_region'
+            || normalized === 'image_generation_unavailable_in_provider_region'
+            || normalized === 'image_generation_unavailable_in_providers_region'
+            || normalized === 'image_generation_blocked_in_country'
+            || normalized === 'image_generation_blocked_in_region'
+            || normalized === 'image_generation_blocked_in_provider_region'
+            || normalized === 'image_output_unavailable_in_country'
+            || normalized === 'image_output_unavailable_in_region'
+            || normalized === 'image_output_unavailable_in_provider_region'
+            || normalized === 'image_output_blocked_in_country'
+            || normalized === 'image_output_blocked_in_region'
+            || normalized === 'image_output_blocked_in_provider_region'
+            || normalized === 'image_generation_unavailable_in_provider_region'
+            || normalized === 'image_generation_unavailable_in_location'
+            || normalized === 'blocked_in_country'
+            || normalized === 'blocked_in_region'
+            || normalized === 'blocked_in_provider_region'
+            || normalized === 'image_generation_unavailable_in_provider_region'
+            || normalized === 'image_output_unavailable'
+            || normalized === 'image_output_unavailable_in_country'
+            || normalized === 'image_output_unavailable_in_region'
+            || normalized === 'image_output_unavailable_in_provider_region'
+            || normalized === 'blocked_in_country'
+            || normalized === 'blocked_in_region'
+            || normalized === 'blocked_in_provider_region'
+            || normalized === 'image_generation_unavailable_in_provider_region'
+            || normalized === 'image_output_unavailable'
+            || normalized === 'image_output_unavailable_in_country'
+            || normalized === 'image_output_unavailable_in_region'
+            || normalized === 'image_output_unavailable_in_provider_region'
+            || normalized === 'provider_region_image_output'
+            || normalized === 'country_image_output'
+            || normalized === 'image_generation_output'
+            || normalized === 'image_generation_only'
+            || normalized === 'image_generation_create'
+            || normalized === 'image_generation_create_output'
+            || normalized === 'image_generation_create_only'
+            || normalized === 'image_generation_create_capability'
+            || normalized === 'image_generation_capability'
+            || normalized === 'image_generation_blocked'
+            || normalized === 'image_generation_unavailable'
+            || normalized === 'image_generation_disabled'
+            || normalized === 'image_generation_restricted'
+            || normalized === 'image_generation_region_blocked'
+            || normalized === 'image_generation_country_blocked'
+            || normalized === 'image_generation_geo_blocked'
+            || normalized === 'image_generation_geo_restricted'
+            || normalized === 'image_generation_not_available'
+            || normalized === 'image_generation_not_supported'
+            || normalized === 'image_generation_only_blocked'
+            || normalized === 'image_generation_only_unavailable'
+            || normalized === 'image_create'
+            || normalized === 'image_create_only'
+            || normalized === 'image_create_capability'
+            || normalized === 'image_creation_only'
+            || normalized === 'image_creation_capability'
+            || normalized === 'images'
+            || normalized === 'images_generation'
+            || normalized === 'images_create'
+            || normalized === 'generate_images'
+            || normalized === 'generated_images'
+            || normalized === 'image_gen_blocked'
+            || normalized === 'image_gen_unavailable'
+            || normalized === 'image_output_blocked'
+            || normalized === 'image_output_unavailable'
+            || normalized === 'image_output_disabled'
+            || normalized === 'image_output_restricted'
+            || normalized === 'image_output_region_blocked'
+            || normalized === 'image_output_country_blocked'
+            || normalized === 'image_output_geo_blocked'
+            || normalized === 'image_output_not_available'
+            || normalized === 'image_output_not_supported'
+            || normalized === 'image_generation_unavailable'
+            || normalized === 'image_output_unavailable'
+            || normalized === 'image_generation_blocked'
+            || normalized === 'image_output_blocked'
+            || normalized === 'image_generation_region_blocked'
+            || normalized === 'image_output_region_blocked'
+            || normalized === 'image_generation_country_blocked'
+            || normalized === 'image_output_country_blocked'
+            || normalized === 'image_generation_create_only'
+            || normalized === 'image_generation_create_image'
+            || normalized === 'image_generation_create_images'
+            || normalized === 'image_generation_unavailable'
+            || normalized === 'image_generation_blocked'
+            || normalized === 'image_generation_disabled'
+            || normalized === 'image_generation_removed'
+            || normalized === 'image_generation_create_image'
+            || normalized === 'image_generation_create_images'
+            || normalized === 'image_generation_unavailable'
+            || normalized === 'image_generation_blocked'
+            || normalized === 'image_generation_disabled'
+            || normalized === 'image_generation_removed'
+            || normalized === 'image_output_unavailable'
+            || normalized === 'image_output_blocked'
+            || normalized === 'image_output_disabled'
+            || normalized === 'image_output_removed'
+            || normalized === 'image_generation_images'
+            || normalized === 'image_generation_image'
+            || normalized === 'image_generation_capability'
+            || normalized === 'image_output_create'
+            || normalized === 'image_output_create_image'
+            || normalized === 'image_output_create_images'
+            || normalized === 'image_output_images'
+            || normalized === 'image_output_image'
+        ) return 'image_output';
+        if (normalized === 'vision' || normalized === 'image_input_vision') return 'image_input';
+        if (
+            normalized === 'audio'
+            || normalized === 'speech_to_text'
+            || normalized === 'speech_input'
+            || normalized === 'transcription'
+        ) return 'audio_input';
+        if (
+            normalized === 'text_to_speech'
+            || normalized === 'speech'
+            || normalized === 'speech_output'
+        ) return 'audio_output';
+        if (
+            normalized === 'tools'
+            || normalized === 'function_calling'
+            || normalized === 'tool_use'
+        ) return 'tool_calling';
+        return normalized;
+    };
+
     const blocked = Array.from(new Set([
         ...(Array.isArray(modelData.capability_blocked) ? modelData.capability_blocked : []),
+        ...(Array.isArray(modelData.blocked) ? modelData.blocked : []),
         ...(Array.isArray(modelData.availability?.capability_blocked) ? modelData.availability.capability_blocked : []),
+        ...(Array.isArray(modelData.availability?.blocked) ? modelData.availability.blocked : []),
     ]
-        .map((entry: unknown) => String(entry || '').trim().toLowerCase())
+        .map((entry: unknown) => normalizeCapabilityConstraintKey(entry))
         .filter(Boolean)));
 
     const skips: Record<string, string> = {};
-    for (const source of [modelData.availability?.capability_skips, modelData.capability_skips]) {
+    for (const source of [
+        modelData.availability?.capability_skips,
+        modelData.availability?.skips,
+        modelData.capability_skips,
+        modelData.skips,
+    ]) {
         if (!source || typeof source !== 'object') continue;
         for (const [key, value] of Object.entries(source as Record<string, unknown>)) {
-            if (typeof value !== 'string' || !value.trim()) continue;
-            const normalizedKey = String(key || '').trim().toLowerCase();
-            if (!normalizedKey) continue;
-            skips[normalizedKey] = value.trim();
+            const normalizedKey = normalizeCapabilityConstraintKey(key);
+            const normalizedValue = String(value || '').trim();
+            if (!normalizedKey || !normalizedValue || skips[normalizedKey]) continue;
+            skips[normalizedKey] = normalizedValue;
         }
     }
 
@@ -176,18 +721,29 @@ function collectAvailabilityConstraintMetadata(modelData: any): {
 function isAvailabilityConstraintReason(value: unknown): boolean {
     const normalized = String(value || '').trim().toLowerCase();
     if (!normalized) return false;
-    return /provider[_ -]?model[_ -]?removed|provider[_ -]?cap[_ -]?blocked|image generation unavailable|generation unavailable|unavailable in provider region|unavailable in country|provider region|provider-region|blocked in provider region|blocked in country|country|regional availability|region(?:al)? availability|geo(?:graph(?:ic)?)? restriction|country availability|unsupported image output/.test(normalized);
+    return /provider[_ -]?model[_ -]?removed|provider[_ -]?cap[_ -]?blocked|capability[_ -]?blocked|image generation unavailable|image generation is unavailable|generation unavailable|generation is unavailable|image generation unavailable in (?:the )?(?:provider(?:'s)? )?region(?:s)?|image generation unavailable in (?:the )?country|image generation blocked in (?:the )?(?:provider(?:'s)? )?region(?:s)?|image generation blocked in (?:the )?country|image output blocked in (?:the )?(?:provider(?:'s)? )?region(?:s)?|image output blocked in (?:the )?country|blocked in (?:the )?(?:provider(?:'s)? )?region(?:s)?|blocked in (?:the )?country|image generation unavailable in provider region(?:s)?|image generation is unavailable in (?:the )?(?:provider(?:'s)? )?region(?:s)?|image generation unavailable in (?:the )?country|image generation is unavailable in (?:the )?country|unavailable in provider region(?:s)?|unavailable in country|blocked in provider region(?:s)?|blocked in country|provider region(?:s)?|provider-region(?:s)?|regional availability|region(?:al)? availability|country availability|image generation unavailable in (?:the )?country|image generation is unavailable in (?:the )?country|unavailable in country|blocked in country|country-blocked|country blocked|unavailable in provider region|blocked in provider region|provider-region|regional availability|region(?:al)? availability|image generation unavailable in (?:the )?country|image generation is unavailable in (?:the )?country|generation unavailable in (?:the )?country|generation is unavailable in (?:the )?country|image generation unavailable in (?:the )?country|image generation is unavailable in (?:the )?country|image generation unavailable in provider region|image generation is unavailable in provider region|unavailable in country|unavailable in provider region|image generation unavailable in country|image generation is unavailable in country|image generation unavailable in (?:the )?country|image generation is unavailable in (?:the )?country|unavailable in provider region|unavailable in country|blocked in provider region|blocked in country|provider region|provider-region|country-blocked|country blocked|regional availability|region(?:al)? availability|region-locked|region locked|geo(?:graph(?:ic)?)? restriction|geo(?:graph(?:ic)?)? restricted|geo-restricted|georestricted|country availability|image generation unavailable in (?:the )?country|image generation is unavailable in (?:the )?country|blocked in (?:the )?(?:provider(?:'s)? )?region|blocked in (?:the )?country|not available in (?:the )?country|not available in (?:the )?(?:provider(?:'s)? )?region|provider[_ -]?region|country[_ -]?blocked|image generation unavailable in (?:the )?country|image generation is unavailable in (?:the )?country|image generation unavailable in provider region|probe[_ -]?skip|skip(?:ped)?\s+image[_ -]?output|capability[_ -]?blocked|image generation is unavailable in provider region|image generation unavailable for (?:the )?(?:provider(?:'s)? )?region|image generation is unavailable for (?:the )?(?:provider(?:'s)? )?region|image generation unavailable in (?:the )?country|image generation is unavailable in (?:the )?country|image generation unavailable for (?:the )?country|image generation is unavailable for (?:the )?country|generation unavailable in (?:the )?(?:provider(?:'s)? )?region|generation is unavailable in (?:the )?(?:provider(?:'s)? )?region|generation unavailable for (?:the )?(?:provider(?:'s)? )?region|generation is unavailable for (?:the )?(?:provider(?:'s)? )?region|generation unavailable in (?:the )?country|generation is unavailable in (?:the )?country|generation unavailable for (?:the )?country|generation is unavailable for (?:the )?country|unavailable in (?:the )?provider(?:'s)? region|unavailable for (?:the )?provider(?:'s)? region|unavailable in provider region|unavailable for provider region|unavailable in country|unavailable for country|provider region|provider-region|blocked in provider region|blocked for provider region|blocked in country|blocked for country|country blocked|country-blocked|region blocked|region-blocked|regional availability|region(?:al)? availability|not available in (?:your |this )?(?:region|country|location)|not available for (?:your |this )?(?:region|country|location)|not supported in (?:your |this )?(?:region|country|location)|blocked in (?:your |this )?(?:region|country|location)|unavailable in (?:your |this )?(?:region|country|location)|unavailable for (?:your |this )?(?:region|country|location)|blocked in country|blocked in provider-region|blocked in-country|blocked in the provider region|image generation unavailable in the provider region|image generation is unavailable in the provider region|generation unavailable in the provider region|generation is unavailable in the provider region|country|country-blocked|country blocked|regional availability|region(?:al)? availability|region-locked|region locked|geo(?:graph(?:ic)?)? restriction|geo(?:graph(?:ic)?)? restricted|geo-restricted|georestricted|country availability|unsupported image output|\bno access\b|access denied|not entitled|not enabled for (?:this )?(?:account|project)|permission denied|forbidden|not available to your account|not available for your account|not available in (?:your |this )?(?:region|country|location)|not available for (?:your |this )?(?:region|country|location)|not supported in (?:your |this )?(?:region|country|location)|blocked in (?:your |this )?(?:region|country|location)|unavailable in (?:your |this |the )?(?:region|country|location)|unavailable for (?:your |this |the )?(?:region|country|location)|(?:region|country|location) is unavailable|unavailable due to (?:region|country|location)|not available in the selected model|no allowed providers are available|model is not available|provider[_ -]?governance|governance drift|provider availability|availability constraint|blocked by provider|provider blocked|provider restriction|provider policy|policy restriction|region blocked|country blocked|geo blocked|regional restriction|country restriction|provider[_ -]?region|provider[_ -]?availability|provider[_ -]?policy|provider[_ -]?restriction|provider[_ -]?blocked|provider[_ -]?disabled|region[_ -]?blocked|country[_ -]?blocked|geo[_ -]?blocked|availability[_ -]?constraint|availability[_ -]?blocked|catalog drift|regional catalog drift|unavailable in (?:the )?provider(?:'s)? region|unavailable for (?:the )?provider(?:'s)? region|image generation unavailable in (?:the )?provider(?:'s)? region|image generation is unavailable in (?:the )?provider(?:'s)? region|image generation unavailable in (?:the )?provider region|image generation is unavailable in (?:the )?provider region|image generation unavailable for (?:the )?provider region|image generation is unavailable for (?:the )?provider region|image generation unavailable in (?:the )?country|image generation is unavailable in (?:the )?country|generation unavailable in (?:the )?provider(?:'s)? region|generation is unavailable in (?:the )?provider(?:'s)? region|generation unavailable for (?:the )?provider(?:'s)? region|generation is unavailable for (?:the )?(?:provider(?:'s)? )?region|generation unavailable in (?:the )?country|generation is unavailable in (?:the )?country|provider[- ]region availability|provider[- ]level availability|provider[- ]country availability|country[- ]level availability|geo[- ]availability|regional catalog|country catalog|available only in selected regions|not available in all regions|not available in this provider region|not available for this provider region|provider region unavailable|country unavailable|region unavailable|unavailable in provider[- ]level region|unavailable for provider[- ]level region|blocked in provider[- ]level region|provider[- ]level region unavailable|image generation unavailable in provider[- ]level region|generation unavailable in provider[- ]level region|image generation unavailable for your country|image generation unavailable for this country|generation unavailable for your country|generation unavailable for this country|image generation unavailable in your country|image generation unavailable in this country|image generation unavailable in your region|image generation unavailable in this region|generation unavailable in your country|generation unavailable in this country|generation unavailable in your region|generation unavailable in this region|not available in provider[- ]country|not available for provider[- ]country|provider[- ]country unavailable|country[- ]restricted|region[- ]restricted|geo[- ]restricted|provider[- ]region blocked|provider[- ]country blocked|provider[- ]level country|provider[- ]level location|location[- ]restricted|location blocked|blocked in provider[- ]location|unavailable in provider[- ]location|unavailable for provider[- ]location/.test(normalized);
 }
 
 function hasAvailabilityConstraint(modelId: string, modelData: any): boolean {
     if (!modelData || typeof modelData !== 'object') return false;
 
     const availability = collectAvailabilityConstraintMetadata(modelData);
-    if (modelData.removed === true || modelData.unavailable === true) return true;
+    const hasExplicitAvailabilityReason = availability.reasonTexts.some((reason) => isAvailabilityConstraintReason(reason));
+    const hasProviderConstraintEventReason = availability.reasonTexts.some((reason) => {
+        const normalized = String(reason || '').trim().toLowerCase();
+        return normalized.includes('provider_cap_blocked') || normalized.includes('provider_model_removed');
+    });
+    const hasCapabilityScopedAvailabilityMetadata = availability.blocked.length > 0
+        || Object.keys(availability.skips).length > 0;
+
+    if ((hasExplicitAvailabilityReason || hasProviderConstraintEventReason) && hasCapabilityScopedAvailabilityMetadata) {
+        return true;
+    }
+    if (modelData.removed === true || modelData.unavailable === true) {
+        return hasExplicitAvailabilityReason || hasProviderConstraintEventReason || hasCapabilityScopedAvailabilityMetadata;
+    }
     if (modelData.disabled === true) {
-        return availability.reasonTexts.some((reason) => isAvailabilityConstraintReason(reason))
-            || availability.blocked.length > 0
-            || Object.keys(availability.skips).length > 0;
+        return hasExplicitAvailabilityReason || hasProviderConstraintEventReason || hasCapabilityScopedAvailabilityMetadata;
     }
 
     const nonChatType = isNonChatModel(modelId);
@@ -714,7 +1270,7 @@ function guessOwnedBy(modelId: string): string {
 
 /**
  * Enhanced model synchronization that:
- * 1. Removes models with 0 providers
+ * 1. Removes models with 0 providers unless they are preserved as explicit availability-constrained entries
  * 2. Adds new models that have at least 1 active provider
  * 3. Updates provider counts for existing models
  * 4. Rehydrates remembered capabilities so re-added models do not need to be re-probed
@@ -753,21 +1309,88 @@ export async function refreshProviderCountsInModelsFile(options: { notifyProbes?
         // `knownProviderCounts` includes providers even when temporarily disabled,
         // and remains useful for diagnostics and pricing heuristics.
         const activeProviderCounts: { [modelId: string]: number } = {};
+        const usableProviderCounts: { [modelId: string]: number } = {};
         const knownProviderCounts: { [modelId: string]: number } = {};
+        const coolingDownProviderCounts: { [modelId: string]: number } = {};
+        const temporarilyUnavailableProviderCounts: { [modelId: string]: number } = {};
+        const catalogProviderCounts: { [modelId: string]: number } = {};
         const availableModelIds = new Set<string>();
         const constrainedModelIds = new Set<string>();
+        const constrainedCatalogModelIds = new Set<string>();
         const modelTpsSamples: { [modelId: string]: number[] } = {};
+        const runtimeNow = Date.now();
 
         for (const provider of providersData) {
             if (!provider.models) continue;
             for (const modelId in provider.models) {
                 const modelData = provider.models[modelId] as any;
                 const hasConstraint = hasAvailabilityConstraint(modelId, modelData);
+                const isConstraintCatalogPresent = !!modelData
+                    && hasConstraint
+                    && (
+                        !provider.disabled
+                        || modelData?.removed === true
+                        || modelData?.unavailable === true
+                        || modelData?.disabled === true
+                    );
+                const providerConstraintEntries = Array.isArray((provider as any)?.capability_blocked)
+                    ? (provider as any).capability_blocked
+                    : [];
+                const providerHasAvailabilityConstraint = providerConstraintEntries.some((entry: any) => {
+                        const normalizedEntry = typeof entry === 'string'
+                            ? entry.trim()
+                            : entry && typeof entry === 'object'
+                                ? JSON.stringify(entry)
+                                : String(entry || '').trim();
+                        const structuredReasonTexts = entry && typeof entry === 'object'
+                            ? [
+                                (entry as any).reason,
+                                (entry as any).message,
+                                (entry as any).detail,
+                                (entry as any).capability,
+                                (entry as any).modelId,
+                            ]
+                                .map((value) => String(value || '').trim())
+                                .filter(Boolean)
+                            : [];
+                        return normalizedEntry.length > 0
+                            && (
+                                isAvailabilityConstraintReason(normalizedEntry)
+                                || structuredReasonTexts.some((value) => isAvailabilityConstraintReason(value))
+                            )
+                            && hasAvailabilityConstraint(modelId, {
+                                availability: {
+                                    capability_blocked: [entry as any],
+                                    reason: normalizedEntry,
+                                },
+                                reason: normalizedEntry,
+                            });
+                    });
+                const hasAvailabilityMetadata = !!modelData && (
+                    modelData?.availability
+                    || providerHasAvailabilityConstraint
+                    || (Array.isArray(modelData?.capability_blocked) && modelData.capability_blocked.length > 0)
+                    || (Array.isArray(modelData?.availability?.capability_blocked) && modelData.availability.capability_blocked.length > 0)
+                    || (Array.isArray(modelData?.blocked) && modelData.blocked.length > 0)
+                    || (Array.isArray(modelData?.availability?.blocked) && modelData.availability.blocked.length > 0)
+                    || (modelData?.skips && typeof modelData.skips === 'object' && Object.keys(modelData.skips).length > 0)
+                    || (modelData?.availability?.skips && typeof modelData.availability.skips === 'object' && Object.keys(modelData.availability.skips).length > 0)
+                );
+                const isActiveCatalogPresent = !!modelData
+                    && !provider.disabled
+                    && !modelData?.disabled
+                    && (!modelData?.unavailable || hasConstraint || hasAvailabilityMetadata)
+                    && (!modelData?.removed || hasConstraint || hasAvailabilityMetadata);
                 if (hasConstraint) {
                     constrainedModelIds.add(modelId);
-                }
-                if (!provider.disabled && !modelData?.disabled && !modelData?.unavailable && !modelData?.removed && !hasConstraint) {
+                    if (isConstraintCatalogPresent || providerHasAvailabilityConstraint) {
+                        constrainedCatalogModelIds.add(modelId);
+                    }
+                } else if (isActiveCatalogPresent) {
                     availableModelIds.add(modelId);
+                }
+                if (isActiveCatalogPresent || isConstraintCatalogPresent) {
+                    catalogProviderCounts[modelId] = (catalogProviderCounts[modelId] || 0) + 1;
                 }
                 if (!shouldCountProviderModel(modelId, modelData)) {
                     continue;
@@ -776,6 +1399,18 @@ export async function refreshProviderCountsInModelsFile(options: { notifyProbes?
 
                 if (!provider.disabled) { // Consider a provider active if 'disabled' is false or undefined
                     activeProviderCounts[modelId] = (activeProviderCounts[modelId] || 0) + 1;
+                    const availabilityState = classifyActiveProviderAvailability(
+                        provider,
+                        modelId,
+                        runtimeNow
+                    );
+                    if (availabilityState === 'usable') {
+                        usableProviderCounts[modelId] = (usableProviderCounts[modelId] || 0) + 1;
+                    } else if (availabilityState === 'cooling_down') {
+                        coolingDownProviderCounts[modelId] = (coolingDownProviderCounts[modelId] || 0) + 1;
+                    } else {
+                        temporarilyUnavailableProviderCounts[modelId] = (temporarilyUnavailableProviderCounts[modelId] || 0) + 1;
+                    }
                     if (!modelData?.disabled && !modelData?.unavailable && !modelData?.removed && !hasConstraint) {
                         availableModelIds.add(modelId);
                     }
@@ -809,10 +1444,13 @@ export async function refreshProviderCountsInModelsFile(options: { notifyProbes?
 
         // Process existing models
         for (const model of modelsFile.data) {
-            const newProviderCount = activeProviderCounts[model.id] || 0;
+            const newProviderCount = usableProviderCounts[model.id] || 0;
+            const activeProviderCount = activeProviderCounts[model.id] || 0;
             const knownProviderCount = knownProviderCounts[model.id] || 0;
+            const coolingDownProviderCount = coolingDownProviderCounts[model.id] || 0;
+            const temporarilyUnavailableProviderCount = temporarilyUnavailableProviderCounts[model.id] || 0;
             const isConstrained = constrainedModelIds.has(model.id);
-            const shouldRetainAsConstrained = newProviderCount === 0 && isConstrained;
+            const shouldRetainAsConstrained = activeProviderCount === 0 && isConstrained;
             const rememberedCaps = getRememberedCapabilities(model.id, model.capabilities, capabilitiesCache, probeData);
             if (isPricingRecord((model as any).pricing)) {
                 pricingCache[model.id] = clonePricingRecord((model as any).pricing);
@@ -832,7 +1470,7 @@ export async function refreshProviderCountsInModelsFile(options: { notifyProbes?
                 }
             }
             
-            if (newProviderCount > 0 || shouldRetainAsConstrained) {
+            if (activeProviderCount > 0 || shouldRetainAsConstrained) {
                 if (model.providers !== newProviderCount) {
                     const oldProviderCount = model.providers;
                     model.providers = newProviderCount;
@@ -843,6 +1481,22 @@ export async function refreshProviderCountsInModelsFile(options: { notifyProbes?
                         console.log(`Updated provider count for ${model.id}: ${oldProviderCount} -> ${newProviderCount}`);
                     }
                 }
+                if ((model as any).active_providers !== activeProviderCount) {
+                    (model as any).active_providers = activeProviderCount;
+                    changesMade = true;
+                }
+                if ((model as any).known_providers !== knownProviderCount) {
+                    (model as any).known_providers = knownProviderCount;
+                    changesMade = true;
+                }
+                if ((model as any).cooling_down_providers !== coolingDownProviderCount) {
+                    (model as any).cooling_down_providers = coolingDownProviderCount;
+                    changesMade = true;
+                }
+                if ((model as any).temporarily_unavailable_providers !== temporarilyUnavailableProviderCount) {
+                    (model as any).temporarily_unavailable_providers = temporarilyUnavailableProviderCount;
+                    changesMade = true;
+                }
                 if (!model.owned_by || model.owned_by === 'unknown') {
                     const guessedOwner = guessOwnedBy(model.id);
                     if (guessedOwner !== model.owned_by) {
@@ -851,9 +1505,9 @@ export async function refreshProviderCountsInModelsFile(options: { notifyProbes?
                         console.log(`Updated owner for ${model.id}: ${guessedOwner}`);
                     }
                 }
-                if (newProviderCount > 0) {
+                if (activeProviderCount > 0) {
                     // Dynamic pricing based on provider availability
-                    const dynamicPrice = calculateDynamicPricing(model.id, Math.max(newProviderCount, knownProviderCount));
+                    const dynamicPrice = calculateDynamicPricing(model.id, Math.max(activeProviderCount, knownProviderCount));
                     const rememberedPricing = isPricingRecord(pricingCache[model.id]) ? pricingCache[model.id] : null;
                     const nextPricing = dynamicPrice
                         ? clonePricingRecord(dynamicPrice)
@@ -890,9 +1544,12 @@ export async function refreshProviderCountsInModelsFile(options: { notifyProbes?
         const newModelsWithoutCaps: string[] = [];
         for (const modelId of availableModelIds) {
             if (!existingModelIds.has(modelId)) {
-                const providerCount = activeProviderCounts[modelId] ?? 0;
+                const providerCount = usableProviderCounts[modelId] ?? 0;
+                const activeProviderCount = activeProviderCounts[modelId] ?? 0;
                 const knownProviderCount = knownProviderCounts[modelId] ?? 0;
-                if (providerCount <= 0) {
+                const coolingDownProviderCount = coolingDownProviderCounts[modelId] ?? 0;
+                const temporarilyUnavailableProviderCount = temporarilyUnavailableProviderCounts[modelId] ?? 0;
+                if (activeProviderCount <= 0) {
                     continue;
                 }
                 const newModel: any = {
@@ -901,6 +1558,10 @@ export async function refreshProviderCountsInModelsFile(options: { notifyProbes?
                     created: Date.now(),
                     owned_by: guessOwnedBy(modelId),
                     providers: providerCount,
+                    active_providers: activeProviderCount,
+                    known_providers: knownProviderCount,
+                    cooling_down_providers: coolingDownProviderCount,
+                    temporarily_unavailable_providers: temporarilyUnavailableProviderCount,
                     throughput: modelThroughput[modelId] || 50
                 };
                 const rememberedCaps = getRememberedCapabilities(modelId, undefined, capabilitiesCache, probeData);
@@ -911,7 +1572,7 @@ export async function refreshProviderCountsInModelsFile(options: { notifyProbes?
                         capabilitiesCache[modelId] = [...rememberedCaps];
                     }
                 }
-                const dynamicPrice = calculateDynamicPricing(modelId, Math.max(providerCount, knownProviderCount));
+                const dynamicPrice = calculateDynamicPricing(modelId, Math.max(activeProviderCount, knownProviderCount));
                 const rememberedPricing = isPricingRecord(pricingCache[modelId]) ? pricingCache[modelId] : null;
                 newModel.pricing = dynamicPrice
                     ? clonePricingRecord(dynamicPrice)
@@ -921,7 +1582,7 @@ export async function refreshProviderCountsInModelsFile(options: { notifyProbes?
                 if (!Array.isArray(newModel.capabilities) || newModel.capabilities.length === 0) {
                     newModelsWithoutCaps.push(modelId);
                 }
-                console.log(`Added new model ${modelId} with ${providerCount} active / ${knownProviderCount} known provider(s), owned by: ${newModel.owned_by}`);
+                console.log(`Added new model ${modelId} with ${providerCount} usable / ${activeProviderCount} active / ${knownProviderCount} known provider(s), owned by: ${newModel.owned_by}`);
                 changesMade = true;
             }
         }
@@ -936,6 +1597,10 @@ export async function refreshProviderCountsInModelsFile(options: { notifyProbes?
                 created: Date.now(),
                 owned_by: guessOwnedBy(modelId),
                 providers: 0,
+                active_providers: 0,
+                known_providers: knownProviderCounts[modelId] ?? 0,
+                cooling_down_providers: coolingDownProviderCounts[modelId] ?? 0,
+                temporarily_unavailable_providers: temporarilyUnavailableProviderCounts[modelId] ?? 0,
                 throughput: 50,
             };
             const rememberedCaps = getRememberedCapabilities(modelId, undefined, capabilitiesCache, probeData);
@@ -957,7 +1622,20 @@ export async function refreshProviderCountsInModelsFile(options: { notifyProbes?
         }
 
         // Normalize key order for consistent JSON output
-        const KEY_ORDER = ['id', 'object', 'created', 'owned_by', 'providers', 'throughput', 'capabilities', 'pricing'];
+        const KEY_ORDER = [
+            'id',
+            'object',
+            'created',
+            'owned_by',
+            'providers',
+            'active_providers',
+            'known_providers',
+            'cooling_down_providers',
+            'temporarily_unavailable_providers',
+            'throughput',
+            'capabilities',
+            'pricing'
+        ];
         const normalizedModels = updatedModels.map((m: any) => {
             const ordered: any = {};
             for (const k of KEY_ORDER) {

@@ -199,6 +199,12 @@ const RATE_LIMIT_WAIT_MAX_MS = (() => {
 	if (parsed <= 0) return Number.POSITIVE_INFINITY;
 	return Math.floor(parsed);
 })();
+const RATE_LIMIT_TOTAL_WAIT_BUDGET_MS = (() => {
+	const raw = process.env.RATE_LIMIT_TOTAL_WAIT_BUDGET_MS;
+	if (raw === undefined) return 5_000; // default: spend at most 5s waiting across the whole request
+	const parsed = Number(raw);
+	return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : 5_000;
+})();
 const RATE_LIMIT_WAKE_EARLY_MS = (() => {
 	const raw = process.env.RATE_LIMIT_WAKE_EARLY_MS;
 	const parsed = raw !== undefined ? Number(raw) : NaN;
@@ -734,6 +740,39 @@ function normalizeRetryAfterCooldownMs(
 	const baseMs = Math.max(1, Math.ceil(retryAfterMs as number));
 	if (!isSharedRateLimitProvider(providerId)) return baseMs;
 	return baseMs + SHARED_PROVIDER_RETRY_AFTER_SAFETY_MS;
+}
+
+function resolveProviderCooldownMs(
+	providerId: string,
+	modelStats: any,
+	retryAfterMs: number | null | undefined
+): number | null {
+	const explicitCooldownMs = normalizeRetryAfterCooldownMs(
+		providerId,
+		retryAfterMs
+	);
+	if (explicitCooldownMs && explicitCooldownMs > 0) {
+		return explicitCooldownMs;
+	}
+
+	const rateLimitWindowMs = Number(modelStats?.rate_limit_window_ms ?? 0);
+	if (Number.isFinite(rateLimitWindowMs) && rateLimitWindowMs > 0) {
+		const boundedWindowMs = Math.max(
+			1_000,
+			Math.min(PROVIDER_COOLDOWN_MS, Math.ceil(rateLimitWindowMs))
+		);
+		return isSharedRateLimitProvider(providerId)
+			? boundedWindowMs + SHARED_PROVIDER_RETRY_AFTER_SAFETY_MS
+			: boundedWindowMs;
+	}
+
+	const rateLimitRps = Number(modelStats?.rate_limit_rps ?? 0);
+	if (Number.isFinite(rateLimitRps) && rateLimitRps > 0) {
+		const perRequestMs = Math.max(1_000, Math.ceil(1_000 / rateLimitRps));
+		return Math.min(PROVIDER_COOLDOWN_MS, perRequestMs);
+	}
+
+	return null;
 }
 
 function smoothPositiveInteger(
@@ -1353,6 +1392,164 @@ export class MessageHandler {
 		return dashIndex > 0 ? normalized.slice(0, dashIndex) : normalized;
 	}
 
+	private hasRecentInsufficientCreditsFailureSignal(
+		provider: LoadedProviderData,
+		modelId?: string
+	): boolean {
+		if (!provider) return false;
+		const modelData = modelId
+			? ((provider.models?.[modelId] as any) ?? null)
+			: null;
+		const message = [
+			provider.lastError,
+			(provider as any).last_error,
+			(provider as any).error,
+			(provider as any).disabled_reason,
+			(provider as any).disabledReason,
+			modelData?.lastError,
+			modelData?.last_error,
+			modelData?.disabled_reason,
+		]
+			.map((value) => String(value || '').trim())
+			.filter(Boolean)
+			.join(' ');
+		const code = String(
+			(provider as any).lastErrorCode ||
+				(provider as any).last_error_code ||
+				modelData?.lastErrorCode ||
+				modelData?.last_error_code ||
+				''
+		);
+		const status = Number(
+			(provider as any).lastStatus ||
+				(provider as any).last_status ||
+				modelData?.lastStatus ||
+				modelData?.last_status ||
+				0
+		);
+		if (!this.isInsufficientCreditsError({ message, code, status })) {
+			return false;
+		}
+
+		const newestFailureAt = Math.max(
+			0,
+			Number(
+				(provider as any).lastErrorAt ||
+					(provider as any).last_error_at ||
+					0
+			),
+			Number(modelData?.lastErrorAt || modelData?.last_error_at || 0),
+			Number(modelData?.disabled_at || 0)
+		);
+		if (newestFailureAt > 0) {
+			return (
+				Date.now() - newestFailureAt <=
+				PROVIDER_AUTH_FAILURE_FAST_SKIP_MS
+			);
+		}
+
+		return Boolean(provider.disabled || modelData?.disabled);
+	}
+
+	private hasRecentRateLimitOrTimeoutFailureSignal(
+		provider: LoadedProviderData,
+		modelId?: string
+	): boolean {
+		if (!provider) return false;
+		const modelData = modelId
+			? ((provider.models?.[modelId] as any) ?? null)
+			: null;
+		const message = [
+			provider.lastError,
+			(provider as any).last_error,
+			(provider as any).error,
+			modelData?.lastError,
+			modelData?.last_error,
+		]
+			.map((value) => String(value || '').trim().toLowerCase())
+			.filter(Boolean)
+			.join(' ');
+		const code = String(
+			(provider as any).lastErrorCode ||
+				(provider as any).last_error_code ||
+				modelData?.lastErrorCode ||
+				modelData?.last_error_code ||
+				''
+		).toLowerCase();
+		const status = Number(
+			(provider as any).lastStatus ||
+				(provider as any).last_status ||
+				modelData?.lastStatus ||
+				modelData?.last_status ||
+				0
+		);
+		const memoryPressureLike =
+			code === 'memory_pressure' ||
+			message.includes('memory pressure') ||
+			message.includes('rejected under memory pressure') ||
+			message.includes('swap_used_mb=') ||
+			message.includes('rss_mb=') ||
+			message.includes('active_runtime_mb=') ||
+			message.includes('external_mb=') ||
+			message.includes('heap_used_mb=');
+		const recentTransientFailureLike =
+			memoryPressureLike ||
+			status === 408 ||
+			status === 409 ||
+			status === 425 ||
+			status === 429 ||
+			code === 'econnaborted' ||
+			code === 'etimedout' ||
+			code === 'timeout' ||
+			message.includes('rate limit') ||
+			message.includes('rate_limit') ||
+			message.includes('too many requests') ||
+			message.includes('resource_exhausted') ||
+			message.includes('quota exceeded') ||
+			message.includes('quota exhausted') ||
+			message.includes('timed out') ||
+			message.includes('timeout');
+		if (!recentTransientFailureLike) {
+			return false;
+		}
+
+		const newestFailureAt = Math.max(
+			0,
+			Number(
+				(provider as any).lastErrorAt ||
+					(provider as any).last_error_at ||
+					0
+			),
+			Number(modelData?.lastErrorAt || modelData?.last_error_at || 0),
+			Number(modelData?.disabled_at || 0)
+		);
+		return (
+			newestFailureAt > 0 &&
+			Date.now() - newestFailureAt <=
+				PROVIDER_AUTH_FAILURE_FAST_SKIP_MS
+		);
+	}
+
+	private preferStableToolCallingProviders(
+		providers: LoadedProviderData[],
+		modelId: string,
+		required: Set<ModelCapability>
+	): LoadedProviderData[] {
+		if (!required.has('tool_calling')) return providers;
+		const stableProviders = providers.filter(
+			(provider: LoadedProviderData) =>
+				!this.hasRecentRateLimitOrTimeoutFailureSignal(
+					provider,
+					modelId
+				) &&
+				!this.hasRecentInsufficientCreditsFailureSignal(
+					provider,
+					modelId
+				)
+		);
+		return stableProviders.length > 0 ? stableProviders : providers;
+	}
+
 	private getEffectiveProviderScore(
 		provider: LoadedProviderData
 	): number | null {
@@ -1488,6 +1685,13 @@ export class MessageHandler {
 			if (triedProviderIds.has(provider.id)) continue;
 			if (candidateProviders.some(cand => cand.id === provider.id))
 				continue;
+			if (
+				this.hasRecentInsufficientCreditsFailureSignal(
+					provider,
+					modelId
+				)
+			)
+				continue;
 			const modelData = provider.models?.[modelId] as any;
 			const isDisabled = Boolean(
 				provider.disabled || modelData?.disabled
@@ -1525,6 +1729,13 @@ export class MessageHandler {
 			if (!provider?.models?.[modelId]) continue;
 			if (triedProviderIds.has(provider.id)) continue;
 			if (candidateProviders.some(cand => cand.id === provider.id))
+				continue;
+			if (
+				this.hasRecentInsufficientCreditsFailureSignal(
+					provider,
+					modelId
+				)
+			)
 				continue;
 			if (this.providerSkipsRequiredCaps(provider, modelId, required))
 				continue;
@@ -1775,6 +1986,13 @@ export class MessageHandler {
 				return Boolean(modelData && !(modelData as any).disabled);
 			}
 		);
+		const creditHealthyCompatibleProviders = compatibleProviders.filter(
+			(p: LoadedProviderData) =>
+				!this.hasRecentInsufficientCreditsFailureSignal(p, modelId)
+		);
+		if (creditHealthyCompatibleProviders.length > 0) {
+			compatibleProviders = creditHealthyCompatibleProviders;
+		}
 		if (compatibleProviders.length === 0) {
 			const activeModelDisabled = activeProviders
 				.filter((p: LoadedProviderData) =>
@@ -2491,6 +2709,11 @@ export class MessageHandler {
 				modelId,
 				requiredCaps
 			);
+			candidateProviders = this.preferStableToolCallingProviders(
+				candidateProviders,
+				modelId,
+				requiredCaps
+			);
 			const filteredGeminiProviders = candidateProviders.filter(
 				(provider: LoadedProviderData) =>
 					!shouldSkipGeminiProviderForMessage(provider, messages)
@@ -2533,6 +2756,7 @@ export class MessageHandler {
 			let disabledFallbackAdded = false;
 			const requestStartTime = Date.now();
 			const totalCandidates = candidateProviders.length;
+			let cooldownWaitSpentMs = 0;
 			let nextCooldownMs: number | null = null;
 			let nextCooldownEarlyWakeMs: number | null = null;
 			let attemptedSinceCooldown = false;
@@ -2943,8 +3167,9 @@ export class MessageHandler {
 										''
 								)
 							);
-							const cooldownMs = normalizeRetryAfterCooldownMs(
+							const cooldownMs = resolveProviderCooldownMs(
 								providerId,
+								modelStats,
 								retryAfterMs
 							);
 							if (providerApiKey) {
@@ -3119,39 +3344,55 @@ export class MessageHandler {
 
 				const hasCooldownSkips =
 					skippedByCooldown > 0 || skippedByProviderRateLimit > 0;
+				const remainingCooldownWaitBudgetMs = Math.max(
+					0,
+					RATE_LIMIT_TOTAL_WAIT_BUDGET_MS - cooldownWaitSpentMs
+				);
 				const shouldRetryAfterCooldown =
 					hasCooldownSkips &&
 					shouldRespectCooldowns &&
+					RATE_LIMIT_WAIT_PER_MESSAGE &&
 					nextCooldownMs !== null &&
-					(!attemptedSinceCooldown ||
-						this.isRateLimitOrQuotaError(lastError));
+					!attemptedSinceCooldown &&
+					remainingCooldownWaitBudgetMs > 0;
 				if (!shouldRetryAfterCooldown) {
 					break;
 				}
+				const effectiveCooldownMs = Math.min(
+					nextCooldownMs ?? remainingCooldownWaitBudgetMs,
+					remainingCooldownWaitBudgetMs
+				);
 				const cooldownWaitStartedAt = Date.now();
 				logMemoryProfile('provider-cooldown-wait:start', {
 					requestId,
 					modelId,
 					stream: false,
-					cooldownMs: nextCooldownMs,
+					cooldownMs: effectiveCooldownMs,
+					waitBudgetRemainingMs: remainingCooldownWaitBudgetMs,
 					earlyWakeMs: nextCooldownEarlyWakeMs,
 					requestAgeMs: cooldownWaitStartedAt - requestStartTime
 				});
 				const waited = await waitForCooldownOrDeadline(
-					nextCooldownMs,
+					effectiveCooldownMs,
 					requestStartTime,
 					REQUEST_DEADLINE_MS,
 					true,
 					nextCooldownEarlyWakeMs
 				);
+				const waitElapsedMs = Date.now() - cooldownWaitStartedAt;
+				cooldownWaitSpentMs += waitElapsedMs;
 				logMemoryProfile('provider-cooldown-wait:end', {
 					requestId,
 					modelId,
 					stream: false,
-					cooldownMs: nextCooldownMs,
+					cooldownMs: effectiveCooldownMs,
+					waitBudgetRemainingMs: Math.max(
+						0,
+						RATE_LIMIT_TOTAL_WAIT_BUDGET_MS - cooldownWaitSpentMs
+					),
 					earlyWakeMs: nextCooldownEarlyWakeMs,
 					waited,
-					waitElapsedMs: Date.now() - cooldownWaitStartedAt,
+					waitElapsedMs,
 					requestAgeMs: Date.now() - requestStartTime
 				});
 				if (!waited) break;
@@ -3270,6 +3511,11 @@ export class MessageHandler {
 			modelId,
 			requiredCaps
 		);
+		candidateProviders = this.preferStableToolCallingProviders(
+			candidateProviders,
+			modelId,
+			requiredCaps
+		);
 		const filteredGeminiProviders = candidateProviders.filter(
 			(provider: LoadedProviderData) =>
 				!shouldSkipGeminiProviderForMessage(provider, messages)
@@ -3310,6 +3556,7 @@ export class MessageHandler {
 		let disabledFallbackAdded = false;
 		const requestStartTime = Date.now();
 		const totalCandidates = candidateProviders.length;
+		let cooldownWaitSpentMs = 0;
 		let nextCooldownMs: number | null = null;
 		let nextCooldownEarlyWakeMs: number | null = null;
 		let attemptedSinceCooldown = false;
@@ -3852,8 +4099,9 @@ export class MessageHandler {
 							const retryAfterMs = extractRetryAfterMs(
 								String(error?.message || error || '')
 							);
-							const cooldownMs = normalizeRetryAfterCooldownMs(
+							const cooldownMs = resolveProviderCooldownMs(
 								providerId,
+								modelStats,
 								retryAfterMs
 							);
 							if (providerApiKey) {
@@ -3932,39 +4180,55 @@ export class MessageHandler {
 
 			const hasCooldownSkips =
 				skippedByCooldown > 0 || skippedByProviderRateLimit > 0;
+			const remainingCooldownWaitBudgetMs = Math.max(
+				0,
+				RATE_LIMIT_TOTAL_WAIT_BUDGET_MS - cooldownWaitSpentMs
+			);
 			const shouldRetryAfterCooldown =
 				hasCooldownSkips &&
 				shouldRespectCooldowns &&
+				RATE_LIMIT_WAIT_PER_MESSAGE &&
 				nextCooldownMs !== null &&
-				(!attemptedSinceCooldown ||
-					this.isRateLimitOrQuotaError(lastError));
+				!attemptedSinceCooldown &&
+				remainingCooldownWaitBudgetMs > 0;
 			if (!shouldRetryAfterCooldown) {
 				break;
 			}
+			const effectiveCooldownMs = Math.min(
+				nextCooldownMs ?? remainingCooldownWaitBudgetMs,
+				remainingCooldownWaitBudgetMs
+			);
 			const cooldownWaitStartedAt = Date.now();
 			logMemoryProfile('provider-cooldown-wait:start', {
 				requestId: options?.requestId,
 				modelId,
 				stream: true,
-				cooldownMs: nextCooldownMs,
+				cooldownMs: effectiveCooldownMs,
+				waitBudgetRemainingMs: remainingCooldownWaitBudgetMs,
 				earlyWakeMs: nextCooldownEarlyWakeMs,
 				requestAgeMs: cooldownWaitStartedAt - requestStartTime
 			});
 			const waited = await waitForCooldownOrDeadline(
-				nextCooldownMs,
+				effectiveCooldownMs,
 				requestStartTime,
 				REQUEST_DEADLINE_MS,
 				true,
 				nextCooldownEarlyWakeMs
 			);
+			const waitElapsedMs = Date.now() - cooldownWaitStartedAt;
+			cooldownWaitSpentMs += waitElapsedMs;
 			logMemoryProfile('provider-cooldown-wait:end', {
 				requestId: options?.requestId,
 				modelId,
 				stream: true,
-				cooldownMs: nextCooldownMs,
+				cooldownMs: effectiveCooldownMs,
+				waitBudgetRemainingMs: Math.max(
+					0,
+					RATE_LIMIT_TOTAL_WAIT_BUDGET_MS - cooldownWaitSpentMs
+				),
 				earlyWakeMs: nextCooldownEarlyWakeMs,
 				waited,
-				waitElapsedMs: Date.now() - cooldownWaitStartedAt,
+				waitElapsedMs,
 				requestAgeMs: Date.now() - requestStartTime
 			});
 			if (!waited) break;

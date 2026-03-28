@@ -228,6 +228,9 @@ type CoordinatedRunnerStatusEntry = {
   lastError?: string;
   lastUpdatedAt?: string;
   restartedCount: number;
+  selfHealCount: number;
+  lastSelfHealAt?: string;
+  lastSelfHealReason?: string;
   summary?: string;
   scopeExpansionMode: ScopeExpansionMode;
 };
@@ -256,6 +259,14 @@ type CoordinatorChildRuntime = {
   nextRestartAt: number;
   lastStatus?: Partial<RunnerStatus>;
   lastSpawnError?: string;
+  lastSemanticProgressSignature?: string;
+  lastSemanticProgressAtMs?: number;
+  lastStatusHeartbeatAtMs?: number;
+  selfHealCount: number;
+  lastSelfHealAt?: string;
+  lastSelfHealReason?: string;
+  selfHealRequestedAtMs?: number;
+  selfHealEscalateAtMs?: number;
 };
 
 const DEFAULT_RUNNER_STATUS_PATH = './apps/langgraph-control-plane/.control-plane/runner-status.json';
@@ -271,6 +282,11 @@ const DEFAULT_CONTROL_PLANE_EXPERIMENTAL_SERVICE = 'anygpt-experimental.service'
 const DEFAULT_CONTROL_PLANE_PRODUCTION_SERVICE = 'anygpt.service';
 const DEFAULT_CONTINUOUS_INTERVAL_MS = 1_000;
 const RUNNER_STATUS_HEARTBEAT_MS = 5_000;
+const RUNNER_STATUS_TRANSIENT_SUMMARY_NOTES = [
+  'Lane inactive. No live PID was found for this status file.',
+  'Child autonomous lanes are still active; status was reattached after coordinator PID drift.',
+  'Runner inactive. Stale runtime state was cleaned.',
+] as const;
 const RUNNER_STREAM_CHUNK_TIMEOUT_MS = (() => {
   const configured = Number(
     process.env.CONTROL_PLANE_STREAM_CHUNK_TIMEOUT_MS
@@ -290,6 +306,32 @@ const RUNNER_CHECKPOINT_HISTORY_LIMIT = (() => {
 })();
 const MULTI_RUNNER_COORDINATOR_POLL_MS = 2_000;
 const MULTI_RUNNER_RESTART_DELAY_MS = 1_500;
+const MULTI_RUNNER_SELF_HEAL_STATUS_STALE_MS = (() => {
+  const configured = Number(process.env.CONTROL_PLANE_MULTI_RUNNER_SELF_HEAL_STATUS_STALE_MS ?? 60_000);
+  return Math.max(15_000, Number.isFinite(configured) ? Math.floor(configured) : 60_000);
+})();
+const MULTI_RUNNER_SELF_HEAL_STARTUP_STALL_MS = (() => {
+  const configured = Number(process.env.CONTROL_PLANE_MULTI_RUNNER_SELF_HEAL_STARTUP_STALL_MS ?? 240_000);
+  return Math.max(60_000, Number.isFinite(configured) ? Math.floor(configured) : 240_000);
+})();
+const MULTI_RUNNER_SELF_HEAL_ROLLED_BACK_STALL_MS = (() => {
+  const configured = Number(process.env.CONTROL_PLANE_MULTI_RUNNER_SELF_HEAL_ROLLED_BACK_STALL_MS ?? 180_000);
+  return Math.max(30_000, Number.isFinite(configured) ? Math.floor(configured) : 180_000);
+})();
+const MULTI_RUNNER_SELF_HEAL_NO_PROGRESS_STALL_MS = (() => {
+  const configured = Number(process.env.CONTROL_PLANE_MULTI_RUNNER_SELF_HEAL_NO_PROGRESS_STALL_MS ?? 90_000);
+  return Math.max(15_000, Number.isFinite(configured) ? Math.floor(configured) : 90_000);
+})();
+const MULTI_RUNNER_SELF_HEAL_COOLDOWN_MS = (() => {
+  const configured = Number(process.env.CONTROL_PLANE_MULTI_RUNNER_SELF_HEAL_COOLDOWN_MS ?? 180_000);
+  return Math.max(30_000, Number.isFinite(configured) ? Math.floor(configured) : 180_000);
+})();
+const MULTI_RUNNER_SELF_HEAL_TERM_GRACE_MS = (() => {
+  const configured = Number(process.env.CONTROL_PLANE_MULTI_RUNNER_SELF_HEAL_TERM_GRACE_MS ?? 10_000);
+  return Math.max(2_000, Number.isFinite(configured) ? Math.floor(configured) : 10_000);
+})();
+
+let boundRunnerPidFilePath: string | undefined;
 
 function loadEnvForControlPlane(repoRoot: string): void {
   const candidates = [
@@ -495,6 +537,78 @@ function readRunnerStatusSnapshot(statusFilePath: string): Partial<RunnerStatus>
   }
 }
 
+function parseIsoTimestampMs(value: unknown): number | undefined {
+  if (typeof value !== 'string') return undefined;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function formatDurationMs(value: number): string {
+  const normalized = Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
+  if (normalized < 1_000) return `${normalized}ms`;
+
+  const totalSeconds = Math.floor(normalized / 1_000);
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes < 60) {
+    return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+  }
+
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
+}
+
+function buildCoordinatorChildSemanticProgressSignature(status: Partial<RunnerStatus> | undefined): string {
+  if (!status || typeof status !== 'object') return '';
+  return JSON.stringify({
+    phase: typeof status.phase === 'string' ? status.phase : '',
+    repairStatus: typeof status.repairStatus === 'string' ? status.repairStatus : '',
+    summary: typeof status.summary === 'string' ? status.summary.trim() : '',
+    proposedEditCount: typeof status.proposedEditCount === 'number' && Number.isFinite(status.proposedEditCount)
+      ? status.proposedEditCount
+      : 0,
+    appliedEditCount: typeof status.appliedEditCount === 'number' && Number.isFinite(status.appliedEditCount)
+      ? status.appliedEditCount
+      : 0,
+    repairDecisionReason: typeof status.repairDecisionReason === 'string'
+      ? status.repairDecisionReason.trim()
+      : '',
+    repairIntentSummary: typeof status.repairIntentSummary === 'string'
+      ? status.repairIntentSummary.trim()
+      : '',
+    noProgressReason: typeof status.noProgressReason === 'string'
+      ? status.noProgressReason.trim()
+      : '',
+    lastError: typeof status.lastError === 'string'
+      ? status.lastError.trim()
+      : '',
+    postRepairValidationStatus: typeof status.postRepairValidationStatus === 'string'
+      ? status.postRepairValidationStatus.trim()
+      : '',
+    evaluationGateStatus: typeof status.evaluationGateStatus === 'string'
+      ? status.evaluationGateStatus.trim()
+      : '',
+  });
+}
+
+function isCoordinatorChildPlaceholderSummary(summary: string | undefined): boolean {
+  const normalized = String(summary || '').trim();
+  if (!normalized) return true;
+  return [
+    'Waiting for graph output...',
+  ].includes(normalized)
+    || /^inspectMcp:/.test(normalized)
+    || /^qualityAgent:/.test(normalized)
+    || /^plannerAgent:/.test(normalized)
+    || /^preplanMcpActions:/.test(normalized)
+    || /^mergePlan:/.test(normalized)
+    || /^reviewAutonomousEdits:/.test(normalized)
+    || /^autonomousEditPlanner:/.test(normalized);
+}
+
 function parseIntegerArg(value: string | undefined, fallback: number, minimum: number): number {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return fallback;
@@ -652,15 +766,51 @@ function summarizeStreamChunk(chunk: unknown): string | undefined {
 }
 
 function writeRunnerStatus(statusFilePath: string, status: RunnerStatus): void {
+  ensureRunnerPidFile(boundRunnerPidFilePath, process.pid);
   fs.mkdirSync(path.dirname(statusFilePath), { recursive: true });
   const tempPath = `${statusFilePath}.tmp`;
-  fs.writeFileSync(tempPath, JSON.stringify(status, null, 2), 'utf8');
+  const nextSummary = sanitizeLiveRunnerSummary(status.summary);
+  const nextStatus = nextSummary === status.summary
+    ? status
+    : {
+        ...status,
+        summary: nextSummary,
+      };
+  fs.writeFileSync(tempPath, JSON.stringify(nextStatus, null, 2), 'utf8');
   fs.renameSync(tempPath, statusFilePath);
 }
 
 function writeRunnerPidFile(pidFilePath: string, pid: number): void {
   fs.mkdirSync(path.dirname(pidFilePath), { recursive: true });
   fs.writeFileSync(pidFilePath, `${pid}\n`, 'utf8');
+}
+
+function ensureRunnerPidFile(pidFilePath: string | undefined, pid: number): void {
+  if (!pidFilePath || !Number.isFinite(pid) || pid <= 0) return;
+
+  try {
+    const existingPid = fs.readFileSync(pidFilePath, 'utf8').trim();
+    if (existingPid === String(pid)) return;
+  } catch {
+    // Rewrite missing or unreadable PID files below.
+  }
+
+  writeRunnerPidFile(pidFilePath, pid);
+}
+
+function bindRunnerPidFile(pidFilePath: string | undefined): void {
+  boundRunnerPidFilePath = pidFilePath;
+  ensureRunnerPidFile(pidFilePath, process.pid);
+}
+
+function sanitizeLiveRunnerSummary(summary: string | undefined): string | undefined {
+  if (typeof summary !== 'string') return summary;
+
+  const filteredLines = summary
+    .split(/\r?\n/)
+    .filter((line) => !RUNNER_STATUS_TRANSIENT_SUMMARY_NOTES.some((note) => line.includes(note)));
+  const normalizedSummary = filteredLines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  return normalizedSummary || undefined;
 }
 
 function removeRunnerPidFile(pidFilePath: string, pid: number): void {
@@ -680,12 +830,13 @@ function removeRunnerPidFile(pidFilePath: string, pid: number): void {
 
 function installRunnerLifecycleHooks(parsedArgs: ParsedArgs, getRunnerStatus: () => RunnerStatus): void {
   const pidFilePath = parsedArgs.pidFilePath;
-  if (pidFilePath) {
-    writeRunnerPidFile(pidFilePath, process.pid);
-  }
+  bindRunnerPidFile(pidFilePath);
   process.once('exit', () => {
     if (pidFilePath) {
       removeRunnerPidFile(pidFilePath, process.pid);
+      if (boundRunnerPidFilePath === pidFilePath) {
+        boundRunnerPidFilePath = undefined;
+      }
     }
   });
 
@@ -702,6 +853,9 @@ function installRunnerLifecycleHooks(parsedArgs: ParsedArgs, getRunnerStatus: ()
 
     if (pidFilePath) {
       removeRunnerPidFile(pidFilePath, process.pid);
+      if (boundRunnerPidFilePath === pidFilePath) {
+        boundRunnerPidFilePath = undefined;
+      }
     }
   };
 
@@ -2165,6 +2319,11 @@ function spawnCoordinatorChild(parsedArgs: ParsedArgs, runtime: CoordinatorChild
   runtime.lastExitCode = undefined;
   runtime.lastExitSignal = undefined;
   runtime.nextRestartAt = 0;
+  runtime.lastSemanticProgressSignature = undefined;
+  runtime.lastSemanticProgressAtMs = Date.now();
+  runtime.lastStatusHeartbeatAtMs = Date.now();
+  runtime.selfHealRequestedAtMs = undefined;
+  runtime.selfHealEscalateAtMs = undefined;
 
   child.on('error', (error) => {
     runtime.lastSpawnError = formatError(error);
@@ -2189,6 +2348,154 @@ function spawnCoordinatorChild(parsedArgs: ParsedArgs, runtime: CoordinatorChild
     runtime.logStream?.end();
     runtime.logStream = undefined;
   });
+}
+
+function updateCoordinatorChildProgressObservation(runtime: CoordinatorChildRuntime, nowMs: number): void {
+  const status = runtime.lastStatus;
+  const statusHeartbeatAtMs = parseIsoTimestampMs(status?.lastUpdatedAt);
+  if (typeof statusHeartbeatAtMs === 'number') {
+    runtime.lastStatusHeartbeatAtMs = Math.max(runtime.lastStatusHeartbeatAtMs || 0, statusHeartbeatAtMs);
+  } else if (typeof runtime.lastStatusHeartbeatAtMs !== 'number') {
+    runtime.lastStatusHeartbeatAtMs = nowMs;
+  }
+
+  const nextSignature = buildCoordinatorChildSemanticProgressSignature(status);
+  if (!runtime.lastSemanticProgressSignature) {
+    runtime.lastSemanticProgressSignature = nextSignature;
+    runtime.lastSemanticProgressAtMs = nowMs;
+    return;
+  }
+
+  if (runtime.lastSemanticProgressSignature !== nextSignature) {
+    runtime.lastSemanticProgressSignature = nextSignature;
+    runtime.lastSemanticProgressAtMs = nowMs;
+  } else if (typeof runtime.lastSemanticProgressAtMs !== 'number') {
+    runtime.lastSemanticProgressAtMs = nowMs;
+  }
+}
+
+function appendCoordinatorChildRuntimeNote(runtime: CoordinatorChildRuntime, message: string): void {
+  fs.appendFileSync(
+    runtime.spec.logFilePath,
+    `[${new Date().toISOString()}] ${message}\n`,
+    'utf8',
+  );
+}
+
+function requestCoordinatorChildSelfHeal(runtime: CoordinatorChildRuntime, reason: string, nowMs: number): void {
+  if (runtime.selfHealRequestedAtMs) return;
+
+  runtime.selfHealCount += 1;
+  runtime.lastSelfHealAt = new Date(nowMs).toISOString();
+  runtime.lastSelfHealReason = reason;
+  runtime.selfHealRequestedAtMs = nowMs;
+  runtime.selfHealEscalateAtMs = nowMs + MULTI_RUNNER_SELF_HEAL_TERM_GRACE_MS;
+  runtime.nextRestartAt = 0;
+  appendCoordinatorChildRuntimeNote(
+    runtime,
+    `coordinator self-heal #${runtime.selfHealCount}: ${reason}`,
+  );
+
+  const pid = runtime.process?.pid || runtime.pid || readPidFile(runtime.spec.pidFilePath);
+  if (typeof pid === 'number' && isPidAlive(pid)) {
+    try {
+      process.kill(pid, 'SIGTERM');
+    } catch (error) {
+      appendCoordinatorChildRuntimeNote(
+        runtime,
+        `coordinator self-heal failed to send SIGTERM: ${formatError(error)}`,
+      );
+    }
+    return;
+  }
+
+  runtime.selfHealRequestedAtMs = undefined;
+  runtime.selfHealEscalateAtMs = undefined;
+}
+
+function serviceCoordinatorChildSelfHeal(runtime: CoordinatorChildRuntime, nowMs: number): void {
+  if (!runtime.selfHealRequestedAtMs) return;
+
+  const pid = runtime.process?.pid || runtime.pid || readPidFile(runtime.spec.pidFilePath);
+  if (!(typeof pid === 'number' && isPidAlive(pid))) {
+    runtime.selfHealRequestedAtMs = undefined;
+    runtime.selfHealEscalateAtMs = undefined;
+    runtime.nextRestartAt = 0;
+    return;
+  }
+
+  if (typeof runtime.selfHealEscalateAtMs === 'number' && nowMs >= runtime.selfHealEscalateAtMs) {
+    appendCoordinatorChildRuntimeNote(
+      runtime,
+      `coordinator self-heal escalating to SIGKILL after ${formatDurationMs(MULTI_RUNNER_SELF_HEAL_TERM_GRACE_MS)} grace period`,
+    );
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch (error) {
+      appendCoordinatorChildRuntimeNote(
+        runtime,
+        `coordinator self-heal failed to send SIGKILL: ${formatError(error)}`,
+      );
+    }
+    runtime.selfHealEscalateAtMs = undefined;
+  }
+}
+
+function evaluateCoordinatorChildSelfHealReason(runtime: CoordinatorChildRuntime, nowMs: number): string | undefined {
+  if (runtime.selfHealRequestedAtMs) return undefined;
+
+  const lastSelfHealAtMs = parseIsoTimestampMs(runtime.lastSelfHealAt);
+  if (typeof lastSelfHealAtMs === 'number' && nowMs - lastSelfHealAtMs < MULTI_RUNNER_SELF_HEAL_COOLDOWN_MS) {
+    return undefined;
+  }
+
+  const status = runtime.lastStatus;
+  const statusSummary = typeof status?.summary === 'string' ? status.summary.trim() : '';
+  const repairStatus = typeof status?.repairStatus === 'string' ? status.repairStatus.trim() : '';
+  const noProgressReason = typeof status?.noProgressReason === 'string' ? status.noProgressReason.trim() : '';
+  const proposedEditCount = typeof status?.proposedEditCount === 'number' && Number.isFinite(status.proposedEditCount)
+    ? status.proposedEditCount
+    : 0;
+  const appliedEditCount = typeof status?.appliedEditCount === 'number' && Number.isFinite(status.appliedEditCount)
+    ? status.appliedEditCount
+    : 0;
+
+  const statusAgeMs = typeof runtime.lastStatusHeartbeatAtMs === 'number'
+    ? nowMs - runtime.lastStatusHeartbeatAtMs
+    : 0;
+  const semanticStallMs = typeof runtime.lastSemanticProgressAtMs === 'number'
+    ? nowMs - runtime.lastSemanticProgressAtMs
+    : 0;
+
+  if (statusAgeMs >= MULTI_RUNNER_SELF_HEAL_STATUS_STALE_MS) {
+    return `lane status heartbeat stalled for ${formatDurationMs(statusAgeMs)} while the child process remained alive`;
+  }
+
+  if (
+    noProgressReason
+    && semanticStallMs >= MULTI_RUNNER_SELF_HEAL_NO_PROGRESS_STALL_MS
+  ) {
+    return `lane stayed in no-progress guard for ${formatDurationMs(semanticStallMs)} (${noProgressReason})`;
+  }
+
+  if (
+    repairStatus === 'rolled-back'
+    && semanticStallMs >= MULTI_RUNNER_SELF_HEAL_ROLLED_BACK_STALL_MS
+  ) {
+    return `lane remained rolled back for ${formatDurationMs(semanticStallMs)} without a new bounded repair attempt`;
+  }
+
+  if (
+    repairStatus === 'idle'
+    && proposedEditCount === 0
+    && appliedEditCount === 0
+    && isCoordinatorChildPlaceholderSummary(statusSummary)
+    && semanticStallMs >= MULTI_RUNNER_SELF_HEAL_STARTUP_STALL_MS
+  ) {
+    return `lane stayed in ${statusSummary || 'startup placeholder'} for ${formatDurationMs(semanticStallMs)} without semantic progress`;
+  }
+
+  return undefined;
 }
 
 function collectCoordinatedRunnerEntry(runtime: CoordinatorChildRuntime): CoordinatedRunnerStatusEntry {
@@ -2241,6 +2548,9 @@ function collectCoordinatedRunnerEntry(runtime: CoordinatorChildRuntime): Coordi
       : runtime.lastSpawnError,
     lastUpdatedAt: typeof status.lastUpdatedAt === 'string' ? status.lastUpdatedAt : undefined,
     restartedCount: runtime.restartCount,
+    selfHealCount: runtime.selfHealCount,
+    lastSelfHealAt: runtime.lastSelfHealAt,
+    lastSelfHealReason: runtime.lastSelfHealReason,
     summary: typeof status.summary === 'string' ? status.summary : undefined,
     scopeExpansionMode: runtime.spec.scopeExpansionMode,
   };
@@ -2259,6 +2569,7 @@ function summarizeCoordinatorRepairStatus(children: CoordinatedRunnerStatusEntry
 function buildCoordinatorSummary(parsedArgs: ParsedArgs, children: CoordinatedRunnerStatusEntry[]): string {
   const runningChildren = children.filter((child) => child.running);
   const failedChildren = children.filter((child) => child.phase === 'failed' || Boolean(child.lastError));
+  const selfHealedChildren = children.filter((child) => child.selfHealCount > 0);
   const lines = [
     `Goal: ${parsedArgs.goal}`,
     `Coordinator mode: multi-runner (${children.length} child lane(s), interval=${parsedArgs.intervalMs}ms)`,
@@ -2269,6 +2580,11 @@ function buildCoordinatorSummary(parsedArgs: ParsedArgs, children: CoordinatedRu
 
   if (failedChildren.length > 0) {
     lines.push(`Failures: ${failedChildren.map((child) => `${child.id}${child.lastError ? ` (${child.lastError})` : ''}`).join('; ')}`);
+  }
+  if (selfHealedChildren.length > 0) {
+    lines.push(
+      `Self-heal: ${selfHealedChildren.map((child) => `${child.id}#${child.selfHealCount}${child.lastSelfHealReason ? ` (${child.lastSelfHealReason})` : ''}`).join('; ')}`,
+    );
   }
   if (runningChildren.length > 0) {
     lines.push(`Active lanes: ${runningChildren.map((child) => `${child.id}@${child.iteration}`).join(', ')}`);
@@ -2287,6 +2603,7 @@ async function runMultiRunnerCoordinator(parsedArgs: ParsedArgs): Promise<void> 
     spec,
     restartCount: 0,
     nextRestartAt: 0,
+    selfHealCount: 0,
   }));
 
   let coordinatorStatus = mergeRunnerStatus(createBaseRunnerStatus(parsedArgs), {
@@ -2311,14 +2628,13 @@ async function runMultiRunnerCoordinator(parsedArgs: ParsedArgs): Promise<void> 
       proposedEditCount: 0,
       appliedEditCount: 0,
       restartedCount: 0,
+      selfHealCount: 0,
       scopeExpansionMode: spec.scopeExpansionMode,
     })),
     summary: `Preparing multi-runner coordinator for ${childSpecs.length} child lane(s).`,
   });
+  bindRunnerPidFile(parsedArgs.pidFilePath);
   writeRunnerStatus(parsedArgs.statusFilePath, coordinatorStatus);
-  if (parsedArgs.pidFilePath) {
-    writeRunnerPidFile(parsedArgs.pidFilePath, process.pid);
-  }
 
   let shuttingDown = false;
   const requestShutdown = (reason: string): void => {
@@ -2354,12 +2670,16 @@ async function runMultiRunnerCoordinator(parsedArgs: ParsedArgs): Promise<void> 
       if (isPidAlive(existingPid)) {
         runtime.pid = existingPid;
         runtime.lastStatus = readRunnerStatusSnapshot(runtime.spec.statusFilePath);
+        runtime.lastSemanticProgressSignature = buildCoordinatorChildSemanticProgressSignature(runtime.lastStatus);
+        runtime.lastSemanticProgressAtMs = Date.now();
+        runtime.lastStatusHeartbeatAtMs = parseIsoTimestampMs(runtime.lastStatus?.lastUpdatedAt) ?? Date.now();
         continue;
       }
       spawnCoordinatorChild(parsedArgs, runtime);
     }
 
     while (true) {
+      const nowMs = Date.now();
       for (const runtime of childRuntimes) {
         runtime.lastStatus = readRunnerStatusSnapshot(runtime.spec.statusFilePath);
         const pidFromFile = readPidFile(runtime.spec.pidFilePath);
@@ -2371,12 +2691,21 @@ async function runMultiRunnerCoordinator(parsedArgs: ParsedArgs): Promise<void> 
           }
         }
 
+        updateCoordinatorChildProgressObservation(runtime, nowMs);
+        serviceCoordinatorChildSelfHeal(runtime, nowMs);
+
         const canRestart = !shuttingDown
           && parsedArgs.continuous
           && parsedArgs.maxIterations === null
           && (!runtime.lastStatus || runtime.lastStatus.phase !== 'paused');
         const processAlive = runtime.process ? runtime.process.exitCode === null : false;
         const pidAlive = isPidAlive(pidFromFile) || isPidAlive(runtime.pid);
+        if ((processAlive || pidAlive) && canRestart) {
+          const selfHealReason = evaluateCoordinatorChildSelfHealReason(runtime, nowMs);
+          if (selfHealReason) {
+            requestCoordinatorChildSelfHeal(runtime, selfHealReason, nowMs);
+          }
+        }
         if (!processAlive && !pidAlive && canRestart && Date.now() >= runtime.nextRestartAt) {
           runtime.restartCount += 1;
           spawnCoordinatorChild(parsedArgs, runtime);
@@ -2449,6 +2778,9 @@ async function runMultiRunnerCoordinator(parsedArgs: ParsedArgs): Promise<void> 
     process.off('SIGHUP', sighupHandler);
     if (parsedArgs.pidFilePath) {
       removeRunnerPidFile(parsedArgs.pidFilePath, process.pid);
+      if (boundRunnerPidFilePath === parsedArgs.pidFilePath) {
+        boundRunnerPidFilePath = undefined;
+      }
     }
   }
 }
@@ -2466,6 +2798,7 @@ async function main() {
     checkpointPath: parsedArgs.checkpointPath,
   });
   let runnerStatus = createBaseRunnerStatus(parsedArgs);
+  bindRunnerPidFile(parsedArgs.pidFilePath);
   writeRunnerStatus(parsedArgs.statusFilePath, runnerStatus);
   installRunnerLifecycleHooks(parsedArgs, () => runnerStatus);
 
@@ -2527,13 +2860,21 @@ async function main() {
         || resultRecord.startupFlushedSoonAfterReady
         || resultRecord.serverStartedThenExited
       );
+      const localhostApiRefusalObserved = Boolean(
+        resultRecord.localhostApiRefusalObserved
+        || resultRecord.localhostApiRefusalSignal
+        || resultRecord.blockedAppsApiLocalhostRefusalObserved,
+      );
+      const blockedAppsApiLocalhostRefusalNote = localhostApiRefusalObserved
+        ? ' The direct fix for apps/api/logs/provider-unique-errors.jsonl openai sendMessage ECONNREFUSED at http://localhost:3101/v1/responses remains out of scope in apps/api provider/runtime routing for this bounded control-plane iteration, and retrying the same openai sendMessage localhost target is unlikely to help until that blocked runtime is serving again.'
+        : '';
       const operatorFacingNoRunDeferReason = !sameThreadValidationObserved
         ? (
             sameThreadPendingObserved && partialReadinessObserved
-              ? `No fresh same-thread LangSmith control-plane run/trace was completed for current thread ${currentThreadId || 'unknown-thread'}; sampled LangSmith visibility is pending-only for thread ${sameThreadPendingThreadId || 'unknown-thread'} and startup evidence is partial readiness only because the control-plane registered graphs, started workers, or reported server-running before flushing/exiting. Cross-thread activity does not satisfy this iteration, so preserve a clear no-run defer reason until one fresh same-thread run/trace with explicit goal context and a passed smoke/typecheck result exists.`
+              ? `No fresh same-thread LangSmith control-plane run/trace was completed for current thread ${currentThreadId || 'unknown-thread'}; sampled LangSmith visibility is pending-only for thread ${sameThreadPendingThreadId || 'unknown-thread'} and startup evidence is partial readiness only because the control-plane registered graphs, started workers, or reported server-running before flushing/exiting.${blockedAppsApiLocalhostRefusalNote} Cross-thread activity does not satisfy this iteration, so preserve a clear no-run defer reason until one fresh same-thread run/trace with explicit goal context and a passed smoke/typecheck result exists.`
               :
             partialReadinessObserved
-              ? `No fresh same-thread LangSmith control-plane run/trace was observed for current thread ${currentThreadId || 'unknown-thread'} during this iteration; startup logs only provide partial readiness evidence because the control-plane registered graphs, started workers, or reported server-running before flushing/exiting. Preserve a no-run defer reason until the same thread emits a fresh completed LangSmith run/trace with explicit goal context and control-plane smoke/typecheck passes.`
+              ? `No fresh same-thread LangSmith control-plane run/trace was observed for current thread ${currentThreadId || 'unknown-thread'} during this iteration; startup logs only provide partial readiness evidence because the control-plane registered graphs, started workers, or reported server-running before flushing/exiting.${blockedAppsApiLocalhostRefusalNote} Preserve a no-run defer reason until the same thread emits a fresh completed LangSmith run/trace with explicit goal context and control-plane smoke/typecheck passes.`
               :             partialReadinessObserved
               ? `No fresh same-thread LangSmith control-plane run/trace was observed for thread ${runnerStatus.threadId}. Control-plane startup showed only partial readiness evidence (for example graph registration, worker startup, or server-running followed by an immediate flush/exit), so do not treat this iteration as validated yet.`
               :

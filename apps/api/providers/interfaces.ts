@@ -7,6 +7,10 @@ export interface ModelDefinition {
   created?: number;
   owned_by?: string;
   providers?: number;
+  active_providers?: number;
+  known_providers?: number;
+  cooling_down_providers?: number;
+  temporarily_unavailable_providers?: number;
   throughput?: number; // Represents tokens per second from the static file
   capabilities?: ModelCapability[]; // Supported modalities for the model
 }

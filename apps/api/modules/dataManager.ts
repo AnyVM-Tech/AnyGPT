@@ -144,6 +144,10 @@ export interface ModelDefinition {
     created: number;  // Add created field
     owned_by: string; // Add owned_by field
     providers: number; // Add providers field
+    active_providers?: number;
+    known_providers?: number;
+    cooling_down_providers?: number;
+    temporarily_unavailable_providers?: number;
     throughput?: number | null;
     capabilities?: string[];
 }
@@ -640,6 +644,14 @@ class DataManager {
             const latestErrorSource = redisLastErrorAt >= fsLastErrorAt ? baseRedis : baseFs;
             const fallbackErrorSource = latestErrorSource === baseRedis ? baseFs : baseRedis;
             const mergedLastErrorAt = Math.max(fsLastErrorAt, redisLastErrorAt) || undefined;
+            const mergedErrorFields = mergedLastErrorAt !== undefined
+                ? latestErrorSource
+                : {
+                    lastError: latestErrorSource.lastError || fallbackErrorSource.lastError,
+                    lastErrorCode: latestErrorSource.lastErrorCode || fallbackErrorSource.lastErrorCode,
+                    lastStatus: latestErrorSource.lastStatus ?? fallbackErrorSource.lastStatus,
+                    disabled_reason: latestErrorSource.disabled_reason || fallbackErrorSource.disabled_reason,
+                };
 
             const modelIds = new Set<string>([
                 ...Object.keys(baseFs.models || {}),
@@ -662,19 +674,19 @@ class DataManager {
                 avg_provider_latency: baseRedis.avg_provider_latency ?? baseFs.avg_provider_latency,
                 errors: Math.max(baseFs.errors || 0, baseRedis.errors || 0),
                 provider_score: baseRedis.provider_score ?? baseFs.provider_score,
-                ...((latestErrorSource.lastError || fallbackErrorSource.lastError)
-                    ? { lastError: latestErrorSource.lastError || fallbackErrorSource.lastError }
+                ...((mergedErrorFields.lastError)
+                    ? { lastError: mergedErrorFields.lastError }
                     : {}),
-                ...((latestErrorSource.lastErrorCode || fallbackErrorSource.lastErrorCode)
-                    ? { lastErrorCode: latestErrorSource.lastErrorCode || fallbackErrorSource.lastErrorCode }
+                ...((mergedErrorFields.lastErrorCode)
+                    ? { lastErrorCode: mergedErrorFields.lastErrorCode }
                     : {}),
-                ...(((latestErrorSource.lastStatus ?? fallbackErrorSource.lastStatus) !== null
-                    && (latestErrorSource.lastStatus ?? fallbackErrorSource.lastStatus) !== undefined)
-                    ? { lastStatus: latestErrorSource.lastStatus ?? fallbackErrorSource.lastStatus }
+                ...(((mergedErrorFields.lastStatus) !== null
+                    && (mergedErrorFields.lastStatus) !== undefined)
+                    ? { lastStatus: mergedErrorFields.lastStatus }
                     : {}),
                 ...(mergedLastErrorAt !== undefined ? { lastErrorAt: mergedLastErrorAt } : {}),
-                ...((baseRedis.disabled_reason || baseFs.disabled_reason)
-                    ? { disabled_reason: baseRedis.disabled_reason || baseFs.disabled_reason }
+                ...((mergedErrorFields.disabled_reason)
+                    ? { disabled_reason: mergedErrorFields.disabled_reason }
                     : {}),
             });
         }

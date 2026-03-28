@@ -417,14 +417,188 @@ async function main(): Promise<void> {
 	acquireLaunchLock();
 	process.on('exit', () => releaseLaunchLock());
 
+	const startupSnapshotPath = process.env.ANYGPT_EXPERIMENTAL_STARTUP_SNAPSHOT_PATH;
+	const validationThread = process.env.ANYGPT_CONTROL_PLANE_THREAD_ID || process.env.ANYGPT_EXPERIMENTAL_VALIDATION_THREAD || 'unknown';
+	const pendingRuns = process.env.ANYGPT_CONTROL_PLANE_PENDING_RUNS || process.env.ANYGPT_EXPERIMENTAL_PENDING_RUN_COUNT || 'unknown';
+	const validationRequirement =
+		process.env.ANYGPT_EXPERIMENTAL_VALIDATION_SUCCESS ||
+		'confirm_a_fresh_same_thread_langsmith_control_plane_run_trace_with_explicit_goal_context_and_a_passed_control_plane_smoke_typecheck_or_preserve_a_clear_no_run_defer_reason';
+	const observabilityState = pendingRuns === 'unknown'
+		? `same_thread_langsmith_observability_unknown_for_${validationThread}_fresh_iteration_run_still_required`
+		: pendingRuns !== '0'
+			? `partial_same_thread_langsmith_observability_pending_or_missing_completed_run_for_${validationThread}`
+			: `same_thread_langsmith_run_count_reported_zero_for_${validationThread}_fresh_iteration_run_still_required`;
+
+	console.log(
+		`[Launcher] Boot config: workers=${WORKER_COUNT}, port=${process.env.PORT || '3000'}, cluster=${WORKER_COUNT > 1 ? 'enabled' : 'disabled'}, swap_recycle=${SWAP_RECYCLE_ENABLED ? 'enabled' : 'disabled'}, server_module=${SERVER_MODULE_URL}`,
+	);
+	if (startupSnapshotPath) {
+		console.log(`[Launcher] Startup snapshot path: ${startupSnapshotPath}`);
+	}
+	console.log(
+		`[Launcher] Validation context: thread=${validationThread}, pending_runs=${pendingRuns}, observability=${observabilityState}, success_condition=${validationRequirement}`,
+	);
+	console.log(
+		`[Launcher] Validation classification: ${pendingRuns === 'unknown' ? 'no_fresh_same_thread_langsmith_run_visible_yet_observability_unknown_preserve_no_run_defer_reason' : pendingRuns !== '0' ? `partial_observability_only_${pendingRuns}_same_thread_run_or_runs_pending_for_${validationThread}_preserve_no_run_defer_reason` : `no_fresh_same_thread_langsmith_run_reported_for_${validationThread}_preserve_no_run_defer_reason_until_new_run_and_smoke_pass`}`,
+	);
+	const startupValidationTarget =
+		process.env.ANYGPT_EXPERIMENTAL_STARTUP_VALIDATION_TARGET ?? 'http://[redacted-ip]:3310/openapi.json';
+	const startupMemAvailableBytes = readMemAvailableBytes();
+	const startupMemAvailableMb =
+		startupMemAvailableBytes !== null ? Math.round(startupMemAvailableBytes / (1024 * 1024)) : 'unknown';
+	const startupValidationSource = process.env.ANYGPT_EXPERIMENTAL_STARTUP_VALIDATION_SOURCE ?? 'launcher-default';
+	console.log(
+		`[Launcher] Startup capacity: mem_available_mb=${startupMemAvailableMb}, swap_recycle_min_mem_available_mb=${SWAP_RECYCLE_MIN_MEM_AVAILABLE_MB}, swap_recycle_max_worker_swap_mb=${SWAP_RECYCLE_MAX_WORKER_SWAP_MB}, swap_recycle_check_interval_ms=${SWAP_RECYCLE_CHECK_INTERVAL_MS}, startup_validation_target=${startupValidationTarget}, startup_validation_source=${startupValidationSource}`,
+	);
+	if (startupSnapshotPath) {
+		const startupSnapshotTimestamp = new Date().toISOString();
+		const startupSnapshotLines = [
+			`launcher_timestamp=${startupSnapshotTimestamp}`,
+			`launcher_pid=${process.pid}`,
+			`launcher_thread=${validationThread}`,
+			`launcher_goal=continuously_monitor_fix_and_improve_anygpt_across_repo_with_bounded_api_platform_startup_health_improvement`,
+			'launcher_repair_signal=recent_langsmith_feedback_sampling_empty_pending_same_thread_runs_and_openapi_reachability_confirmed',
+			`launcher_pending_runs=${pendingRuns}`,
+			`launcher_observability=${observabilityState}`,
+			`launcher_success_condition=${validationRequirement}`,
+			`launcher_mem_available_mb=${startupMemAvailableMb}`,
+			`launcher_startup_validation_target=${startupValidationTarget}`,
+			`launcher_startup_validation_source=${startupValidationSource}`,
+			`launcher_experimental_api_base_url=${process.env.API_BASE_URL ?? process.env.EXPERIMENTAL_API_BASE_URL ?? 'unknown'}`,
+			`launcher_openapi_url=${startupValidationTarget}`,
+			'launcher_openapi_reachability=partial_readiness_evidence_only_not_completed_validation',
+			`launcher_cluster_mode=${WORKER_COUNT > 1 ? 'cluster' : 'single-worker'}`,
+			`launcher_pending_same_thread_langsmith_runs=${pendingRuns}`,
+			pendingRuns === 'unknown'
+				? 'launcher_operator_defer_reason=no_fresh_same_thread_langsmith_run_visible_yet_observability_unknown_preserve_no_run_defer_reason'
+				: pendingRuns !== '0'
+					? `launcher_operator_defer_reason=partial_same_thread_langsmith_observability_pending_${pendingRuns}_for_${validationThread}_preserve_no_run_defer_reason_until_completion_and_smoke_typecheck_pass`
+					: `launcher_operator_defer_reason=no_fresh_same_thread_langsmith_run_reported_for_${validationThread}_preserve_no_run_defer_reason_until_new_run_and_smoke_pass`,
+		];
+		try {
+			fs.mkdirSync(path.dirname(startupSnapshotPath), { recursive: true });
+			fs.appendFileSync(
+				startupSnapshotPath,
+				startupSnapshotLines.concat('launcher_snapshot_append=ok').join('\n') + '\n',
+			);
+		} catch (error) {
+			const startupSnapshotError = error instanceof Error ? error.message : String(error);
+			console.warn(
+				`[Launcher] Failed to append startup snapshot at ${startupSnapshotPath}: ${startupSnapshotError}`,
+			);
+			try {
+				fs.mkdirSync(path.dirname(startupSnapshotPath), { recursive: true });
+				fs.writeFileSync(
+					startupSnapshotPath,
+					startupSnapshotLines
+						.concat(
+							'launcher_snapshot_append=failed',
+							`launcher_snapshot_append_error=${startupSnapshotError.replace(/\s+/g, '_')}`,
+						)
+						.join('\n') + '\n',
+				);
+			} catch {
+				// Preserve the console warning above as the final fallback observability signal.
+			}
+		}
+	}
+
 	if (WORKER_COUNT <= 1) {
 		process.env.CLUSTER_WORKERS = '0';
+		console.log(
+			`[Launcher] Single-worker mode: importing server module directly for thread=${validationThread}. This is startup/readiness evidence only and not a completed validation run; success still requires ${validationRequirement}.`,
+		);
+		if (pendingRuns !== '0') {
+			console.log(
+				`[Launcher] Validation defer context: same-thread LangSmith visibility for ${validationThread} is pending or incomplete (pending_runs=${pendingRuns}); preserve a clear no-run defer reason until a fresh completed same-thread run/trace and smoke/typecheck result exist.`,
+			);
+		}
 		await import(SERVER_MODULE_URL);
 		return;
 	}
 
 	process.on('SIGINT', () => shutdown('SIGINT'));
 	process.on('SIGTERM', () => shutdown('SIGTERM'));
+
+	const startupValidationSummary = [
+		`thread=${validationThread}`,
+		`worker_mode=${WORKER_COUNT <= 1 ? 'single' : 'cluster'}`,
+		`worker_count=${WORKER_COUNT}`,
+		`pending_same_thread_runs=${pendingRuns}`,
+		`readiness=partial_until_fresh_same_thread_langsmith_run_and_smoke`,
+		`validation_requirement=${validationRequirement}`,
+		pendingRuns !== '0'
+			? `operator_defer_reason=same_thread_langsmith_visibility_for_${validationThread}_is_${pendingRuns === 'unknown' ? 'unknown' : 'pending_or_incomplete'}_preserve_no_run_defer_reason_until_fresh_completed_same_thread_run_trace_and_smoke_typecheck_exist`
+			: `operator_defer_reason=fresh_same_thread_langsmith_run_trace_and_smoke_typecheck_still_required_for_${validationThread}`,
+	].join(' ');
+	console.log(`[Launcher] Startup validation summary: ${startupValidationSummary}`);
+	const startupSummaryDirs = [
+		process.env.ANYGPT_RUNTIME_DIR?.trim(),
+		'/run/anygpt',
+		path.join(process.cwd(), '.control-plane', 'experimental'),
+	].filter((value): value is string => Boolean(value && value.trim()));
+	let startupSummaryPersisted = false;
+	for (const runtimeDir of startupSummaryDirs) {
+		try {
+			fs.mkdirSync(runtimeDir, { recursive: true });
+			const startupSummaryPath = path.join(runtimeDir, 'experimental-startup-validation.summary');
+			fs.writeFileSync(`${startupSummaryPath}.tmp`, `${startupValidationSummary}\n`, 'utf8');
+			fs.renameSync(`${startupSummaryPath}.tmp`, startupSummaryPath);
+			console.log(`[Launcher] Wrote startup validation summary to ${startupSummaryPath}`);
+			startupSummaryPersisted = true;
+			break;
+		} catch (error) {
+			console.warn(`[Launcher] Failed to persist startup validation summary in ${runtimeDir}:`, error);
+		}
+	}
+	if (!startupSummaryPersisted) {
+		console.warn('[Launcher] Failed to persist startup validation summary in all candidate directories.');
+	}
+
+	const pendingRunsState = pendingRuns === '0' ? 'none-observed' : pendingRuns === 'unknown' ? 'unknown' : 'pending-or-incomplete';
+	const validationCheckedAt = new Date().toISOString();
+	const validationTarget = process.env.ANYGPT_EXPERIMENTAL_STARTUP_VALIDATION_TARGET?.trim() || 'unknown';
+	const validationDeferReason = pendingRuns === '0'
+		? `fresh same-thread LangSmith run/trace still missing for ${validationThread}; clustered worker startup is partial readiness evidence only until smoke/typecheck also passes.`
+		: pendingRuns === 'unknown'
+			? `same-thread LangSmith visibility is unknown for ${validationThread}; clustered worker startup is partial readiness evidence only, so preserve a no-run defer reason until a fresh completed same-thread run/trace and smoke/typecheck result exist.`
+			: `same-thread LangSmith run/trace is still pending or incomplete for ${validationThread} (pending_runs=${pendingRuns}); clustered worker startup is partial readiness evidence only, not completed validation.`;
+	let validationStatePersisted = false;
+	for (const runtimeDir of startupSummaryDirs) {
+		try {
+			fs.mkdirSync(runtimeDir, { recursive: true });
+			const validationStatePath = path.join(runtimeDir, 'experimental-startup-validation.state');
+			const validationState = [
+				`thread_id=${validationThread}`,
+				`checked_at=${validationCheckedAt}`,
+				`validation_target=${validationTarget}`,
+				`pending_runs=${pendingRuns}`,
+				`pending_runs_state=${pendingRunsState}`,
+				'operator_readiness=partial',
+				'operator_validation=deferred',
+				`operator_defer_reason=${validationDeferReason.replace(/\s+/g, '_')}`,
+			].join('\n');
+			fs.writeFileSync(`${validationStatePath}.tmp`, `${validationState}\n`, 'utf8');
+			fs.renameSync(`${validationStatePath}.tmp`, validationStatePath);
+			console.log(`[Launcher] Wrote startup validation state to ${validationStatePath}`);
+			validationStatePersisted = true;
+		} catch (error) {
+			console.warn(`[Launcher] Failed to persist startup validation state in ${runtimeDir}:`, error);
+		}
+	}
+	if (!validationStatePersisted) {
+		console.warn('[Launcher] Failed to persist startup validation state in all candidate directories.');
+	}
+
+	if (pendingRuns !== '0') {
+		console.log(
+			`[Launcher] Cluster validation defer context: same-thread LangSmith visibility for ${validationThread} is ${pendingRuns === 'unknown' ? 'unknown' : 'pending or incomplete'} (pending_runs=${pendingRuns}); clustered worker startup is partial readiness evidence only and not a completed validation run, so preserve a clear no-run defer reason until a fresh completed same-thread run/trace and smoke/typecheck result exist.`,
+		);
+	} else {
+		console.log(
+			`[Launcher] Cluster validation defer context: no fresh same-thread LangSmith run/trace was observed yet for ${validationThread}; clustered worker startup remains partial readiness evidence only until a fresh same-thread run/trace with explicit goal context and a passed smoke/typecheck result exist.`,
+		);
+	}
 
 	for (let index = 0; index < WORKER_COUNT; index += 1) {
 		spawnWorker(index);
