@@ -38,7 +38,6 @@ elif grep -q '"frontend:status:snapshot:thread"' "${ROOT_DIR}/package.json" 2>/d
 	DEFAULT_WORKSPACE_SURFACE_COMMAND="frontend:status:snapshot:thread"
 elif grep -q '"workspace:surface:summary"' "${ROOT_DIR}/package.json" 2>/dev/null; then
 	DEFAULT_WORKSPACE_SURFACE_COMMAND="workspace:surface:summary"
-fi	DEFAULT_WORKSPACE_SURFACE_COMMAND="frontend:install:status"
 fi
 if [[ "$#" -eq 0 ]]; then
 	echo "Usage: bash ./scripts/with-bun-path.sh <command> [args...]" >&2
