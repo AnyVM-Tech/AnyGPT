@@ -13,6 +13,7 @@
 				"SEARXNG_BASE_URL": "http://10.87.212.49:8080"
 			},
 			"alwaysAllow": [
+				"searxng_web_search",
 				"brave_web_search",
 				"brave_local_search"
 			]

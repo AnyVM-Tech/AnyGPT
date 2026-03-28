@@ -2,7 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CONTROL_DIR="$ROOT_DIR/apps/langgraph-control-plane/.control-plane"
+DEFAULT_RUNTIME_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/anygpt/langgraph-control-plane"
+CONTROL_DIR="${CONTROL_PLANE_RUNTIME_DIR:-$DEFAULT_RUNTIME_DIR}"
 ENV_FILE="$CONTROL_DIR/live-autonomous-runner.env"
 LOG_FILE="$CONTROL_DIR/live-autonomous-runner.log"
 
@@ -20,6 +21,7 @@ fi
 : "${CONTROL_PLANE_AUTONOMOUS_EDIT_ALLOWLIST:=apps/langgraph-control-plane,apps/api,apps/homepage,apps/ui,scripts,README.md,SETUP.md,package.json,turbo.json,pnpm-workspace.yaml,tsconfig.json,bun.sh}"
 : "${CONTROL_PLANE_AUTONOMOUS_EDIT_DENYLIST:=}"
 : "${CONTROL_PLANE_REPO_ROOT:=$ROOT_DIR}"
+: "${CONTROL_PLANE_RUNTIME_DIR:=$CONTROL_DIR}"
 : "${CONTROL_PLANE_AUTONOMOUS_STATUS_FILE:=$CONTROL_DIR/live-autonomous-runner-status.json}"
 : "${CONTROL_PLANE_AUTONOMOUS_CHECKPOINT_FILE:=$CONTROL_DIR/live-autonomous-runner-checkpoints.json}"
 : "${CONTROL_PLANE_AUTONOMOUS_PID_FILE:=$CONTROL_DIR/live-autonomous-runner.pid}"

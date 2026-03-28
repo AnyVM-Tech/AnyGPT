@@ -1715,9 +1715,10 @@ export function isInsufficientCreditsError(error: any): boolean {
 export function isInvalidProviderCredentialError(error: any): boolean {
 const message = String(error?.message || error || '').toLowerCase();
 const status = Number((error as any)?.status || (error as any)?.statusCode || (error as any)?.response?.status || 0);
-const code = String((error as any)?.code || (error as any)?.error?.code || '').toLowerCase();
-const errorType = String((error as any)?.type || (error as any)?.error?.type || '').toLowerCase();
-if (!message && status === 0 && !code && !errorType) return false;
+const code = String((error as any)?.code || (error as any)?.error?.code || (error as any)?.response?.data?.error?.code || '').toLowerCase();
+const errorType = String((error as any)?.type || (error as any)?.error?.type || (error as any)?.response?.data?.error?.type || '').toLowerCase();
+const providerStatus = String((error as any)?.error?.status || (error as any)?.response?.data?.error?.status || '').toLowerCase();
+if (!message && status === 0 && !code && !errorType && !providerStatus) return false;
 return (
 	status === 401 ||
 	status === 403 ||
@@ -1725,6 +1726,9 @@ return (
 	code === 'invalid key' ||
 	code === 'invalid_key' ||
 	code === 'key_invalid' ||
+	code === 'invalidapikey' ||
+	code === 'invalidtoken' ||
+	code === 'invalid_token' ||
 	code === 'unauthorized' ||
 	code === 'forbidden' ||
 	code === 'permission_denied' ||
@@ -1734,15 +1738,324 @@ return (
 	code === 'invalid_credential' ||
 	code === 'invalid_credentials' ||
 	code === 'authenticationerror' ||
+	code === 'authentication_error' ||
+	code === 'authentication_failed' ||
+	providerStatus === 'permission_denied' ||
+	providerStatus === 'unauthenticated' ||
+	providerStatus === 'unauthorized' ||
+	providerStatus === 'forbidden' ||
+	message.includes('incorrect api key provided') ||
+	message.includes('invalid api key') ||
+	message.includes('invalid_api_key') ||
+	message.includes('api key provided') ||
+	message.includes('api key is invalid') ||
+	message.includes('invalid authentication') ||
+	message.includes('authentication failed') ||
+	message.includes('authentication error') ||
+	message.includes('invalid credentials') ||
+	message.includes('invalid credential') ||
+	message.includes('unauthorized') ||
+	message.includes('permission denied') ||
+	message.includes('forbidden') ||
+	message.includes('incorrect api key provided') ||
+	message.includes('invalid api key') ||
+	message.includes('invalid_api_key') ||
+	message.includes('invalid authentication') ||
+	message.includes('authentication failed') ||
+	message.includes('invalid credentials') ||
+	message.includes('invalid credential') ||
+	message.includes('unauthorized') ||
+	message.includes('api key provided') ||
+	message.includes('api key is invalid') ||
+	message.includes('the api key is invalid') ||
+	message.includes('provided api key') ||
+	code === 'bad_api_key' ||
+	code === 'bad_api_token' ||
+	code === 'api_key_invalid' ||
+	code === 'api_key_not_valid' ||
+	code === 'invalid_api_token' ||
+	code === 'invalid_auth_token' ||
+	code === 'invalid_bearer_token' ||
+	code === 'invalid_signature' ||
+	code === 'signature_invalid' ||
+	code === 'access_denied' ||
+	code === 'accessdenied' ||
+	code === 'unauthenticated' ||
+	message.includes('incorrect api key provided') ||
+	message.includes('invalid api key') ||
+	message.includes('invalid api-key') ||
+	message.includes('api key provided') ||
+	message.includes('authorization header') ||
+	message.includes('malformed authorization header') ||
+	providerStatus === 'unauthenticated' ||
+	providerStatus === 'permission_denied' ||
+	errorType === 'authentication_error' ||
+	errorType === 'invalid_request_error' ||
+	message.includes('incorrect api key provided') ||
+	message.includes('invalid api key') ||
+	message.includes('invalid api-key') ||
+	message.includes('invalid authentication') ||
+	message.includes('invalid credentials') ||
+	message.includes('authentication failed') ||
+	message.includes('failed authentication') ||
+	message.includes('unauthorized') ||
+	message.includes('not authorized') ||
+	message.includes('forbidden') ||
+	message.includes('permission denied') ||
+	message.includes('api key provided is invalid') ||
+	message.includes('api key is invalid') ||
+	message.includes('api key not valid') ||
+	message.includes('api key has expired') ||
+	message.includes('invalid token') ||
+	message.includes('token is invalid') ||
+	code === 'incorrect_api_key' ||
+	code === 'bad_api_key' ||
+	code === 'bad_api_token' ||
+	code === 'api_key_invalid' ||
+	code === 'api_key_not_found' ||
+	code === 'invalid_bearer_token' ||
+	code === 'invalid_signature' ||
+	code === 'signature_invalid' ||
+	code === 'organization_deactivated' ||
+	code === 'account_deactivated' ||
+	errorType === 'invalid_request_error' && (
+		message.includes('incorrect api key provided') ||
+		message.includes('invalid api key') ||
+		message.includes('incorrect api key')
+	) ||
+	message.includes('incorrect api key provided') ||
+	message.includes('invalid api key provided') ||
+	message.includes('invalid api key') ||
+	message.includes('invalid api token') ||
+	message.includes('invalid authentication') ||
+	message.includes('authentication failed') ||
+	message.includes('authentication error') ||
+	message.includes('unauthorized') ||
+	message.includes('forbidden') ||
+	message.includes('permission denied') ||
+	message.includes('api key not found') ||
+	message.includes('invalid bearer token') ||
+	message.includes('invalid signature') ||
+	message.includes('signature invalid') ||
+	message.includes('incorrect api key provided') ||
+	message.includes('invalid api key') ||
+	message.includes('invalid api-key') ||
+	message.includes('invalid authentication') ||
+	message.includes('invalid credentials') ||
+	message.includes('authentication failed') ||
+	message.includes('authentication error') ||
+	message.includes('unauthorized') ||
+	message.includes('api key provided') ||
+	providerStatus === 'unauthenticated' ||
+	providerStatus === 'permission_denied' ||
+	errorType === 'authentication_error' ||
+	errorType === 'invalid_request_error' ||
+	message.includes('incorrect api key provided') ||
+	message.includes('invalid api key') ||
+	message.includes('invalid api-key') ||
+	message.includes('invalid authentication') ||
+	message.includes('invalid credentials') ||
+	message.includes('authentication failed') ||
+	message.includes('authentication error') ||
+	message.includes('unauthorized') ||
+	message.includes('forbidden') ||
+	message.includes('api key provided is invalid') ||
+	message.includes('the api key provided is invalid') ||
+	message.includes('you didn\'t provide an api key') ||
+	message.includes('you did not provide an api key') ||
+	message.includes('no api key provided') ||
+	message.includes('api key not found') ||
+	message.includes('invalid or missing api key') ||
+	providerStatus === 'unauthenticated' ||
+	providerStatus === 'permission_denied' ||
+	errorType === 'authentication_error' ||
+	errorType === 'authenticationerror' ||
+	errorType === 'invalid_request_error' ||
+	message.includes('incorrect api key provided') ||
+	message.includes('invalid api key') ||
+	message.includes('invalid api-key') ||
+	message.includes('invalid authentication') ||
+	message.includes('invalid credentials') ||
+	message.includes('invalid credential') ||
+	message.includes('authentication failed') ||
+	message.includes('authentication error') ||
+	message.includes('unauthorized') ||
+	message.includes('forbidden') ||
+	message.includes('permission denied') ||
+	message.includes('api key provided')
+		&& (message.includes('incorrect') || message.includes('invalid')) ||
+	providerStatus === 'unauthenticated' ||
+	providerStatus === 'permission_denied' ||
+	message.includes('incorrect api key provided') ||
+	message.includes('invalid api key') ||
+	message.includes('invalid_api_key') ||
+	message.includes('invalid authentication') ||
+	message.includes('invalid credentials') ||
+	message.includes('authentication failed') ||
+	message.includes('failed authentication') ||
+	message.includes('api key not valid') ||
+	message.includes('api key is invalid') ||
+	message.includes('the api key is invalid') ||
+	message.includes('expired api key') ||
+	message.includes('malformed api key') ||
+	code === 'auth_failed' ||
+	code === 'bad_api_key' ||
+	code === 'billing_not_active' ||
+	code === 'account_not_active' ||
+	code === 'organization_deactivated' ||
+	providerStatus === 'permission_denied' ||
+	providerStatus === 'unauthenticated' ||
+	providerStatus === 'unauthorized' ||
+	errorType === 'invalid_request_error' ||
+	errorType === 'authentication_error' ||
+	errorType === 'authenticationerror' ||
+	message.includes('incorrect api key provided') ||
+	message.includes('invalid api key') ||
+	message.includes('invalid_api_key') ||
+	message.includes('invalid authentication') ||
+	message.includes('invalid credentials') ||
+	message.includes('authentication failed') ||
+	message.includes('api key provided') ||
+	message.includes('you can find your api key at') ||
+	message.includes('unauthorized') ||
+	message.includes('permission denied') ||
+	message.includes('forbidden') ||
+	message.includes('account not active') ||
+	message.includes('billing not active') ||
+	providerStatus === 'permission_denied' ||
+	providerStatus === 'unauthenticated' ||
+	providerStatus === 'unauthorized' ||
+	errorType === 'invalid_request_error' ||
+	errorType === 'authentication_error' ||
+	message.includes('incorrect api key provided') ||
+	message.includes('invalid api key') ||
+	message.includes('invalid_api_key') ||
+	message.includes('api key provided') ||
+	message.includes('unauthorized') ||
+	message.includes('authentication failed') ||
+	message.includes('authentication error') ||
+	message.includes('invalid authentication') ||
+	message.includes('invalid credentials') ||
+	message.includes('permission denied') ||
+	message.includes('forbidden') ||
+	message.includes('api key not valid') ||
+	message.includes('api key is invalid') ||
+	message.includes('the api key is invalid') ||
+	message.includes('the provided api key is invalid') ||
+	providerStatus === 'unauthenticated' ||
+	providerStatus === 'permission_denied' ||
+	errorType === 'authentication_error' ||
+	errorType === 'authenticationerror' ||
+	errorType === 'invalid_request_error' ||
+	message.includes('incorrect api key provided') ||
+	message.includes('invalid api key') ||
+	message.includes('invalid_api_key') ||
+	message.includes('api key provided is invalid') ||
+	message.includes('api key is invalid') ||
+	message.includes('api key not valid') ||
+	message.includes('invalid authentication') ||
+	message.includes('authentication failed') ||
+	message.includes('failed to authenticate') ||
+	message.includes('unauthorized') ||
+	message.includes('not authorized') ||
+	message.includes('forbidden') ||
+	code === 'account_deactivated' ||
 	errorType === 'invalid_api_key' ||
 	errorType === 'authentication_error' ||
+	errorType === 'authenticationfailed' ||
+	providerStatus === 'permission_denied' ||
+	providerStatus === 'unauthenticated' ||
+	message.includes('incorrect api key provided') ||
+	message.includes('invalid api key') ||
+	message.includes('invalid_api_key') ||
+	message.includes('invalid authentication') ||
+	message.includes('invalid credentials') ||
+	message.includes('authentication failed') ||
+	message.includes('unauthorized') ||
+	message.includes('api key provided is invalid') ||
+	message.includes('the api key provided is invalid') ||
+	errorType === 'invalid_authentication' ||
+	errorType === 'billing_not_active' ||
+	errorType === 'organization_deactivated' ||
+	errorType === 'account_deactivated' ||
+	message.includes('incorrect api key provided') ||
+	message.includes('invalid api key') ||
+	message.includes('invalid_api_key') ||
+	message.includes('api key provided') ||
+	message.includes('unauthorized') ||
+	message.includes('authentication failed') ||
+	message.includes('authentication error') ||
+	message.includes('invalid authentication') ||
+	message.includes('invalid credentials') ||
+	message.includes('invalid credential') ||
+	message.includes('bad api key') ||
+	message.includes('permission denied') ||
+	message.includes('forbidden') ||
 	message.includes('api key not found') ||
 	message.includes('api key not valid') ||
+	message.includes('incorrect api key provided') ||
+	message.includes('your account is not active') ||
+	message.includes('account is not active') ||
 	message.includes('api key expired') ||
 	message.includes('please renew the api key') ||
 	message.includes('incorrect api key provided') ||
 	message.includes('invalid api key') ||
+	message.includes('invalid_api_key') ||
+	message.includes('key_invalid') ||
+	message.includes('unauthorized') ||
+	message.includes('forbidden') ||
+	message.includes('account is not active') ||
+	message.includes('authentication failed') ||
+	message.includes('invalid api key') ||
+	message.includes('invalid_api_key') ||
+	message.includes('incorrect api key') ||
+	message.includes('unauthorized') ||
+	message.includes('authentication failed') ||
+	message.includes('authentication error') ||
 	message.includes('invalid authentication') ||
+	message.includes('invalid credentials') ||
+	message.includes('permission denied') ||
+	message.includes('forbidden') ||
+	message.includes('invalid api key') ||
+	message.includes('invalid_api_key') ||
+	message.includes('incorrect api key') ||
+	message.includes('invalid authentication') ||
+	message.includes('authentication failed') ||
+	message.includes('unauthorized') ||
+	message.includes('forbidden') ||
+	message.includes('permission denied') ||
+	message.includes('incorrect api key provided') ||
+	message.includes('invalid api key') ||
+	message.includes('invalid authentication') ||
+	message.includes('invalid credentials') ||
+	message.includes('invalid credential') ||
+	message.includes('authentication failed') ||
+	message.includes('authentication error') ||
+	message.includes('unauthorized') ||
+	message.includes('forbidden') ||
+	message.includes('permission denied') ||
+	message.includes('invalid credentials') ||
+	message.includes('invalid credential') ||
+	message.includes('invalid token') ||
+	message.includes('invalid bearer token') ||
+	message.includes('invalid authorization') ||
+	message.includes('authentication failed') ||
+	message.includes('authentication error') ||
+	message.includes('authorization failed') ||
+	message.includes('unauthorized') ||
+	message.includes('forbidden') ||
+	message.includes('access denied') ||
+	message.includes('invalid api key provided') ||
+	message.includes('invalid_api_key') ||
+	message.includes('key_invalid') ||
+	message.includes('unauthorized') ||
+	message.includes('unauthorized request') ||
+	message.includes('authentication failed') ||
+	message.includes('authentication error') ||
+	message.includes('invalid credentials') ||
+	message.includes('invalid credential') ||
+	message.includes('access token expired') ||
+	message.includes('token expired') ||
 	message.includes('invalid_api_key') ||
 	message.includes('invalid api credentials') ||
 	message.includes('invalid credentials') ||
@@ -3762,7 +4075,25 @@ export function isToolUnsupportedError(error: any): boolean {
 		message.includes('rate limit/timeout: switching provider') ||
 		message.includes('timeout: switching provider') ||
 		message.includes('switching provider') ||
+		message.includes('failed to process request after ') ||
+		message.includes('provider attempt(s)') ||
+		message.includes('provider attempts') ||
+		message.includes('last provider:') ||
+		message.includes('cause: api call failed: timeout') ||
+		message.includes('last provider error summary') ||
+		message.includes('api call failed: timeout') ||
+		message.includes('api call failed: timed out') ||
+		message.includes('unsupported parameter') ||
+		message.includes('is not supported with this model') ||
+		message.includes('not supported with this model') ||
+		message.includes('unsupported value for') ||
+		message.includes('does not support this parameter') ||
+		message.includes('request timed out') ||
+		message.includes('upstream request timed out') ||
 		message.includes('timeout of ') ||
+		message.includes('etimedout') ||
+		message.includes('econnreset') ||
+		message.includes('socket hang up') ||
 		message.includes('timed out') ||
 		message.includes('timedout') ||
 		message.includes('etimedout') ||
@@ -3772,6 +4103,17 @@ export function isToolUnsupportedError(error: any): boolean {
 		message.includes('upstream request timeout') ||
 		message.includes('upstream timed out') ||
 		message.includes('upstream timeout') ||
+		message.includes('timeout of <duration> exceeded') ||
+		message.includes('timeout exceeded') ||
+		message.includes('timed out after') ||
+		message.includes('failed to process request after') ||
+		message.includes('timeout of') ||
+		message.includes('timed out after') ||
+		message.includes('request timed out') ||
+		message.includes('operation timed out') ||
+		message.includes('connection timed out') ||
+		message.includes('read timed out') ||
+		message.includes('socket hang up') ||
 		message.includes('timeout of <duration> exceeded') ||
 		message.includes('timeout exceeded') ||
 		message.includes('timed out after') ||

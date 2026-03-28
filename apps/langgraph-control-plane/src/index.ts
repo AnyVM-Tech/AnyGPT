@@ -239,6 +239,9 @@ type CoordinatorChildSpec = {
   id: string;
   label: string;
   scopes: string[];
+  intervalMs: number;
+  maxIterations: number | null;
+  respawnDelayMs: number;
   editAllowlist: string[];
   checkpointPath: string;
   statusFilePath: string;
@@ -253,6 +256,7 @@ type CoordinatorChildRuntime = {
   process?: ChildProcess;
   logStream?: fs.WriteStream;
   pid?: number;
+  lastSpawnedAtMs?: number;
   restartCount: number;
   lastExitCode?: number | null;
   lastExitSignal?: NodeJS.Signals | null;
@@ -282,6 +286,7 @@ const DEFAULT_CONTROL_PLANE_EXPERIMENTAL_SERVICE = 'anygpt-experimental.service'
 const DEFAULT_CONTROL_PLANE_PRODUCTION_SERVICE = 'anygpt.service';
 const DEFAULT_CONTINUOUS_INTERVAL_MS = 1_000;
 const RUNNER_STATUS_HEARTBEAT_MS = 5_000;
+const RUNNER_STATUS_STREAM_WRITE_THROTTLE_MS = 2_000;
 const RUNNER_STATUS_TRANSIENT_SUMMARY_NOTES = [
   'Lane inactive. No live PID was found for this status file.',
   'Child autonomous lanes are still active; status was reattached after coordinator PID drift.',
@@ -306,6 +311,10 @@ const RUNNER_CHECKPOINT_HISTORY_LIMIT = (() => {
 })();
 const MULTI_RUNNER_COORDINATOR_POLL_MS = 2_000;
 const MULTI_RUNNER_RESTART_DELAY_MS = 1_500;
+const MULTI_RUNNER_BACKGROUND_ACTIVE_CAP = (() => {
+  const configured = Number(process.env.CONTROL_PLANE_MULTI_RUNNER_BACKGROUND_ACTIVE_CAP ?? 1);
+  return Math.max(0, Number.isFinite(configured) ? Math.floor(configured) : 1);
+})();
 const MULTI_RUNNER_SELF_HEAL_STATUS_STALE_MS = (() => {
   const configured = Number(process.env.CONTROL_PLANE_MULTI_RUNNER_SELF_HEAL_STATUS_STALE_MS ?? 60_000);
   return Math.max(15_000, Number.isFinite(configured) ? Math.floor(configured) : 60_000);
@@ -332,6 +341,10 @@ const MULTI_RUNNER_SELF_HEAL_TERM_GRACE_MS = (() => {
 })();
 
 let boundRunnerPidFilePath: string | undefined;
+const runnerStatusWriteCache = new Map<string, {
+  lastWriteAtMs: number;
+  lastComparable: string;
+}>();
 
 function loadEnvForControlPlane(repoRoot: string): void {
   const candidates = [
@@ -776,8 +789,27 @@ function writeRunnerStatus(statusFilePath: string, status: RunnerStatus): void {
         ...status,
         summary: nextSummary,
       };
+  const cacheKey = path.resolve(statusFilePath);
+  const comparableStatus = {
+    ...nextStatus,
+    lastUpdatedAt: '',
+  };
+  const comparable = JSON.stringify(comparableStatus);
+  const nowMs = Date.now();
+  const previous = runnerStatusWriteCache.get(cacheKey);
+  if (
+    nextStatus.phase === 'streaming'
+    && previous
+    && nowMs - previous.lastWriteAtMs < RUNNER_STATUS_STREAM_WRITE_THROTTLE_MS
+  ) {
+    return;
+  }
   fs.writeFileSync(tempPath, JSON.stringify(nextStatus, null, 2), 'utf8');
   fs.renameSync(tempPath, statusFilePath);
+  runnerStatusWriteCache.set(cacheKey, {
+    lastWriteAtMs: nowMs,
+    lastComparable: comparable,
+  });
 }
 
 function writeRunnerPidFile(pidFilePath: string, pid: number): void {
@@ -901,12 +933,23 @@ function resolveLangSmithRunnerStatusSeed(): Partial<RunnerStatus> {
   };
 }
 
-function readPersistedLangSmithRunnerStatusSeed(statusFilePath: string): Partial<RunnerStatus> {
+function readPersistedLangSmithRunnerStatusSeed(
+  statusFilePath: string,
+  currentThreadId?: string,
+): Partial<RunnerStatus> {
   if (!fs.existsSync(statusFilePath)) return {};
 
   try {
     const parsed = JSON.parse(fs.readFileSync(statusFilePath, 'utf8')) as Partial<RunnerStatus> | null;
     if (!parsed || typeof parsed !== 'object') return {};
+    const persistedThreadId = typeof parsed.threadId === 'string' && parsed.threadId.trim()
+      ? parsed.threadId.trim()
+      : '';
+    const shouldCarryFailureHistory = Boolean(
+      currentThreadId
+      && persistedThreadId
+      && persistedThreadId === currentThreadId,
+    );
 
     const accessibleWorkspaceNames = Array.isArray(parsed.langSmithAccessibleWorkspaceNames)
       ? parsed.langSmithAccessibleWorkspaceNames
@@ -914,13 +957,13 @@ function readPersistedLangSmithRunnerStatusSeed(statusFilePath: string): Partial
           .filter(Boolean)
           .slice(0, 10)
       : undefined;
-    const recentAutonomousEditFailures = Array.isArray(parsed.recentAutonomousEditFailures)
+    const recentAutonomousEditFailures = shouldCarryFailureHistory && Array.isArray(parsed.recentAutonomousEditFailures)
       ? parsed.recentAutonomousEditFailures
           .map((entry) => AppliedAutonomousEditSchema.safeParse(entry))
           .flatMap((result) => result.success ? [result.data] : [])
           .slice(-4)
       : undefined;
-    const recentAutonomousLearningNotes = Array.isArray(parsed.recentAutonomousLearningNotes)
+    const recentAutonomousLearningNotes = shouldCarryFailureHistory && Array.isArray(parsed.recentAutonomousLearningNotes)
       ? parsed.recentAutonomousLearningNotes
           .map((entry: unknown) => String(entry || '').trim())
           .filter(Boolean)
@@ -1117,7 +1160,7 @@ function createBaseRunnerStatus(parsedArgs: ParsedArgs): RunnerStatus {
     || DEFAULT_CONTROL_PLANE_EXPERIMENTAL_API_BASE_URL,
   ).trim() || DEFAULT_CONTROL_PLANE_EXPERIMENTAL_API_BASE_URL;
   const langSmithRunnerStatusSeed = {
-    ...readPersistedLangSmithRunnerStatusSeed(parsedArgs.statusFilePath),
+    ...readPersistedLangSmithRunnerStatusSeed(parsedArgs.statusFilePath, parsedArgs.threadId),
     ...readPersistedLangSmithCheckpointSeed(parsedArgs.checkpointPath, parsedArgs.threadId),
     ...resolveLangSmithRunnerStatusSeed(),
   };
@@ -2132,7 +2175,11 @@ async function runGraphOnce(
 
 function buildCoordinatorChildSpecs(parsedArgs: ParsedArgs): CoordinatorChildSpec[] {
   const requestedScopes = new Set(parsedArgs.scopes.map((scope) => String(scope || '').trim().toLowerCase()).filter(Boolean));
-  const laneTemplates: Array<{ id: string; label: string; scopes: string[]; editAllowlist: string[] }> = [];
+  const laneTemplates: Array<{ id: string; label: string; scopes: string[]; editAllowlist: string[]; intervalMs?: number }> = [];
+  const baseIntervalMs = Math.max(1_000, parsedArgs.intervalMs);
+  const idleSurfaceRespawnDelayMs = Math.max(baseIntervalMs * 30, 30_000);
+  const researchRespawnDelayMs = Math.max(baseIntervalMs * 60, 60_000);
+  const apiBackgroundRespawnDelayMs = Math.max(baseIntervalMs * 10, 10_000);
 
   const includeApiFamilyLanes = requestedScopes.has('repo') || requestedScopes.has('api') || requestedScopes.has('api-experimental');
   const includeRepoSurfaceFamilyLanes = requestedScopes.has('repo') || requestedScopes.has('repo-surface');
@@ -2174,6 +2221,7 @@ function buildCoordinatorChildSpecs(parsedArgs: ParsedArgs): CoordinatorChildSpe
       id: 'api-data',
       label: 'API Data & Model Sync',
       scopes: ['api-data'],
+      intervalMs: Math.max(baseIntervalMs * 2, 2_000),
       editAllowlist: [
         'apps/api/models.json',
         'apps/api/pricing.json',
@@ -2194,6 +2242,7 @@ function buildCoordinatorChildSpecs(parsedArgs: ParsedArgs): CoordinatorChildSpe
       id: 'api-platform',
       label: 'API Platform & Validation',
       scopes: ['api-platform'],
+      intervalMs: Math.max(baseIntervalMs * 2, 2_000),
       editAllowlist: [
         'apps/api/server.ts',
         'apps/api/server.launcher.bun.ts',
@@ -2209,6 +2258,14 @@ function buildCoordinatorChildSpecs(parsedArgs: ParsedArgs): CoordinatorChildSpe
       id: 'control-plane',
       label: 'Control Plane',
       scopes: ['control-plane'],
+      intervalMs: Math.max(baseIntervalMs * 2, 2_000),
+      editAllowlist: ['apps/langgraph-control-plane'],
+    });
+    laneTemplates.push({
+      id: 'research-scout',
+      label: 'Research Scout',
+      scopes: ['research-scout'],
+      intervalMs: Math.max(baseIntervalMs * 10, 10_000),
       editAllowlist: ['apps/langgraph-control-plane'],
     });
   }
@@ -2218,18 +2275,21 @@ function buildCoordinatorChildSpecs(parsedArgs: ParsedArgs): CoordinatorChildSpe
       id: 'workspace-surface',
       label: 'Workspace Surface',
       scopes: ['workspace-surface'],
+      intervalMs: Math.max(baseIntervalMs * 5, 5_000),
       editAllowlist: ['package.json', 'turbo.json', 'bun.sh', 'README.md', 'SETUP.md', 'pnpm-workspace.yaml', 'tsconfig.json', 'scripts'],
     });
     laneTemplates.push({
       id: 'homepage-surface',
       label: 'Homepage Surface',
       scopes: ['homepage-surface'],
+      intervalMs: Math.max(baseIntervalMs * 5, 5_000),
       editAllowlist: ['apps/homepage'],
     });
     laneTemplates.push({
       id: 'ui-surface',
       label: 'UI Surface',
       scopes: ['ui-surface'],
+      intervalMs: Math.max(baseIntervalMs * 5, 5_000),
       editAllowlist: ['apps/ui'],
     });
   }
@@ -2239,6 +2299,7 @@ function buildCoordinatorChildSpecs(parsedArgs: ParsedArgs): CoordinatorChildSpe
       id: 'primary',
       label: 'Primary',
       scopes: parsedArgs.scopes,
+      intervalMs: baseIntervalMs,
       editAllowlist: parsedArgs.editAllowlist,
     });
   }
@@ -2257,6 +2318,27 @@ function buildCoordinatorChildSpecs(parsedArgs: ParsedArgs): CoordinatorChildSpe
       id: laneId,
       label: lane.label,
       scopes: lane.scopes,
+      intervalMs: typeof lane.intervalMs === 'number' && Number.isFinite(lane.intervalMs)
+        ? Math.max(1_000, Math.floor(lane.intervalMs))
+        : baseIntervalMs,
+      maxIterations: laneId === 'research-scout'
+        ? 1
+        : laneId === 'control-plane'
+          ? 1
+        : ['workspace-surface', 'homepage-surface', 'ui-surface'].includes(laneId)
+          ? 1
+          : ['api-data', 'api-platform'].includes(laneId)
+            ? 1
+            : parsedArgs.maxIterations,
+      respawnDelayMs: laneId === 'research-scout'
+        ? researchRespawnDelayMs
+        : laneId === 'control-plane'
+          ? apiBackgroundRespawnDelayMs
+        : ['workspace-surface', 'homepage-surface', 'ui-surface'].includes(laneId)
+          ? idleSurfaceRespawnDelayMs
+          : ['api-data', 'api-platform'].includes(laneId)
+            ? apiBackgroundRespawnDelayMs
+            : MULTI_RUNNER_RESTART_DELAY_MS,
       editAllowlist: childAllowlist,
       checkpointPath,
       statusFilePath,
@@ -2279,6 +2361,8 @@ function buildCoordinatorChildArgs(parsedArgs: ParsedArgs, spec: CoordinatorChil
     ...parsedArgs,
     scopes: spec.scopes,
     threadId: spec.threadId,
+    intervalMs: spec.intervalMs,
+    maxIterations: spec.maxIterations,
     multiRunner: false,
     coordinatorChildId: spec.id,
     coordinatorParentThreadId: parsedArgs.threadId,
@@ -2300,12 +2384,24 @@ function spawnCoordinatorChild(parsedArgs: ParsedArgs, runtime: CoordinatorChild
     { encoding: 'utf8', flag: logFlags },
   );
 
+  const childEnv: Record<string, string> = {
+    ...process.env,
+    CONTROL_PLANE_COORDINATED_RUNNER: 'true',
+  } as Record<string, string>;
+  if (runtime.spec.id === 'research-scout') {
+    childEnv.CONTROL_PLANE_AI_MODEL = String(
+      process.env.CONTROL_PLANE_RESEARCH_SCOUT_AI_MODEL
+      || 'gpt-5.4',
+    ).trim() || 'gpt-5.4';
+    childEnv.CONTROL_PLANE_AI_REASONING_EFFORT = String(
+      process.env.CONTROL_PLANE_RESEARCH_SCOUT_AI_REASONING_EFFORT
+      || 'xhigh',
+    ).trim() || 'xhigh';
+  }
+
   const child = spawn('bash', buildCoordinatorChildArgs(parsedArgs, runtime.spec), {
     cwd: parsedArgs.repoRoot,
-    env: {
-      ...process.env,
-      CONTROL_PLANE_COORDINATED_RUNNER: 'true',
-    },
+    env: childEnv,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   const logStream = fs.createWriteStream(runtime.spec.logFilePath, { flags: 'a' });
@@ -2315,6 +2411,7 @@ function spawnCoordinatorChild(parsedArgs: ParsedArgs, runtime: CoordinatorChild
   runtime.process = child;
   runtime.logStream = logStream;
   runtime.pid = typeof child.pid === 'number' ? child.pid : readPidFile(runtime.spec.pidFilePath);
+  runtime.lastSpawnedAtMs = Date.now();
   runtime.lastSpawnError = undefined;
   runtime.lastExitCode = undefined;
   runtime.lastExitSignal = undefined;
@@ -2339,15 +2436,65 @@ function spawnCoordinatorChild(parsedArgs: ParsedArgs, runtime: CoordinatorChild
     runtime.lastExitSignal = signal;
     runtime.pid = undefined;
     runtime.process = undefined;
-    runtime.nextRestartAt = Date.now() + MULTI_RUNNER_RESTART_DELAY_MS;
+    runtime.nextRestartAt = Date.now() + Math.max(1_000, runtime.spec.respawnDelayMs || MULTI_RUNNER_RESTART_DELAY_MS);
     fs.appendFileSync(
       runtime.spec.logFilePath,
-      `[${new Date().toISOString()}] coordinator observed exit code=${code ?? 'null'} signal=${signal ?? 'null'}\n`,
+      `[${new Date().toISOString()}] coordinator observed exit code=${code ?? 'null'} signal=${signal ?? 'null'} next_restart_in_ms=${Math.max(1_000, runtime.spec.respawnDelayMs || MULTI_RUNNER_RESTART_DELAY_MS)}\n`,
       'utf8',
     );
     runtime.logStream?.end();
     runtime.logStream = undefined;
   });
+}
+
+function isCoordinatorCoreLane(runtime: CoordinatorChildRuntime): boolean {
+  return ['api-routing', 'api-runtime'].includes(runtime.spec.id);
+}
+
+function getCoordinatorBackgroundActiveCount(runtimes: CoordinatorChildRuntime[]): number {
+  return runtimes.filter((runtime) => {
+    if (isCoordinatorCoreLane(runtime)) return false;
+    const processAlive = runtime.process ? runtime.process.exitCode === null : false;
+    const pidAlive = isPidAlive(runtime.process?.pid) || isPidAlive(runtime.pid) || isPidAlive(readPidFile(runtime.spec.pidFilePath));
+    return processAlive || pidAlive;
+  }).length;
+}
+
+function canCoordinatorChildRestart(
+  parsedArgs: ParsedArgs,
+  runtime: CoordinatorChildRuntime,
+): boolean {
+  return parsedArgs.continuous
+    && parsedArgs.maxIterations === null
+    && (!runtime.lastStatus || runtime.lastStatus.phase !== 'paused');
+}
+
+function selectNextCoordinatorBackgroundLaneToSpawn(
+  parsedArgs: ParsedArgs,
+  runtimes: CoordinatorChildRuntime[],
+  nowMs: number,
+): CoordinatorChildRuntime | null {
+  if (MULTI_RUNNER_BACKGROUND_ACTIVE_CAP <= 0) return null;
+  if (getCoordinatorBackgroundActiveCount(runtimes) >= MULTI_RUNNER_BACKGROUND_ACTIVE_CAP) {
+    return null;
+  }
+
+  const eligible = runtimes.filter((runtime) => {
+    if (isCoordinatorCoreLane(runtime)) return false;
+    if (!canCoordinatorChildRestart(parsedArgs, runtime)) return false;
+    const processAlive = runtime.process ? runtime.process.exitCode === null : false;
+    const pidAlive = isPidAlive(runtime.process?.pid) || isPidAlive(runtime.pid) || isPidAlive(readPidFile(runtime.spec.pidFilePath));
+    if (processAlive || pidAlive) return false;
+    return nowMs >= runtime.nextRestartAt;
+  });
+
+  if (eligible.length === 0) return null;
+  eligible.sort((left, right) =>
+    (left.lastSpawnedAtMs ?? 0) - (right.lastSpawnedAtMs ?? 0)
+    || left.restartCount - right.restartCount
+    || left.spec.id.localeCompare(right.spec.id)
+  );
+  return eligible[0] || null;
 }
 
 function updateCoordinatorChildProgressObservation(runtime: CoordinatorChildRuntime, nowMs: number): void {
@@ -2570,9 +2717,11 @@ function buildCoordinatorSummary(parsedArgs: ParsedArgs, children: CoordinatedRu
   const runningChildren = children.filter((child) => child.running);
   const failedChildren = children.filter((child) => child.phase === 'failed' || Boolean(child.lastError));
   const selfHealedChildren = children.filter((child) => child.selfHealCount > 0);
+  const backgroundRunningChildren = runningChildren.filter((child) => !['api-routing', 'api-runtime', 'control-plane'].includes(child.id));
   const lines = [
     `Goal: ${parsedArgs.goal}`,
     `Coordinator mode: multi-runner (${children.length} child lane(s), interval=${parsedArgs.intervalMs}ms)`,
+    `Background lane cap: ${MULTI_RUNNER_BACKGROUND_ACTIVE_CAP} concurrent background lane(s)`,
     `Requested scopes: ${parsedArgs.scopes.join(', ')}`,
     `Children: ${children.map((child) => `${child.id}=${child.phase}${child.running ? '/running' : ''}`).join('; ') || 'none'}`,
     `Autonomous edits: ${children.reduce((sum, child) => sum + child.proposedEditCount, 0)} proposed, ${children.reduce((sum, child) => sum + child.appliedEditCount, 0)} applied`,
@@ -2588,6 +2737,9 @@ function buildCoordinatorSummary(parsedArgs: ParsedArgs, children: CoordinatedRu
   }
   if (runningChildren.length > 0) {
     lines.push(`Active lanes: ${runningChildren.map((child) => `${child.id}@${child.iteration}`).join(', ')}`);
+  }
+  if (backgroundRunningChildren.length > 0) {
+    lines.push(`Active background lanes: ${backgroundRunningChildren.map((child) => `${child.id}@${child.iteration}`).join(', ')}`);
   }
 
   return lines.join('\n');
@@ -2669,13 +2821,18 @@ async function runMultiRunnerCoordinator(parsedArgs: ParsedArgs): Promise<void> 
       const existingPid = readPidFile(runtime.spec.pidFilePath);
       if (isPidAlive(existingPid)) {
         runtime.pid = existingPid;
+        runtime.lastSpawnedAtMs = Date.now();
         runtime.lastStatus = readRunnerStatusSnapshot(runtime.spec.statusFilePath);
         runtime.lastSemanticProgressSignature = buildCoordinatorChildSemanticProgressSignature(runtime.lastStatus);
         runtime.lastSemanticProgressAtMs = Date.now();
         runtime.lastStatusHeartbeatAtMs = parseIsoTimestampMs(runtime.lastStatus?.lastUpdatedAt) ?? Date.now();
         continue;
       }
-      spawnCoordinatorChild(parsedArgs, runtime);
+      if (isCoordinatorCoreLane(runtime)) {
+        spawnCoordinatorChild(parsedArgs, runtime);
+      } else {
+        runtime.nextRestartAt = 0;
+      }
     }
 
     while (true) {
@@ -2694,10 +2851,7 @@ async function runMultiRunnerCoordinator(parsedArgs: ParsedArgs): Promise<void> 
         updateCoordinatorChildProgressObservation(runtime, nowMs);
         serviceCoordinatorChildSelfHeal(runtime, nowMs);
 
-        const canRestart = !shuttingDown
-          && parsedArgs.continuous
-          && parsedArgs.maxIterations === null
-          && (!runtime.lastStatus || runtime.lastStatus.phase !== 'paused');
+        const canRestart = !shuttingDown && canCoordinatorChildRestart(parsedArgs, runtime);
         const processAlive = runtime.process ? runtime.process.exitCode === null : false;
         const pidAlive = isPidAlive(pidFromFile) || isPidAlive(runtime.pid);
         if ((processAlive || pidAlive) && canRestart) {
@@ -2706,10 +2860,17 @@ async function runMultiRunnerCoordinator(parsedArgs: ParsedArgs): Promise<void> 
             requestCoordinatorChildSelfHeal(runtime, selfHealReason, nowMs);
           }
         }
-        if (!processAlive && !pidAlive && canRestart && Date.now() >= runtime.nextRestartAt) {
+        if (isCoordinatorCoreLane(runtime) && !processAlive && !pidAlive && canRestart && Date.now() >= runtime.nextRestartAt) {
           runtime.restartCount += 1;
           spawnCoordinatorChild(parsedArgs, runtime);
         }
+      }
+
+      while (!shuttingDown) {
+        const nextBackgroundLane = selectNextCoordinatorBackgroundLaneToSpawn(parsedArgs, childRuntimes, nowMs);
+        if (!nextBackgroundLane) break;
+        nextBackgroundLane.restartCount += 1;
+        spawnCoordinatorChild(parsedArgs, nextBackgroundLane);
       }
 
       const coordinatedRunners = childRuntimes.map((runtime) => collectCoordinatedRunnerEntry(runtime));

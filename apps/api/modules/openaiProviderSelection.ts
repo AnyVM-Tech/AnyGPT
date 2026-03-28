@@ -500,7 +500,11 @@ export async function inspectVideoGenProviderAvailability(
     (provider) => !hasRecentRateLimitOrTimeoutSignal(provider)
   );
   const timeoutStableSupportedMatches = supportedMatches.filter(
-    (provider) => !hasRecentRateLimitOrTimeoutSignal(provider)
+    (provider) =>
+      !hasRecentRateLimitOrTimeoutSignal(provider) &&
+      !hasInvalidOpenAiKeySignal(provider) &&
+      !hasOpenRouterBillingFailureSignal(provider) &&
+      !hasRecentGeminiCatalogAuthFailureSignal(provider)
   );
   const preferredAuthHealthyMatches =
     stableAuthHealthyMatches.length > 0

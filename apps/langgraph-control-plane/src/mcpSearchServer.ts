@@ -183,6 +183,18 @@ async function searchSearxng(query: string, limit: number): Promise<SearchResult
   return dedupeResults(results, limit);
 }
 
+async function runSearxngOnlySearch(query: string, limit: number): Promise<{ provider: string; results: SearchResult[] }> {
+  if (!SEARXNG_BASE_URL) {
+    throw new Error('SearXNG search is unavailable because SEARXNG_BASE_URL is not configured.');
+  }
+
+  const results = await searchSearxng(query, limit);
+  return {
+    provider: 'searxng',
+    results,
+  };
+}
+
 async function searchDuckDuckGoHtml(query: string, limit: number): Promise<SearchResult[]> {
   const url = new URL('https://html.duckduckgo.com/html/');
   url.searchParams.set('q', query);
@@ -363,6 +375,38 @@ server.registerTool('brave_web_search', {
   },
 }, async ({ query, count }) => {
   const { provider, results } = await runSearch(query, { count });
+  return {
+    content: [
+      {
+        type: 'text',
+        text: formatResults(query, provider, results),
+      },
+    ],
+    structuredContent: {
+      provider,
+      results,
+    },
+  };
+});
+
+server.registerTool('searxng_web_search', {
+  description: 'Search the web using the configured local SearXNG instance only. This tool does not fall back to other providers.',
+  inputSchema: {
+    query: z.string().min(1).describe('The search query to run against SearXNG.'),
+    count: z.number().int().min(1).max(10).optional().describe('Maximum number of results to return.'),
+  },
+  outputSchema: {
+    provider: z.string(),
+    results: z.array(z.object({
+      title: z.string(),
+      url: z.string(),
+      description: z.string(),
+      source: z.string(),
+    })),
+  },
+}, async ({ query, count }) => {
+  const limit = Math.max(1, Math.min(10, count || SEARCH_RESULT_LIMIT));
+  const { provider, results } = await runSearxngOnlySearch(query, limit);
   return {
     content: [
       {

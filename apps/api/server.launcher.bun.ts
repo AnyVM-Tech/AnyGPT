@@ -568,12 +568,18 @@ async function main(): Promise<void> {
 		try {
 			fs.mkdirSync(runtimeDir, { recursive: true });
 			const validationStatePath = path.join(runtimeDir, 'experimental-startup-validation.state');
+			const validationMode = pendingRuns === '0'
+				? 'missing-fresh-same-thread-run'
+				: pendingRuns === 'unknown'
+					? 'same-thread-visibility-unknown'
+					: 'same-thread-pending-or-incomplete';
 			const validationState = [
 				`thread_id=${validationThread}`,
 				`checked_at=${validationCheckedAt}`,
 				`validation_target=${validationTarget}`,
 				`pending_runs=${pendingRuns}`,
 				`pending_runs_state=${pendingRunsState}`,
+				`validation_mode=${validationMode}`,
 				'operator_readiness=partial',
 				'operator_validation=deferred',
 				`operator_defer_reason=${validationDeferReason.replace(/\s+/g, '_')}`,

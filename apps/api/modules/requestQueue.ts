@@ -955,20 +955,6 @@ export function getRequestQueueSnapshot(extra: Record<string, unknown> = {}) {
 			: overloaded
 				? 'Queue contention is likely contributing; reduce intake rate or add capacity before retry amplification builds.'
 				: 'Retry after a short delay and inspect queue occupancy plus runtime memory snapshots if pressure persists.';
-		const failureOriginHint = memoryPressureLikely
-			? 'runtime_capacity'
-			: overloaded || saturated
-				? 'request_queue'
-				: 'mixed';
-		const bottleneckHint = memoryPressureLikely
-			? 'memory-pressure'
-			: overloaded
-				? 'queue-overload'
-				: backlogged
-					? 'queue-backlog'
-					: saturated
-						? 'concurrency-saturation'
-						: 'none';
 		const bottleneck = memoryPressureLikely
 			? 'memory-pressure'
 			: runtimeCapacityLikely

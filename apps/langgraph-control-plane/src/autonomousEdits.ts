@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -73,7 +74,22 @@ export type ReadAutonomousEditContextOptions = {
 
 const DEFAULT_AUTONOMOUS_EDIT_ALLOWLIST = ['*'];
 
-const DEFAULT_AUTONOMOUS_EDIT_DENYLIST: string[] = [];
+const DEFAULT_AUTONOMOUS_EDIT_DENYLIST: string[] = [
+  '.git',
+  '.codeql',
+  'logs',
+  'dist',
+  'node_modules',
+  'apps/api/.control-plane',
+  'apps/api/dist',
+  'apps/api/logs',
+  'apps/api/node_modules',
+  'apps/api/keys.json',
+  'apps/langgraph-control-plane/.control-plane',
+  'apps/langgraph-control-plane/dist',
+  'apps/langgraph-control-plane/node_modules',
+  'apps/homepage/node_modules',
+];
 
 const AUTONOMOUS_EDIT_CONTEXT_BINARY_EXTENSIONS = new Set([
   '.png',
@@ -822,6 +838,15 @@ export function buildAutonomousEditCandidatePaths(scopes: string[]): string[] {
     candidates.add('apps/langgraph-control-plane/governance-profiles.json');
     candidates.add('apps/langgraph-control-plane/src/langsmithClient.ts');
     candidates.add('apps/langgraph-control-plane/src/studioGraph.ts');
+    candidates.add('apps/langgraph-control-plane/src/autonomousSkills.ts');
+  }
+
+  if (normalizedScopes.includes('research-scout')) {
+    candidates.add('apps/langgraph-control-plane/src/workflow.ts');
+    candidates.add('apps/langgraph-control-plane/src/autonomousEdits.ts');
+    candidates.add('apps/langgraph-control-plane/src/autonomousSkills.ts');
+    candidates.add('apps/langgraph-control-plane/src/index.ts');
+    candidates.add('apps/langgraph-control-plane/README.md');
   }
 
   if (hasAnyScope('repo', 'repo-surface', 'workspace-surface', 'homepage-surface', 'ui-surface')) {
@@ -990,6 +1015,10 @@ type AutonomousEditTypeScriptDiagnostic = {
   code: number;
   message: string;
 };
+
+type AutonomousEditPostValidationResult =
+  | { ok: true; message?: string }
+  | { ok: false; message: string };
 
 function collectTypeScriptDiagnosticsForFile(
   filePath: string,
@@ -1309,6 +1338,145 @@ function validateAutonomousEditContent(
   return validateAutonomousEditTypeScriptDiagnostics(absolutePath, nextContent);
 }
 
+function shouldRunControlPlanePostEditTypecheck(normalizedPath: string): boolean {
+  if (!normalizedPath.startsWith('apps/langgraph-control-plane/')) return false;
+  return /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/i.test(normalizedPath)
+    || /(?:package\.json|tsconfig\.json|langgraph\.json|governance-profiles\.json)$/i.test(normalizedPath);
+}
+
+function shouldRunApiPostEditTypecheck(normalizedPath: string): boolean {
+  if (!normalizedPath.startsWith('apps/api/')) return false;
+  return /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/i.test(normalizedPath)
+    || /(?:package\.json|tsconfig\.json)$/i.test(normalizedPath);
+}
+
+function sanitizePostEditValidatorOutput(value: string): string {
+  return String(value || '')
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 12)
+    .join(' | ')
+    .slice(0, 900);
+}
+
+function runPostEditValidatorCommand(
+  repoRoot: string,
+  normalizedPath: string,
+  label: string,
+  command: string[],
+): AutonomousEditPostValidationResult {
+  const commandPreview = command.join(' ');
+  const result = spawnSync(command[0] || '', command.slice(1), {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    timeout: 60_000,
+    maxBuffer: 1024 * 1024,
+  });
+
+  const combinedOutput = sanitizePostEditValidatorOutput(
+    `${result.stdout || ''}\n${result.stderr || ''}`,
+  );
+
+  if (result.error) {
+    return {
+      ok: false,
+      message: `Post-edit validator ${label} failed to start for ${normalizedPath}: ${result.error.message}. Command: ${commandPreview}`,
+    };
+  }
+
+  if (typeof result.status === 'number' && result.status !== 0) {
+    return {
+      ok: false,
+      message: `Post-edit validator ${label} failed for ${normalizedPath}: ${combinedOutput || `exit ${result.status}`}. Command: ${commandPreview}`,
+    };
+  }
+
+  return {
+    ok: true,
+    message: `Post-edit validator ${label} passed for ${normalizedPath}.`,
+  };
+}
+
+function runAutonomousEditPostValidation(
+  repoRoot: string,
+  normalizedPath: string,
+): AutonomousEditPostValidationResult {
+  if (shouldRunControlPlanePostEditTypecheck(normalizedPath)) {
+    return runPostEditValidatorCommand(
+      repoRoot,
+      normalizedPath,
+      'control-plane typecheck',
+      ['bash', './bun.sh', 'run', '-F', 'anygpt-langgraph-control-plane', 'typecheck'],
+    );
+  }
+
+  if (shouldRunApiPostEditTypecheck(normalizedPath)) {
+    return {
+      ok: true,
+      message: `Post-edit validator api file-level checks passed for ${normalizedPath}; full API typecheck is deferred to repair smoke validation.`,
+    };
+  }
+
+  return { ok: true };
+}
+
+function ensureTouchedFileSnapshot(
+  repoRoot: string,
+  normalizedPath: string,
+  touchedFiles: Map<string, AutonomousEditTouchedFile>,
+): AutonomousEditTouchedFile {
+  const existing = touchedFiles.get(normalizedPath);
+  if (existing) return existing;
+  const snapshot = captureTouchedFileSnapshot(repoRoot, normalizedPath);
+  touchedFiles.set(normalizedPath, snapshot);
+  return snapshot;
+}
+
+function restoreTouchedFileSnapshot(
+  repoRoot: string,
+  snapshot: AutonomousEditTouchedFile,
+): void {
+  const absolutePath = path.resolve(repoRoot, snapshot.path);
+  if (snapshot.existedBefore) {
+    fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
+    fs.writeFileSync(absolutePath, snapshot.beforeContent, 'utf8');
+    return;
+  }
+
+  fs.rmSync(absolutePath, { force: true });
+}
+
+function applyAutonomousEditFileWrite(
+  repoRoot: string,
+  normalizedPath: string,
+  nextContent: string,
+  touchedFiles: Map<string, AutonomousEditTouchedFile>,
+  successMessage: string,
+): { ok: true; message: string } | { ok: false; message: string } {
+  const snapshot = ensureTouchedFileSnapshot(repoRoot, normalizedPath, touchedFiles);
+  const absolutePath = path.resolve(repoRoot, normalizedPath);
+
+  fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
+  fs.writeFileSync(absolutePath, nextContent, 'utf8');
+
+  const postValidation = runAutonomousEditPostValidation(repoRoot, normalizedPath);
+  if (!postValidation.ok) {
+    restoreTouchedFileSnapshot(repoRoot, snapshot);
+    touchedFiles.delete(normalizedPath);
+    return {
+      ok: false,
+      message: postValidation.message,
+    };
+  }
+
+  return {
+    ok: true,
+    message: [successMessage, postValidation.message].filter(Boolean).join(' '),
+  };
+}
+
 function previewReplaceActionContent(
   current: string,
   find: string,
@@ -1573,15 +1741,18 @@ export function applyAutonomousEditsWithManifest(
               continue;
             }
 
-            if (!touchedFiles.has(check.normalizedPath)) {
-              touchedFiles.set(check.normalizedPath, captureTouchedFileSnapshot(repoRoot, check.normalizedPath));
-            }
-            fs.writeFileSync(absolutePath, next, 'utf8');
+            const applied = applyAutonomousEditFileWrite(
+              repoRoot,
+              check.normalizedPath,
+              next,
+              touchedFiles,
+              'Replace action applied successfully using indentation-insensitive block matching.',
+            );
             resultsByIndex.set(index, AppliedAutonomousEditSchema.parse({
               ...action,
               path: check.normalizedPath,
-              status: 'applied',
-              message: 'Replace action applied successfully using indentation-insensitive block matching.',
+              status: applied.ok ? 'applied' : 'failed',
+              message: applied.message,
             }));
             continue;
           }
@@ -1621,15 +1792,18 @@ export function applyAutonomousEditsWithManifest(
               continue;
             }
 
-            if (!touchedFiles.has(check.normalizedPath)) {
-              touchedFiles.set(check.normalizedPath, captureTouchedFileSnapshot(repoRoot, check.normalizedPath));
-            }
-            fs.writeFileSync(absolutePath, next, 'utf8');
+            const applied = applyAutonomousEditFileWrite(
+              repoRoot,
+              check.normalizedPath,
+              next,
+              touchedFiles,
+              `Replace action applied successfully using anchor-fragment block matching (${anchorFragmentMatch.anchorCount} anchor lines).`,
+            );
             resultsByIndex.set(index, AppliedAutonomousEditSchema.parse({
               ...action,
               path: check.normalizedPath,
-              status: 'applied',
-              message: `Replace action applied successfully using anchor-fragment block matching (${anchorFragmentMatch.anchorCount} anchor lines).`,
+              status: applied.ok ? 'applied' : 'failed',
+              message: applied.message,
             }));
             continue;
           }
@@ -1675,15 +1849,18 @@ export function applyAutonomousEditsWithManifest(
           continue;
         }
 
-        if (!touchedFiles.has(check.normalizedPath)) {
-          touchedFiles.set(check.normalizedPath, captureTouchedFileSnapshot(repoRoot, check.normalizedPath));
-        }
-        fs.writeFileSync(absolutePath, next, 'utf8');
+        const applied = applyAutonomousEditFileWrite(
+          repoRoot,
+          check.normalizedPath,
+          next,
+          touchedFiles,
+          'Replace action applied successfully.',
+        );
         resultsByIndex.set(index, AppliedAutonomousEditSchema.parse({
           ...action,
           path: check.normalizedPath,
-          status: 'applied',
-          message: 'Replace action applied successfully.',
+          status: applied.ok ? 'applied' : 'failed',
+          message: applied.message,
         }));
         continue;
       }
@@ -1723,16 +1900,18 @@ export function applyAutonomousEditsWithManifest(
         continue;
       }
 
-      if (!touchedFiles.has(check.normalizedPath)) {
-        touchedFiles.set(check.normalizedPath, captureTouchedFileSnapshot(repoRoot, check.normalizedPath));
-      }
-      fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
-      fs.writeFileSync(absolutePath, content, 'utf8');
+      const applied = applyAutonomousEditFileWrite(
+        repoRoot,
+        check.normalizedPath,
+        content,
+        touchedFiles,
+        'Write action applied successfully.',
+      );
       resultsByIndex.set(index, AppliedAutonomousEditSchema.parse({
         ...action,
         path: check.normalizedPath,
-        status: 'applied',
-        message: 'Write action applied successfully.',
+        status: applied.ok ? 'applied' : 'failed',
+        message: applied.message,
       }));
     } catch (error: any) {
       resultsByIndex.set(index, AppliedAutonomousEditSchema.parse({

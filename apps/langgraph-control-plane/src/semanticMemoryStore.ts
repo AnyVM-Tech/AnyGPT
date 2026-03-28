@@ -33,6 +33,14 @@ const SEMANTIC_MEMORY_CONTEXT_FIELD_MAX_CHARS = 240;
 const SEMANTIC_MEMORY_SEARCH_TEXT_MAX_CHARS = 1_200;
 const SEMANTIC_MEMORY_KEYWORD_LIMIT = 16;
 const SEMANTIC_MEMORY_RECENCY_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+const SEMANTIC_MEMORY_REMOTE_EMBEDDINGS_TIMEOUT_MS = Math.max(
+  1_000,
+  Math.floor(Number(process.env.CONTROL_PLANE_SEMANTIC_EMBEDDINGS_TIMEOUT_MS) || 15_000),
+);
+const SEMANTIC_MEMORY_REMOTE_EMBEDDINGS_BATCH_SIZE = Math.max(
+  1,
+  Math.min(32, Math.floor(Number(process.env.CONTROL_PLANE_SEMANTIC_EMBEDDINGS_BATCH_SIZE) || 12)),
+);
 const SEMANTIC_MEMORY_STOP_WORDS = new Set([
   'a',
   'an',
@@ -65,6 +73,14 @@ const SEMANTIC_MEMORY_STOP_WORDS = new Set([
 
 function normalizeWhitespace(value: unknown): string {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
+}
+
+function parseBooleanEnv(value: unknown, fallback: boolean): boolean {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (!normalized) return fallback;
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  return fallback;
 }
 
 function truncateTextMiddle(text: string, maxChars: number): string {
@@ -332,6 +348,59 @@ export function buildSemanticMemoryRecordKey(input: {
   return `${category}:${fingerprintText(memorySeed)}`;
 }
 
+type RemoteEmbeddingsConfig = {
+  apiKey: string;
+  baseUrl: string;
+  model: string;
+  dims: number;
+  timeoutMs: number;
+  batchSize: number;
+  useDimensionsParameter: boolean;
+};
+
+function resolveRemoteEmbeddingsConfig(dims: number): RemoteEmbeddingsConfig | null {
+  const apiKey = normalizeWhitespace(
+    process.env.CONTROL_PLANE_SEMANTIC_EMBEDDINGS_API_KEY
+    || process.env.OPENAI_API_KEY,
+  );
+  const baseUrl = normalizeWhitespace(
+    process.env.CONTROL_PLANE_SEMANTIC_EMBEDDINGS_BASE_URL
+    || (apiKey ? 'https://api.openai.com/v1' : ''),
+  ).replace(/\/+$/, '');
+  const model = normalizeWhitespace(
+    process.env.CONTROL_PLANE_SEMANTIC_EMBEDDINGS_MODEL
+    || 'text-embedding-3-large',
+  );
+  const remoteEnabled = parseBooleanEnv(
+    process.env.CONTROL_PLANE_SEMANTIC_EMBEDDINGS_ENABLED,
+    Boolean(apiKey && baseUrl && model),
+  );
+  if (!remoteEnabled || !apiKey || !baseUrl || !model) return null;
+
+  return {
+    apiKey,
+    baseUrl,
+    model,
+    dims,
+    timeoutMs: SEMANTIC_MEMORY_REMOTE_EMBEDDINGS_TIMEOUT_MS,
+    batchSize: SEMANTIC_MEMORY_REMOTE_EMBEDDINGS_BATCH_SIZE,
+    useDimensionsParameter: parseBooleanEnv(
+      process.env.CONTROL_PLANE_SEMANTIC_EMBEDDINGS_USE_DIMENSIONS,
+      /text-embedding-3/i.test(model),
+    ),
+  };
+}
+
+function coerceEmbeddingDimensions(vector: number[], dims: number): number[] {
+  const adjusted = Array.from({ length: dims }, (_, index) => {
+    const value = Number(vector[index] ?? 0);
+    return Number.isFinite(value) ? value : 0;
+  });
+  const magnitude = Math.sqrt(adjusted.reduce((sum, value) => sum + (value * value), 0));
+  if (!Number.isFinite(magnitude) || magnitude === 0) return adjusted;
+  return adjusted.map((value) => value / magnitude);
+}
+
 class LocalSemanticEmbeddings extends Embeddings<number[]> {
   private readonly dims: number;
 
@@ -388,6 +457,106 @@ class LocalSemanticEmbeddings extends Embeddings<number[]> {
   }
 }
 
+class OpenAiCompatibleSemanticEmbeddings extends Embeddings<number[]> {
+  private readonly config: RemoteEmbeddingsConfig;
+
+  constructor(config: RemoteEmbeddingsConfig) {
+    super({});
+    this.config = config;
+  }
+
+  async embedDocuments(texts: string[]): Promise<number[][]> {
+    const vectors: number[][] = [];
+    for (let offset = 0; offset < texts.length; offset += this.config.batchSize) {
+      const batch = texts.slice(offset, offset + this.config.batchSize);
+      vectors.push(...await this.embedBatch(batch));
+    }
+    return vectors;
+  }
+
+  async embedQuery(text: string): Promise<number[]> {
+    const [vector] = await this.embedBatch([text]);
+    return vector || Array.from({ length: this.config.dims }, () => 0);
+  }
+
+  private async embedBatch(texts: string[]): Promise<number[][]> {
+    if (texts.length === 0) return [];
+
+    const payload: Record<string, unknown> = {
+      input: texts,
+      model: this.config.model,
+      encoding_format: 'float',
+    };
+    if (this.config.useDimensionsParameter) {
+      payload.dimensions = this.config.dims;
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.config.timeoutMs);
+    try {
+      const response = await fetch(`${this.config.baseUrl}/embeddings`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.config.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        const bodyText = normalizeWhitespace(await response.text().catch(() => ''));
+        throw new Error(`Semantic embeddings request failed (${response.status}): ${bodyText || response.statusText}`);
+      }
+
+      const parsed = await response.json() as {
+        data?: Array<{ embedding?: number[] }>;
+      };
+      const rows = Array.isArray(parsed?.data) ? parsed.data : [];
+      return texts.map((_, index) => coerceEmbeddingDimensions(
+        Array.isArray(rows[index]?.embedding) ? rows[index]?.embedding || [] : [],
+        this.config.dims,
+      ));
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+}
+
+class AdaptiveSemanticEmbeddings extends Embeddings<number[]> {
+  private readonly local: LocalSemanticEmbeddings;
+  private readonly remote: OpenAiCompatibleSemanticEmbeddings | null;
+  private remoteDisabled = false;
+
+  constructor(dims: number) {
+    super({});
+    this.local = new LocalSemanticEmbeddings(dims);
+    const remoteConfig = resolveRemoteEmbeddingsConfig(dims);
+    this.remote = remoteConfig ? new OpenAiCompatibleSemanticEmbeddings(remoteConfig) : null;
+  }
+
+  async embedDocuments(texts: string[]): Promise<number[][]> {
+    if (this.remote && !this.remoteDisabled) {
+      try {
+        return await this.remote.embedDocuments(texts);
+      } catch {
+        this.remoteDisabled = true;
+      }
+    }
+    return this.local.embedDocuments(texts);
+  }
+
+  async embedQuery(text: string): Promise<number[]> {
+    if (this.remote && !this.remoteDisabled) {
+      try {
+        return await this.remote.embedQuery(text);
+      } catch {
+        this.remoteDisabled = true;
+      }
+    }
+    return this.local.embedQuery(text);
+  }
+}
+
 export class PersistentSemanticMemoryStore extends BaseStore {
   private readonly filePath: string;
   private readonly backingStore: InMemoryStore;
@@ -399,7 +568,7 @@ export class PersistentSemanticMemoryStore extends BaseStore {
     this.backingStore = new InMemoryStore({
       index: {
         dims: SEMANTIC_MEMORY_INDEX_DIMS,
-        embeddings: new LocalSemanticEmbeddings(SEMANTIC_MEMORY_INDEX_DIMS) as unknown as Embeddings<number[]>,
+        embeddings: new AdaptiveSemanticEmbeddings(SEMANTIC_MEMORY_INDEX_DIMS) as unknown as Embeddings<number[]>,
         fields: ['searchText', 'memory', 'signalKeywords[*]', 'category', 'failureClass', 'resolution', 'signalSignature'],
       },
     });

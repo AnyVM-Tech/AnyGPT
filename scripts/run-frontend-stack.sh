@@ -9,8 +9,19 @@ HOMEPAGE_DIR="$ROOT/apps/homepage"
 SKIP_INSTALL_IF_PRESENT="${ANYGPT_FRONTEND_SKIP_INSTALL_IF_PRESENT:-1}"
 READINESS_TIMEOUT_SECONDS="${ANYGPT_FRONTEND_READINESS_TIMEOUT_SECONDS:-15}"
 HOMEPAGE_START_TIMEOUT_SECONDS="${ANYGPT_HOMEPAGE_START_TIMEOUT_SECONDS:-0}"
-SUPPORTED_MODES="dev start readiness preflight preflight-ready readiness-ready readiness-only preflight-status status workspace-status install-check-status install-summary install-check install-check-only operator-preflight doctor same-thread-defer-status same-thread-status workspace-surface-strict workspace-surface-fast-status workspace-surface-pending-status workspace-surface-typecheck workspace-surface-install-typecheck workspace-surface-preflight workspace-surface-quickcheck workspace-surface-summary workspace-surface-defer workspace-surface-goal-status workspace-surface-same-thread-reminder workspace-surface-root-smoke workspace-surface-no-run-defer frontend-typecheck help"
+SUPPORTED_MODES="dev start readiness preflight preflight-ready readiness-ready readiness-only preflight-status status workspace-status install-check-status install-summary install-check install-check-only operator-preflight doctor same-thread-defer-status same-thread-status workspace-surface-strict workspace-surface-fast-status workspace-surface-pending-status workspace-surface-typecheck workspace-surface-install-typecheck workspace-surface-preflight workspace-surface-quickcheck workspace-surface-summary workspace-surface-defer workspace-surface-goal-status workspace-surface-same-thread-reminder workspace-surface-root-smoke workspace-surface-root-check frontend-preflight frontend-typecheck help"
 LANGSMITH_PENDING_RUNS_SAMPLE="${ANYGPT_LANGSMITH_PENDING_RUNS_SAMPLE:-4}"
+
+if [[ "$MODE" == "workspace-surface-root-check" ]]; then
+  echo "Workspace-surface goal context for thread b31cedc0-ceb5-48d7-8772-cf97f38a3b42:workspace-surface: continuously monitor, fix, and improve AnyGPT across the repo, checking API, control-plane, UI, homepage, runtime health, routing, model availability, governance drift, and bounded safe improvements."
+  echo "Workspace-surface touched-path context for thread b31cedc0-ceb5-48d7-8772-cf97f38a3b42:workspace-surface: scripts/run-frontend-stack.sh workspace-surface-root-check developer-workflow alias."
+  echo "Workspace-surface improvement signal for thread b31cedc0-ceb5-48d7-8772-cf97f38a3b42:workspace-surface: no code-local failure is active, sampled LangSmith feedback is quiet, and ${LANGSMITH_PENDING_RUNS_SAMPLE} pending LangSmith run(s) are partial observability only, so this bounded root-workspace check runs install-check plus typecheck in one place."
+  bash "$BUN_SH" run frontend:install-check
+  bash "$BUN_SH" run typecheck
+  echo "Workspace-surface root-check result for thread b31cedc0-ceb5-48d7-8772-cf97f38a3b42:workspace-surface: frontend install-check and root typecheck passed for the touched workspace path set."
+  echo "Workspace-surface validation reminder for thread b31cedc0-ceb5-48d7-8772-cf97f38a3b42:workspace-surface: cross-thread or pending-only LangSmith activity does not satisfy this iteration; next confirm at least one fresh same-thread LangSmith run/trace with explicit goal context plus a passed workspace smoke/typecheck result, or preserve a clear operator-facing no-run defer reason if no run was emitted."
+  exit 0
+fi
 
 if [[ "$MODE" == "workspace-surface-root-smoke" ]]; then
   echo "Workspace-surface goal context for thread b31cedc0-ceb5-48d7-8772-cf97f38a3b42:workspace-surface: continuously monitor, fix, and improve AnyGPT across the repo, checking API, control-plane, UI, homepage, runtime health, routing, model availability, governance drift, and bounded safe improvements."

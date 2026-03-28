@@ -1,0 +1,69 @@
+name: CodeQL
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/codeql.yml'
+      - '.github/codeql/**'
+      - 'apps/api/**'
+      - 'apps/langgraph-control-plane/**'
+      - 'apps/ui/**'
+      - 'apps/homepage/**'
+      - 'scripts/**'
+      - 'package.json'
+      - 'pnpm-workspace.yaml'
+      - 'tsconfig.json'
+      - 'bun.sh'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/codeql.yml'
+      - '.github/codeql/**'
+      - 'apps/api/**'
+      - 'apps/langgraph-control-plane/**'
+      - 'apps/ui/**'
+      - 'apps/homepage/**'
+      - 'scripts/**'
+      - 'package.json'
+      - 'pnpm-workspace.yaml'
+      - 'tsconfig.json'
+      - 'bun.sh'
+  schedule:
+    - cron: '19 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  security-events: write
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: javascript-typescript
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          config-file: ./.github/codeql/codeql-config.yml
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:${{ matrix.language }}

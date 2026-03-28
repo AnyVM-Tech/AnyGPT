@@ -2,7 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CONTROL_DIR="$ROOT_DIR/apps/langgraph-control-plane/.control-plane"
+DEFAULT_RUNTIME_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/anygpt/langgraph-control-plane"
+CONTROL_DIR="${CONTROL_PLANE_RUNTIME_DIR:-$DEFAULT_RUNTIME_DIR}"
 STATUS_FILE="$CONTROL_DIR/live-autonomous-runner-status.json"
 CHECKPOINT_FILE="$CONTROL_DIR/live-autonomous-runner-checkpoints.json"
 LOG_FILE="$CONTROL_DIR/live-autonomous-runner.log"
@@ -24,6 +25,11 @@ DEFAULT_EDIT_ALLOWLIST='apps/langgraph-control-plane,apps/api,apps/homepage,apps
 DEFAULT_AGENT_PARALLELISM='6'
 DEFAULT_MULTI_RUNNER='true'
 DEFAULT_LOG_TAIL_LINES='80'
+DEFAULT_CODEQL_AUTORUN='false'
+DEFAULT_RESEARCH_SCOUT_AI_MODEL='gpt-5.4'
+DEFAULT_RESEARCH_SCOUT_AI_REASONING_EFFORT='xhigh'
+DEFAULT_RESEARCH_SCOUT_AI_NOTES_TIMEOUT_MS='90000'
+DEFAULT_RESEARCH_SCOUT_AI_PLANNER_TIMEOUT_MS='180000'
 
 print_usage() {
   echo "Usage: bash ./scripts/control-plane-autonomous-runner.sh <start|stop|status|restart>" >&2
@@ -240,6 +246,21 @@ normalize_stale_child_status_files() {
 
       const now = new Date().toISOString();
       const staleNote = "Lane inactive. No live PID was found for this status file.";
+      const normalizedPhase = typeof parsed.phase === "string" ? parsed.phase.trim().toLowerCase() : "";
+      const alreadyTerminal = parsed.running === false && (normalizedPhase === "completed" || normalizedPhase === "failed");
+      if (alreadyTerminal) {
+        if (typeof parsed.summary === "string" && parsed.summary.includes(staleNote)) {
+          parsed.summary = parsed.summary
+            .split(/\r?\n/)
+            .filter((line) => !line.includes(staleNote) && !line.includes("[cleaned]"))
+            .join("\n")
+            .replace(/\n{3,}/g, "\n\n")
+            .trim();
+          fs.writeFileSync(statusPath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
+        }
+        process.exit(0);
+      }
+
       parsed.running = false;
       parsed.phase = "completed";
       parsed.lastUpdatedAt = now;
@@ -453,6 +474,11 @@ write_env_file() {
   local log_tail_lines="${9}"
   local auto_restart_experimental="${10}"
   local auto_restart_production="${11}"
+  local codeql_autorun="${12}"
+  local research_scout_ai_model="${13}"
+  local research_scout_ai_reasoning_effort="${14}"
+  local research_scout_ai_notes_timeout_ms="${15}"
+  local research_scout_ai_planner_timeout_ms="${16}"
 
   mkdir -p "$CONTROL_DIR"
   {
@@ -463,6 +489,7 @@ write_env_file() {
     write_env_var CONTROL_PLANE_AUTONOMOUS_EDIT_ALLOWLIST "$edit_allowlist"
     write_env_var CONTROL_PLANE_AUTONOMOUS_EDIT_DENYLIST "$edit_denylist"
     write_env_var CONTROL_PLANE_REPO_ROOT "$ROOT_DIR"
+    write_env_var CONTROL_PLANE_RUNTIME_DIR "$CONTROL_DIR"
     write_env_var CONTROL_PLANE_AUTONOMOUS_STATUS_FILE "$STATUS_FILE"
     write_env_var CONTROL_PLANE_AUTONOMOUS_CHECKPOINT_FILE "$CHECKPOINT_FILE"
     write_env_var CONTROL_PLANE_AUTONOMOUS_PID_FILE "$PID_FILE"
@@ -471,6 +498,11 @@ write_env_file() {
     write_env_var CONTROL_PLANE_LOG_TAIL_LINES "$log_tail_lines"
     write_env_var CONTROL_PLANE_AUTO_RESTART_EXPERIMENTAL "$auto_restart_experimental"
     write_env_var CONTROL_PLANE_AUTO_RESTART_PRODUCTION "$auto_restart_production"
+    write_env_var CONTROL_PLANE_CODEQL_AUTORUN "$codeql_autorun"
+    write_env_var CONTROL_PLANE_RESEARCH_SCOUT_AI_MODEL "$research_scout_ai_model"
+    write_env_var CONTROL_PLANE_RESEARCH_SCOUT_AI_REASONING_EFFORT "$research_scout_ai_reasoning_effort"
+    write_env_var CONTROL_PLANE_RESEARCH_SCOUT_AI_NOTES_TIMEOUT_MS "$research_scout_ai_notes_timeout_ms"
+    write_env_var CONTROL_PLANE_RESEARCH_SCOUT_AI_PLANNER_TIMEOUT_MS "$research_scout_ai_planner_timeout_ms"
   } > "$ENV_FILE"
 }
 
@@ -570,9 +602,14 @@ start_runner() {
   local log_tail_lines="${CONTROL_PLANE_AUTONOMOUS_LOG_TAIL_LINES:-$DEFAULT_LOG_TAIL_LINES}"
   local auto_restart_experimental="${CONTROL_PLANE_AUTONOMOUS_AUTO_RESTART_EXPERIMENTAL:-${CONTROL_PLANE_AUTO_RESTART_EXPERIMENTAL:-false}}"
   local auto_restart_production="${CONTROL_PLANE_AUTONOMOUS_AUTO_RESTART_PRODUCTION:-${CONTROL_PLANE_AUTO_RESTART_PRODUCTION:-false}}"
+  local codeql_autorun="${CONTROL_PLANE_AUTONOMOUS_CODEQL_AUTORUN:-${CONTROL_PLANE_CODEQL_AUTORUN:-$DEFAULT_CODEQL_AUTORUN}}"
+  local research_scout_ai_model="${CONTROL_PLANE_RESEARCH_SCOUT_AI_MODEL:-$DEFAULT_RESEARCH_SCOUT_AI_MODEL}"
+  local research_scout_ai_reasoning_effort="${CONTROL_PLANE_RESEARCH_SCOUT_AI_REASONING_EFFORT:-$DEFAULT_RESEARCH_SCOUT_AI_REASONING_EFFORT}"
+  local research_scout_ai_notes_timeout_ms="${CONTROL_PLANE_RESEARCH_SCOUT_AI_NOTES_TIMEOUT_MS:-$DEFAULT_RESEARCH_SCOUT_AI_NOTES_TIMEOUT_MS}"
+  local research_scout_ai_planner_timeout_ms="${CONTROL_PLANE_RESEARCH_SCOUT_AI_PLANNER_TIMEOUT_MS:-$DEFAULT_RESEARCH_SCOUT_AI_PLANNER_TIMEOUT_MS}"
 
   rotate_runtime_files
-  write_env_file "$goal" "$scopes" "$interval_ms" "$max_edit_actions" "$edit_allowlist" "$edit_denylist" "$agent_parallelism" "$multi_runner" "$log_tail_lines" "$auto_restart_experimental" "$auto_restart_production"
+  write_env_file "$goal" "$scopes" "$interval_ms" "$max_edit_actions" "$edit_allowlist" "$edit_denylist" "$agent_parallelism" "$multi_runner" "$log_tail_lines" "$auto_restart_experimental" "$auto_restart_production" "$codeql_autorun" "$research_scout_ai_model" "$research_scout_ai_reasoning_effort" "$research_scout_ai_notes_timeout_ms" "$research_scout_ai_planner_timeout_ms"
   chmod +x "$EXEC_SCRIPT"
   if user_systemd_available; then
     write_unit_file

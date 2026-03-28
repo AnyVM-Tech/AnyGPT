@@ -82,7 +82,7 @@ function isNonChatModel(modelId: string): 'tts' | 'stt' | 'image-gen' | 'video-g
 function isAvailabilityConstraintReason(value: unknown): boolean {
   const normalized = String(value || '').trim().toLowerCase();
   if (!normalized) return false;
-  return /provider[_ -]?model[_ -]?removed|provider[_ -]?cap[_ -]?blocked|image generation unavailable|generation unavailable|unavailable in provider region|unavailable in country|provider region|provider-region|blocked in provider region|blocked in country|country|country-blocked|country blocked|regional availability|region(?:al)? availability|region-locked|region locked|geo(?:graph(?:ic)?)? restriction|geo(?:graph(?:ic)?)? restricted|geo-restricted|georestricted|country availability|unsupported image output|\bno access\b|access denied|not entitled|not enabled for (?:this )?(?:account|project)|permission denied|forbidden|not available to your account|not available for your account|not available in (?:your |this )?(?:region|country|location)|not available for (?:your |this )?(?:region|country|location)|not supported in (?:your |this )?(?:region|country|location)|blocked in (?:your |this )?(?:region|country|location)|unavailable in (?:your |this )?(?:region|country|location)|unavailable for (?:your |this )?(?:region|country|location)|(?:region|country|location) is unavailable|unavailable due to (?:region|country|location)|not available in the selected model|no allowed providers are available|model is not available/.test(normalized);
+  return /provider[_ -]?model[_ -]?removed|provider[_ -]?cap[_ -]?blocked|image generation unavailable|image generation unavailable in (?:provider )?(?:region|country|location)|generation unavailable|generation unavailable in (?:provider )?(?:region|country|location)|unavailable in provider region|unavailable in country|blocked in provider region|blocked in country|country-blocked|country blocked|regional availability|region(?:al)? availability|region-locked|region locked|geo(?:graph(?:ic)?)? restriction|geo(?:graph(?:ic)?)? restricted|geo-restricted|georestricted|country availability|unsupported image output|\bno access\b|access denied|not entitled|not enabled for (?:this )?(?:account|project)|permission denied|forbidden|not available to your account|not available for your account|not available in (?:your |this )?(?:region|country|location)|not available for (?:your |this )?(?:region|country|location)|not supported in (?:your |this )?(?:region|country|location)|blocked in (?:your |this )?(?:region|country|location)|unavailable in (?:your |this )?(?:region|country|location)|unavailable for (?:your |this )?(?:region|country|location)|(?:region|country|location) is unavailable|unavailable due to (?:region|country|location)|not available in the selected model|no allowed providers are available|model is not available|model unavailable|provider unavailable|provider not available|not available for this provider|not available from this provider|not accessible|access restricted|account restricted|project restricted|not provisioned|not whitelisted|not authorized|unauthorized|unsupported in your region|insufficient permissions?|missing permissions?|permission\s+required|requires? (?:billing|verification|organization verification|org verification)|billing (?:required|disabled|not enabled)|organization verification required|org verification required|account not verified|project not verified|service not enabled|api not enabled|feature not enabled|disabled for your account|disabled for this account|disabled for your project|not available on your current plan|plan upgrade required|upgrade required/.test(normalized);
 }
 
 function collectAvailabilityConstraintMetadata(meta: ProviderModelMeta | null | undefined): {
@@ -263,9 +263,11 @@ function main() {
     if (!provider.models) continue;
     for (const [modelId, modelMeta] of Object.entries(provider.models)) {
       const meta = modelMeta as ProviderModelMeta | null;
+      const constrained = hasAvailabilityConstraint(modelId, meta);
       providerSeenModels.add(modelId);
-      if (hasAvailabilityConstraint(modelId, meta)) {
+      if (constrained) {
         constrainedModelIds.add(modelId);
+        constrainedCatalogModelIds.add(modelId);
         if (
           meta
           && (

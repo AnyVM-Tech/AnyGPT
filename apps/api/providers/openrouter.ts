@@ -17,7 +17,19 @@ function isOpenRouterToolUseUnsupportedError(error: any): boolean {
       || error?.message
       || ''
   );
-  return status === 404 && /no endpoints found that support (tool use|the tool|the provided ['\"]tool_choice['\"] value)|no allowed providers are available for the selected model/i.test(message);
+  const lowerMessage = message.toLowerCase();
+  const isToolCallingRequest =
+    lowerMessage.includes('tool use') ||
+    lowerMessage.includes('tool_choice') ||
+    lowerMessage.includes('client-side tools') ||
+    lowerMessage.includes('function calling');
+  return (
+    (status === 404 || status === 400) &&
+    (
+      /no endpoints found that support (tool use|the tool|the provided ['\"]tool_choice['\"] value)|no allowed providers are available for the selected model/i.test(message) ||
+      (isToolCallingRequest && /beta access|invalid argument/i.test(lowerMessage))
+    )
+  );
 }
 /**
  * OpenRouter provider: OpenAI-compatible but requires Referer and X-Title headers.
@@ -892,11 +904,14 @@ export class OpenRouterAI implements IAIProvider {
       const wrappedError = new Error(`OpenRouter API call failed: ${msg} (latency ${latency}ms)`);
       const status = Number(error?.response?.status || error?.status || 0);
       const lowerMsg = msg.toLowerCase();
+      const isToolUseUnsupportedFailure = isOpenRouterToolUseUnsupportedError(error);
       const isCredentialOrQuotaFailure =
-        status === 401 ||
-        status === 402 ||
-        status === 403 ||
-        /unauthorized|invalid api key|invalid_api_key|incorrect api key|authentication failed|forbidden|insufficient credits|quota exceeded|billing|payment required|no allowed providers are available for the selected model/i.test(msg) ||
+        !isToolUseUnsupportedFailure && (
+          status === 401 ||
+          status === 402 ||
+          status === 403 ||
+          /unauthorized|invalid api key|invalid_api_key|incorrect api key|authentication failed|forbidden|insufficient credits|quota exceeded|billing|payment required/i.test(msg)
+        ) ||
         /quota exceeded|insufficient credits|insufficient balance|payment required|billing|credits required|key_no_quota|no credits/i.test(msg);
       if (
         isCredentialOrQuotaFailure

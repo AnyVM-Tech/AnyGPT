@@ -1,0 +1,21 @@
+name: AnyGPT CodeQL
+
+paths:
+  - apps/api
+  - apps/langgraph-control-plane
+  - apps/ui
+  - apps/homepage
+  - scripts
+  - package.json
+  - pnpm-workspace.yaml
+  - tsconfig.json
+  - bun.sh
+
+paths-ignore:
+  - '**/.control-plane/**'
+  - '**/.langgraph_api/**'
+  - '**/dist/**'
+  - '**/logs/**'
+  - '**/node_modules/**'
+  - '**/.turbo/**'
+  - '.codeql/**'

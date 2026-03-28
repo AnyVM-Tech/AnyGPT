@@ -29,8 +29,8 @@ const FILE_CHECKPOINTER_MAX_ITERATIONS_PER_NAMESPACE = (() => {
 })();
 
 const FILE_CHECKPOINTER_MAX_CHECKPOINTS_PER_NAMESPACE = (() => {
-  const raw = Number(process.env.CONTROL_PLANE_MAX_CHECKPOINTS_PER_NAMESPACE ?? 96);
-  if (!Number.isFinite(raw) || raw < 1) return 96;
+  const raw = Number(process.env.CONTROL_PLANE_MAX_CHECKPOINTS_PER_NAMESPACE ?? 24);
+  if (!Number.isFinite(raw) || raw < 1) return 24;
   return Math.max(1, Math.floor(raw));
 })();
 
@@ -199,6 +199,7 @@ function compactWrites(writes: InMemoryWrites): InMemoryWrites {
 export class FileMemorySaver extends MemorySaver {
   readonly filePath: string;
   private loaded = false;
+  private lastPersistedSnapshotJson = '';
 
   constructor(filePath: string) {
     super();
@@ -254,9 +255,14 @@ export class FileMemorySaver extends MemorySaver {
 
   private async persist(): Promise<void> {
     fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
+    const snapshotJson = JSON.stringify(this.buildSnapshot());
+    if (snapshotJson === this.lastPersistedSnapshotJson) {
+      return;
+    }
     const tempPath = `${this.filePath}.tmp`;
-    fs.writeFileSync(tempPath, JSON.stringify(this.buildSnapshot()), 'utf8');
+    fs.writeFileSync(tempPath, snapshotJson, 'utf8');
     fs.renameSync(tempPath, this.filePath);
+    this.lastPersistedSnapshotJson = snapshotJson;
   }
 
   async setup(): Promise<void> {
@@ -274,7 +280,7 @@ export class FileMemorySaver extends MemorySaver {
     this.storage = compactStorage(this.storage as InMemoryStorage);
     this.writes = compactWrites(this.writes as InMemoryWrites);
     this.loaded = true;
-    await this.persist();
+    this.lastPersistedSnapshotJson = JSON.stringify(this.buildSnapshot());
   }
 
   async getTuple(config: any): Promise<any> {
@@ -299,7 +305,6 @@ export class FileMemorySaver extends MemorySaver {
   async putWrites(config: any, writes: any, taskId: string): Promise<void> {
     await this.setup();
     await super.putWrites(config, writes, taskId);
-    await this.persist();
   }
 
   async deleteThread(threadId: string): Promise<void> {
