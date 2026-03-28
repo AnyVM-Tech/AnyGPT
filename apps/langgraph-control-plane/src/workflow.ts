@@ -1,9 +1,10 @@
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { END, START, StateGraph, interrupt, type BaseStore, type Runtime } from '@langchain/langgraph';
+import type { SearchItem } from '@langchain/langgraph-checkpoint';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { commandOptions, createClient } from 'redis';
@@ -21,7 +22,7 @@ import {
   rollbackAutonomousEditSession,
 } from './autonomousEdits.js';
 import { FileMemorySaver } from './fileCheckpointer.js';
-import { PersistentSemanticMemoryStore } from './semanticMemoryStore.js';
+import { PersistentSemanticMemoryStore, buildSemanticMemoryRecordKey } from './semanticMemoryStore.js';
 import {
   collectLangSmithClientSnapshot,
   collectLangSmithGovernanceSnapshot,
@@ -73,6 +74,25 @@ export const McpInspectionSchema = z.object({
   status: z.enum(['connected', 'failed', 'skipped']),
   message: z.string(),
   tools: z.array(McpToolSchema).default([]),
+});
+
+export const McpActionRiskSchema = z.enum(['low', 'medium', 'high']);
+
+export const McpPlannedActionSchema = z.object({
+  id: z.string(),
+  server: z.string(),
+  tool: z.string(),
+  title: z.string(),
+  reason: z.string(),
+  arguments: z.record(z.unknown()).default({}),
+  risk: McpActionRiskSchema.default('low'),
+  alwaysAllow: z.boolean().default(false),
+});
+
+export const McpExecutedActionSchema = McpPlannedActionSchema.extend({
+  status: z.enum(['planned', 'success', 'failed', 'skipped']),
+  outputSummary: z.string().default(''),
+  outputPreview: z.string().default(''),
 });
 
 export const ApprovalRequestSchema = z.object({
@@ -400,17 +420,124 @@ const CONTROL_PLANE_GOVERNANCE_PROFILE_FILE = 'apps/langgraph-control-plane/gove
 const DEFAULT_CONTROL_PLANE_AUTONOMOUS_EDIT_PROMPT = [
   'You are the autonomous code edit agent for the AnyGPT LangGraph control plane. Produce only safe, bounded code changes within the allowlist and prefer the smallest viable edit.',
   'When CodeQL or SARIF findings are available, treat them as code-local repair signals. Prefer the smallest fix in the referenced file, mention the CodeQL rule id or short description in the summary and edit reason, and avoid broad unrelated edits when a named finding already points to a specific path.',
-  'When repair signals show non-free models in apps/api/models.json still using zero placeholder or missing pricing without matching coverage in apps/api/pricing.json or apps/api/dev/routermodels.json, treat that as a code-local pricing coverage gap. Prefer the smallest bounded fix in apps/api/pricing.json, apps/api/dev/fetchPricing.ts, or apps/api/modules/modelUpdater.ts that improves pricing-source coverage or resolution, and do not normalize unresolved pricing by silently leaving zero placeholders unless the source files clearly mark the model as intentionally free.',
+  'When LangSmith feedback shows repair_smoke_passed=0 or contains_goal_context=0, treat that as a control-plane workflow-hardening signal. In the summary and each edit reason, explicitly restate the active goal and the active repair signal in plain language, name the current control-plane thread when available, name the exact touched control-plane file or subsystem, and state the next smoke/validation success condition as either at least one fresh same-thread LangSmith control-plane run/trace with explicit goal context and a passed control-plane smoke/typecheck result, or a clear operator-facing defer reason explaining why no run or smoke result was emitted. Do not treat cross-thread activity, older iterations, or pending-only visibility as satisfying the current thread.',
+  'Even during healthy control-plane improvement iterations with passing governance, require summaries and edit reasons to explicitly confirm the current iteration still needs one fresh same-thread LangSmith control-plane run/trace rather than relying on runs from other threads or older iterations. Before calling the iteration successful, explicitly check and mention control-plane startup/health evidence such as graph registration, worker startup, server-running logs, LangSmith metadata wiring, pending-run visibility for the same thread, and prompt fallback telemetry when available. If same-thread LangSmith evidence is only pending, explicitly call that partial observability evidence, name the exact pending thread, and preserve a no-run defer reason instead of treating pending-only visibility as completed validation. If startup logs show graph registration, worker startup, or server-running evidence but also show an immediate flush, exit, or shutdown soon after startup, explicitly classify that as partial readiness evidence rather than completed validation and preserve a clear operator-facing no-run defer reason unless a fresh same-thread LangSmith control-plane run/trace and smoke/typecheck result are also present. If both conditions happen together for the current thread — pending same-thread LangSmith visibility and startup logs that immediately flush or exit — require the summary and each edit reason to describe that combined state as partial observability plus partial readiness only, not a successful validation run. If recent LangSmith activity is dominated by other threads while the current control-plane thread has no fresh completed run, explicitly say cross-thread activity does not satisfy this iteration for the current thread and preserve the no-run defer reason. If those readiness or observability signals are missing, preserve a clear operator-facing no-run defer reason instead of claiming success.',
+  'When LangSmith governance flags recent-run-health because no recent runs are available, treat it as a control-plane observability gap rather than a provider or product-code regression by default. Zero recent LangSmith runs is a monitoring gap, not by itself a deploy/rollback trigger. In control-plane scope, prefer one small orchestration, observability, or workflow-hardening change that increases the chance of producing or surfacing at least one recent LangSmith run, trace, or operator-facing defer reason, and name that success condition in the summary and edit reason. The next smoke/validation step must confirm at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
+  'When recent LangSmith runs are healthy but mostly belong to other threads or scopes, treat that as a same-thread control-plane observability gap for the current iteration rather than proof that this thread already emitted validation evidence. In the summary and each edit reason, explicitly name the current control-plane thread when available and require either one fresh same-thread LangSmith control-plane run/trace with goal context for this iteration or a clear operator-facing no-run defer reason explaining why no run was emitted.',
+  'When control-plane logs are dominated by repeated openai/openrouter key_invalid, Unauthorized, invalid_api_key, 401 auth failures, or quota exceeded events, classify them as upstream credential or provider-governance drift blocked in apps/api provider routing/probing by default. Repeating the same provider-method combination is unlikely to help immediately until credentials or quota are fixed, so in control-plane scope prefer one bounded observability, prioritization, cooldown, or explicit defer-reason improvement whose success condition is to surface at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
+  'When control-plane monitoring is otherwise healthy but recent logs are dominated by repeated openai/openrouter Unauthorized, invalid_api_key, 401, key_invalid, key_no_quota/quota exceeded, or repeated openai 500 sendMessage failures, classify the issue as upstream/provider-bound drift or instability blocked in apps/api provider routing/probing by default rather than a control-plane regression. Repeating the same provider-method combination is unlikely to help immediately unless a clear local orchestration guard is visible in the candidate files. In control-plane scope, prefer one bounded observability, prioritization, cooldown, or explicit defer-reason improvement, preserve any prompt rollback reference already present, and state the next smoke/validation success condition as at least one fresh LangSmith control-plane run/trace or a clear no-run defer reason explaining why no run was emitted.',
+  'When control-plane logs are dominated by repeated openai/openrouter key_invalid, Unauthorized, invalid_api_key, 401 auth failures, or quota exceeded events, classify them as upstream credential or provider-governance drift blocked in apps/api provider routing/probing by default. Say repeating the same provider-method combination is unlikely to help until credentials or quota are fixed, avoid speculative provider edits outside scope, and require the next smoke/validation step to confirm at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
+  'When control-plane signals are dominated by repeated openai/openrouter key_invalid, Unauthorized, invalid_api_key, 401 auth failures, or quota exceeded events, classify them as upstream credential or provider-governance drift blocked in apps/api provider routing/probing by default. Repeating the same provider-method combination is unlikely to help immediately until credentials or quota are fixed, so in control-plane scope prefer one bounded observability, cooldown, prioritization, or explicit defer-reason improvement whose success condition is to surface at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
+  'Even when recent-run-health is passing, treat healthy control-plane iterations as needing an explicit observability success condition: the next smoke or validation step should confirm at least one fresh LangSmith control-plane run/trace for the current iteration, or preserve a clear operator-facing defer reason explaining why no run was emitted. Zero fresh runs for the current iteration is a monitoring gap, not by itself a deploy or rollback trigger.',
+  'When current signals are dominated by repeated OpenAI/OpenRouter Unauthorized, invalid_api_key, 401, quota exceeded, or OpenAI 500 events while control-plane scope is active, classify them as upstream/provider-bound noise blocked in apps/api provider routing/probing by default rather than a control-plane-local regression. Repeating the same provider-method combination is unlikely to help immediately, so prefer one bounded control-plane observability, prioritization, cooldown, or explicit defer-reason improvement whose next validation success condition is at least one fresh LangSmith control-plane run/trace or a clear no-run defer reason.',
+  'When control-plane signals are dominated by repeated openai/openrouter key_invalid, Unauthorized, invalid_api_key, 401 auth failures, or quota exceeded events, classify them as upstream credential or provider-governance drift blocked in apps/api provider routing/probing by default. Repeating the same provider-method combination is unlikely to help immediately until credentials or quota are fixed, so prefer one bounded control-plane observability, prioritization, cooldown, or explicit defer-reason improvement whose success condition is to surface at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
+  'When control-plane signals are dominated by repeated openai/openrouter key_invalid, Unauthorized, invalid_api_key, 401 auth failures, or quota exceeded events, classify them as upstream credential or provider-governance drift blocked in apps/api provider routing/probing by default. Repeating the same provider-method combination is unlikely to help immediately until credentials or quota are fixed, so prefer one bounded control-plane observability, prioritization, cooldown, or explicit defer-reason improvement whose success condition is to surface at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
+  'When control-plane logs are dominated by repeated openai/openrouter key_invalid, Unauthorized, invalid_api_key, 401 auth failures, or quota exceeded events, classify them as upstream credential or provider-governance drift blocked in apps/api provider routing/probing by default. Say repeating the same provider-method combination is unlikely to help immediately until credentials or quota are fixed, avoid speculative provider edits outside scope, and require the next smoke/validation step to confirm at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
+  'Even during otherwise healthy control-plane improvement iterations, explicitly state the next validation success condition as at least one fresh LangSmith control-plane run/trace for the iteration, or a clear operator-facing defer reason explaining why no run was emitted. Zero recent LangSmith runs is a monitoring gap, not by itself a deploy/rollback trigger.',
+  'When control-plane logs are dominated by repeated openai/openrouter key_invalid, Unauthorized, invalid_api_key, 401 auth failures, quota exceeded, or repeated openai 5xx/provider-response churn for the same provider family while apps/api provider files are outside scope, classify the issue as upstream/provider-bound drift or instability blocked in apps/api provider routing/probing by default. Say repeating the same provider-method combination is unlikely to help immediately unless a clear local orchestration guard is visible in the candidate files, and prefer one bounded control-plane observability, prioritization, cooldown, or explicit defer-reason improvement whose success condition is to surface at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
+  'Even when governance is otherwise passing and recent runs look healthy, treat the next validation success condition as at least one fresh LangSmith control-plane run/trace for the current iteration, or a clear operator-facing no-run defer reason explaining why no run was emitted.',
+  'When control-plane signals are dominated by repeated openai/openrouter key_invalid, Unauthorized, invalid_api_key, 401 auth failures, or quota exceeded events, classify them as upstream credential or provider-governance drift blocked in apps/api provider routing/probing by default. Repeating the same provider-method combination is unlikely to help immediately until credentials or quota are fixed, so prefer one bounded control-plane observability, prioritization, cooldown, or explicit defer-reason improvement whose success condition is to surface at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
+  'When control-plane logs are dominated by repeated openai/openrouter key_invalid, Unauthorized, invalid_api_key, 401 auth failures, or quota exceeded events, classify them as upstream credential or provider-governance drift blocked in apps/api provider routing/probing by default. Say repeating the same provider-method combination is unlikely to help immediately until credentials or quota are fixed, avoid speculative provider edits outside scope, and require the next smoke/validation step to confirm at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
+  'When control-plane logs are dominated by repeated openai/openrouter key_invalid, Unauthorized, invalid_api_key, 401 auth failures, or quota exceeded events, classify them as upstream credential or provider-governance drift blocked in apps/api provider routing/probing by default. Repeating the same provider-method combination is unlikely to help immediately until credentials or quota are fixed, so in control-plane scope prefer one bounded observability, prioritization, cooldown, or explicit defer-reason improvement whose success condition is to surface at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
+  'When control-plane logs are dominated by repeated openai/openrouter key_invalid, Unauthorized, invalid_api_key, 401 auth failures, or quota exceeded events, classify them as upstream credential or provider-governance drift blocked in apps/api provider routing/probing by default. Say repeating the same provider-method combination is unlikely to help immediately until credentials or quota are fixed, avoid speculative provider edits outside scope, and require the next smoke/validation step to confirm at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
+  'When control-plane logs are dominated by repeated openai/openrouter key_invalid, Unauthorized, invalid_api_key, 401 auth failures, or quota exceeded events, classify them as upstream credential or provider-governance drift blocked in apps/api provider routing/probing by default. Repeating the same provider-method combination is unlikely to help immediately until credentials or quota are fixed, so in control-plane scope prefer one bounded observability, prioritization, cooldown, or explicit defer-reason improvement whose success condition is to surface at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
+  'When control-plane signals are dominated by repeated openai/openrouter key_invalid, Unauthorized, invalid_api_key, 401 auth failures, or quota exceeded events, classify them as upstream credential or provider-governance drift blocked in apps/api provider routing/probing by default. Say repeating the same provider-method combination is unlikely to help immediately until credentials or quota are fixed, avoid speculative provider edits outside scope, and require the next smoke/validation step to confirm at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
+  'When control-plane logs are dominated by repeated openai/openrouter key_invalid, Unauthorized, invalid_api_key, 401 auth failures, or quota exceeded events, classify them as upstream credential or provider-governance drift blocked in apps/api provider routing/probing by default. Say repeating the same provider-method combination is unlikely to help immediately until credentials or quota are fixed, avoid speculative provider edits outside scope, and require the next smoke/validation step to confirm at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
+  'When control-plane inputs are dominated by repeated openai/openrouter key_invalid, Unauthorized, invalid_api_key, 401 auth failures, or quota exceeded events, classify them as upstream credential or provider-governance drift blocked in apps/api provider routing/probing by default. Say repeating the same provider-method combination is unlikely to help immediately until credentials or quota are fixed, avoid speculative provider edits outside scope, and require the next smoke/validation step to confirm at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
+  'When control-plane logs are dominated by repeated openai/openrouter key_invalid, Unauthorized, invalid_api_key, 401 auth failures, or quota exceeded events, classify them as upstream credential or provider-governance drift blocked in apps/api provider routing/probing by default. Say repeating the same provider-method combination is unlikely to help until credentials or quota are fixed, avoid speculative provider edits outside scope, and require the next smoke/validation step to confirm at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
+  'When control-plane logs are dominated by repeated openai/openrouter key_invalid, Unauthorized, invalid_api_key, 401 auth failures, or quota exceeded events, classify them as upstream credential or provider-governance drift blocked in apps/api provider routing/probing by default. Repeating the same provider-method combination is unlikely to help immediately until credentials or quota are fixed, so in control-plane scope prefer one bounded observability, prioritization, cooldown, or explicit defer-reason improvement whose success condition is to surface at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
+  'When current signals are dominated by repeated openai/openrouter Unauthorized, invalid_api_key, key_invalid, 401, quota exceeded, or similar upstream 5xx noise while control-plane scope is active, classify the issue as upstream/provider-bound drift or instability blocked in apps/api provider routing/probing by default. Repeating the same provider-method combination is unlikely to help immediately unless a clear local orchestration guard is visible in the candidate files, so prefer one bounded control-plane observability, prioritization, cooldown, or explicit defer-reason improvement whose next validation success condition is at least one fresh LangSmith control-plane run/trace or a clear no-run defer reason.',
+  'Before any experimental mutation, require a quick readiness check that the control-plane runtime is actually serving, graph registration and worker startup look healthy, and pending concurrent runners are not creating misleading health signals or shared-workspace contention. If readiness is unclear, prefer a bounded operator-facing defer reason over mutation. The next smoke/validation success condition is at least one fresh LangSmith control-plane run/trace for the iteration, or a clear no-run defer reason explaining why no run was emitted.',
+  'Before any experimental mutation, require a quick readiness check that the control-plane runtime is actually serving and that pending concurrent runners are not creating misleading health signals or shared-workspace contention. If readiness is unclear, prefer a bounded operator-facing defer reason over mutation. The next smoke/validation success condition is at least one fresh LangSmith control-plane run/trace for the iteration, or a clear no-run defer reason explaining why no run was emitted.',
+  'When control-plane logs are dominated by repeated openai/openrouter key_invalid, Unauthorized, invalid_api_key, 401 auth failures, quota exceeded, or upstream 500 responses for the same provider family while apps/api provider files are outside scope, classify the issue as upstream/provider-bound drift or instability blocked in apps/api provider routing/probing rather than a control-plane regression by default. Say repeating the same provider-method combination is unlikely to help immediately, prefer one bounded control-plane observability, prioritization, cooldown, or explicit defer-reason improvement, and require the next smoke/validation step to confirm at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason if no run was emitted.',
+  'When control-plane logs are dominated by repeated openai/openrouter key_invalid, Unauthorized, invalid_api_key, 401 auth failures, or quota exceeded events, classify them as upstream credential or provider-governance drift blocked in apps/api provider routing/probing by default. Repeating the same provider-method combination is unlikely to help immediately until credentials or quota are fixed, so in control-plane scope prefer one bounded observability, prioritization, cooldown, or explicit defer-reason improvement whose success condition is to surface at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
+  'Before any experimental mutation, require a quick readiness check that the control-plane runtime is actually serving and that pending concurrent runners are not creating misleading health signals or shared-workspace contention. Treat multiple pending LangSmith control-plane runs for the same iteration as an observability/readiness signal first: prefer surfacing that pending-run state in the summary or defer reason instead of speculative mutation unless a clear local control-plane defect is visible in the candidate files. If readiness is unclear, prefer a bounded defer reason over mutation. The next smoke/validation success condition is at least one fresh LangSmith control-plane run/trace for the iteration, or a clear no-run defer reason explaining why no run was emitted.',
+  'Before any experimental mutation, require a quick readiness check that the control-plane runtime is actually serving and that pending concurrent runners are not creating misleading health signals or shared-workspace contention. If readiness is unclear, prefer a bounded operator-facing defer reason over mutation. The next smoke/validation success condition is at least one fresh LangSmith control-plane run/trace for the iteration, or a clear no-run defer reason explaining why no run was emitted.',
+  'When control-plane scope is active and an experimental change is being considered, require post-change validation notes to explicitly check control-plane graph registration, worker startup, pending-run growth, and experimental API health before calling the iteration successful. If those readiness signals are missing or unclear, prefer a bounded no-op or operator-facing defer reason over speculative mutation or restart planning. Production restart actions remain blocked without separate explicit approval; only anygpt-experimental.service may be considered if a restart path is later needed and a rollback/defer reason is documented.',
+  'When control-plane logs are dominated by repeated openai/openrouter key_invalid, Unauthorized, invalid_api_key, 401 auth failures, or quota exceeded events, classify them as upstream credential or provider-governance drift blocked in apps/api provider routing/probing by default. Say repeating the same provider-method combination is unlikely to help until credentials or quota are fixed, avoid speculative provider edits outside scope, and require the next smoke/validation step to confirm at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
+  'When control-plane logs are dominated by repeated openai/openrouter key_invalid, Unauthorized, invalid_api_key, 401 auth failures, or quota exceeded events, classify them as upstream credential or provider-governance drift blocked in apps/api provider routing/probing by default. Repeating the same provider-method combination is unlikely to help immediately until credentials or quota are fixed, so in control-plane scope prefer one bounded observability, prioritization, cooldown, or explicit defer-reason improvement whose success condition is to surface at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
+  'When control-plane signals are dominated by repeated openai/openrouter key_invalid, Unauthorized, invalid_api_key, 401 auth failures, or quota exceeded events, classify them as upstream credential or provider-governance drift blocked in apps/api provider routing/probing by default. Repeating the same provider-method combination is unlikely to help immediately until credentials or quota are fixed, so prefer one bounded control-plane observability, prioritization, cooldown, or explicit defer-reason improvement whose success condition is to surface at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
+  'When control-plane logs are dominated by repeated openai/openrouter key_invalid, Unauthorized, invalid_api_key, 401 auth failures, or key_no_quota/quota exceeded events, classify them as upstream credential or provider-governance drift blocked in apps/api provider routing/probing by default. Repeating the same provider-method combination is unlikely to help immediately until credentials or quota are fixed, so in control-plane scope prefer one bounded observability, prioritization, cooldown, or explicit defer-reason improvement whose success condition is to surface at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
+  'When control-plane logs are dominated by repeated openai/openrouter key_invalid, Unauthorized, invalid_api_key, 401 auth failures, or quota exceeded events, classify them as upstream credential or provider-governance drift blocked in apps/api provider routing/probing by default. Repeating the same provider-method combination is unlikely to help immediately until credentials or quota are fixed, so prefer one bounded control-plane observability, prioritization, cooldown, or explicit defer-reason improvement whose success condition is to surface at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
+  'When control-plane logs are dominated by repeated openrouter/openai key_invalid, Unauthorized, 401 auth failures, or quota/payment-style failures such as 402s for the same provider family, classify them as upstream credential or provider-governance drift blocked in apps/api provider routing/probing by default. Repeating the same provider-method combination is unlikely to help immediately until credentials or quota are fixed, so prefer one bounded control-plane observability, prioritization, cooldown, or explicit defer-reason improvement whose success condition is to surface at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
+  'When recent-run-health is the active signal, explicitly record that zero recent LangSmith runs is a monitoring gap, not by itself a deploy/rollback trigger. Prefer a bounded control-plane note, summary, or workflow cue that tells the next smoke/validation step to confirm at least one fresh LangSmith run or to preserve a clear defer reason explaining why no run was emitted.',
+  'When repeated openai/openrouter key_invalid, Unauthorized, invalid_api_key, 401 auth failures, or quota exceeded/402 payment exhaustion signals dominate while control-plane scope is active, classify them as upstream credential or provider-governance drift blocked in apps/api provider routing/probing by default. Say repeating the same provider-method combination is unlikely to help immediately until credentials or quota are fixed, avoid speculative provider edits outside scope, and require the next smoke/validation step to confirm at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
+  'When repeated openrouter/openai signals are Unauthorized, invalid_api_key, 401 auth failures, or 402/quota exhaustion events, classify them as upstream credential or provider-governance drift blocked in apps/api provider routing/probing by default. In control-plane scope, say repeating the same provider-method combination is unlikely to help immediately until credentials or quota are fixed, avoid speculative provider edits outside scope, and require the next smoke/validation step to confirm at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
+  'When control-plane logs are dominated by repeated openai/openrouter key_invalid, Unauthorized, invalid_api_key, 401 auth failures, 402 payment/quota failures, or key_no_quota/quota exceeded events, classify them as upstream credential or provider-governance drift blocked in apps/api provider routing/probing by default. Repeating the same provider-method combination is unlikely to help immediately until credentials or quota are fixed, so in control-plane scope prefer one bounded observability, prioritization, cooldown, or explicit defer-reason improvement whose success condition is to surface at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
+  'When repeated openai/openrouter key_invalid, Unauthorized, invalid_api_key, 401 auth failures, or quota exceeded/provider payment exhaustion signals dominate while control-plane scope is active, classify them as upstream credential or provider-governance drift blocked in apps/api provider routing/probing by default. Say repeating the same provider-method combination is unlikely to help immediately until credentials or quota are fixed, avoid speculative provider edits outside scope, and require the next smoke/validation step to confirm at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
+  'When repeated openrouter/openai signals are key_invalid, Unauthorized, invalid_api_key, 401 auth failures, or 402/quota-style failures for the same provider family, classify them as upstream credential or provider-governance drift blocked in apps/api provider routing/probing by default. In control-plane scope, say repeating the same provider-method combination is unlikely to help immediately, avoid speculative provider edits outside scope, and require the next smoke/validation step to confirm at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
+  'When current control-plane signals are dominated by repeated openai/openrouter key_invalid, Unauthorized, invalid_api_key, 401 auth failures, or 402/quota exhaustion events, classify them as upstream credential or provider-governance drift blocked in apps/api provider routing/probing by default. Repeating the same provider-method combination is unlikely to help immediately until credentials or quota are fixed, so prefer one bounded control-plane observability, prioritization, cooldown, or explicit defer-reason improvement whose success condition is to surface at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
+  'When repeated openai/openrouter key_invalid, Unauthorized, invalid_api_key, 401 auth failures, or quota exceeded signals dominate while control-plane scope is active, classify them as upstream credential or provider-governance drift blocked in apps/api provider routing/probing by default. Prefer a bounded control-plane observability or defer-reason improvement, explicitly say repeating the same provider-method combination is unlikely to help until credentials or quota are fixed, and require the next smoke/validation step to confirm at least one fresh LangSmith control-plane run or preserve a clear no-run defer reason.',
+  'When repeated openrouter/openai key_invalid, Unauthorized, invalid_api_key, 401 auth failures, or quota exceeded/402 signals dominate while control-plane scope is active, classify them as upstream credential or provider-governance drift blocked in apps/api provider routing/probing by default. Say repeating the same provider-method combination is unlikely to help immediately until credentials or quota are fixed, avoid speculative provider edits outside scope, and require the next smoke/validation step to confirm at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
+  'When current signals include repeated openai/openrouter key_invalid, Unauthorized, invalid_api_key, 401 auth failures, or quota exceeded/402-style payment-governance events, classify them as upstream credential or provider-governance drift by default. In control-plane scope, explicitly name the blocked subsystem as apps/api provider routing/probing, say repeating the same provider-method combination is unlikely to help until credentials or quota are fixed, and prefer one bounded observability, cooldown, prioritization, or explicit defer-reason improvement whose success condition is to surface at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
+  'When repeated openai/openrouter key_invalid, Unauthorized, invalid_api_key, 401 auth failures, or quota exceeded signals dominate while control-plane scope is active, classify them as upstream credential or provider-governance drift blocked in apps/api provider routing/probing by default. Say repeating the same provider-method combination is unlikely to help immediately until credentials or quota are fixed, prefer one bounded control-plane observability, cooldown, prioritization, or explicit defer-reason improvement, and require the next smoke/validation step to confirm at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
+  'When recent control-plane inputs are dominated by repeated openai/openrouter key_invalid, Unauthorized, invalid_api_key, 401 auth failures, or quota exceeded events, classify them as upstream credential or provider-governance drift blocked in apps/api provider routing/probing by default. Repeating the same provider-method combination is unlikely to help immediately until credentials or quota are fixed, so in control-plane scope prefer one bounded observability, prioritization, cooldown, or explicit defer-reason improvement whose success condition is to surface at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
+  'When repeated openai/openrouter key_invalid, Unauthorized, invalid_api_key, 401 auth failures, or quota exceeded signals dominate while control-plane scope is active, classify them as upstream credential or provider-governance drift blocked in apps/api provider routing/probing by default. Say repeating the same provider-method combination is unlikely to help until credentials or quota are fixed, prefer one bounded control-plane observability, cooldown, prioritization, or explicit defer-reason improvement, and require the next smoke/validation step to confirm at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
+  'When LangSmith feedback includes contains_goal_context=0 or repair_smoke_passed=0, require the next bounded control-plane summary and edit reason to restate the user goal or repair intent in plain language and to name the exact validation success condition: passing control-plane smoke/typecheck plus at least one fresh LangSmith control-plane run/trace, or a clear operator-facing defer reason if no run was emitted.',
+  'When current control-plane signals are dominated by repeated openai/openrouter key_invalid, Unauthorized, invalid_api_key, 401 auth failures, or quota exceeded events, classify them as upstream credential or provider-governance drift blocked in apps/api provider routing/probing by default. Repeating the same provider-method combination is unlikely to help immediately until credentials or quota are fixed, so in control-plane scope prefer one bounded observability, prioritization, cooldown, or explicit defer-reason improvement whose success condition is to surface at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
+  'When recent logs show Gemini provider_cap_blocked or provider_model_removed for image_output because generation is unavailable in a country or provider region together with probe_fail errors for the same model family such as unsupported audio/s16le input, function calling not enabled, or generateContent unsupported, treat that cluster as one upstream/provider-bound Gemini capability mismatch and regional catalog drift family blocked in apps/api Gemini provider routing/capability handling; in control-plane scope, prefer a single observability, prioritization, or explicit defer-reason improvement and state that repeating the same Gemini provider-method combination is unlikely to help immediately. The next smoke/validation step should confirm at least one fresh LangSmith control-plane run/trace or preserve a clear defer reason if no run was emitted.',
+  'When active signals are repeated probe_retry entries whose reason is rate limit/timeout: switching provider, classify them as upstream/provider-bound retry churn blocked in apps/api provider routing/probing by default rather than a clear control-plane regression. In control-plane scope, say repeating the same provider-method combination is unlikely to help immediately unless a clear local orchestration guard is visible, and prefer one small observability, prioritization, cooldown, or explicit defer-reason improvement whose success condition is to surface at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
+  'When recent control-plane inputs are dominated by repeated openai/openrouter key_invalid, Unauthorized, invalid_api_key, 401 auth failures, or quota exceeded events, classify them as upstream credential or provider-governance drift blocked in apps/api provider routing/probing by default. Repeating the same provider-method combination is unlikely to help immediately until credentials or quota are fixed, so in control-plane scope prefer one bounded observability, cooldown, prioritization, or explicit defer-reason improvement whose success condition is to surface at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
+  'When active signals are repeated probe_retry entries whose reason is rate limit/timeout: switching provider, classify them as upstream/provider-bound retry churn by default rather than a clear control-plane regression. In control-plane scope, explicitly name the blocked subsystem as apps/api provider routing/probing, say repeating the same provider-method combination is unlikely to help immediately unless a clear local orchestration guard is visible in the candidate files, and prefer one small observability, prioritization, cooldown, or defer-reason improvement whose success condition is to surface at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
+  'When logs show request-queue memory-pressure rejections with high rss, external memory, or swap usage but low in-flight and pending counts, treat the active failure as runtime-capacity pressure by default rather than a clear queue-logic bug. Prefer the smallest bounded control-plane change that improves failure-origin labeling, operator-facing recovery notes, autonomous decision reasons, or conservative load-shedding guidance over speculative concurrency increases or broad queue rewrites, and tell the next smoke/validation step to confirm at least one fresh LangSmith control-plane run/trace or preserve a clear defer reason if no run was emitted.',
+  'When control-plane logs are dominated by repeated openai/openrouter key_invalid, Unauthorized, invalid_api_key, 401 auth failures, or quota exceeded events, classify them as upstream credential or provider-governance drift blocked in apps/api provider routing/probing by default. Say repeating the same provider-method combination is unlikely to help until credentials or quota are fixed, avoid speculative provider edits outside scope, and require the next smoke/validation step to confirm at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
+  'When control-plane logs are dominated by repeated openai/openrouter key_invalid, Unauthorized, invalid_api_key, 401 auth failures, or quota exceeded events, classify them as upstream credential or provider-governance drift blocked in apps/api provider routing/probing by default. Repeating the same provider-method combination is unlikely to help immediately until credentials or quota are fixed, so prefer one bounded control-plane observability, prioritization, cooldown, or explicit defer-reason improvement whose success condition is to surface at least one fresh LangSmith run/trace or preserve a clear no-run defer reason.',
+  'When control-plane signals include repeated openai/openrouter key_invalid, Unauthorized, invalid_api_key, 401 auth failures, or key_no_quota/quota exceeded events, classify them as upstream credential or provider-governance drift blocked in apps/api provider routing/probing by default. Say repeating the same provider-method combination is unlikely to help until credentials or quota are fixed, avoid speculative provider edits outside scope, and require the next smoke/validation step to confirm at least one fresh LangSmith control-plane run or preserve a clear defer reason if no run was emitted.',
+  'When repeated openai/openrouter key_invalid, Unauthorized, invalid_api_key, 401 auth failures, or quota exceeded signals dominate while control-plane scope is active, classify them as upstream credential or provider-governance drift blocked in apps/api provider routing/probing by default. Say repeating the same provider-method combination is unlikely to help until credentials or quota are fixed, prefer one bounded control-plane observability, cooldown, prioritization, or explicit defer-reason improvement, and require the next smoke/validation step to confirm at least one fresh LangSmith control-plane run or preserve a clear no-run defer reason.',
+  'When control-plane signals are dominated by repeated openai/openrouter key_invalid, Unauthorized, invalid_api_key, 401 auth failures, or quota exceeded events, classify them as upstream credential or provider-governance drift by default. If apps/api provider files are outside scope, explicitly name the blocked subsystem as apps/api provider routing/probing, say repeating the same provider-method combination is unlikely to help immediately, and prefer one bounded control-plane observability, prioritization, cooldown, or explicit defer-reason improvement. In the summary or edit reason, also tell the next smoke/validation step to confirm at least one fresh LangSmith run or preserve a clear defer reason explaining why no run was emitted.',
+  'When current signals include repeated openai or openrouter key_invalid, Unauthorized, invalid_api_key, 401 auth failures, or quota exceeded events, classify them as upstream credential or provider-governance drift by default. In control-plane scope, explicitly name the blocked subsystem as apps/api provider routing/probing, say repeating the same provider-method combination is unlikely to help until credentials or quota are fixed, and prefer a bounded observability, cooldown, prioritization, or explicit defer-reason improvement whose success condition is to surface at least one fresh LangSmith run or preserve a clear no-run defer reason.',
+  'Even during healthy improvement iterations with quiet governance, explicitly state the next validation success condition in the summary and edit reason as: confirm at least one fresh LangSmith control-plane run/trace for this iteration, or preserve a clear operator-facing defer reason explaining why no run was emitted. Treat missing fresh control-plane runs as an observability gap, not by itself a deploy/rollback trigger.',
+  'When repeated OpenRouter signals include Unauthorized/key_invalid together with 402 or quota-style failures in the same repair window, summarize them as one upstream credential or provider-governance drift family blocked in apps/api provider routing/probing rather than a control-plane regression. In control-plane scope, prefer one small observability or explicit defer-reason improvement, state that retrying the same OpenRouter provider-method combination is unlikely to help immediately, and require the next smoke/validation step to confirm at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason if no run was emitted.',
+  'When repeated OpenRouter Unauthorized, invalid_api_key, 401, or 402 quota/payment failures dominate while control-plane scope is active, summarize them as upstream credential or provider-governance drift blocked in apps/api provider routing/probing rather than a control-plane regression. Repeating the same OpenRouter provider-method combination is unlikely to help immediately until credentials or quota are fixed, so prefer one small control-plane observability or explicit defer-reason improvement and require the next smoke/validation step to confirm at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
+  'When repeated openrouter or openai auth/governance failures such as Unauthorized, invalid_api_key, 401, or 402/quota-style exhaustion dominate an otherwise healthy control-plane iteration, record them as upstream/provider-bound drift in apps/api provider routing/probing rather than a deploy/rollback trigger for control-plane code. Prefer one small observability or defer-reason improvement, state that retrying the same provider-method combination is unlikely to help immediately, and require the next smoke/validation step to confirm at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
+  'When repeated openrouter Unauthorized, invalid_api_key, 401, or 402/quota-style failures dominate the current window, treat them as the same upstream credential or provider-governance drift family blocked in apps/api provider routing/probing. In control-plane scope, avoid speculative provider edits outside scope, record that retrying the same OpenRouter provider-method combination is unlikely to help immediately, and require the next smoke/validation step to confirm at least one fresh LangSmith control-plane run/trace or preserve a clear operator-facing defer reason if no run was emitted.',
+  'When prior history shows restartProductionService succeeded, do not treat that as approval to restart production again. In experimental-safe control-plane scope, production restart actions must be blocked or omitted unless separate explicit approval is present; only anygpt-experimental.service may be considered for restart if needed, and the summary should preserve a clear operator-facing defer reason when production restart is intentionally skipped.',
+  'When repeated openai/openrouter probe errors are Unauthorized, invalid_api_key, 401, 402 payment/quota failures, or quota exceeded, classify them as upstream credential or provider-governance drift by default. In control-plane scope, explicitly name the blocked subsystem as apps/api provider routing/probing, say repeating the same provider-method combination is unlikely to help immediately, and prefer a bounded observability or defer-reason improvement that also tells the next smoke/validation step to confirm at least one fresh LangSmith control-plane run/trace or preserve a clear defer reason if no run was emitted.',
+  'When repeated openai/openrouter Unauthorized, invalid_api_key, 401, or quota/402 signals appear during an otherwise healthy control-plane iteration, treat them as upstream credential or provider-governance drift blocked in apps/api provider routing/probing rather than a control-plane regression by default. Prefer one small control-plane observability, workflow-hardening, or explicit defer-reason improvement, and require the next smoke/validation step to confirm at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason because repeating the same provider-method combination is unlikely to help immediately.',
+  'When prior history shows restartProductionService succeeded, do not treat that as approval to restart production again. In experimental-safe control-plane scope, production restart actions must be blocked or omitted unless separate explicit approval is present; only anygpt-experimental.service may be considered for restart if needed, and the summary should preserve a clear operator-facing defer reason when production restart is intentionally skipped.',
+  'Even when governance is otherwise passing, prefer summaries and decision reasons that name the next validation success condition as at least one fresh control-plane LangSmith run, trace, or an operator-facing defer reason explaining why no run was emitted.',  'When control-plane signals include repeated key_invalid, Unauthorized, invalid_api_key, 401 auth failures, or quota exceeded events for openai/openrouter while apps/api provider files are outside scope, classify them as upstream credential or provider-governance drift blocked in apps/api provider routing/probing. In that case prefer one small control-plane observability, cooldown, prioritization, or explicit defer-reason improvement, say repeating the same provider-method combination is unlikely to help immediately, and require the next smoke/validation step to confirm at least one fresh LangSmith control-plane run or preserve a clear defer reason if no run was emitted.',
+  'When repair or improvement signals are repeated key_invalid, Unauthorized, invalid_api_key, 401 auth failures, or key_no_quota/quota exceeded events for the same provider family, classify them as upstream credential or provider-governance drift by default. In control-plane scope, prefer one small observability, prioritization, cooldown, or explicit defer-reason improvement and say speculative provider edits in apps/api provider routing are blocked outside scope unless a clear local control-plane guard is visible.',
+  'When repair or improvement signals are dominated by repeated key_invalid, Unauthorized, invalid_api_key, 401 auth failures, or quota exceeded/provider payment exhaustion for the same provider family, classify them as upstream credential or provider-governance drift by default. In control-plane scope, prefer one small observability, prioritization, cooldown, or explicit no-op/defer-reason improvement that names the blocked apps/api provider subsystem and says repeating the same provider-method combination is unlikely to help until credentials or quota are fixed.',
+  'When repair signals show non-free models in apps/api/models.json still using zero placeholder or missing pricing without matching coverage in apps/api/pricing.json or apps/api/dev/routermodels.json, treat that as a code-local pricing coverage gap. Prefer the smallest bounded fix in apps/api/pricing.json, apps/api/dev/fetchPricing.ts, or apps/api/modules/modelUpdater.ts that improves pricing-source coverage or resolution, and do not normalize unresolved pricing by silently leaving zero placeholders unless the source files clearly mark the model as intentionally free. Because this audit is driven by pricing coverage in apps/api/pricing.json or apps/api/dev/routermodels.json, a fetchPricing.ts-only change is usually insufficient; prefer a single-file apps/api/pricing.json update when possible, or a tightly coupled apps/api/pricing.json plus apps/api/dev/fetchPricing.ts pair only when generator logic must change too. If those apps/api paths are outside the current allowlist or locked scope, do not propose unreachable edits there; instead return a concise summary that the pricing coverage gap is blocked by scope/allowlist, name the blocked apps/api pricing files or subsystem in that summary, and, if possible within the current scope, make only a small control-plane note or prioritization improvement that preserves that decision reason.',
+  'Treat apps/api/dev/checkModelCapabilities.ts as an audit helper, not a source-of-truth model/provider file. Do not edit it for provider/model sync churn, region-blocked capability removals, or pricing coverage gaps unless the active signal explicitly comes from that audit script or a missing-capability report.',
   'Treat provider-bound failures (for example upstream API incompatibility, unsupported endpoint or mode combinations such as streaming or multi-agent restrictions, unsupported tool-calling or tool_choice combinations reported by an upstream router or provider, invalid API keys, disabled upstream APIs or projects, quota or payment exhaustion, repeated invalid upstream response structures, repeated empty streaming responses for the same model or endpoint, repeated upstream OpenAI-compatible streaming server_error responses for the same model or endpoint, repeated provider catalog or list-model auth failures, repeated Gemini ListModels 400/401/403 failures indicating disabled APIs, forbidden projects, expired or invalid API keys, or missing upstream activation, memory-pressure queue rejections caused by high rss/external/runtime usage without a clear local leak in the candidate files, or non-retryable remote media fetch failures) as ambiguous for direct repair unless a clear local guard, fallback, validation, routing, provider-selection fix, failure-origin classification improvement, bounded candidate prioritization improvement, operator-facing recovery note, or bounded local load-shedding improvement is visible in the provided candidate files.',
   'When logs show request-queue memory-pressure rejections with high rss, external memory, or swap usage but low in-flight and pending counts, treat the active failure as runtime-capacity pressure by default rather than a clear queue-logic bug; prefer the smallest bounded edit that improves failure-origin labeling, operator-facing recovery notes, autonomous decision reasons, or conservative load-shedding guidance in candidate files over speculative concurrency increases or threshold loosening.',
   'When active repair signals are repeated MEMORY_PRESSURE 503s from requestQueue/requestIntake with high rss, heap, external, or swap usage and low queue occupancy, treat them as runtime-capacity signals by default; prefer edits that improve failure-origin labeling, operator-facing recovery notes, candidate prioritization, or bounded load-shedding heuristics over speculative concurrency increases or broad queue rewrites unless the candidate files show a clear local regression.',
   'When logs already mark providerSwitchWorthless or requestRetryWorthless for these failures, prefer a bounded heuristic, note-quality, observability, cooldown, provider de-prioritization, failure-origin labeling, or recovery-planning improvement over speculative provider implementation edits.',
   'When repeated Gemini catalog failures are the active signal, especially ListModels 400/401/403 responses about disabled APIs, forbidden projects, or expired/invalid keys, prefer edits that improve autonomous classification, decision reasons, candidate-path prioritization, repair summaries, or operator-facing notes in control-plane candidate files rather than direct provider code changes unless the candidate files show an obvious local validation or routing defect.',
-  'When the stated goal concerns failed jobs, runner failure propagation, or terminal status accuracy, prioritize small control-plane fixes that ensure failed repair/build/deploy/job outcomes are surfaced as runner failure, persisted in status fields, and reflected in summaries before attempting unrelated provider changes.',
-  'When repeated empty streaming responses are concentrated on the same provider family, model, or endpoint, treat them as upstream/provider-bound by default and prefer control-plane recovery guidance, provider de-prioritization notes, or retry-worthlessness labeling over speculative streaming implementation edits unless a small local guard is clearly visible in the candidate files.',
-  'When active repair signals are dominated by memory-pressure rejections that already include runtime snapshots (for example swap_used_mb, rssBytes, externalBytes, or queue idle snapshots), treat them as runtime-capacity incidents by default and prefer bounded request-intake observability, clearer failure-origin labeling, operator-facing recovery notes, or autonomous decision-quality improvements over speculative concurrency or provider-routing changes unless the candidate files show an obvious local threshold or leak bug.',
-  'When logs show many skipped providers, repeated upstream-only failures, repeated catalog or auth failures for the same provider family, or unsupported endpoint or mode combinations for a specific model, bias toward improving heuristics, operator visibility, and autonomous recovery notes rather than attempting speculative provider implementation edits.',
-].join(' ');
+  'When Gemini errors say a specific model does not support generateContent, sendMessage, or another upstream method/endpoint combination, treat that as provider/model incompatibility by default. If the failing Gemini provider implementation lives outside the current allowlist or locked scope (for example apps/api provider files), do not propose unreachable provider edits; instead prefer one bounded control-plane observability, prioritization, or explicit defer-reason improvement that names the blocked apps/api subsystem and marks the issue as upstream/provider-bound unless a clear local control-plane guard is visible.',
+  'When Gemini probe or provider errors report unsupported input mime types such as audio/s16le, function calling not enabled for the model, or generateContent unsupported for a specific model, classify the issue as upstream/provider-bound capability mismatch by default. In control-plane scope, prefer one small workflow, summary, or observability improvement that explicitly names the blocked apps/api Gemini provider subsystem and says retrying the same provider/method combination is unlikely to help.',
+  'When repeated Gemini capability-mismatch signals mention generateContent unsupported, unsupported input mime types, or function calling not enabled, explicitly mark the issue as blocked in the apps/api Gemini provider subsystem, say the failure is upstream/provider-bound rather than a control-plane regression, and prefer a single bounded control-plane observability, prioritization, or defer-reason improvement over speculative provider repair outside scope.',
+  'When active repair signals specifically show Gemini generateContent incompatibility for a named model or unsupported audio/function-calling input on the same provider family, treat that as an upstream/provider-bound Gemini method-capability mismatch. If apps/api Gemini provider files are outside scope, require the summary or decision reason to say the blocked subsystem is apps/api Gemini provider routing/capability handling and that repeating the same Gemini provider-method combination is unlikely to succeed.',
+  'When active signals combine Gemini method incompatibility such as generateContent unsupported with probe failures like unsupported audio mime type or function calling not enabled, summarize them as one upstream/provider-bound Gemini capability mismatch family, explicitly name the blocked apps/api Gemini provider routing/capability subsystem, and say retrying the same Gemini provider-method combination is unlikely to help.',
+  'When active signals combine Gemini generateContent unsupported, unsupported audio mime types such as audio/s16le, or function calling not enabled for the same provider family, summarize them as one upstream/provider-bound Gemini capability mismatch family, explicitly name the blocked subsystem as apps/api Gemini provider routing/capability handling, and prefer a bounded control-plane observability or defer-reason improvement because retrying the same Gemini provider-method combination is unlikely to help.',
+  'When active signals combine Gemini generateContent unsupported with unsupported audio mime type or function-calling-disabled probe failures, summarize them as one upstream/provider-bound Gemini capability mismatch family, explicitly name the blocked subsystem as apps/api Gemini provider routing/capability handling, and prefer one bounded control-plane observability or workflow-hardening change over retrying the same Gemini provider-method combination.',
+  'When active signals combine Gemini method incompatibility (for example model does not support generateContent) with capability-specific probe failures (for example unsupported audio mime type or function calling not enabled), explicitly summarize them as the same upstream/provider-bound Gemini capability mismatch family, mention the blocked apps/api Gemini provider subsystem, and bias the next step toward a no-op defer reason or a single control-plane observability/workflow-hardening change instead of speculative provider switching or repeated repair planning.',
+  'When Gemini signals pair provider_cap_blocked or provider_model_removed events for image_output with country or provider-region availability reasons and probe_fail outcomes such as unsupported audio/s16le input or function calling not enabled for the same model family, summarize them as one upstream/provider-bound Gemini capability mismatch and regional catalog drift family, explicitly name the blocked subsystem as apps/api Gemini provider routing/capability handling, and say retrying the same Gemini provider-method combination is unlikely to succeed.',
+  'When active signals pair provider_cap_blocked or provider_model_removed events for Gemini image_output with region or country availability reasons and Gemini probe_fail messages such as unsupported audio/s16le input, function calling not enabled, or generateContent unsupported for the same model family, summarize them as one upstream/provider-bound Gemini capability mismatch and regional catalog drift family, explicitly name the blocked subsystem as apps/api Gemini provider routing/capability handling, and say retrying the same Gemini provider-method combination is unlikely to succeed.',
+  'When repeated Gemini probe_retry or probe_skip signals are dominated by rate limit/timeout switching for the same model or capability test, classify them as upstream/provider-bound retry churn by default. In control-plane scope, explicitly name the blocked subsystem as apps/api Gemini provider routing/capability handling, say repeating the same Gemini provider-method combination is unlikely to help immediately, and prefer one bounded observability, defer-reason, or prioritization improvement over speculative provider edits outside scope.',
+  'When Gemini signals specifically pair generateContent unsupported for one model with unsupported audio mime types such as audio/s16le or function calling not enabled for another Gemini model family in the same repair window, require the summary or decision reason to say this is one upstream/provider-bound Gemini capability mismatch family blocked in apps/api Gemini provider routing/capability handling and that repeating the same Gemini provider-method combination is unlikely to succeed.',
+  'When Gemini signals specifically mention generateContent unsupported for a named model together with unsupported audio mime types such as audio/s16le or function calling not enabled, require the summary or decision reason to say the blocked subsystem is apps/api Gemini provider routing/capability handling and that repeating the same Gemini provider-method combination is unlikely to succeed; in control-plane scope, prefer one small observability, prioritization, or defer-reason improvement over unreachable provider edits.',
+  'When the stated goal concerns failed jobs, runner failure propagation, or terminal status accuracy, prioritize small control-plane fixes that ensure failed repair/build/deploy/job outcomes are surfaced as runner failure, persisted in status fields, and reflected in summaries before attempting unrelated provider changes.',  'When logs show many skipped providers, repeated upstream-only failures, repeated catalog or auth failures for the same provider family, or unsupported endpoint or mode combinations for a specific model, bias toward improving heuristics, operator visibility, and autonomous recovery notes rather than attempting speculative provider implementation edits.',
+  'When active signals are repeated probe_retry entries whose reason is rate limit/timeout: switching provider, treat them as upstream/provider-bound retry churn by default rather than a clear control-plane regression; in control-plane scope, prefer one small observability, prioritization, cooldown, or defer-reason improvement and say repeating the same provider-method combination may not help unless a local orchestration guard is visible in the candidate files.',
+  'When repeated probe_retry rate limit/timeout switching dominates and the failing provider implementation is outside scope, explicitly name the blocked subsystem as apps/api provider routing/probing, record the issue as upstream/provider-bound retry churn, and say repeating the same provider-method combination is unlikely to help immediately unless a clear local control-plane orchestration guard is visible in the candidate files.',
+  'When repeated OpenRouter probe_fail signals say "No allowed providers are available for the selected model" with status 404 for the same capability test, classify them as upstream/provider-bound availability or governance drift blocked in apps/api provider routing/probing by default. In control-plane scope, prefer one small observability, prioritization, or explicit defer-reason improvement, say repeating the same provider-method combination is unlikely to help immediately, and require the next smoke/validation step to confirm at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
+  'When repeated OpenRouter probe_fail signals say "No allowed providers are available for the selected model" with status 404 across multiple models or capability tests in the same repair window, summarize them as one upstream/provider-bound OpenRouter availability/governance drift family blocked in apps/api provider routing/probing, state that retrying the same OpenRouter provider-method combination is unlikely to help immediately, and prefer one bounded control-plane observability, workflow-hardening, or explicit defer-reason improvement whose success condition is to surface at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
+  'When tool_calling probe_fail signals combine OpenRouter 404 "No allowed providers are available for the selected model" with xAI multi-agent errors such as "Client-side tools for multi-agent models require beta access", treat them as one upstream/provider-bound tool-calling availability/governance mismatch family blocked in apps/api provider routing/probing. In control-plane scope, say retrying the same provider-method combination is unlikely to help immediately, prefer one small observability, workflow-hardening, prioritization, or explicit defer-reason improvement over speculative provider edits outside scope, and require the next smoke/validation step to confirm at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
+  'When provider/model sync churn is active at the same time as repeated probe_retry rate limit/timeout switching, summarize the situation as monitoring-only upstream/provider pressure plus catalog churn, and prefer a bounded control-plane workflow-hardening or note-quality improvement over speculative provider or model-file edits outside scope.',  'When provider_cap_blocked or provider_model_removed events cluster around image_output or region/country availability, explicitly say the failure is upstream/provider-bound regional catalog drift, mention that provider switching is unlikely to help for the same blocked capability family, and prefer a bounded control-plane note, prioritization tweak, or no-op defer reason over proposing provider/model file churn outside scope.',
+  'When provider_cap_blocked or provider_model_removed events cite country, region, or provider-region availability limits, explicitly mention that governance or geography constraint in the summary/decision reason and prefer a bounded control-plane observability or prioritization improvement over retrying the same provider-sync idea.',
+  'When active signals combine Gemini provider_cap_blocked or provider_model_removed events for image_output with probe_fail capability errors such as unsupported audio mime types like audio/s16le, function calling not enabled, or generateContent unsupported, summarize them as one upstream/provider-bound Gemini capability mismatch and regional catalog drift family, explicitly name the blocked subsystem as apps/api Gemini provider routing/capability handling, and say retrying the same Gemini provider-method combination is unlikely to succeed.',
+  'When active signals combine Gemini image_output provider_cap_blocked/provider_model_removed region or country availability failures with lyria-3-pro-preview probe_fail outcomes like unsupported audio/s16le input or function calling not enabled, treat that as the same upstream/provider-bound Gemini capability mismatch and regional catalog drift family blocked in apps/api Gemini provider routing/capability handling; prefer one bounded control-plane observability or explicit defer-reason improvement and require the next smoke/validation step to confirm at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
+  'When active signals combine Gemini image_output provider_cap_blocked or provider_model_removed region/country availability failures with probe_fail capability errors such as unsupported audio/s16le input, function calling not enabled, or generateContent unsupported for the same model family, summarize them as one upstream/provider-bound Gemini capability mismatch and regional catalog drift family, explicitly name the blocked subsystem as apps/api Gemini provider routing/capability handling, say retrying the same Gemini provider-method combination is unlikely to succeed, and preserve the next validation success condition as at least one fresh LangSmith control-plane run/trace or a clear operator-facing no-run defer reason.',
+  'When active repair signals specifically pair Gemini image_output blocked-in-country or blocked-in-provider-region events for lyria-3-pro-preview with probe_fail errors such as unsupported audio/s16le input or function calling not enabled, classify them as the same upstream/provider-bound Gemini capability mismatch and regional catalog drift family, explicitly say the blocked subsystem is apps/api Gemini provider routing/capability handling, state that repeating the same Gemini provider-method combination is unlikely to help immediately, and preserve the next validation success condition as at least one fresh LangSmith control-plane run/trace or a clear no-run defer reason if no run was emitted.',
+  'When Gemini signals combine provider_cap_blocked or provider_model_removed region/country limits with probe_fail capability errors such as generateContent unsupported, unsupported audio mime types like audio/s16le, or function calling not enabled, summarize them as one upstream/provider-bound Gemini capability mismatch and regional catalog drift family, explicitly name the blocked subsystem as apps/api Gemini provider routing/capability handling, and say retrying the same Gemini provider-method combination is unlikely to succeed.',
+  'When recent logs show Gemini provider_cap_blocked or provider_model_removed for image_output because generation is unavailable in a country or provider region together with probe_fail errors for the same model family such as unsupported audio/s16le input, function calling not enabled, or generateContent unsupported, treat that cluster as one upstream/provider-bound Gemini capability mismatch and regional catalog drift family blocked in apps/api Gemini provider routing/capability handling; in control-plane scope, prefer a single observability, prioritization, or explicit defer-reason improvement and state that repeating the same Gemini provider-method combination is unlikely to help immediately. The next smoke/validation step should confirm at least one fresh LangSmith control-plane run/trace or preserve a clear defer reason if no run was emitted.',
+  'When active repair signals specifically pair Gemini image_output blocked-in-country or blocked-in-provider-region events for lyria-3-pro-preview with probe_fail errors such as unsupported audio/s16le input or function calling not enabled, classify them as the same upstream/provider-bound Gemini capability mismatch and regional catalog drift family, explicitly say the blocked subsystem is apps/api Gemini provider routing/capability handling, and prefer one bounded control-plane observability, prioritization, or defer-reason improvement because repeating the same Gemini provider-method combination is unlikely to help.',
+  'When recent logs show Gemini provider_cap_blocked or provider_model_removed for image_output because generation is unavailable in a country or provider region together with probe_fail errors for the same model family such as unsupported audio/s16le input, function calling not enabled, or generateContent unsupported, treat that cluster as one upstream/provider-bound Gemini capability mismatch and regional catalog drift family blocked in apps/api Gemini provider routing/capability handling; in control-plane scope, prefer a single observability, prioritization, or explicit defer-reason improvement, state that repeating the same Gemini provider-method combination is unlikely to help immediately, and preserve the next validation success condition as at least one fresh LangSmith control-plane run/trace or a clear no-run defer reason.',
+  'When active repair signals specifically pair Gemini image_output region/country blocking or provider_model_removed events with lyria-3-pro-preview probe failures such as unsupported audio/s16le input or function calling not enabled, require the summary or decision reason to classify them as the same upstream/provider-bound Gemini capability mismatch and regional catalog drift family blocked in apps/api Gemini provider routing/capability handling, and state that repeating the same Gemini provider-method combination is unlikely to help immediately.',
+  'When active repair signals specifically pair Gemini image_output provider_cap_blocked/provider_model_removed region or country availability failures with lyria-3-pro-preview probe_fail outcomes like unsupported audio/s16le input or function calling not enabled, treat that as the same upstream/provider-bound Gemini capability mismatch and regional catalog drift family blocked in apps/api Gemini provider routing/capability handling; prefer one bounded control-plane observability or defer-reason improvement and state that repeating the same Gemini provider-method combination is unlikely to help immediately.',
+  'When Gemini signals specifically pair image generation unavailable in country or provider region with unsupported audio mime types such as audio/s16le, treat them as the same upstream/provider-bound Gemini capability mismatch and regional catalog drift family blocked in apps/api Gemini provider routing/capability handling; in control-plane scope, prefer one bounded observability, prioritization, or defer-reason improvement and state that retrying the same Gemini provider-method combination is unlikely to help.',
+  'When recent logs show Gemini provider_cap_blocked or provider_model_removed for image_output because generation is unavailable in a country or provider region together with probe_fail errors for the same model family such as unsupported audio/s16le input, function calling not enabled, or generateContent unsupported, treat that cluster as one upstream/provider-bound Gemini capability mismatch and regional catalog drift family blocked in apps/api Gemini provider routing/capability handling; in control-plane scope, prefer a single observability, prioritization, or explicit defer-reason improvement, state that repeating the same Gemini provider-method combination is unlikely to help immediately, and require the next smoke/validation step to confirm at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason if no run was emitted.',].join(' ');
 
 const DEFAULT_CONTROL_PLANE_PROMPT_BUNDLE = ControlPlanePromptBundleSchema.parse({
   planner: 'You are the planner agent for the AnyGPT LangGraph control plane. Produce concise, actionable planning notes based on logs, MCP findings, and requested scopes. Focus on priorities, risks, and safe next steps.',
@@ -642,6 +769,9 @@ export const ControlPlaneStateSchema = z.object({
   repairSignals: z.array(z.string()).default([]),
   improvementIntentSummary: z.string().default(''),
   improvementSignals: z.array(z.string()).default([]),
+  autonomousContractSummary: z.string().default(''),
+  autonomousContractChecks: z.array(z.string()).default([]),
+  autonomousContractPaths: z.array(z.string()).default([]),
   repairStatus: RepairStatusSchema.default('idle'),
   repairDecisionReason: z.string().default(''),
   recentRepairValidationFailureCount: z.number().int().nonnegative().default(0),
@@ -664,6 +794,12 @@ export const ControlPlaneStateSchema = z.object({
   mcpConfigPath: z.string().default(''),
   mcpServers: z.array(McpServerSchema).default([]),
   mcpInspections: z.array(McpInspectionSchema).default([]),
+  mcpActionEnabled: z.boolean().default(parseBooleanEnv('CONTROL_PLANE_MCP_ACTIONS', false)),
+  maxMcpActions: z.number().int().min(0).default(parsePositiveIntegerEnv('CONTROL_PLANE_MAX_MCP_ACTIONS', 4, 1)),
+  mcpTargetUrls: z.array(z.string()).default([]),
+  plannedMcpActions: z.array(McpPlannedActionSchema).default([]),
+  executedMcpActions: z.array(McpExecutedActionSchema).default([]),
+  mcpActionNotes: z.array(z.string()).default([]),
   logInsights: z.array(LogInsightSchema).default([]),
   plannerNotes: z.array(z.string()).default([]),
   buildJobs: z.array(PlannedJobSchema).default([]),
@@ -679,6 +815,8 @@ export type ExecutedJob = z.infer<typeof ExecutedJobSchema>;
 export type McpServer = z.infer<typeof McpServerSchema>;
 export type McpTool = z.infer<typeof McpToolSchema>;
 export type McpInspection = z.infer<typeof McpInspectionSchema>;
+export type McpPlannedAction = z.infer<typeof McpPlannedActionSchema>;
+export type McpExecutedAction = z.infer<typeof McpExecutedActionSchema>;
 export type ApprovalRequest = z.infer<typeof ApprovalRequestSchema>;
 export type AiNodeAdvice = z.infer<typeof AiNodeAdviceSchema>;
 export type LogInsight = z.infer<typeof LogInsightSchema>;
@@ -1110,25 +1248,243 @@ function isTightlyCoupledAutonomousEditBatch(touchedPaths: string[]): boolean {
   const hasWorkflow = normalizedPaths.includes('apps/langgraph-control-plane/src/workflow.ts');
   const hasIndex = normalizedPaths.includes('apps/langgraph-control-plane/src/index.ts');
   const hasErrorClassification = normalizedPaths.includes('apps/api/modules/errorClassification.ts');
+  const hasPricingFile = normalizedPaths.includes(API_PRICING_SOURCE_FILE);
+  const hasFetchPricing = normalizedPaths.includes('apps/api/dev/fetchPricing.ts');
+  const hasModelUpdater = normalizedPaths.includes('apps/api/modules/modelUpdater.ts');
   const allControlPlane = normalizedPaths.every((candidatePath) => candidatePath.startsWith('apps/langgraph-control-plane/'));
   const allApiModules = normalizedPaths.every((candidatePath) => candidatePath.startsWith('apps/api/modules/'));
 
   if (allControlPlane) return true;
   if (allApiModules && hasErrorClassification) return true;
+  if (hasPricingFile && (hasFetchPricing || hasModelUpdater)) return true;
   if (hasWorkflow && (hasIndex || hasErrorClassification)) return true;
   return false;
 }
 
+function signalTextHasPricingCoverageFocus(sourceText: string): boolean {
+  return /pricing coverage|pricing gap|zero placeholder pricing|missing pricing|pricing\.json|routermodels\.json|fetch pricing|fetchpricing|unresolved non-free pricing|source-of-truth pricing/.test(sourceText);
+}
+
+function signalTextHasApiAvailabilityFocus(sourceText: string): boolean {
+  return /provider_cap_blocked|provider_model_removed|image generation unavailable|availability metadata|model-availability|removed in provider region|unavailable in provider region|unsupported capability|unsupported modality|tool_choice|tool choice|tool[-_ ]calling|tool calling|fast-image-sync|saved providers\.json|providers\.json|lyria-3-clip-preview|lyria-3-pro-preview/.test(sourceText);
+}
+
+function signalTextHasApiCatalogDriftFocus(sourceText: string): boolean {
+  return /provider_cap_blocked|provider_model_removed|image generation unavailable|removed in provider region|unavailable in provider region|fast-image-sync|saved providers\.json|providers\.json/.test(sourceText);
+}
+
+function signalTextHasApiRoutingFocus(sourceText: string): boolean {
+  return /provider traversal|attemptedproviders|candidateproviders|skippedbycooldown|cooldown|provider selection|provider switch|routing|retry worthless|providerswitchworthless|requestretryworthless|generatecontent|unsupported input mime type|audio_input|function calling is not enabled|unsupported capability|unsupported modality|tool[-_ ]calling|tool calling|tool_choice|gemini-3\.1-flash-live-preview|lyria-3-pro-preview/.test(sourceText);
+}
+
+function signalTextHasProviderAuthDriftFocus(sourceText: string): boolean {
+  return /key_invalid|invalid_api_key|incorrect api key|api key not found|api key not valid|unauthorized|status 401|request failed with status code 401|permission_denied|service_disabled|quota exceeded|quota exhausted|resource has been exhausted|insufficient_quota|insufficient quota|payment required|credit balance|key_no_quota|request failed with status code 402/.test(sourceText);
+}
+
+function signalTextHasCapabilityAuditFocus(sourceText: string): boolean {
+  return /checkmodelcapabilities|capability audit|missing capabilities|inferred capability requirements|capability heuristic|heuristic capability|capability check/.test(sourceText);
+}
+
+function signalTextHasSurfaceAssetFocus(sourceText: string): boolean {
+  return /favicon|\/favicon\.ico|static asset|asset path|asset pipeline|missing asset|broken asset|homepage|ui shell|browser shell|logo|hero|cta|frontend origin/.test(sourceText);
+}
+
+function signalTextHasApiRuntimeFocus(sourceText: string): boolean {
+  return /memory pressure|queue|overloaded|max_pending|swap_used_mb|external_mb|request-body-read|request queue|queuewaittimeout|memorypressureerror|middleware|rate limit redis|token estimation|error classification|failureorigin|provider-bound|runtime-capacity/.test(sourceText);
+}
+
+function signalTextHasApiPlatformFocus(sourceText: string): boolean {
+  return /experimental service|experimental target|entrypoint|startup|openapi\.json|wsserver|websocket|service unit|server\.launcher|health check|platform health|launcher|pid file|port binding|listen|restart/.test(sourceText);
+}
+
+function signalTextHasWorkspaceFocus(sourceText: string, insightFile: string): boolean {
+  return /workspace-surface|repo-surface|developer-workflow|operator payoff|frontend stack|sync-config|setup\.md|pnpm-workspace|tsconfig|bun\.sh|run-frontend-stack|turbo|package\.json/.test(sourceText)
+    || /^(?:package\.json|pnpm-workspace\.yaml|tsconfig\.json|SETUP\.md|turbo\.json|bun\.sh|scripts\/)/.test(insightFile);
+}
+
+function scoreLogInsightLineForScope(
+  state: Pick<ControlPlaneState, 'scopes' | 'effectiveScopes'>,
+  insightFile: string,
+  line: string,
+): number {
+  const effectiveScopes = new Set(getEffectiveScopes(state as ControlPlaneState));
+  if (effectiveScopes.has('repo')) return 1;
+
+  const normalizedText = normalizeRepairSignalCategoryText([
+    insightFile,
+    ...collectRepairSignalTextFragments(line),
+  ].join(' | '));
+  if (!normalizedText) return 0;
+
+  const pricingCoverageFocus = signalTextHasPricingCoverageFocus(normalizedText);
+  const availabilityFocus = signalTextHasApiAvailabilityFocus(normalizedText);
+  const catalogDriftFocus = signalTextHasApiCatalogDriftFocus(normalizedText);
+  const routingFocus = signalTextHasApiRoutingFocus(normalizedText);
+  const authDriftFocus = signalTextHasProviderAuthDriftFocus(normalizedText);
+  const capabilityAuditFocus = signalTextHasCapabilityAuditFocus(normalizedText);
+  const surfaceAssetFocus = signalTextHasSurfaceAssetFocus(normalizedText);
+  const runtimeFocus = signalTextHasApiRuntimeFocus(normalizedText);
+  const platformFocus = signalTextHasApiPlatformFocus(normalizedText);
+  const workspaceFocus = signalTextHasWorkspaceFocus(normalizedText, insightFile);
+  const controlPlaneFocus = /langsmith|control-plane|runner status|evaluation gate|governance gate|annotation backlog|prompt fallback|prompt sync|studio-server/.test(normalizedText)
+    || insightFile.startsWith('apps/langgraph-control-plane/')
+    || insightFile.startsWith('codeql:');
+
+  let score = 0;
+
+  if (effectiveScopes.has('api-routing')) {
+    if (routingFocus) score += 4;
+    if (availabilityFocus || authDriftFocus) score += 2;
+    if (surfaceAssetFocus || workspaceFocus) score -= 4;
+  }
+
+  if (effectiveScopes.has('api-runtime')) {
+    if (runtimeFocus) score += 4;
+    if (authDriftFocus) score += 2;
+    if (routingFocus && (runtimeFocus || authDriftFocus)) score += 1;
+    if (routingFocus && !runtimeFocus && !authDriftFocus) score -= 4;
+    if (surfaceAssetFocus || workspaceFocus) score -= 4;
+  }
+
+  if (effectiveScopes.has('api-data')) {
+    if (pricingCoverageFocus) score += 5;
+    if (catalogDriftFocus) score += 4;
+    if (availabilityFocus) score += 2;
+    if (capabilityAuditFocus) score += 3;
+    if (insightFile.endsWith('fast-image-sync.log')) score += 3;
+    if (routingFocus && !pricingCoverageFocus && !catalogDriftFocus && !capabilityAuditFocus) score -= 4;
+    if (surfaceAssetFocus || workspaceFocus || platformFocus) score -= 4;
+  }
+
+  if (effectiveScopes.has('api-platform')) {
+    if (platformFocus) score += 5;
+    if (insightFile.endsWith('studio-server.log')) score += 2;
+    if (routingFocus || pricingCoverageFocus || workspaceFocus || surfaceAssetFocus) score -= 3;
+  }
+
+  if (effectiveScopes.has('control-plane')) {
+    if (controlPlaneFocus) score += 5;
+    if (surfaceAssetFocus) score -= 2;
+  }
+
+  if (effectiveScopes.has('workspace-surface')) {
+    if (workspaceFocus) score += 5;
+    if (surfaceAssetFocus) score -= 2;
+    if (insightFile.startsWith('apps/api/logs/')) score -= 5;
+  }
+
+  if (effectiveScopes.has('homepage-surface')) {
+    if (surfaceAssetFocus) score += 4;
+    if (insightFile.startsWith('apps/homepage/')) score += 3;
+    if (insightFile.startsWith('apps/ui/')) score += 1;
+    if (insightFile.startsWith('apps/api/logs/') && !surfaceAssetFocus) score -= 5;
+  }
+
+  if (effectiveScopes.has('ui-surface')) {
+    if (surfaceAssetFocus) score += 4;
+    if (insightFile.startsWith('apps/ui/')) score += 3;
+    if (insightFile.startsWith('apps/homepage/')) score += 1;
+    if (insightFile.startsWith('apps/api/logs/') && !surfaceAssetFocus) score -= 5;
+  }
+
+  return score;
+}
+
+function filterLogInsightForScope(
+  state: Pick<ControlPlaneState, 'scopes' | 'effectiveScopes'>,
+  insight: LogInsight,
+): LogInsight | null {
+  const effectiveScopes = new Set(getEffectiveScopes(state as ControlPlaneState));
+  if (effectiveScopes.has('repo')) return insight;
+
+  const filteredLines = insight.lines
+    .filter((line) => scoreLogInsightLineForScope(state, insight.file, line) > 0)
+    .slice(-DEFAULT_LOG_TAIL_LINE_COUNT);
+  if (filteredLines.length === 0) return null;
+
+  return LogInsightSchema.parse({
+    file: insight.file,
+    lines: filteredLines,
+  });
+}
+
+function isApiDataAuditHelperPath(candidatePath: string): boolean {
+  return String(candidatePath || '').trim() === 'apps/api/dev/checkModelCapabilities.ts';
+}
+
+function isApiDataSourceOfTruthPath(candidatePath: string): boolean {
+  const normalizedPath = String(candidatePath || '').trim();
+  return normalizedPath === API_MODELS_SOURCE_FILE
+    || normalizedPath === API_PRICING_SOURCE_FILE
+    || [
+      'apps/api/modules/modelUpdater.ts',
+      'apps/api/modules/dataManager.ts',
+      'apps/api/dev/fetchPricing.ts',
+      'apps/api/dev/refreshModels.ts',
+      'apps/api/dev/updatemodels.ts',
+      'apps/api/dev/updateproviders.ts',
+      'apps/api/routes/models.ts',
+    ].includes(normalizedPath);
+}
+
 function scoreAutonomousEditPathFit(
-  state: Pick<ControlPlaneState, 'repairSignals' | 'improvementSignals' | 'autonomousOperationMode'>,
+  state: Pick<ControlPlaneState, 'repairSignals' | 'improvementSignals' | 'autonomousOperationMode' | 'scopes' | 'effectiveScopes'>,
   path: string,
   supportingText: string = '',
 ): number {
   const normalizedPath = String(path || '').trim();
   if (!normalizedPath) return 0;
+  const effectiveScopes = new Set(getEffectiveScopes(state as ControlPlaneState));
   const sourceText = [...state.repairSignals, ...state.improvementSignals, supportingText].join(' | ').toLowerCase();
+  const pricingCoverageFocus = signalTextHasPricingCoverageFocus(sourceText);
+  const availabilityFocus = signalTextHasApiAvailabilityFocus(sourceText);
+  const catalogDriftFocus = signalTextHasApiCatalogDriftFocus(sourceText);
+  const routingFocus = signalTextHasApiRoutingFocus(sourceText);
+  const authDriftFocus = signalTextHasProviderAuthDriftFocus(sourceText);
+  const capabilityAuditFocus = signalTextHasCapabilityAuditFocus(sourceText);
+  const surfaceAssetFocus = signalTextHasSurfaceAssetFocus(sourceText);
+  const platformFocus = /experimental service|experimental target|entrypoint|startup|openapi\.json|wsserver|websocket|service unit|server\.launcher|health check|platform health/.test(sourceText);
+  const workspaceFocus = /workspace-surface|repo-surface|developer-workflow|operator payoff|frontend stack|sync-config|setup\.md|pnpm-workspace|tsconfig|bun\.sh|run-frontend-stack/.test(sourceText);
 
   let score = 0;
+  if (effectiveScopes.has('api-routing') && (
+    normalizedPath === 'apps/api/providers/handler.ts'
+    || normalizedPath === 'apps/api/providers/gemini.ts'
+    || normalizedPath === 'apps/api/providers/openrouter.ts'
+    || normalizedPath === 'apps/api/modules/openaiProviderSelection.ts'
+    || normalizedPath === 'apps/api/modules/openaiRouteSupport.ts'
+    || normalizedPath === 'apps/api/modules/openaiRouteUtils.ts'
+    || normalizedPath === 'apps/api/modules/openaiResponsesFormat.ts'
+    || normalizedPath === 'apps/api/modules/geminiMediaValidation.ts'
+    || normalizedPath === 'apps/api/routes/openai.ts'
+  )) score += 2;
+  if (effectiveScopes.has('api-runtime') && (
+    normalizedPath === 'apps/api/modules/errorClassification.ts'
+    || normalizedPath === 'apps/api/modules/requestQueue.ts'
+    || normalizedPath === 'apps/api/modules/requestIntake.ts'
+    || normalizedPath === 'apps/api/modules/errorLogger.ts'
+    || normalizedPath === 'apps/api/modules/middlewareFactory.ts'
+    || normalizedPath === 'apps/api/modules/rateLimit.ts'
+    || normalizedPath === 'apps/api/modules/rateLimitRedis.ts'
+  )) score += 2;
+  if (effectiveScopes.has('api-data') && isApiDataSourceOfTruthPath(normalizedPath)) score += 2;
+  if (effectiveScopes.has('api-platform') && (
+    normalizedPath === 'apps/api/server.ts'
+    || normalizedPath === 'apps/api/server.launcher.bun.ts'
+    || normalizedPath === 'apps/api/ws/wsServer.ts'
+    || normalizedPath === 'apps/api/anygpt-api.service'
+    || normalizedPath === 'apps/api/anygpt-experimental.service'
+  )) score += 2;
+  if (effectiveScopes.has('homepage-surface') && normalizedPath.startsWith('apps/homepage/')) score += 2;
+  if (effectiveScopes.has('ui-surface') && normalizedPath.startsWith('apps/ui/')) score += 2;
+  if (effectiveScopes.has('workspace-surface') && (
+    normalizedPath === 'package.json'
+    || normalizedPath === 'pnpm-workspace.yaml'
+    || normalizedPath === 'tsconfig.json'
+    || normalizedPath === 'SETUP.md'
+    || normalizedPath === 'scripts/run-frontend-stack.sh'
+    || normalizedPath === 'scripts/with-bun-path.sh'
+  )) score += 2;
   if (normalizedPath.startsWith('apps/langgraph-control-plane/')) score += 2;
   if ((/codeql|sarif|security|vulnerability|injection|xss|ssrf|traversal|taint/.test(sourceText))) {
     if (normalizedPath.startsWith('apps/api/')) score += 2;
@@ -1136,15 +1492,55 @@ function scoreAutonomousEditPathFit(
     if (normalizedPath.startsWith('apps/homepage/') || normalizedPath.startsWith('apps/ui/')) score += 1;
   }
   if (normalizedPath.startsWith('apps/api/modules/errorClassification.ts') && /server_error|invalid_response_structure|failureorigin|provider-bound|request retry worthless|providerswitchworthless/.test(sourceText)) score += 4;
+  if (normalizedPath.startsWith('apps/api/modules/errorClassification.ts') && /generatecontent|unsupported input mime type|function calling is not enabled|unsupported capability|unsupported modality|resource has been exhausted|quota/.test(sourceText)) score += 3;
+  if (normalizedPath.startsWith('apps/api/modules/errorClassification.ts') && authDriftFocus) score += 4;
   if (normalizedPath.startsWith('apps/api/modules/requestQueue.ts') && /memory pressure|queue|overloaded|max_pending|swap_used_mb|external_mb/.test(sourceText)) score += 4;
+  if (normalizedPath.startsWith('apps/api/modules/requestQueue.ts') && /resource has been exhausted|quota|candidateproviders|attemptedproviders|skippedbycooldown|provider traversal|retry worthless/.test(sourceText)) score += 3;
   if (normalizedPath.startsWith('apps/api/modules/requestIntake.ts') && /content_length|intake|request body|bufferedrequestbody/.test(sourceText)) score += 4;
+  if ((normalizedPath === 'apps/api/server.ts' || normalizedPath === 'apps/api/server.launcher.bun.ts' || normalizedPath === 'apps/api/ws/wsServer.ts' || normalizedPath === 'apps/api/anygpt-api.service' || normalizedPath === 'apps/api/anygpt-experimental.service') && platformFocus) score += 4;
   if (normalizedPath === API_MODELS_SOURCE_FILE && /pricing coverage|pricing gap|zero placeholder pricing|missing pricing|pricing\.json|models\.json/.test(sourceText)) score += 3;
-  if (normalizedPath === API_PRICING_SOURCE_FILE && /pricing coverage|pricing gap|zero placeholder pricing|missing pricing|pricing\.json|models\.json|routermodels\.json|fetch pricing|fetchpricing/.test(sourceText)) score += 4;
+  if (normalizedPath === API_MODELS_SOURCE_FILE && availabilityFocus) score += 4;
+  if (normalizedPath === API_MODELS_SOURCE_FILE && authDriftFocus && !catalogDriftFocus) score -= 3;
+  if (normalizedPath === API_PRICING_SOURCE_FILE && pricingCoverageFocus) score += 4;
   if (normalizedPath === 'apps/api/modules/modelUpdater.ts' && /pricing coverage|pricing gap|zero placeholder pricing|missing pricing|pricing\.json|models\.json|buildzeropricing|pricing source/.test(sourceText)) score += 4;
-  if (normalizedPath === 'apps/api/dev/fetchPricing.ts' && /pricing coverage|pricing gap|zero placeholder pricing|missing pricing|pricing\.json|routermodels\.json|fetch pricing|fetchpricing/.test(sourceText)) score += 4;
+  if (normalizedPath === 'apps/api/modules/modelUpdater.ts' && availabilityFocus) score += 3;
+  if (normalizedPath === 'apps/api/modules/modelUpdater.ts' && authDriftFocus && !catalogDriftFocus) score -= 3;
+  if (normalizedPath === 'apps/api/dev/fetchPricing.ts' && pricingCoverageFocus) score += 4;
+  if (normalizedPath === 'apps/api/dev/updateproviders.ts' && availabilityFocus) score += 4;
+  if (normalizedPath === 'apps/api/dev/updateproviders.ts' && authDriftFocus && !catalogDriftFocus) score -= 3;
+  if (normalizedPath === 'apps/api/dev/updatemodels.ts' && availabilityFocus) score += 4;
+  if (normalizedPath === 'apps/api/dev/updatemodels.ts' && authDriftFocus && !catalogDriftFocus) score -= 3;
+  if (normalizedPath === 'apps/api/dev/refreshModels.ts' && availabilityFocus) score += 3;
+  if (normalizedPath === 'apps/api/dev/refreshModels.ts' && authDriftFocus && !catalogDriftFocus) score -= 2;
+  if (normalizedPath === 'apps/api/routes/models.ts' && availabilityFocus) score += 3;
+  if (normalizedPath === 'apps/api/routes/models.ts' && authDriftFocus && !catalogDriftFocus) score -= 2;
+  if (normalizedPath.startsWith('apps/api/providers/handler.ts') && routingFocus) score += 5;
+  if (normalizedPath.startsWith('apps/api/providers/gemini.ts') && routingFocus) score += 5;
+  if (normalizedPath.startsWith('apps/api/providers/openrouter.ts') && routingFocus) score += 4;
+  if (normalizedPath.startsWith('apps/api/modules/geminiMediaValidation.ts') && routingFocus) score += 4;
+  if (normalizedPath.startsWith('apps/api/routes/openai.ts') && routingFocus) score += 3;
+  if (normalizedPath.startsWith('apps/api/modules/openaiRouteSupport.ts') && routingFocus) score += 3;
+  if (normalizedPath.startsWith('apps/api/modules/openaiRouteUtils.ts') && routingFocus) score += 3;
+  if (normalizedPath.startsWith('apps/api/modules/openaiResponsesFormat.ts') && routingFocus) score += 2;
+  if (normalizedPath === 'apps/api/dev/checkModelCapabilities.ts' && capabilityAuditFocus) score += 3;
+  if (normalizedPath === 'apps/api/dev/checkModelCapabilities.ts' && (pricingCoverageFocus || availabilityFocus)) score -= 4;
   if (normalizedPath.startsWith('apps/api/modules/openaiProviderSelection.ts') && /provider selection|provider switch|retry worthless|routing|model-availability|probe|tool-calling|tool_choice|unsupported(?:-| )tool|healthy selection/.test(sourceText)) score += 3;
   if (normalizedPath.startsWith('apps/api/modules/openaiRequestSupport.ts') && /heartbeat|keepalive|keep-alive|backpressure|response\.write|drain|sse|stream teardown|stream keepalive|premature stream/.test(sourceText)) score += 3;
   if (normalizedPath.startsWith('apps/api/providers/openai.ts') && /server_error|empty streaming response|responses endpoint|stream/.test(sourceText)) score += 2;
+  if (normalizedPath === 'apps/homepage/public/index.html' && surfaceAssetFocus) score += 5;
+  if ((normalizedPath === 'apps/homepage/public/script.js' || normalizedPath === 'apps/homepage/public/style.css') && surfaceAssetFocus) score += 4;
+  if (normalizedPath === 'apps/homepage/serve.js' && surfaceAssetFocus) score += 3;
+  if (normalizedPath === 'apps/ui/librechat/client/index.html' && surfaceAssetFocus) score += 5;
+  if (
+    (
+      normalizedPath === 'apps/ui/librechat/client/src/App.jsx'
+      || normalizedPath === 'apps/ui/librechat/client/src/main.jsx'
+      || normalizedPath === 'apps/ui/librechat/client/src/style.css'
+    )
+    && surfaceAssetFocus
+  ) score += 4;
+  if (normalizedPath.startsWith('apps/ui/scripts/') && surfaceAssetFocus) score += 2;
+  if ((normalizedPath === 'package.json' || normalizedPath === 'pnpm-workspace.yaml' || normalizedPath === 'tsconfig.json' || normalizedPath === 'SETUP.md' || normalizedPath === 'scripts/run-frontend-stack.sh' || normalizedPath === 'scripts/with-bun-path.sh') && workspaceFocus) score += 4;
   if (normalizedPath.startsWith('apps/api/providers/gemini.ts') && /gemini/.test(sourceText)) score += 1;
   if (normalizedPath.startsWith('apps/api/providers/')) score -= 1;
   return score;
@@ -1359,6 +1755,10 @@ function deriveRepairIntent(state: ControlPlaneState): { summary: string; signal
 function deriveImprovementIntent(state: ControlPlaneState): { summary: string; signals: string[] } {
   const signals: string[] = [];
   const uniqueScopeSet = new Set(getEffectiveScopes(state));
+  const providerAvailabilityDriftDetected = state.logInsights.some((insight) => (
+    insight.file.endsWith('probe-errors.jsonl')
+    && insight.lines.some((line) => /provider_cap_blocked|provider_model_removed|image generation unavailable/i.test(line))
+  ));
 
   if (hasApiFamilyScope(uniqueScopeSet) || uniqueScopeSet.has('repo')) {
     signals.push('Experimental API loop is healthy enough to pursue bounded throughput, routing, and model-availability improvements.');
@@ -1386,8 +1786,12 @@ function deriveImprovementIntent(state: ControlPlaneState): { summary: string; s
 
   const syncInsight = state.logInsights.find((insight) => insight.file.endsWith('fast-image-sync.log'));
   const latestSyncLine = syncInsight?.lines[syncInsight.lines.length - 1];
-  if (latestSyncLine) {
+  if (latestSyncLine && (hasApiFamilyScope(uniqueScopeSet) || uniqueScopeSet.has('repo'))) {
     signals.push(`Provider/model sync churn insight: ${latestSyncLine}`);
+  }
+
+  if (providerAvailabilityDriftDetected && (uniqueScopeSet.has('api-data') || hasApiFamilyScope(uniqueScopeSet) || uniqueScopeSet.has('repo'))) {
+    signals.push(`Source-of-truth preference: when provider/model availability drift is active, prefer ${API_MODELS_SOURCE_FILE}, apps/api/dev/updateproviders.ts, apps/api/dev/updatemodels.ts, apps/api/modules/modelUpdater.ts, and apps/api/routes/models.ts over audit-only helpers like apps/api/dev/checkModelCapabilities.ts.`);
   }
 
   if (state.langSmithRuns.length > 0 && state.langSmithRuns.every((run) => !isLangSmithRunFailure(run))) {
@@ -1410,6 +1814,285 @@ function deriveImprovementIntent(state: ControlPlaneState): { summary: string; s
   return {
     summary,
     signals: dedupedSignals,
+  };
+}
+
+function resolveAutonomousContractPaths(
+  state: Pick<ControlPlaneState, 'repoRoot' | 'editAllowlist' | 'editDenylist'>,
+  preferredPaths: string[],
+): string[] {
+  const resolved: string[] = [];
+  for (const preferredPath of preferredPaths) {
+    const normalizedPath = String(preferredPath || '').trim();
+    if (!normalizedPath) continue;
+    const check = checkAutonomousEditPath(
+      state.repoRoot,
+      normalizedPath,
+      state.editAllowlist,
+      state.editDenylist,
+    );
+    if (!check.allowed) continue;
+    if (!resolved.includes(check.normalizedPath)) {
+      resolved.push(check.normalizedPath);
+    }
+  }
+  return resolved;
+}
+
+function shouldAllowScopedProviderPathAutonomousEdits(
+  state: Pick<ControlPlaneState, 'repairSignals' | 'improvementSignals' | 'scopes' | 'effectiveScopes'>,
+  touchedPaths: string[],
+  proposalReasonByPath?: Map<string, string>,
+): boolean {
+  const effectiveScopes = new Set(getEffectiveScopes(state as ControlPlaneState));
+  if (!effectiveScopes.has('api-routing')) return false;
+
+  const normalizedTouchedPaths = Array.from(new Set(
+    touchedPaths
+      .map((candidatePath) => String(candidatePath || '').trim())
+      .filter(Boolean),
+  ));
+  if (!normalizedTouchedPaths.some((candidatePath) => candidatePath.startsWith('apps/api/providers/'))) {
+    return false;
+  }
+
+  const allowedProviderPaths = new Set([
+    'apps/api/providers/handler.ts',
+    'apps/api/providers/gemini.ts',
+    'apps/api/providers/openrouter.ts',
+  ]);
+  const allowedSupportingPaths = new Set([
+    'apps/api/modules/openaiProviderSelection.ts',
+    'apps/api/modules/openaiRequestSupport.ts',
+    'apps/api/modules/openaiRouteSupport.ts',
+    'apps/api/modules/openaiRouteUtils.ts',
+    'apps/api/modules/openaiResponsesFormat.ts',
+    'apps/api/modules/geminiMediaValidation.ts',
+    'apps/api/modules/responsesHistory.ts',
+    'apps/api/routes/openai.ts',
+  ]);
+
+  if (normalizedTouchedPaths.some((candidatePath) => candidatePath.startsWith('apps/api/providers/') && !allowedProviderPaths.has(candidatePath))) {
+    return false;
+  }
+  if (normalizedTouchedPaths.some((candidatePath) => candidatePath.startsWith('apps/api/') && !allowedProviderPaths.has(candidatePath) && !allowedSupportingPaths.has(candidatePath))) {
+    return false;
+  }
+
+  const sourceText = [
+    ...state.repairSignals,
+    ...state.improvementSignals,
+    ...normalizedTouchedPaths.map((candidatePath) => proposalReasonByPath?.get(candidatePath) || ''),
+  ].join(' | ').toLowerCase();
+  return signalTextHasApiRoutingFocus(sourceText);
+}
+
+function buildDeterministicAutonomousContract(
+  state: Pick<
+    ControlPlaneState,
+    | 'repoRoot'
+    | 'editAllowlist'
+    | 'editDenylist'
+    | 'goal'
+    | 'scopes'
+    | 'effectiveScopes'
+    | 'autonomousOperationMode'
+    | 'repairIntentSummary'
+    | 'repairSignals'
+    | 'improvementIntentSummary'
+    | 'improvementSignals'
+  >,
+): { summary: string; checks: string[]; paths: string[] } {
+  const effectiveScopes = new Set(getEffectiveScopes(state as ControlPlaneState));
+  const sourceText = [
+    state.goal,
+    state.repairIntentSummary,
+    ...state.repairSignals,
+    state.improvementIntentSummary,
+    ...state.improvementSignals,
+  ].join(' | ').toLowerCase();
+  const pricingCoverageAudit = auditModelPricingCoverage(state.repoRoot);
+  const hasCurrentPricingCoverageGap = Boolean(
+    pricingCoverageAudit
+    && pricingCoverageAudit.unresolvedCount > 0,
+  );
+  const apiCatalogDriftFocus = signalTextHasApiCatalogDriftFocus(sourceText);
+  const providerAuthDriftFocus = signalTextHasProviderAuthDriftFocus(sourceText);
+  const checks = [
+    'Pick one concrete next change or one tightly coupled file pair and stop after that bounded step.',
+    'Every proposed edit must map directly to the active signals and name the exact success condition it satisfies.',
+    'If no contract-aligned edit is safe, return no edits and state the blocking reason instead of re-planning broadly.',
+  ];
+  let summary = state.autonomousOperationMode === 'repair'
+    ? 'Bounded repair contract: make one path-bounded change with explicit validation and rollback-ready scope.'
+    : 'Bounded improvement contract: make one path-bounded improvement with explicit success criteria or no-op cleanly.';
+  let preferredPaths: string[] = [];
+
+  if (hasCurrentPricingCoverageGap && (effectiveScopes.has('api-data') || effectiveScopes.has('api') || effectiveScopes.has('api-experimental') || effectiveScopes.has('repo'))) {
+    const sampleSuffix = pricingCoverageAudit?.sampleModelIds?.length
+      ? ` (examples: ${pricingCoverageAudit.sampleModelIds.join(', ')})`
+      : '';
+    summary = `Pricing coverage contract: reduce ${pricingCoverageAudit?.unresolvedCount || 0} unresolved non-free pricing entr${(pricingCoverageAudit?.unresolvedCount || 0) === 1 ? 'y' : 'ies'} through source-of-truth pricing/model update files, not audit helpers${sampleSuffix}.`;
+    checks.push('Success means the change is anchored in pricing source-of-truth files and remains compatible with experimental API build smoke.');
+    checks.push('Use apps/api/pricing.json alone when possible, or a tightly coupled pricing.json plus fetchPricing.ts/modelUpdater.ts pair when generator logic truly must change.');
+    preferredPaths = [
+      API_PRICING_SOURCE_FILE,
+      'apps/api/dev/fetchPricing.ts',
+      'apps/api/modules/modelUpdater.ts',
+      API_MODELS_SOURCE_FILE,
+    ];
+  } else if (effectiveScopes.has('api-routing')) {
+    summary = 'Routing contract: make one bounded provider-selection, capability-gating, or retry-worthlessness improvement that prevents unsupported or exhausted candidates from being attempted again.';
+    checks.push('Prefer routing-time compatibility filters, skip reasons, or candidate de-prioritization over broad provider rewrites.');
+    checks.push('Provider-file edits are only valid here when they are small api-routing compatibility or selection guards tied directly to the active signals.');
+    preferredPaths = [
+      'apps/api/providers/handler.ts',
+      'apps/api/providers/gemini.ts',
+      'apps/api/providers/openrouter.ts',
+      'apps/api/modules/openaiProviderSelection.ts',
+      'apps/api/modules/openaiRouteSupport.ts',
+      'apps/api/modules/openaiRouteUtils.ts',
+      'apps/api/modules/openaiResponsesFormat.ts',
+      'apps/api/modules/geminiMediaValidation.ts',
+      'apps/api/routes/openai.ts',
+    ];
+  } else if (effectiveScopes.has('api-runtime')) {
+    summary = 'Runtime classification contract: make one bounded queue, intake, or failure-classification improvement that turns repetitive external/provider churn into clearer local handling.';
+    checks.push('Prefer requestQueue, requestIntake, errorClassification, errorLogger, or middlewareFactory paths over source-of-truth model/provider files.');
+    checks.push('Success means the change reduces ambiguous retries or clarifies provider-bound failures without widening into catalog-sync edits.');
+    preferredPaths = [
+      'apps/api/modules/errorClassification.ts',
+      'apps/api/modules/requestQueue.ts',
+      'apps/api/modules/requestIntake.ts',
+      'apps/api/modules/errorLogger.ts',
+      'apps/api/modules/middlewareFactory.ts',
+      'apps/api/modules/rateLimit.ts',
+      'apps/api/modules/rateLimitRedis.ts',
+    ];
+  } else if (effectiveScopes.has('api-platform')) {
+    summary = 'Platform health contract: make one bounded experimental API entrypoint, service, websocket, or startup-health improvement with safe validation.';
+    checks.push('Prefer server, launcher, websocket, or service-unit paths and avoid source-of-truth provider/model edits in this lane.');
+    checks.push('Success means the change improves experimental runtime health or observability without requiring production restarts.');
+    preferredPaths = [
+      'apps/api/server.ts',
+      'apps/api/server.launcher.bun.ts',
+      'apps/api/ws/wsServer.ts',
+      'apps/api/anygpt-api.service',
+      'apps/api/anygpt-experimental.service',
+    ];
+  } else if (effectiveScopes.has('api-data') && providerAuthDriftFocus && !apiCatalogDriftFocus) {
+    summary = 'Data sync defer contract: preserve source-of-truth model/provider files and return no edit unless a concrete catalog or availability delta is visible; repeated auth/quota drift belongs to apps/api provider routing/probing.';
+    checks.push('Do not edit apps/api/models.json, modelUpdater, or provider/model sync files to respond to Unauthorized, invalid_api_key, or quota-only failures.');
+    checks.push('Success for this iteration is a clear defer/no-op reason unless a concrete source-of-truth availability defect is visible in the provided context.');
+    preferredPaths = [
+      API_MODELS_SOURCE_FILE,
+      'apps/api/dev/updateproviders.ts',
+      'apps/api/dev/updatemodels.ts',
+      'apps/api/dev/refreshModels.ts',
+      'apps/api/modules/modelUpdater.ts',
+      'apps/api/routes/models.ts',
+    ];
+  } else if ((effectiveScopes.has('api-data') || effectiveScopes.has('api') || effectiveScopes.has('api-experimental') || effectiveScopes.has('repo')) && apiCatalogDriftFocus) {
+    summary = 'Provider/model availability contract: update source-of-truth model/provider availability handling and preserve expected region-blocked removals as availability constraints.';
+    checks.push('Do not edit apps/api/dev/checkModelCapabilities.ts unless the active signal explicitly references the audit script or a missing-capability report.');
+    checks.push('Prefer source-of-truth catalog files and model-availability output paths over audit-only helpers.');
+    checks.push('Do not reinterpret expected Gemini regional image removals or provider capability blocks as generic runtime regressions.');
+    checks.push('After an unused-local rejection in modelUpdater or updatemodels, prefer in-place branch rewrites over adding a new helper declaration; any helper added must be consumed by an existing branch in the same patch.');
+    preferredPaths = [
+      API_MODELS_SOURCE_FILE,
+      'apps/api/dev/updateproviders.ts',
+      'apps/api/dev/updatemodels.ts',
+      'apps/api/dev/refreshModels.ts',
+      'apps/api/modules/modelUpdater.ts',
+      'apps/api/routes/models.ts',
+    ];
+  } else if (
+    (effectiveScopes.has('api-runtime') || effectiveScopes.has('api') || effectiveScopes.has('api-experimental') || effectiveScopes.has('repo'))
+    && /memory pressure|queue|overloaded|max_pending|swap_used_mb|external_mb|request-body-read/.test(sourceText)
+  ) {
+    summary = 'Runtime pressure contract: make one narrow queue/intake/classification change that reduces ambiguity or load-shedding risk without broad concurrency rewrites.';
+    checks.push('Prefer requestQueue, requestIntake, or errorClassification paths and avoid speculative provider changes.');
+    preferredPaths = [
+      'apps/api/modules/requestQueue.ts',
+      'apps/api/modules/requestIntake.ts',
+      'apps/api/modules/errorClassification.ts',
+    ];
+  } else if (effectiveScopes.has('control-plane') || effectiveScopes.has('repo')) {
+    summary = 'Control-plane contract: make one orchestration, observability, or workflow-hardening change with passing control-plane validation.';
+    checks.push('Success means the change stays inside control-plane scope and passes control-plane smoke validation.');
+    preferredPaths = [
+      'apps/langgraph-control-plane/src/workflow.ts',
+      'apps/langgraph-control-plane/src/index.ts',
+      'apps/langgraph-control-plane/src/autonomousEdits.ts',
+      'apps/langgraph-control-plane/README.md',
+    ];
+  } else if (effectiveScopes.has('homepage-surface')) {
+    summary = 'Homepage surface contract: make one bounded static-asset or browser-shell improvement with a direct homepage-visible payoff.';
+    checks.push('Prefer favicon or static-asset fixes in homepage public files over speculative backend changes.');
+    preferredPaths = [
+      'apps/homepage/public/index.html',
+      'apps/homepage/public/script.js',
+      'apps/homepage/public/style.css',
+      'apps/homepage/serve.js',
+    ];
+  } else if (effectiveScopes.has('ui-surface')) {
+    summary = 'UI shell contract: make one bounded UI shell or static-asset improvement with a direct browser-visible payoff.';
+    checks.push('Prefer frontend shell, favicon/static asset, or asset-origin fixes in apps/ui over backend changes.');
+    preferredPaths = [
+      'apps/ui/librechat/client/index.html',
+      'apps/ui/librechat/client/src/App.jsx',
+      'apps/ui/librechat/client/src/main.jsx',
+      'apps/ui/librechat/client/src/style.css',
+      'apps/ui/scripts/dev.sh',
+      'apps/ui/scripts/start.sh',
+      'apps/ui/scripts/sync-config.sh',
+    ];
+  } else if (effectiveScopes.has('workspace-surface')) {
+    summary = 'Workspace surface contract: make one bounded root-workspace or developer-workflow improvement with direct operator payoff.';
+    checks.push('Prefer root scripts, workspace config, or setup/docs changes over speculative app-surface edits.');
+    preferredPaths = [
+      'package.json',
+      'pnpm-workspace.yaml',
+      'tsconfig.json',
+      'scripts/run-frontend-stack.sh',
+      'scripts/with-bun-path.sh',
+      'SETUP.md',
+    ];
+  } else if (hasRepoSurfaceFamilyScope(effectiveScopes)) {
+    summary = 'Repo-surface contract: make one bounded workspace/homepage/UI improvement with a direct user-visible or operator-visible payoff.';
+  }
+
+  return {
+    summary,
+    checks: Array.from(new Set(checks)).slice(0, 6),
+    paths: resolveAutonomousContractPaths(state, preferredPaths),
+  };
+}
+
+async function autonomousContractNode(state: ControlPlaneState): Promise<Partial<ControlPlaneState>> {
+  if (!state.autonomousEditEnabled) {
+    return {
+      autonomousContractSummary: '',
+      autonomousContractChecks: [],
+      autonomousContractPaths: [],
+    };
+  }
+
+  const contract = buildDeterministicAutonomousContract(state);
+  const notes = [
+    `Autonomous contract: ${contract.summary}`,
+    ...contract.checks.map((check, index) => `Autonomous contract check ${index + 1}: ${check}`),
+  ];
+  if (contract.paths.length > 0) {
+    notes.push(`Autonomous contract paths: ${contract.paths.join(', ')}`);
+  }
+
+  return {
+    autonomousContractSummary: contract.summary,
+    autonomousContractChecks: contract.checks,
+    autonomousContractPaths: contract.paths,
+    plannerNotes: appendUniqueNotes(state.plannerNotes, notes),
+    repairNotes: appendUniqueNotes(state.repairNotes, notes),
   };
 }
 
@@ -1683,6 +2366,13 @@ type LoadedMcpServerConfig = {
   cwd?: string;
 };
 
+const executableAvailabilityCache = new Map<string, boolean>();
+const codeQlSourceFreshnessCache = new Map<string, {
+  checkedAtMs: number;
+  newestSourceMtimeMs: number;
+  newestSourcePath: string;
+}>();
+
 const CONTROL_PLANE_DATA_DIR = './apps/api/.control-plane';
 const CONTROL_PLANE_PACKAGE_DATA_DIR = '.control-plane';
 const API_MODELS_SOURCE_FILE = 'apps/api/models.json';
@@ -1932,7 +2622,9 @@ const MCP_CLIENT_NAME = 'anygpt-langgraph-control-plane';
 const MCP_CLIENT_VERSION = '0.1.0';
 const DEFAULT_LOG_TAIL_LINE_COUNT = parsePositiveIntegerEnv('CONTROL_PLANE_LOG_TAIL_LINES', 40, 4);
 const MCP_INSPECTION_TIMEOUT_MS = parsePositiveIntegerEnv('CONTROL_PLANE_MCP_INSPECTION_TIMEOUT_MS', 8_000, 1_000);
+const MCP_ACTION_TIMEOUT_MS = parsePositiveIntegerEnv('CONTROL_PLANE_MCP_ACTION_TIMEOUT_MS', 20_000, 1_000);
 const MCP_MAX_TOOL_PAGES = 20;
+const MCP_ACTION_OUTPUT_PREVIEW_MAX_CHARS = parsePositiveIntegerEnv('CONTROL_PLANE_MCP_ACTION_OUTPUT_MAX_CHARS', 2_400, 200);
 const CODEQL_RESULT_FILE_LIMIT = parsePositiveIntegerEnv('CONTROL_PLANE_CODEQL_RESULT_FILE_LIMIT', 4, 1);
 const CODEQL_RESULT_LINE_LIMIT = parsePositiveIntegerEnv('CONTROL_PLANE_CODEQL_RESULT_LINE_LIMIT', 12, 1);
 const AI_AGENT_REQUEST_TIMEOUT_MS = parsePositiveIntegerEnv('CONTROL_PLANE_AI_AGENT_TIMEOUT_MS', 40_000, 5_000);
@@ -1953,6 +2645,7 @@ const CONTROL_PLANE_NOTE_HISTORY_LIMIT = parsePositiveIntegerEnv('CONTROL_PLANE_
 const CONTROL_PLANE_TYPECHECK_COMMAND = 'bash ./bun.sh run -F anygpt-langgraph-control-plane typecheck';
 const CODEQL_AUTORUN_ENABLED = parseBooleanEnv('CONTROL_PLANE_CODEQL_AUTORUN', true);
 const CODEQL_REFRESH_MS = parsePositiveIntegerEnv('CONTROL_PLANE_CODEQL_REFRESH_MS', 30 * 60 * 1000, 60_000);
+const CODEQL_SOURCE_FRESHNESS_REFRESH_MS = parsePositiveIntegerEnv('CONTROL_PLANE_CODEQL_SOURCE_FRESHNESS_REFRESH_MS', 500, 250);
 const REDIS_CLONE_CONNECT_TIMEOUT_MS = parsePositiveIntegerEnv('CONTROL_PLANE_REDIS_CLONE_CONNECT_TIMEOUT_MS', 15_000, 1_000);
 const REDIS_CLONE_SCAN_TIMEOUT_MS = parsePositiveIntegerEnv('CONTROL_PLANE_REDIS_CLONE_SCAN_TIMEOUT_MS', 60_000, 1_000);
 const REDIS_CLONE_COMMAND_TIMEOUT_MS = parsePositiveIntegerEnv('CONTROL_PLANE_REDIS_CLONE_COMMAND_TIMEOUT_MS', 30_000, 1_000);
@@ -2157,19 +2850,28 @@ function compactUnknownForAi(
   const maxObjectKeys = options.maxObjectKeys ?? AI_AGENT_PAYLOAD_OBJECT_KEY_LIMIT;
   const maxDepth = options.maxDepth ?? 4;
 
+  const sanitizeAiPayloadText = (input: string): string => {
+    const normalized = String(input || '');
+    if (!normalized) return normalized;
+    if (normalized.length > 20_000 && /<svg[\s\S]*\bdata:image\/[a-z0-9.+-]+;base64,/i.test(normalized)) {
+      return '[svg asset with embedded image data omitted from AI payload]';
+    }
+    return normalized.replace(/\bdata:image\/[a-z0-9.+-]+;base64,[a-z0-9+/=\s]+/gi, '[embedded image data omitted]');
+  };
+
   if (value == null || typeof value === 'number' || typeof value === 'boolean') {
     return value;
   }
 
   if (typeof value === 'string') {
-    return truncateTextMiddle(redactSensitiveText(value), maxStringChars);
+    return truncateTextMiddle(redactSensitiveText(sanitizeAiPayloadText(value)), maxStringChars);
   }
 
   if (Array.isArray(value)) {
     const sliced = value.slice(0, maxArrayItems);
     if (depth >= maxDepth) {
       return sliced.map((entry) => truncateTextMiddle(
-        JSON.stringify(redactSensitiveValue(entry)),
+        sanitizeAiPayloadText(JSON.stringify(redactSensitiveValue(entry))),
         maxStringChars,
       ));
     }
@@ -2182,7 +2884,7 @@ function compactUnknownForAi(
       return Object.fromEntries(
         entries.map(([key, entryValue]) => [
           key,
-          truncateTextMiddle(JSON.stringify(redactSensitiveValue(entryValue)), maxStringChars),
+          truncateTextMiddle(sanitizeAiPayloadText(JSON.stringify(redactSensitiveValue(entryValue))), maxStringChars),
         ]),
       );
     }
@@ -2412,6 +3114,23 @@ function buildApprovalRequests(state: ControlPlaneState): ApprovalRequest[] {
       reason: state.proposedEdits
         .map((edit) => `${edit.type} ${edit.path}: ${edit.reason}`)
         .join(' | '),
+    }));
+  }
+
+  for (const action of state.plannedMcpActions) {
+    if (action.alwaysAllow && action.risk === 'low') {
+      continue;
+    }
+
+    const approvalId = `mcp-action-${action.id}`;
+    if (seen.has(approvalId)) {
+      continue;
+    }
+    seen.add(approvalId);
+    approvals.push(ApprovalRequestSchema.parse({
+      id: approvalId,
+      title: `Approve MCP tool ${action.server}.${action.tool}`,
+      reason: `${action.title}: ${action.reason}`,
     }));
   }
 
@@ -2862,21 +3581,168 @@ function getControlPlaneSemanticMemoryNamespace(state: Pick<ControlPlaneState, '
   return ['control-plane', 'semantic-memory', projectName, governanceProfile];
 }
 
+const SEMANTIC_MEMORY_QUERY_SOURCE_LIMIT = 18;
+const SEMANTIC_MEMORY_QUERY_TOKEN_LIMIT = 24;
+const SEMANTIC_MEMORY_READ_LIMIT = 8;
+const SEMANTIC_MEMORY_SEARCH_WINDOW = 16;
+const SEMANTIC_MEMORY_WRITE_LIMIT = 6;
+const SEMANTIC_MEMORY_MEMORY_MAX_CHARS = 280;
+const SEMANTIC_MEMORY_SIGNAL_SIGNATURE_MAX_CHARS = 320;
+const SEMANTIC_MEMORY_RESOLUTION_MAX_CHARS = 220;
+const SEMANTIC_MEMORY_METADATA_MAX_CHARS = 96;
+const SEMANTIC_MEMORY_KEYWORD_LIMIT = 16;
+const SEMANTIC_MEMORY_QUERY_STOP_WORDS = new Set([
+  'a',
+  'an',
+  'and',
+  'are',
+  'as',
+  'at',
+  'be',
+  'by',
+  'for',
+  'from',
+  'in',
+  'into',
+  'is',
+  'it',
+  'of',
+  'on',
+  'or',
+  'that',
+  'the',
+  'this',
+  'to',
+  'was',
+  'were',
+  'with',
+]);
+
+function normalizeSemanticMemorySummary(value: unknown, maxChars: number): string {
+  const normalized = redactSensitiveText(String(value || '').replace(/\s+/g, ' ').trim());
+  if (!normalized) return '';
+  return truncateTextMiddle(normalized, maxChars);
+}
+
+function tokenizeSemanticMemoryText(value: unknown): string[] {
+  const normalized = normalizeSemanticMemorySummary(value, 640)
+    .toLowerCase()
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/[_:/.-]+/g, ' ');
+  if (!normalized) return [];
+
+  return normalized
+    .split(/[^a-z0-9]+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 2 && !SEMANTIC_MEMORY_QUERY_STOP_WORDS.has(token));
+}
+
+function collectSemanticMemoryKeywords(values: unknown[], limit: number = SEMANTIC_MEMORY_KEYWORD_LIMIT): string[] {
+  const counts = new Map<string, number>();
+  for (const value of values) {
+    for (const token of tokenizeSemanticMemoryText(value)) {
+      counts.set(token, (counts.get(token) || 0) + 1);
+    }
+  }
+
+  return [...counts.entries()]
+    .sort((left, right) => (
+      right[1] - left[1]
+      || right[0].length - left[0].length
+      || left[0].localeCompare(right[0])
+    ))
+    .slice(0, limit)
+    .map(([token]) => token);
+}
+
+function buildSemanticMemoryQuery(
+  state: Pick<ControlPlaneState, 'repairSignals' | 'improvementSignals' | 'recentAutonomousLearningNotes'>,
+): string {
+  const sources = [
+    ...state.repairSignals,
+    ...state.improvementSignals,
+    ...state.recentAutonomousLearningNotes,
+  ]
+    .map((entry) => normalizeSemanticMemorySummary(entry, 180))
+    .filter(Boolean)
+    .slice(-SEMANTIC_MEMORY_QUERY_SOURCE_LIMIT);
+
+  const keywords = collectSemanticMemoryKeywords(sources, SEMANTIC_MEMORY_QUERY_TOKEN_LIMIT);
+  return [...keywords, ...sources.slice(-6)]
+    .slice(0, SEMANTIC_MEMORY_QUERY_TOKEN_LIMIT)
+    .join(' | ')
+    .trim();
+}
+
+function dedupeSemanticMemoryNotes(
+  notes: Array<z.infer<typeof SemanticMemoryNoteSchema>>,
+): Array<z.infer<typeof SemanticMemoryNoteSchema>> {
+  const uniqueNotes: Array<z.infer<typeof SemanticMemoryNoteSchema>> = [];
+  const seen = new Set<string>();
+
+  for (const note of notes) {
+    const identity = normalizeSemanticMemorySummary(note.memory, SEMANTIC_MEMORY_MEMORY_MAX_CHARS).toLowerCase();
+    if (!identity || seen.has(identity)) continue;
+    seen.add(identity);
+    uniqueNotes.push(note);
+    if (uniqueNotes.length >= SEMANTIC_MEMORY_READ_LIMIT) break;
+  }
+
+  return uniqueNotes;
+}
+
+function buildSemanticMemoryPayload(
+  memory: string,
+  metadata?: { signalSignature?: string; failureClass?: string; resolution?: string; source?: string },
+  existingValue?: Record<string, any> | null,
+): Record<string, any> {
+  const now = new Date().toISOString();
+  const normalizedMemory = normalizeSemanticMemorySummary(memory, SEMANTIC_MEMORY_MEMORY_MAX_CHARS);
+  const failureClass = normalizeSemanticMemorySummary(metadata?.failureClass, SEMANTIC_MEMORY_METADATA_MAX_CHARS) || 'general';
+  const signalSignature = normalizeSemanticMemorySummary(metadata?.signalSignature, SEMANTIC_MEMORY_SIGNAL_SIGNATURE_MAX_CHARS);
+  const resolution = normalizeSemanticMemorySummary(metadata?.resolution, SEMANTIC_MEMORY_RESOLUTION_MAX_CHARS);
+  const source = normalizeSemanticMemorySummary(metadata?.source, SEMANTIC_MEMORY_METADATA_MAX_CHARS) || 'runner-learning';
+  const signalKeywords = Array.from(new Set([
+    ...(
+      Array.isArray(existingValue?.signalKeywords)
+        ? existingValue.signalKeywords.map((entry: unknown) => String(entry || '').trim()).filter(Boolean)
+        : []
+    ),
+    ...collectSemanticMemoryKeywords([normalizedMemory, signalSignature, resolution, failureClass], SEMANTIC_MEMORY_KEYWORD_LIMIT),
+  ])).slice(0, SEMANTIC_MEMORY_KEYWORD_LIMIT);
+  const previousObservationCount = Math.max(0, Math.floor(Number(existingValue?.observationCount) || 0));
+
+  return {
+    category: failureClass,
+    memory: normalizedMemory,
+    signalSignature,
+    failureClass,
+    resolution,
+    source,
+    observationCount: previousObservationCount + 1,
+    firstObservedAt: typeof existingValue?.firstObservedAt === 'string' && existingValue.firstObservedAt.trim()
+      ? existingValue.firstObservedAt.trim()
+      : now,
+    lastObservedAt: now,
+    signalKeywords,
+    searchText: [
+      normalizedMemory,
+      failureClass,
+      signalSignature,
+      resolution,
+      signalKeywords.join(' '),
+    ].filter(Boolean).join('\n'),
+  };
+}
+
 async function readSemanticMemoryNotes(
   store: BaseStore | undefined,
   state: Pick<ControlPlaneState, 'langSmithProjectName' | 'governanceProfile' | 'repairSignals' | 'improvementSignals' | 'recentAutonomousLearningNotes'>,
 ): Promise<Array<z.infer<typeof SemanticMemoryNoteSchema>>> {
   if (!store) return [];
   const namespace = getControlPlaneSemanticMemoryNamespace(state);
-  const query = [...state.repairSignals, ...state.improvementSignals, ...state.recentAutonomousLearningNotes]
-    .slice(-12)
-    .join(' | ')
-    .trim();
-  const results = await store.search(namespace, {
-    query: query || 'control plane runner learnings',
-    limit: 6,
-  }).catch(() => []);
-  return results
+  const query = buildSemanticMemoryQuery(state);
+  const parseResults = (items: SearchItem[]): Array<z.infer<typeof SemanticMemoryNoteSchema>> => items
     .map((item) => SemanticMemoryNoteSchema.safeParse({
       key: item.key,
       category: item.value.category,
@@ -2887,6 +3753,23 @@ async function readSemanticMemoryNotes(
       source: item.value.source,
     }))
     .flatMap((parsed) => parsed.success ? [parsed.data] : []);
+
+  const results = await store.search(namespace, {
+    query: query || 'control plane runner learnings recent repair notes',
+    limit: SEMANTIC_MEMORY_SEARCH_WINDOW,
+  }).catch(() => [] as SearchItem[]);
+  const primaryNotes = dedupeSemanticMemoryNotes(parseResults(results));
+  if (primaryNotes.length >= SEMANTIC_MEMORY_READ_LIMIT) {
+    return primaryNotes;
+  }
+
+  const fallbackResults = await store.search(namespace, {
+    limit: SEMANTIC_MEMORY_READ_LIMIT,
+  }).catch(() => [] as SearchItem[]);
+  return dedupeSemanticMemoryNotes([
+    ...primaryNotes,
+    ...parseResults(fallbackResults),
+  ]);
 }
 
 export async function writeSemanticMemoryNotes(
@@ -2897,18 +3780,24 @@ export async function writeSemanticMemoryNotes(
 ): Promise<void> {
   if (!store || notes.length === 0) return;
   const namespace = getControlPlaneSemanticMemoryNamespace(state);
-  const normalizedNotes = Array.from(new Set(notes.map((entry) => String(entry || '').trim()).filter(Boolean))).slice(-4);
+  const normalizedNotes = Array.from(new Set(
+    notes
+      .map((entry) => normalizeSemanticMemorySummary(entry, SEMANTIC_MEMORY_MEMORY_MAX_CHARS))
+      .filter(Boolean),
+  )).slice(-SEMANTIC_MEMORY_WRITE_LIMIT);
   for (const memory of normalizedNotes) {
-    const keySeed = `${metadata?.failureClass || 'general'}:${metadata?.signalSignature || 'none'}:${memory}`;
-    const key = Buffer.from(keySeed).toString('base64url').slice(0, 96);
-    await store.put(namespace, key, {
-      category: metadata?.failureClass || 'general',
+    const key = buildSemanticMemoryRecordKey({
       memory,
-      signalSignature: metadata?.signalSignature || '',
-      failureClass: metadata?.failureClass || '',
-      resolution: metadata?.resolution || '',
-      source: metadata?.source || 'runner-learning',
-    }).catch(() => undefined);
+      failureClass: metadata?.failureClass,
+      category: metadata?.failureClass,
+    });
+    const existing = await store.get(namespace, key).catch(() => null);
+    await store.put(
+      namespace,
+      key,
+      buildSemanticMemoryPayload(memory, metadata, existing?.value || null),
+      ['memory', 'category', 'failureClass', 'resolution', 'signalSignature', 'signalKeywords[*]', 'searchText'],
+    ).catch(() => undefined);
   }
 }
 
@@ -3037,6 +3926,24 @@ function buildSharedAiAgentPayload(state: ControlPlaneState): Record<string, unk
       status: inspection.status,
       tools: inspection.tools.map((tool) => tool.name),
     })),
+    mcpActions: {
+      planned: state.plannedMcpActions.map((action) => ({
+        id: action.id,
+        server: action.server,
+        tool: action.tool,
+        title: action.title,
+        reason: action.reason,
+        risk: action.risk,
+      })),
+      executed: state.executedMcpActions.map((action) => ({
+        id: action.id,
+        server: action.server,
+        tool: action.tool,
+        status: action.status,
+        outputSummary: action.outputSummary,
+      })),
+      notes: compactStringArrayForAi(state.mcpActionNotes, 8),
+    },
     logInsights: state.logInsights.map((insight) => ({
       file: insight.file,
       latest: insight.lines.slice(-6),
@@ -3090,6 +3997,13 @@ function buildSharedAiAgentPayload(state: ControlPlaneState): Record<string, unk
       experimentalRestartStatus: state.experimentalRestartStatus,
       experimentalRestartReason: state.experimentalRestartReason,
     },
+    autonomousContract: state.autonomousContractSummary.trim()
+      ? {
+          summary: state.autonomousContractSummary,
+          checks: state.autonomousContractChecks,
+          paths: state.autonomousContractPaths,
+        }
+      : undefined,
   };
 
   return compactUnknownForAi(payload, {
@@ -3237,6 +4151,7 @@ async function callAiAutonomousEditReviewer(
               'Prefer rejecting edits when the proposed path set is broad, weakly justified, or mixes unrelated subsystems.',
               'Allow tightly coupled multi-file edits only when the reason clearly depends on both files and the payload shows strong signal/path alignment.',
               'When signals are externally caused or provider-bound, approve only control-plane or clearly justified classification/queue/resilience edits.',
+              'When an autonomous contract is provided, reject proposals that do not satisfy its summary/checks or that go outside its listed contract paths.',
               'Do not output markdown fences or prose outside the JSON object.',
             ].join('\n'),
           },
@@ -3353,6 +4268,8 @@ async function callAiCodeEditAgent(
               aggressiveExperimentalBias
                 ? 'Aggressive experimental planning is enabled. Because allowlists, path checks, repair smoke validation, and rollback still apply, bias toward proposing one small bounded edit instead of another no-op analysis pass.'
                 : '',
+              'An autonomous contract may be provided in the payload. Treat it as binding: satisfy the contract summary, stay inside the contract paths when they are provided, and explicitly address the listed checks.',
+              'Think in two phases: first decide the next concrete contract-aligned change, then emit only that bounded edit plan. Do not re-plan the whole subsystem.',
               'Prefer the smallest safe replace edit over rewriting entire files.',
               'If previous failed edits are provided, do not repeat the same stale replace block or reuse the same find string unchanged.',
               'When a previous replace failed because the target text was not found, refresh the exact current block from the provided candidate file excerpts before proposing another replace edit.',
@@ -3452,6 +4369,103 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: str
   } finally {
     if (timeoutId) clearTimeout(timeoutId);
   }
+}
+
+async function withConnectedMcpClient<T>(
+  config: LoadedMcpServerConfig,
+  repoRoot: string,
+  label: string,
+  callback: (client: Client) => Promise<T>,
+): Promise<T> {
+  const client = new Client({ name: MCP_CLIENT_NAME, version: MCP_CLIENT_VERSION });
+
+  try {
+    const transport = new StdioClientTransport({
+      command: config.command,
+      args: config.args,
+      env: {
+        ...process.env,
+        ...config.env,
+      },
+      cwd: config.cwd ? path.resolve(repoRoot, config.cwd) : repoRoot,
+    } as any);
+
+    await withTimeout(
+      client.connect(transport),
+      MCP_INSPECTION_TIMEOUT_MS,
+      `${label} connect`,
+    );
+    return await callback(client);
+  } finally {
+    await client.close().catch(() => undefined);
+  }
+}
+
+function summarizeMcpCallResult(result: unknown): { summary: string; preview: string; failed: boolean } {
+  const fragments: string[] = [];
+  const record = result && typeof result === 'object' ? result as Record<string, unknown> : null;
+  const content = Array.isArray(record?.content) ? record.content : [];
+
+  for (const item of content) {
+    if (!item || typeof item !== 'object') continue;
+    const typedItem = item as Record<string, any>;
+    if (typedItem.type === 'text' && typeof typedItem.text === 'string') {
+      fragments.push(typedItem.text.trim());
+      continue;
+    }
+    if (typedItem.type === 'resource' && typedItem.resource && typeof typedItem.resource === 'object') {
+      if (typeof typedItem.resource.text === 'string' && typedItem.resource.text.trim()) {
+        fragments.push(typedItem.resource.text.trim());
+      } else if (typeof typedItem.resource.uri === 'string' && typedItem.resource.uri.trim()) {
+        fragments.push(`[resource] ${typedItem.resource.uri.trim()}`);
+      }
+      continue;
+    }
+    if (typedItem.type === 'resource_link' && typeof typedItem.uri === 'string' && typedItem.uri.trim()) {
+      fragments.push(`[resource-link] ${typedItem.uri.trim()}`);
+      continue;
+    }
+    if (typedItem.type === 'image' && typeof typedItem.mimeType === 'string') {
+      fragments.push(`[image:${typedItem.mimeType}]`);
+      continue;
+    }
+    if (typedItem.type === 'audio' && typeof typedItem.mimeType === 'string') {
+      fragments.push(`[audio:${typedItem.mimeType}]`);
+    }
+  }
+
+  if (fragments.length === 0 && record?.structuredContent !== undefined) {
+    fragments.push(JSON.stringify(record.structuredContent));
+  }
+  if (fragments.length === 0 && record?.content !== undefined) {
+    fragments.push(JSON.stringify(record.content));
+  }
+  if (fragments.length === 0 && result !== undefined) {
+    fragments.push(JSON.stringify(result));
+  }
+
+  const preview = truncateTextMiddle(
+    fragments.filter(Boolean).join('\n\n') || 'Tool completed without textual output.',
+    MCP_ACTION_OUTPUT_PREVIEW_MAX_CHARS,
+  );
+  const summary = truncateTextMiddle(
+    preview
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .slice(0, 2)
+      .join(' '),
+    320,
+  ) || 'Tool completed without textual output.';
+
+  const failed = record?.isError === true
+    || /^#+\s*error\b/i.test(summary)
+    || /^error[:\s]/i.test(summary)
+    || /failed to launch the browser process/i.test(preview)
+    || /chromium distribution .* is not found/i.test(preview)
+    || /browser has been closed/i.test(preview);
+
+  return { summary, preview, failed };
 }
 
 async function listAllMcpTools(client: Client): Promise<McpTool[]> {
@@ -3614,6 +4628,81 @@ function splitConfiguredRepoPaths(value: string | undefined): string[] {
     .filter(Boolean);
 }
 
+function hasExecutable(command: string): boolean {
+  const normalized = String(command || '').trim();
+  if (!normalized) return false;
+  if (executableAvailabilityCache.has(normalized)) {
+    return executableAvailabilityCache.get(normalized) === true;
+  }
+
+  const probe = spawnSync('bash', ['-lc', `command -v ${JSON.stringify(normalized)} >/dev/null 2>&1`], {
+    cwd: process.cwd(),
+    env: process.env,
+    stdio: 'ignore',
+  });
+  const exists = probe.status === 0;
+  executableAvailabilityCache.set(normalized, exists);
+  return exists;
+}
+
+function resolveCodeQlBinaryPath(state: Pick<ControlPlaneState, 'repoRoot'>): string {
+  const configuredBinary = String(process.env.CONTROL_PLANE_CODEQL_BIN || '').trim();
+  if (configuredBinary) return configuredBinary;
+
+  const localCandidates = [
+    path.resolve(state.repoRoot, '.tools', 'codeql-bundle', 'codeql', 'codeql'),
+    path.resolve(state.repoRoot, '.tools', 'codeql', 'codeql', 'codeql'),
+    path.resolve(state.repoRoot, 'tools', 'codeql-bundle', 'codeql', 'codeql'),
+    path.resolve(state.repoRoot, 'tools', 'codeql', 'codeql', 'codeql'),
+  ];
+  for (const candidate of localCandidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return 'codeql';
+}
+
+function normalizeMcpCommand(command: string, args: string[]): { command: string; args: string[] } {
+  const normalizedCommand = String(command || '').trim();
+  const normalizedArgs = [...args];
+  const isPlaywrightMcp = normalizedArgs.some((entry) => /@playwright\/mcp\b/.test(String(entry || '').trim()));
+  const sandboxFlagsPresent = normalizedArgs.includes('--no-sandbox') || normalizedArgs.includes('--sandbox');
+
+  if (isPlaywrightMcp && !sandboxFlagsPresent) {
+    try {
+      if (typeof process.getuid === 'function' && process.getuid() === 0) {
+        normalizedArgs.push('--no-sandbox');
+      }
+    } catch {
+      // Preserve configured args when uid detection is unavailable.
+    }
+  }
+
+  if (normalizedCommand !== 'npx') {
+    return { command: normalizedCommand, args: normalizedArgs };
+  }
+
+  if (hasExecutable('npx')) {
+    return { command: normalizedCommand, args: normalizedArgs };
+  }
+
+  const fallbackCommand = String(process.env.CONTROL_PLANE_MCP_EXECUTABLE_FALLBACK || 'bunx').trim() || 'bunx';
+  if (!hasExecutable(fallbackCommand)) {
+    return { command: normalizedCommand, args: normalizedArgs };
+  }
+
+  const fallbackArgs = [...normalizedArgs];
+  while (fallbackArgs[0] === '-y' || fallbackArgs[0] === '--yes') {
+    fallbackArgs.shift();
+  }
+  return {
+    command: fallbackCommand,
+    args: fallbackArgs,
+  };
+}
+
 function readTailLines(filePath: string, maxLines: number = 20): string[] {
   if (!fs.existsSync(filePath)) return [];
   try {
@@ -3658,6 +4747,10 @@ function listRecentCodeQlCandidatePaths(state: ControlPlaneState): string[] {
   const seededCandidates = [
     path.resolve(state.repoRoot, 'codeql-results.sarif'),
     path.resolve(state.repoRoot, 'codeql-results.sarif.json'),
+    path.resolve(state.repoRoot, '.codeql', 'control-plane-results.sarif'),
+    path.resolve(state.repoRoot, '.codeql', 'control-plane-results.sarif.json'),
+    path.resolve(state.repoRoot, '.codeql', 'repo-codeql-results.sarif'),
+    path.resolve(state.repoRoot, '.codeql', 'repo-codeql-results.sarif.json'),
     path.resolve(state.repoRoot, 'reports', 'codeql-results.sarif'),
     path.resolve(state.repoRoot, 'reports', 'codeql-results.sarif.json'),
     path.resolve(state.repoRoot, 'logs', 'codeql-results.sarif'),
@@ -3668,6 +4761,7 @@ function listRecentCodeQlCandidatePaths(state: ControlPlaneState): string[] {
     path.resolve(state.repoRoot, 'apps', 'langgraph-control-plane', '.control-plane', 'codeql-results.sarif.json'),
   ];
   const discoveredCandidates = [
+    ...listRecentSarifFiles(path.resolve(state.repoRoot, '.codeql'), CODEQL_RESULT_FILE_LIMIT),
     ...listRecentSarifFiles(path.resolve(state.repoRoot, 'reports'), CODEQL_RESULT_FILE_LIMIT),
     ...listRecentSarifFiles(path.resolve(state.repoRoot, 'logs'), CODEQL_RESULT_FILE_LIMIT),
     ...listRecentSarifFiles(path.resolve(state.repoRoot, '.github'), CODEQL_RESULT_FILE_LIMIT),
@@ -3689,13 +4783,118 @@ function shouldAutoRunCodeQl(state: ControlPlaneState): boolean {
 function resolveAutomaticCodeQlResultPath(state: ControlPlaneState): string {
   const configured = String(process.env.CONTROL_PLANE_CODEQL_RESULT_PATH || '').trim();
   if (configured) return path.resolve(state.repoRoot, configured);
-  return path.resolve(state.repoRoot, 'apps', 'langgraph-control-plane', '.control-plane', 'codeql-results.sarif');
+
+  const scopes = new Set(getEffectiveScopes(state));
+  if (scopes.has('control-plane')) {
+    return path.resolve(state.repoRoot, '.codeql', 'control-plane-results.sarif');
+  }
+
+  return path.resolve(state.repoRoot, '.codeql', 'repo-codeql-results.sarif');
 }
 
 function resolveAutomaticCodeQlDatabasePath(state: ControlPlaneState): string {
   const configured = String(process.env.CONTROL_PLANE_CODEQL_DATABASE_PATH || '').trim();
   if (configured) return path.resolve(state.repoRoot, configured);
-  return path.resolve(state.repoRoot, 'apps', 'langgraph-control-plane', '.control-plane', 'codeql-db-javascript');
+
+  const scopes = new Set(getEffectiveScopes(state));
+  const databaseName = scopes.has('control-plane')
+    ? 'control-plane-db-javascript'
+    : 'repo-db-javascript';
+  return path.resolve(state.repoRoot, '.codeql', databaseName);
+}
+
+function resolveAutomaticCodeQlSourceRoot(state: ControlPlaneState): string {
+  const configured = String(process.env.CONTROL_PLANE_CODEQL_SOURCE_ROOT || '').trim();
+  if (configured) return path.resolve(state.repoRoot, configured);
+
+  const scopes = new Set(getEffectiveScopes(state));
+  const controlPlaneRoot = path.resolve(state.repoRoot, 'apps', 'langgraph-control-plane');
+  if (scopes.has('control-plane') && fs.existsSync(controlPlaneRoot)) {
+    return controlPlaneRoot;
+  }
+
+  return state.repoRoot;
+}
+
+function shouldTrackCodeQlSourceFreshness(state: ControlPlaneState, sourceRoot: string): boolean {
+  const controlPlaneRoot = path.resolve(state.repoRoot, 'apps', 'langgraph-control-plane');
+  const normalizedSourceRoot = path.resolve(sourceRoot);
+  return normalizedSourceRoot === controlPlaneRoot || normalizedSourceRoot.startsWith(`${controlPlaneRoot}${path.sep}`);
+}
+
+function getNewestCodeQlSourceState(sourceRoot: string): { newestSourceMtimeMs: number; newestSourcePath: string } {
+  const normalizedSourceRoot = path.resolve(sourceRoot);
+  if (!fs.existsSync(normalizedSourceRoot)) {
+    return { newestSourceMtimeMs: 0, newestSourcePath: '' };
+  }
+
+  const cached = codeQlSourceFreshnessCache.get(normalizedSourceRoot);
+  if (cached && Date.now() - cached.checkedAtMs <= CODEQL_SOURCE_FRESHNESS_REFRESH_MS) {
+    return {
+      newestSourceMtimeMs: cached.newestSourceMtimeMs,
+      newestSourcePath: cached.newestSourcePath,
+    };
+  }
+
+  const ignoredDirectoryNames = new Set([
+    '.git',
+    '.hg',
+    '.svn',
+    '.codeql',
+    '.codeql-test',
+    '.control-plane',
+    '.tools',
+    '.turbo',
+    'coverage',
+    'dist',
+    'logs',
+    'node_modules',
+  ]);
+
+  let newestSourceMtimeMs = 0;
+  let newestSourcePath = '';
+  const rootStats = fs.statSync(normalizedSourceRoot);
+  if (rootStats.isFile()) {
+    newestSourceMtimeMs = rootStats.mtimeMs || 0;
+    newestSourcePath = normalizedSourceRoot;
+  } else {
+    const pendingDirectories = [normalizedSourceRoot];
+    while (pendingDirectories.length > 0) {
+      const currentDirectory = pendingDirectories.pop();
+      if (!currentDirectory) continue;
+
+      let entries: fs.Dirent[] = [];
+      try {
+        entries = fs.readdirSync(currentDirectory, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+
+      for (const entry of entries) {
+        if (entry.isDirectory()) {
+          if (ignoredDirectoryNames.has(entry.name)) continue;
+          pendingDirectories.push(path.resolve(currentDirectory, entry.name));
+          continue;
+        }
+
+        if (!entry.isFile()) continue;
+        const entryPath = path.resolve(currentDirectory, entry.name);
+        const modifiedTimeMs = getFileModifiedTimeMs(entryPath);
+        if (modifiedTimeMs > newestSourceMtimeMs) {
+          newestSourceMtimeMs = modifiedTimeMs;
+          newestSourcePath = entryPath;
+        }
+      }
+    }
+  }
+
+  codeQlSourceFreshnessCache.set(normalizedSourceRoot, {
+    checkedAtMs: Date.now(),
+    newestSourceMtimeMs,
+    newestSourcePath,
+  });
+
+  return { newestSourceMtimeMs, newestSourcePath };
 }
 
 function countCodeQlSarifFindings(filePath: string): number {
@@ -3716,23 +4915,38 @@ async function ensureAutomaticCodeQlSarif(state: ControlPlaneState): Promise<str
   if (!shouldAutoRunCodeQl(state)) return [];
 
   const resultPath = resolveAutomaticCodeQlResultPath(state);
+  const sourceRoot = resolveAutomaticCodeQlSourceRoot(state);
   const resultRelativePath = path.relative(state.repoRoot, resultPath).replace(/\\/g, '/');
+  const resultModifiedTimeMs = getFileModifiedTimeMs(resultPath);
   const resultAgeMs = Date.now() - getFileModifiedTimeMs(resultPath);
-  if (fs.existsSync(resultPath) && resultAgeMs >= 0 && resultAgeMs <= CODEQL_REFRESH_MS) {
+  const trackedSourceState = shouldTrackCodeQlSourceFreshness(state, sourceRoot)
+    ? getNewestCodeQlSourceState(sourceRoot)
+    : null;
+  const cachedSarifIsOlderThanTrackedSource = Boolean(
+    trackedSourceState
+    && trackedSourceState.newestSourceMtimeMs > resultModifiedTimeMs,
+  );
+  if (
+    fs.existsSync(resultPath)
+    && resultAgeMs >= 0
+    && resultAgeMs <= CODEQL_REFRESH_MS
+    && !cachedSarifIsOlderThanTrackedSource
+  ) {
     const findingCount = countCodeQlSarifFindings(resultPath);
     return [`CodeQL autorun: reusing fresh SARIF at ${resultRelativePath} (${findingCount} finding(s)).`];
   }
 
-  const codeqlBinary = String(process.env.CONTROL_PLANE_CODEQL_BIN || 'codeql').trim() || 'codeql';
+  const codeqlBinary = resolveCodeQlBinaryPath(state);
   const queryPack = String(process.env.CONTROL_PLANE_CODEQL_QUERY_PACK || 'codeql/javascript-queries').trim() || 'codeql/javascript-queries';
   const language = String(process.env.CONTROL_PLANE_CODEQL_LANGUAGE || 'javascript').trim() || 'javascript';
   const databasePath = resolveAutomaticCodeQlDatabasePath(state);
   fs.mkdirSync(path.dirname(resultPath), { recursive: true });
+  fs.mkdirSync(path.dirname(databasePath), { recursive: true });
   fs.rmSync(databasePath, { recursive: true, force: true });
 
   const command = [
     `rm -rf ${shellEscapeCommandArg(databasePath)}`,
-    `${shellEscapeCommandArg(codeqlBinary)} database create ${shellEscapeCommandArg(databasePath)} --language=${shellEscapeCommandArg(language)} --build-mode=none --source-root=${shellEscapeCommandArg(state.repoRoot)}`,
+    `${shellEscapeCommandArg(codeqlBinary)} database create ${shellEscapeCommandArg(databasePath)} --language=${shellEscapeCommandArg(language)} --build-mode=none --source-root=${shellEscapeCommandArg(sourceRoot)}`,
     `${shellEscapeCommandArg(codeqlBinary)} database analyze ${shellEscapeCommandArg(databasePath)} ${shellEscapeCommandArg(queryPack)} --format=sarifv2.1.0 --output=${shellEscapeCommandArg(resultPath)} --threads=0 --download --no-print-diagnostics-summary --no-print-metrics-summary --sarif-category=${shellEscapeCommandArg('control-plane-autonomous')}`,
   ].join(' && ');
 
@@ -3748,7 +4962,10 @@ async function ensureAutomaticCodeQlSarif(state: ControlPlaneState): Promise<str
   }
 
   const findingCount = countCodeQlSarifFindings(resultPath);
-  return [`CodeQL autorun: generated ${resultRelativePath} with ${findingCount} finding(s).`];
+  const freshnessSuffix = cachedSarifIsOlderThanTrackedSource
+    ? ` after source changes newer than the cached SARIF (${path.relative(state.repoRoot, trackedSourceState?.newestSourcePath || sourceRoot).replace(/\\/g, '/')})`
+    : '';
+  return [`CodeQL autorun: generated ${resultRelativePath} with ${findingCount} finding(s)${freshnessSuffix}.`];
 }
 
 function normalizeCodeQlFindingPath(repoRoot: string, sarifPath: string, rawUri: string | undefined): string {
@@ -3876,14 +5093,17 @@ function resolveLogInsights(state: ControlPlaneState): LogInsight[] {
   const fileLogInsights = listRecentLogCandidatePaths(state)
     .map((filePath) => ({ file: path.relative(state.repoRoot, filePath), lines: readTailLines(filePath, DEFAULT_LOG_TAIL_LINE_COUNT) }))
     .filter((entry) => entry.lines.length > 0)
-    .map((entry) => LogInsightSchema.parse(entry));
-  return [...codeQlInsights, ...fileLogInsights];
+    .map((entry) => LogInsightSchema.parse(entry))
+    .map((entry) => filterLogInsightForScope(state, entry))
+    .filter((entry): entry is LogInsight => Boolean(entry));
+  return [...codeQlInsights, ...fileLogInsights]
+    .map((entry) => filterLogInsightForScope(state, entry))
+    .filter((entry): entry is LogInsight => Boolean(entry));
 }
 
 function buildRecentFailedAutonomousEditsPayload(state: ControlPlaneState): Array<Record<string, unknown>> {
-  return state.appliedEdits
+  const appliedFailures = state.appliedEdits
     .filter((edit) => edit.status === 'failed')
-    .slice(-3)
     .map((edit) => ({
       type: edit.type,
       path: edit.path,
@@ -3899,6 +5119,25 @@ function buildRecentFailedAutonomousEditsPayload(state: ControlPlaneState): Arra
         ? truncateTextMiddle((edit as any).content, Math.min(1200, AI_CODE_EDIT_CANDIDATE_FILE_MAX_CHARS))
         : undefined,
     }));
+
+  const syntheticFailures = state.autonomousEditNotes
+    .map((note) => String(note || '').trim())
+    .map((note) => note.match(/Skipped autonomous (replace|write) proposal for ([^:]+):\s*(.+)$/i))
+    .flatMap((match) => {
+      if (!match) return [];
+      const type = String(match[1] || '').trim().toLowerCase();
+      const path = String(match[2] || '').trim();
+      const message = redactSensitiveText(String(match[3] || '').trim());
+      if (!path || !message) return [];
+      return [{
+        type,
+        path,
+        reason: '',
+        message,
+      }];
+    });
+
+  return [...appliedFailures, ...syntheticFailures].slice(-4);
 }
 
 function extractMeaningfulAnchorLines(text: string, maxCount: number = 4): string[] {
@@ -3911,14 +5150,12 @@ function extractMeaningfulAnchorLines(text: string, maxCount: number = 4): strin
 
 function buildFailedAutonomousEditAnchorHints(state: ControlPlaneState): Record<string, string[]> {
   const hints: Record<string, string[]> = {};
-  for (const edit of state.appliedEdits.filter((entry) => entry.status === 'failed').slice(-4)) {
-    const normalizedPath = String(edit.path || '').trim();
-    if (!normalizedPath) continue;
+  const appendHints = (normalizedPath: string, message: string, find?: string): void => {
+    if (!normalizedPath) return;
     const nextHints = [
       ...(hints[normalizedPath] || []),
-      ...(typeof edit.find === 'string' ? extractMeaningfulAnchorLines(edit.find, 4) : []),
+      ...(typeof find === 'string' ? extractMeaningfulAnchorLines(find, 4) : []),
     ];
-    const message = String(edit.message || '');
     const firstAnchorMatch = message.match(/First anchor fragment:\s*(.+)$/s);
     if (firstAnchorMatch) {
       nextHints.push(String(firstAnchorMatch[1] || '').split('\n')[0].trim());
@@ -3928,6 +5165,18 @@ function buildFailedAutonomousEditAnchorHints(state: ControlPlaneState): Record<
       nextHints.push(...extractMeaningfulAnchorLines(String(excerptMatch[1] || ''), 4));
     }
     hints[normalizedPath] = uniqueNormalizedStrings(nextHints).slice(0, 8);
+  };
+
+  for (const edit of state.appliedEdits.filter((entry) => entry.status === 'failed').slice(-4)) {
+    const normalizedPath = String(edit.path || '').trim();
+    if (!normalizedPath) continue;
+    appendHints(normalizedPath, String(edit.message || ''), typeof edit.find === 'string' ? edit.find : undefined);
+  }
+
+  for (const note of state.autonomousEditNotes.map((entry) => String(entry || '').trim()).slice(-16)) {
+    const match = note.match(/Skipped autonomous replace proposal for ([^:]+):\s*(.+)$/i);
+    if (!match) continue;
+    appendHints(String(match[1] || '').trim(), String(match[2] || '').trim());
   }
   return hints;
 }
@@ -3961,17 +5210,54 @@ function buildFailedAutonomousEditRefreshContexts(
   }));
 }
 
+function isCompileShapeAutonomousEditFailure(message: string): boolean {
+  const normalized = String(message || '').trim().toLowerCase();
+  if (!normalized) return false;
+  return /unused local symbols|declared but its value is never read|cannot redeclare block-scoped variable|duplicate identifier|duplicate function implementation|same-file typescript diagnostics|typecheck|build validation|compile validation/.test(normalized);
+}
+
+function reasonAcknowledgesCompileShapeFailure(reason: string): boolean {
+  const normalized = String(reason || '').trim().toLowerCase();
+  if (!normalized) return false;
+  return /unused|stale declaration|stale symbol|remove.*declaration|remove.*symbol|cleanup|clean up|compile failure|build validation|typecheck|dead code|redeclare|duplicate declaration|duplicate variable|duplicate identifier|rename.*variable|rename.*declaration/.test(normalized);
+}
+
+function reasonAddsHelperWithoutImmediateWiring(reason: string): boolean {
+  const normalized = String(reason || '').trim().toLowerCase();
+  if (!normalized) return false;
+
+  const addsHelper = /(?:add|adds|adding|introduce|introduces|introducing|create|creates|creating).{0,40}(?:helper|detector|predicate|utility|wrapper)|(?:helper|detector|predicate|utility|wrapper)/.test(normalized);
+  if (!addsHelper) return false;
+
+  return !/(?:wire|wired|wiring|use|uses|using|consume|consumes|consuming|invoke|invokes|invoking|call site|callsite|replace existing|reuse existing|inline|in-place|branch rewrite|existing branch|same patch)/.test(normalized);
+}
+
 function isRepeatedFailedEditProposal(
   edit: AutonomousEditAction,
   recentFailedEdits: Array<Record<string, unknown>>,
 ): boolean {
   const normalizedPath = String(edit.path || '').trim();
   const normalizedType = String(edit.type || '').trim();
+  const normalizedReason = String(edit.reason || '').trim();
   if (!normalizedPath || !normalizedType) return false;
 
   return recentFailedEdits.some((failedEdit) => {
     if (String(failedEdit.path || '').trim() !== normalizedPath) return false;
     if (String(failedEdit.type || '').trim() !== normalizedType) return false;
+
+    const failedMessage = String(failedEdit.message || '').trim();
+    if (isCompileShapeAutonomousEditFailure(failedMessage)) {
+      if (!reasonAcknowledgesCompileShapeFailure(normalizedReason)) {
+        return true;
+      }
+      if (
+        /unused local symbols|declared but its value is never read/i.test(failedMessage)
+        && reasonAddsHelperWithoutImmediateWiring(normalizedReason)
+      ) {
+        return true;
+      }
+      return false;
+    }
 
     if (normalizedType === 'replace') {
       return String(failedEdit.find || '').trim() === String(edit.find || '').trim();
@@ -3985,6 +5271,72 @@ function isRepeatedFailedEditProposal(
   });
 }
 
+function chooseStrongestAutonomousEditPath(
+  state: Pick<ControlPlaneState, 'repairSignals' | 'improvementSignals' | 'autonomousOperationMode' | 'scopes' | 'effectiveScopes'>,
+  touchedPaths: string[],
+  proposalReasonByPath: Map<string, string>,
+): string | null {
+  const normalizedPaths = Array.from(new Set(
+    touchedPaths
+      .map((entry) => String(entry || '').trim())
+      .filter(Boolean),
+  ));
+  if (normalizedPaths.length === 0) return null;
+
+  const ranked = normalizedPaths
+    .map((candidatePath, index) => {
+      const reason = proposalReasonByPath.get(candidatePath) || '';
+      return {
+        path: candidatePath,
+        score: scoreAutonomousEditPathFit(state as ControlPlaneState, candidatePath, reason),
+        documentationPenalty: /\.(md|mdx|txt)$/i.test(candidatePath) ? 1 : 0,
+        reasonLength: reason.length,
+        index,
+      };
+    })
+    .sort((left, right) =>
+      right.score - left.score
+      || left.documentationPenalty - right.documentationPenalty
+      || right.reasonLength - left.reasonLength
+      || left.index - right.index
+    );
+
+  return ranked[0]?.path || null;
+}
+
+function maybeNarrowAutonomousEditBatchToStrongestPath(
+  state: Pick<ControlPlaneState, 'repairSignals' | 'improvementSignals' | 'autonomousOperationMode' | 'scopes' | 'effectiveScopes'>,
+  edits: AutonomousEditAction[],
+  proposalReasonByPath: Map<string, string>,
+): { edits: AutonomousEditAction[]; note: string } | null {
+  const touchedPaths = Array.from(new Set(
+    edits
+      .map((edit) => String(edit.path || '').trim())
+      .filter(Boolean),
+  ));
+  if (touchedPaths.length <= 1) return null;
+  if (
+    state.autonomousOperationMode === 'repair'
+    && isTightlyCoupledAutonomousEditBatch(touchedPaths)
+  ) {
+    return null;
+  }
+
+  const strongestPath = chooseStrongestAutonomousEditPath(state, touchedPaths, proposalReasonByPath);
+  if (!strongestPath) return null;
+
+  const narrowedEdits = edits.filter((edit) => String(edit.path || '').trim() === strongestPath);
+  if (narrowedEdits.length === 0 || narrowedEdits.length === edits.length) {
+    return null;
+  }
+
+  const deferredPaths = touchedPaths.filter((candidatePath) => candidatePath !== strongestPath);
+  return {
+    edits: narrowedEdits,
+    note: `Narrowed autonomous edit batch to ${strongestPath} to preserve bounded single-path scope; deferred ${deferredPaths.join(', ')} for a later iteration.`,
+  };
+}
+
 function filterInvalidAutonomousEditProposals(
   state: ControlPlaneState,
   edits: AutonomousEditAction[],
@@ -3992,8 +5344,34 @@ function filterInvalidAutonomousEditProposals(
 ): { accepted: AutonomousEditAction[]; notes: string[] } {
   const accepted: AutonomousEditAction[] = [];
   const notes: string[] = [];
+  const rejectedPathPreflightMessages = new Map<string, string>();
   const avoidProviderPathEdits = shouldAvoidProviderPathAutonomousEdits(state.repairSignals);
   const restrictToControlPlane = shouldRestrictAutonomousEditsToControlPlane(state);
+  const proposalReasonByPath = new Map<string, string>();
+  for (const edit of edits) {
+    const normalizedPath = String(edit.path || '').trim();
+    const normalizedReason = String(edit.reason || '').trim();
+    if (!normalizedPath || !normalizedReason) continue;
+    const reasonParts = [proposalReasonByPath.get(normalizedPath), normalizedReason]
+      .filter((value): value is string => Boolean(value));
+    proposalReasonByPath.set(normalizedPath, reasonParts.join(' | '));
+  }
+  const allowScopedProviderPathEdits = shouldAllowScopedProviderPathAutonomousEdits(
+    state,
+    edits.map((edit) => String(edit.path || '').trim()),
+    proposalReasonByPath,
+  );
+  const sourceText = [
+    ...state.repairSignals,
+    ...state.improvementSignals,
+    ...state.plannerNotes.slice(-12),
+  ].join(' | ').toLowerCase();
+  const pricingCoverageFocus = signalTextHasPricingCoverageFocus(sourceText);
+  const availabilityFocus = signalTextHasApiAvailabilityFocus(sourceText);
+  const capabilityAuditFocus = signalTextHasCapabilityAuditFocus(sourceText);
+  const contractPaths = state.autonomousContractPaths
+    .map((entry) => String(entry || '').trim())
+    .filter(Boolean);
 
   for (const edit of edits) {
     const check = checkAutonomousEditPath(
@@ -4007,13 +5385,33 @@ function filterInvalidAutonomousEditProposals(
       continue;
     }
 
-    if (avoidProviderPathEdits && check.normalizedPath.startsWith('apps/api/providers/')) {
+    if (avoidProviderPathEdits && !allowScopedProviderPathEdits && check.normalizedPath.startsWith('apps/api/providers/')) {
       notes.push(`Skipped autonomous edit proposal for ${check.normalizedPath}: active repair signals are provider-bound, so autonomous provider-file edits are blocked for this iteration.`);
       continue;
     }
 
     if (restrictToControlPlane && !check.normalizedPath.startsWith('apps/langgraph-control-plane/')) {
       notes.push(`Skipped autonomous edit proposal for ${check.normalizedPath}: current signals are externally caused or repetitive, so this iteration is restricted to control-plane-only edits.`);
+      continue;
+    }
+
+    if (
+      isApiDataAuditHelperPath(check.normalizedPath)
+      && (pricingCoverageFocus || availabilityFocus)
+      && !capabilityAuditFocus
+    ) {
+      notes.push(`Skipped autonomous edit proposal for ${check.normalizedPath}: active api-data signals target source-of-truth model/provider data, so audit-helper edits are deferred until the underlying data files are fixed.`);
+      continue;
+    }
+
+    if (contractPaths.length > 0 && !contractPaths.includes(check.normalizedPath)) {
+      notes.push(`Skipped autonomous edit proposal for ${check.normalizedPath}: it falls outside the current autonomous contract paths (${contractPaths.join(', ')}).`);
+      continue;
+    }
+
+    const priorPreflightFailure = rejectedPathPreflightMessages.get(check.normalizedPath);
+    if (priorPreflightFailure) {
+      notes.push(`Skipped autonomous ${edit.type} proposal for ${check.normalizedPath}: an earlier proposal for this path already failed preflight validation (${priorPreflightFailure}).`);
       continue;
     }
 
@@ -4027,36 +5425,42 @@ function filterInvalidAutonomousEditProposals(
         notes.push(`Skipped autonomous replace proposal for ${check.normalizedPath}: target file does not exist.`);
         continue;
       }
-      const current = fs.readFileSync(absolutePath, 'utf8');
       const find = typeof edit.find === 'string' ? edit.find : '';
       if (!find) {
         notes.push(`Skipped autonomous replace proposal for ${check.normalizedPath}: replace edits must include a find block.`);
         continue;
       }
-      const exactMatchCount = current.includes(find)
-        ? current.split(find).length - 1
-        : 0;
-      const preflightFailure = exactMatchCount === 0
-        ? preflightAutonomousEditAction(
-            state.repoRoot,
-            {
-              ...edit,
-              path: check.normalizedPath,
-            },
-            state.editAllowlist,
-            state.editDenylist,
-          )
-        : null;
-      if (preflightFailure) {
-        notes.push(`Skipped autonomous replace proposal for ${check.normalizedPath}: ${preflightFailure.message}`);
-        continue;
-      }
+    }
+
+    const preflightFailure = preflightAutonomousEditAction(
+      state.repoRoot,
+      {
+        ...edit,
+        path: check.normalizedPath,
+      },
+      state.editAllowlist,
+      state.editDenylist,
+    );
+    if (preflightFailure) {
+      rejectedPathPreflightMessages.set(check.normalizedPath, preflightFailure.message);
+      notes.push(`Skipped autonomous ${edit.type} proposal for ${check.normalizedPath}: ${preflightFailure.message}`);
+      continue;
     }
 
     accepted.push({
       ...edit,
       path: check.normalizedPath,
     });
+  }
+
+  const narrowedBatch = maybeNarrowAutonomousEditBatchToStrongestPath(
+    state,
+    accepted,
+    proposalReasonByPath,
+  );
+  if (narrowedBatch) {
+    notes.push(narrowedBatch.note);
+    return { accepted: narrowedBatch.edits, notes };
   }
 
   return { accepted, notes };
@@ -4096,8 +5500,74 @@ function buildAutonomousEditAgentWorkloads(
     });
   };
 
+  const effectiveScopes = new Set(getEffectiveScopes(state));
+
   addWorkload('primary', buildDefaultAutonomousEditAgentFocus(operationMode), candidateFiles);
   if (maxAgents === 1) return workloads;
+
+  if (effectiveScopes.has('api-data')) {
+    addWorkload(
+      'api-data-source-of-truth',
+      operationMode === 'repair'
+        ? 'Prefer source-of-truth model/provider/pricing files over audit helpers when fixing api-data issues.'
+        : 'Prefer source-of-truth model/provider/pricing files over audit helpers when improving availability, provider sync, or pricing metadata.',
+      candidateFiles.filter((file) => isApiDataSourceOfTruthPath(file.path)),
+    );
+  }
+
+  if (effectiveScopes.has('api-routing')) {
+    addWorkload(
+      'api-routing',
+      operationMode === 'repair'
+        ? 'Focus on routing-time capability gating, provider selection, skip reasons, and retry-worthlessness improvements.'
+        : 'Prefer small routing, selection, and compatibility-gating improvements in the API hot path.',
+      candidateFiles.filter((file) => [
+        'apps/api/providers/handler.ts',
+        'apps/api/providers/gemini.ts',
+        'apps/api/providers/openrouter.ts',
+        'apps/api/modules/openaiProviderSelection.ts',
+        'apps/api/modules/openaiRouteSupport.ts',
+        'apps/api/modules/openaiRouteUtils.ts',
+        'apps/api/modules/openaiResponsesFormat.ts',
+        'apps/api/modules/geminiMediaValidation.ts',
+        'apps/api/routes/openai.ts',
+      ].includes(file.path)),
+    );
+  }
+
+  if (effectiveScopes.has('api-runtime')) {
+    addWorkload(
+      'api-runtime',
+      operationMode === 'repair'
+        ? 'Focus on queue, intake, error-classification, and runtime failure-origin improvements.'
+        : 'Prefer small runtime resilience or observability improvements in queue/intake/classification paths.',
+      candidateFiles.filter((file) => [
+        'apps/api/modules/errorClassification.ts',
+        'apps/api/modules/requestQueue.ts',
+        'apps/api/modules/requestIntake.ts',
+        'apps/api/modules/errorLogger.ts',
+        'apps/api/modules/middlewareFactory.ts',
+        'apps/api/modules/rateLimit.ts',
+        'apps/api/modules/rateLimitRedis.ts',
+      ].includes(file.path)),
+    );
+  }
+
+  if (effectiveScopes.has('api-platform')) {
+    addWorkload(
+      'api-platform',
+      operationMode === 'repair'
+        ? 'Focus on experimental API entrypoint, service-unit, websocket, and startup-health improvements.'
+        : 'Prefer bounded experimental platform health, startup, or service wiring improvements.',
+      candidateFiles.filter((file) => [
+        'apps/api/server.ts',
+        'apps/api/server.launcher.bun.ts',
+        'apps/api/ws/wsServer.ts',
+        'apps/api/anygpt-api.service',
+        'apps/api/anygpt-experimental.service',
+      ].includes(file.path)),
+    );
+  }
 
   if (failedPaths.size > 0) {
     addWorkload(
@@ -4107,8 +5577,7 @@ function buildAutonomousEditAgentWorkloads(
     );
   }
 
-  const effectiveScopes = new Set(getEffectiveScopes(state));
-  if (hasApiFamilyScope(effectiveScopes) || effectiveScopes.has('repo')) {
+  if (effectiveScopes.has('api') || effectiveScopes.has('api-experimental') || effectiveScopes.has('repo')) {
     addWorkload(
       'api-hot-paths',
       operationMode === 'repair'
@@ -4128,11 +5597,35 @@ function buildAutonomousEditAgentWorkloads(
     );
   }
 
-  if (effectiveScopes.has('repo') || hasRepoSurfaceFamilyScope(effectiveScopes)) {
+  if (effectiveScopes.has('repo') || effectiveScopes.has('repo-surface')) {
     addWorkload(
       'repo-surface',
       'Look specifically for a small repo/workspace/homepage/UI cleanup or developer-workflow hardening improvement.',
       candidateFiles.filter((file) => !file.path.startsWith('apps/api/') && !file.path.startsWith('apps/langgraph-control-plane/')),
+    );
+  }
+
+  if (effectiveScopes.has('workspace-surface')) {
+    addWorkload(
+      'workspace-surface',
+      'Prefer one bounded root-workspace or developer-workflow improvement with direct operator payoff.',
+      candidateFiles.filter((file) => !file.path.startsWith('apps/') || file.path.startsWith('scripts/')),
+    );
+  }
+
+  if (effectiveScopes.has('homepage-surface')) {
+    addWorkload(
+      'homepage-surface',
+      'Prefer a homepage-visible static-asset or browser-shell improvement, especially favicon or asset-path fixes.',
+      candidateFiles.filter((file) => file.path.startsWith('apps/homepage/')),
+    );
+  }
+
+  if (effectiveScopes.has('ui-surface')) {
+    addWorkload(
+      'ui-surface',
+      'Prefer a UI shell or static-asset improvement with direct browser-visible payoff.',
+      candidateFiles.filter((file) => file.path.startsWith('apps/ui/')),
     );
   }
 
@@ -4254,20 +5747,402 @@ function loadMcpServers(configPath: string): LoadedMcpServerConfig[] {
     const servers = parsed?.mcpServers && typeof parsed.mcpServers === 'object'
       ? parsed.mcpServers
       : {};
-    return Object.entries(servers).map(([name, config]: [string, any]) => ({
+    return Object.entries(servers).map(([name, config]: [string, any]) => {
+      const normalizedArgs = coerceStringArray(config?.args);
+      const normalizedCommand = normalizeMcpCommand(String(config?.command || ''), normalizedArgs);
+      return ({
       name,
-      command: String(config?.command || ''),
-      args: coerceStringArray(config?.args),
+      command: normalizedCommand.command,
+      args: normalizedCommand.args,
       type: typeof config?.type === 'string' && config.type.trim().length > 0 ? config.type.trim() : 'stdio',
       disabled: config?.disabled === true,
       alwaysAllow: coerceStringArray(config?.alwaysAllow),
       disabledTools: coerceStringArray(config?.disabledTools),
       env: coerceStringRecord(config?.env),
       cwd: typeof config?.cwd === 'string' && config.cwd.trim().length > 0 ? config.cwd.trim() : undefined,
-    }));
+    });
+    });
   } catch {
     return [];
   }
+}
+
+function extractUrlsFromText(value: string): string[] {
+  const matches = String(value || '').match(/https?:\/\/[^\s<>"')\]]+/gi) || [];
+  return uniqueNormalizedStrings(
+    matches.map((entry) => {
+      try {
+        const parsed = new URL(entry);
+        return parsed.toString();
+      } catch {
+        return '';
+      }
+    }),
+  );
+}
+
+function resolveConfiguredMcpTargetUrls(state: Pick<ControlPlaneState, 'goal' | 'mcpTargetUrls'>): string[] {
+  const configuredUrls = splitConfiguredRepoPaths(process.env.CONTROL_PLANE_MCP_TARGET_URLS)
+    .map((entry) => {
+      try {
+        return new URL(entry).toString();
+      } catch {
+        return '';
+      }
+    });
+  return uniqueNormalizedStrings([
+    ...state.mcpTargetUrls,
+    ...configuredUrls,
+    ...extractUrlsFromText(state.goal),
+  ]);
+}
+
+function mcpInspectionHasTool(inspection: McpInspection | undefined, toolName: string): boolean {
+  return Boolean(
+    inspection?.status === 'connected'
+    && inspection.tools.some((tool) => tool.name === toolName),
+  );
+}
+
+function shouldPlanBraveSearchForGoal(goal: string): boolean {
+  return /research|search|look up|lookup|latest|docs?|documentation|website|github|langgraph|openclaw|browse/i.test(
+    String(goal || ''),
+  );
+}
+
+function collectMcpPlanningSourceText(
+  state: Pick<
+    ControlPlaneState,
+    | 'goal'
+    | 'repairIntentSummary'
+    | 'repairSignals'
+    | 'improvementIntentSummary'
+    | 'improvementSignals'
+    | 'plannerNotes'
+    | 'buildAgentInsights'
+    | 'qualityAgentInsights'
+    | 'deployAgentInsights'
+    | 'autonomousContractSummary'
+    | 'autonomousContractChecks'
+    | 'autonomousContractPaths'
+  >,
+): string {
+  return [
+    state.goal,
+    state.repairIntentSummary,
+    ...state.repairSignals,
+    state.improvementIntentSummary,
+    ...state.improvementSignals,
+    ...state.plannerNotes.slice(-20),
+    ...state.buildAgentInsights.slice(-8),
+    ...state.qualityAgentInsights.slice(-8),
+    ...state.deployAgentInsights.slice(-8),
+    state.autonomousContractSummary,
+    ...state.autonomousContractChecks,
+    ...state.autonomousContractPaths,
+  ].join(' | ').toLowerCase();
+}
+
+function shouldPlanSignalDrivenBraveSearch(
+  state: Pick<
+    ControlPlaneState,
+    | 'goal'
+    | 'repairIntentSummary'
+    | 'repairSignals'
+    | 'improvementIntentSummary'
+    | 'improvementSignals'
+    | 'plannerNotes'
+    | 'buildAgentInsights'
+    | 'qualityAgentInsights'
+    | 'deployAgentInsights'
+    | 'autonomousContractSummary'
+    | 'autonomousContractChecks'
+    | 'autonomousContractPaths'
+  >,
+): boolean {
+  const sourceText = collectMcpPlanningSourceText(state);
+  return /provider_model_removed|provider_cap_blocked|image generation unavailable|tool_choice|tool choice|unsupported capability|unsupported modality|provider routing|pricing coverage|resource has been exhausted|quota exhausted|listmodels failed|responses endpoint|request failed with status code 500|request failed with status code 503|openrouter|gemini|lyria-3|qwen\/qwen3\.5-plus|mimo-v2-pro/.test(sourceText);
+}
+
+function extractSignalDrivenSearchHints(entries: string[]): string[] {
+  const hints: string[] = [];
+  const pushHint = (value: string): void => {
+    const normalized = String(value || '').replace(/\s+/g, ' ').trim();
+    if (!normalized || hints.includes(normalized)) return;
+    hints.push(normalized);
+  };
+
+  for (const entry of entries) {
+    const normalized = String(entry || '').replace(/\s+/g, ' ').trim();
+    if (!normalized) continue;
+
+    for (const modelMatch of normalized.match(/\b(?:gemini(?:-[a-z0-9.-]+)?|lyria-3-(?:clip|pro)-preview|gpt-5\.4|gpt-5-pro-2025-10-06|qwen\/qwen3\.5-plus-[0-9-]+|mimo-v2-pro)\b/gi) || []) {
+      pushHint(modelMatch);
+    }
+    if (/does not support generatecontent/i.test(normalized)) pushHint('does not support generateContent');
+    if (/unsupported input mime type.*audio\/s16le/i.test(normalized)) pushHint('unsupported audio/s16le input');
+    if (/function calling is not enabled/i.test(normalized)) pushHint('function calling not enabled');
+    if (/image generation unavailable in country|image generation unavailable in provider region/i.test(normalized)) pushHint('image generation unavailable in provider region');
+    if (/provider_cap_blocked/i.test(normalized)) pushHint('provider_cap_blocked');
+    if (/provider_model_removed/i.test(normalized)) pushHint('provider_model_removed');
+    if (/resource has been exhausted|quota exceeded|quota exhausted/i.test(normalized)) pushHint('quota exhausted');
+    if (/tool[_ -]?calling|tool_choice/i.test(normalized)) pushHint('tool calling compatibility');
+    if (/request failed with status code 500/i.test(normalized)) pushHint('upstream 500');
+    if (/request failed with status code 503/i.test(normalized)) pushHint('upstream 503');
+    if (/pricing coverage|pricing gap|missing pricing/i.test(normalized)) pushHint('pricing coverage gap');
+  }
+
+  return hints.slice(0, 8);
+}
+
+function buildSignalDrivenBraveQuery(
+  state: Pick<
+    ControlPlaneState,
+    | 'goal'
+    | 'repairSignals'
+    | 'improvementSignals'
+    | 'plannerNotes'
+  >,
+): string {
+  const candidateSignals = [
+    ...state.repairSignals,
+    ...state.improvementSignals,
+    ...state.plannerNotes,
+  ]
+    .map((entry) => String(entry || '').trim())
+    .filter(Boolean)
+    .filter((entry) => /provider_model_removed|provider_cap_blocked|image generation unavailable|tool_choice|tool choice|unsupported capability|provider routing|pricing coverage|resource has been exhausted|openrouter|gemini|lyria-3|qwen\/qwen3\.5-plus|mimo-v2-pro|gpt-5\.4|gpt-5-pro-2025-10-06/i.test(entry))
+    .slice(0, 2);
+
+  const providerHints = Array.from(new Set(
+    candidateSignals
+      .flatMap((entry) => entry.match(/\b(?:gemini|openrouter|openai|deepseek|qwen|xiaomi|lyria-3(?:-clip|-pro)?|mimo-v2-pro|gpt-5\.4|gpt-5-pro-2025-10-06)\b/gi) || [])
+      .map((entry) => String(entry || '').trim())
+      .filter(Boolean),
+  )).slice(0, 6);
+  const symptomHints = extractSignalDrivenSearchHints(candidateSignals);
+
+  return truncateTextMiddle(
+    [...providerHints, ...symptomHints]
+      .map((entry) => String(entry || '').replace(/\s+/g, ' ').trim())
+      .filter(Boolean)
+      .join(' '),
+    240,
+  );
+}
+
+function resolveSignalDrivenMcpTargetUrls(
+  state: Pick<
+    ControlPlaneState,
+    | 'goal'
+    | 'mcpTargetUrls'
+    | 'experimentalApiBaseUrl'
+    | 'scopes'
+    | 'effectiveScopes'
+    | 'repairIntentSummary'
+    | 'repairSignals'
+    | 'improvementIntentSummary'
+    | 'improvementSignals'
+    | 'plannerNotes'
+    | 'buildAgentInsights'
+    | 'qualityAgentInsights'
+    | 'deployAgentInsights'
+    | 'autonomousContractSummary'
+    | 'autonomousContractChecks'
+    | 'autonomousContractPaths'
+  >,
+): string[] {
+  const configuredUrls = resolveConfiguredMcpTargetUrls(state);
+  if (configuredUrls.length > 0) return configuredUrls;
+
+  const sourceText = collectMcpPlanningSourceText(state);
+  const baseUrl = String(state.experimentalApiBaseUrl || '').trim().replace(/\/+$/, '');
+  const effectiveScopes = new Set(getEffectiveScopes(state as ControlPlaneState));
+  const targets: string[] = [];
+
+  if (
+    baseUrl
+    && hasApiFamilyScope(effectiveScopes)
+    && (
+      /model-availability|provider_model_removed|provider_cap_blocked|pricing coverage|tool_choice|provider routing|openapi|apiBaseUrl|experimental api/.test(sourceText)
+      || state.autonomousContractPaths.some((candidatePath) => candidatePath.startsWith('apps/api/'))
+    )
+  ) {
+    targets.push(`${baseUrl}/openapi.json`);
+  }
+
+  return uniqueNormalizedStrings(targets);
+}
+
+function buildMcpPlannedAction(input: {
+  id: string;
+  server: string;
+  tool: string;
+  title: string;
+  reason: string;
+  arguments?: Record<string, unknown>;
+  risk?: z.infer<typeof McpActionRiskSchema>;
+  alwaysAllow?: boolean;
+}): McpPlannedAction {
+  return McpPlannedActionSchema.parse({
+    id: input.id,
+    server: input.server,
+    tool: input.tool,
+    title: input.title,
+    reason: input.reason,
+    arguments: input.arguments || {},
+    risk: input.risk || 'low',
+    alwaysAllow: input.alwaysAllow === true,
+  });
+}
+
+function buildDeterministicMcpActionPlan(
+  state: Pick<
+    ControlPlaneState,
+    | 'repoRoot'
+    | 'goal'
+    | 'mcpConfigPath'
+    | 'mcpActionEnabled'
+    | 'maxMcpActions'
+    | 'mcpTargetUrls'
+    | 'mcpInspections'
+    | 'experimentalApiBaseUrl'
+    | 'scopes'
+    | 'effectiveScopes'
+    | 'repairIntentSummary'
+    | 'repairSignals'
+    | 'improvementIntentSummary'
+    | 'improvementSignals'
+    | 'plannerNotes'
+    | 'buildAgentInsights'
+    | 'qualityAgentInsights'
+    | 'deployAgentInsights'
+    | 'autonomousContractSummary'
+    | 'autonomousContractChecks'
+    | 'autonomousContractPaths'
+  >,
+): McpPlannedAction[] {
+  if (!state.mcpActionEnabled || state.maxMcpActions <= 0) return [];
+
+  const inspectionsByServer = new Map(
+    state.mcpInspections.map((inspection) => [inspection.server, inspection] as const),
+  );
+  const configsByServer = new Map(
+    loadMcpServers(resolveMcpConfigPath(state as ControlPlaneState)).map((server) => [server.name, server] as const),
+  );
+  const actions: McpPlannedAction[] = [];
+  const configuredTargetUrls = resolveConfiguredMcpTargetUrls(state);
+  const urls = resolveSignalDrivenMcpTargetUrls(state);
+
+  const braveInspection = inspectionsByServer.get('brave-search');
+  const braveConfig = configsByServer.get('brave-search');
+  if (
+    braveInspection
+    && braveConfig
+    && mcpInspectionHasTool(braveInspection, 'brave_web_search')
+    && (shouldPlanBraveSearchForGoal(state.goal) || shouldPlanSignalDrivenBraveSearch(state))
+  ) {
+    actions.push(buildMcpPlannedAction({
+      id: 'mcp-brave-web-search',
+      server: 'brave-search',
+      tool: 'brave_web_search',
+      title: shouldPlanBraveSearchForGoal(state.goal)
+        ? 'Research goal context with Brave Search'
+        : 'Research active provider/model uncertainty with Brave Search',
+      reason: shouldPlanBraveSearchForGoal(state.goal)
+        ? 'The goal references external docs/websites or discovery work, so a bounded web search can provide operator context.'
+        : `The active signals and autonomous contract indicate provider/model uncertainty; gather external compatibility context before committing to a code change${state.autonomousContractSummary ? ` (${state.autonomousContractSummary})` : ''}.`,
+      arguments: {
+        query: buildSignalDrivenBraveQuery(state),
+      },
+      risk: 'low',
+      alwaysAllow: braveConfig.alwaysAllow.includes('brave_web_search'),
+    }));
+  }
+
+  const playwrightInspection = inspectionsByServer.get('playwright');
+  const playwrightConfig = configsByServer.get('playwright');
+  if (playwrightInspection && playwrightConfig && urls.length > 0) {
+    const targetUrl = urls[0];
+    if (mcpInspectionHasTool(playwrightInspection, 'browser_install')) {
+      actions.push(buildMcpPlannedAction({
+        id: 'mcp-playwright-install',
+        server: 'playwright',
+        tool: 'browser_install',
+        title: 'Ensure Playwright browser dependencies are installed',
+        reason: 'Install the browser runtime before navigation so bounded browser inspection can succeed in long-running autonomous runs.',
+        arguments: {},
+        risk: 'low',
+        alwaysAllow: playwrightConfig.alwaysAllow.includes('browser_install'),
+      }));
+    }
+    if (mcpInspectionHasTool(playwrightInspection, 'browser_navigate')) {
+      actions.push(buildMcpPlannedAction({
+        id: 'mcp-playwright-navigate',
+        server: 'playwright',
+        tool: 'browser_navigate',
+        title: `Open browser target ${targetUrl}`,
+        reason: configuredTargetUrls.length > 0
+          ? 'The goal includes an explicit target URL, so the control plane can inspect it with the Playwright MCP browser.'
+          : 'The active API signals and autonomous contract target the experimental API surface, so inspect the live endpoint before code changes are applied.',
+        arguments: { url: targetUrl },
+        risk: 'low',
+        alwaysAllow: playwrightConfig.alwaysAllow.includes('browser_navigate'),
+      }));
+    }
+    if (mcpInspectionHasTool(playwrightInspection, 'browser_snapshot')) {
+      actions.push(buildMcpPlannedAction({
+        id: 'mcp-playwright-snapshot',
+        server: 'playwright',
+        tool: 'browser_snapshot',
+        title: `Capture browser snapshot for ${targetUrl}`,
+        reason: 'Capture a structured browser snapshot after navigation so the control plane can persist the visible state in its run summary.',
+        arguments: {},
+        risk: 'low',
+        alwaysAllow: playwrightConfig.alwaysAllow.includes('browser_snapshot'),
+      }));
+    }
+    if (mcpInspectionHasTool(playwrightInspection, 'browser_network_requests')) {
+      actions.push(buildMcpPlannedAction({
+        id: 'mcp-playwright-network-requests',
+        server: 'playwright',
+        tool: 'browser_network_requests',
+        title: `Capture network activity for ${targetUrl}`,
+        reason: 'Capture network activity from the inspected surface so the control plane can verify that the targeted API/UI endpoint responded as expected before code changes are applied.',
+        arguments: {},
+        risk: 'low',
+        alwaysAllow: playwrightConfig.alwaysAllow.includes('browser_network_requests'),
+      }));
+    }
+  }
+
+  return actions.slice(0, Math.max(0, state.maxMcpActions));
+}
+
+function getPendingMcpActions(
+  state: Pick<ControlPlaneState, 'plannedMcpActions' | 'executedMcpActions'>,
+  options?: { safeOnly?: boolean },
+): McpPlannedAction[] {
+  const executedIds = new Set(
+    (state.executedMcpActions || []).map((action) => String(action.id || '').trim()).filter(Boolean),
+  );
+  return (state.plannedMcpActions || []).filter((action) => {
+    if (executedIds.has(action.id)) return false;
+    if (options?.safeOnly && !(action.alwaysAllow && action.risk === 'low')) return false;
+    return true;
+  });
+}
+
+function shouldRunPreplanMcpActionsForState(
+  state: Pick<ControlPlaneState, 'executePlan' | 'mcpActionEnabled' | 'plannedMcpActions' | 'executedMcpActions'>,
+): boolean {
+  return state.executePlan && state.mcpActionEnabled && getPendingMcpActions(state, { safeOnly: true }).length > 0;
+}
+
+function shouldRunMcpActionsForState(
+  state: Pick<ControlPlaneState, 'executePlan' | 'mcpActionEnabled' | 'plannedMcpActions' | 'executedMcpActions'>,
+): boolean {
+  return state.executePlan && state.mcpActionEnabled && getPendingMcpActions(state).length > 0;
 }
 
 function isUnsafeProductionDeployCommand(command: string): boolean {
@@ -4969,6 +6844,36 @@ async function plannerAgentNode(state: ControlPlaneState): Promise<Partial<Contr
   };
 }
 
+async function planMcpActionsNode(state: ControlPlaneState): Promise<Partial<ControlPlaneState>> {
+  if (!state.mcpActionEnabled || state.maxMcpActions <= 0) {
+    return {
+      plannedMcpActions: [],
+      executedMcpActions: [],
+      mcpActionNotes: [],
+    };
+  }
+
+  const plannedMcpActions = buildDeterministicMcpActionPlan(state);
+  const notes: string[] = [];
+
+  if (plannedMcpActions.length === 0) {
+    notes.push('No bounded MCP actions were planned for this run.');
+  } else {
+    for (const action of plannedMcpActions) {
+      notes.push(
+        `Planned MCP action ${action.server}.${action.tool} (${action.risk}${action.alwaysAllow ? ', always-allow' : ''}): ${action.reason}`,
+      );
+    }
+  }
+
+  return {
+    plannedMcpActions,
+    executedMcpActions: [],
+    mcpActionNotes: notes,
+    plannerNotes: appendUniqueNotes(state.plannerNotes, notes),
+  };
+}
+
 async function buildAgentNode(state: ControlPlaneState): Promise<Partial<ControlPlaneState>> {
   const buildJobs = buildScopeJobs(getEffectiveScopes(state), 'build');
   const aiBuild = await callAiNotesAgent(
@@ -5133,17 +7038,30 @@ async function autonomousEditPlannerNode(state: ControlPlaneState): Promise<Part
   );
   const failedRefreshContexts = buildFailedAutonomousEditRefreshContexts(state, failedEditAnchorHints);
   const failedPaths = new Set(Object.keys(failedEditAnchorHints));
+  const currentThreadId = String(state.threadId || '').trim();
   const candidatePrioritySources = [
+    `Current control-plane thread priority: emit or surface at least one fresh LangSmith control-plane run/trace for thread ${currentThreadId || 'unknown'} with explicit goal context for this iteration before proposing broader improvement work; if no run can be emitted, preserve a clear operator-facing defer reason. Treat a missing fresh run for the current iteration as an observability gap, not by itself a deploy or rollback trigger. Do not count recent LangSmith runs from other threads or scopes as satisfying this iteration's control-plane observability success condition. When concurrent pending runs exist in other threads, require correlation by exact thread id before treating any sampled run as evidence for this iteration, and prefer the same-thread fresh run or an explicit no-run defer reason over broad speculative changes. If sampled recent runs are only from other threads or scopes, explicitly say that observability for thread ${currentThreadId || 'unknown'} is still unconfirmed and require either one fresh same-thread control-plane run/trace with explicit goal context or a clear no-run defer reason before calling the iteration successful. If sampled recent runs already include same-thread control-plane entries for ${currentThreadId || 'unknown'} but they are still pending, treat that as partial observability evidence rather than as zero-run health; explicitly surface that a same-thread run exists but has not completed yet, avoid claiming success from it, and preserve the next validation requirement as either one completed fresh same-thread control-plane run/trace with explicit goal context and passed smoke/typecheck or a clear operator-facing defer reason explaining why completion was not observed. If recent sampled runs are mostly from other threads or scopes while one or more same-thread control-plane runs for ${currentThreadId || 'unknown'} are pending or only indirectly visible in logs/embedded error context, explicitly call that out as same-thread pending-run visibility rather than summarizing the situation as zero recent runs; require the summary or defer reason to name that pending-run state so operators can distinguish observability lag from true no-run absence. When no fresh completed same-thread control-plane run is visible for ${currentThreadId || 'unknown'} in the current iteration, explicitly classify that as a same-thread control-plane observability gap or pending-run visibility gap, not as proof of runtime failure and not as a deploy/rollback trigger by itself; require the summary to mention any available readiness evidence such as graph registration, worker startup, server-running logs, LangSmith metadata wiring, prompt fallback telemetry, or pending-run visibility before choosing between a bounded edit and a no-run defer reason. When recent LangSmith samples are available, explicitly count how many sampled runs belong to the current thread ${currentThreadId || 'unknown'} and how many of those are pending versus completed; if sampled runs are mostly from other threads or same-thread runs are still pending, require the summary or defer reason to say that directly instead of collapsing the situation into a generic zero-run statement. When recent LangSmith samples are available, require the summary or defer reason to include a compact same-thread observability line in plain language for ${currentThreadId || 'unknown'} in the form same-thread sampled runs=<n>, completed=<n>, pending=<n>, other-thread sampled runs=<n>; if completed is 0, explicitly classify the situation as a same-thread observability gap or pending-run visibility gap rather than proof of runtime failure. When same-thread sampled runs are 0 for ${currentThreadId || 'unknown'}, require the summary and any no-op/defer outcome to say that older runs or runs from other threads do not satisfy this iteration's validation evidence, and require an explicit operator-facing no-run defer reason instead of implying success from cross-thread activity alone. When same-thread sampled runs are present but pending > 0 or completed is still 0 for ${currentThreadId || 'unknown'}, require the summary or defer reason to explicitly classify that state as partial observability evidence with pending-run visibility for the current thread, name the exact pending thread ${currentThreadId || 'unknown'}, include the compact same-thread observability line, and preserve a clear operator-facing no-run defer reason instead of claiming validation success from pending activity alone. When same-thread sampled runs are 0 for ${currentThreadId || 'unknown'} but other-thread sampled runs are present, require the summary and each edit reason to explicitly say that cross-thread activity does not satisfy this iteration's validation evidence for the current control-plane thread and to preserve a clear operator-facing no-run defer reason instead of implying success. When same-thread sampled runs are still 0 for ${currentThreadId || 'unknown'} but pending same-thread activity is visible, require the summary and each edit reason to name that exact current thread as partial observability evidence only, not completed validation, and to preserve a clear operator-facing no-run defer reason until at least one fresh same-thread LangSmith control-plane run/trace is completed with explicit goal context. If recent LangSmith activity is mostly from sibling or unrelated threads while ${currentThreadId || 'unknown'} still has no fresh completed control-plane run, require the summary and each edit reason to explicitly say that cross-thread activity does not satisfy validation for ${currentThreadId || 'unknown'} and to keep the same-thread no-run defer reason. When startup evidence shows graph registration, worker startup, or server-running logs but also shows early exit or flushing to persistent storage, require the summary to classify that as partial readiness evidence rather than completed validation and to keep the same-thread no-run defer requirement unless a fresh same-thread LangSmith control-plane run/trace is also present. When LangSmith feedback includes contains_goal_context=0 or repair_smoke_passed=0, restate the active user goal in plain language in the summary and in every edit reason, and do not treat a fresh run as sufficient unless that same-thread run/trace clearly carries the current control-plane goal context for this iteration. Before any experimental mutation, require a quick readiness check that the control-plane runtime is actually serving and that pending concurrent runners are not creating misleading health signals or shared-workspace contention; use known control-plane serving evidence such as graph registration, worker startup, server-running logs, or experimental API health when available. If logs also show the runtime exiting or flushing to persistent storage soon after startup, require the summary to classify that as partial readiness evidence rather than completed validation. If readiness is unclear, prefer a bounded operator-facing no-run defer reason over speculative mutation. When the current control-plane thread has no fresh completed LangSmith run/trace but sampled LangSmith data shows pending same-thread visibility, require the summary and each edit reason to name that exact pending thread as partial observability evidence only, not completed validation. When that pending same-thread visibility appears together with startup logs that show graph registration, worker startup, or server-running evidence followed by an immediate flush, exit, or shutdown, require the summary and each edit reason to explicitly classify the state as combined partial observability plus partial readiness only, and to preserve a clear operator-facing no-run defer reason for the current thread instead of claiming successful validation.`,   
+    currentThreadId
+      ? `Current-thread observability guard: when summarizing recent LangSmith activity for this control-plane iteration, explicitly prefer runs whose threadId exactly matches ${currentThreadId}. If only other-thread or other-scope runs are fresh, record that as supporting context only and preserve a no-run defer reason for this control-plane thread instead of claiming observability success.`
+      : 'Current-thread observability guard: if the control-plane threadId is unavailable, do not infer observability success from unrelated recent LangSmith runs; preserve a clear operator-facing defer reason explaining that no current-thread run identity was available for validation.',
+    `When LangSmith recent runs include many pending entries from other threads or scopes, treat that as shared observability noise rather than proof that the current control-plane thread already produced a fresh validating run. Prefer notes, summaries, and bounded edits that explicitly distinguish the current thread ${state.threadId || 'unknown'} from cross-thread pending activity, and do not count other-thread pending runs as satisfying this iteration's validation target.`,
+    `Observability success condition for this control-plane iteration: confirm at least one fresh LangSmith control-plane run/trace tied to thread ${state.threadId || 'unknown'} and the active goal, or preserve a clear no-run defer reason explaining why no run was emitted. Zero fresh runs is a monitoring gap, not by itself a deploy or rollback trigger.`,
+    `Before proposing broader control-plane improvements, prefer one bounded step that either increases the chance of producing a fresh LangSmith control-plane run/trace for thread ${state.threadId || 'unknown'} or makes the no-run defer reason explicit to operators; do not treat upstream/provider-bound OpenAI or OpenRouter failures outside control-plane scope as a local control-plane regression by default.`,
+    `Thread-local observability guard: when sampled LangSmith runs are healthy overall but mostly belong to other threads, prioritize a bounded control-plane change that increases the chance of producing or surfacing a fresh run/trace for the current thread ${state.threadId || 'unknown'} before broader cleanup work.`,
+    `When recent LangSmith activity includes runs from multiple threads, treat only runs whose threadId exactly matches ${state.threadId || 'unknown'} or ends with :control-plane as primary observability evidence for this control-plane iteration; do not let healthy non-control-plane thread runs satisfy the fresh-run success condition for the active control-plane goal.`,
+    `When recent signals are otherwise healthy but provider logs show repeated OpenAI/OpenRouter 401, 402, quota, invalid_api_key, or 500 churn outside control-plane scope, classify that as upstream/provider-bound drift blocked in apps/api provider routing/probing; repeating the same provider-method combination is unlikely to help immediately, so prefer bounded control-plane observability, prioritization, cooldown, or explicit defer-reason improvements.`,
     ...state.repairSignals,
     ...state.improvementSignals,
     ...state.plannerNotes,
     ...state.buildAgentInsights,
     ...state.qualityAgentInsights,
     ...state.deployAgentInsights,
+    'Control-plane observability success condition for this iteration: confirm at least one fresh LangSmith control-plane run/trace with goal context and a passed smoke/typecheck result, or preserve a clear operator-facing defer reason explaining why no run was emitted.',
   ].slice(-40);
+  const candidatePriorityPathPattern = /(?:apps\/[A-Za-z0-9._/-]+|[A-Za-z0-9._/-]+)(?:\.(?:ts|js|json|md|mts|service|jsonl|log|txt)|\/(?:package\.json|langgraph\.json|README\.md)|\/(?:governance-profiles\.json))/g;
   const referencedCandidatePaths = new Set<string>();
   for (const sourceText of candidatePrioritySources) {
-    for (const match of String(sourceText || '').match(/apps\/[A-Za-z0-9._/-]+\.(?:ts|js|json|md|mts|service)/g) || []) {
+    for (const match of String(sourceText || '').match(candidatePriorityPathPattern) || []) {
       referencedCandidatePaths.add(match);
     }
   }
@@ -5271,10 +7189,15 @@ async function autonomousEditPlannerNode(state: ControlPlaneState): Promise<Part
             summary: truncateTextMiddle(state.improvementIntentSummary, AI_AGENT_PAYLOAD_STRING_MAX_CHARS),
             signals: compactStringArrayForAi(state.improvementSignals, AI_AGENT_SIGNAL_PAYLOAD_LIMIT),
           },
+          autonomousContract: {
+            summary: truncateTextMiddle(state.autonomousContractSummary, AI_AGENT_PAYLOAD_STRING_MAX_CHARS),
+            checks: compactStringArrayForAi(state.autonomousContractChecks, 6),
+            paths: state.autonomousContractPaths.slice(0, 8),
+          },
           previousRepairStatus: state.repairStatus,
           previousRepairDecisionReason: truncateTextMiddle(state.repairDecisionReason, AI_AGENT_PAYLOAD_STRING_MAX_CHARS),
           previousAutonomousEditNotes: compactStringArrayForAi(
-            state.autonomousEditNotes.filter((note) => /autonomous edit failed|replace target text was not found|matched \d+ times|provider-bound|blocked for this iteration/i.test(note)),
+            state.autonomousEditNotes.filter((note) => /autonomous edit failed|replace target text was not found|matched \d+ times|provider-bound|blocked for this iteration|introduced unused local symbols|declared but its value is never read|duplicate package\.json scripts/i.test(note)),
             12,
           ),
           previousFailedEdits: recentFailedEdits,
@@ -5450,9 +7373,13 @@ async function reviewAutonomousEditsNode(state: ControlPlaneState): Promise<Part
 
   const touchedPaths = Array.from(new Set(state.proposedEdits.map((edit) => String(edit.path || '').trim()).filter(Boolean)));
   const providerPathTouches = touchedPaths.filter((candidatePath) => candidatePath.startsWith('apps/api/providers/'));
-  const apiTouches = touchedPaths.filter((candidatePath) => candidatePath.startsWith('apps/api/'));
-  const controlPlaneTouches = touchedPaths.filter((candidatePath) => candidatePath.startsWith('apps/langgraph-control-plane/'));
   const nonControlPlaneTouches = touchedPaths.filter((candidatePath) => !candidatePath.startsWith('apps/langgraph-control-plane/'));
+  const contractPaths = state.autonomousContractPaths
+    .map((entry) => String(entry || '').trim())
+    .filter(Boolean);
+  const offContractTouches = contractPaths.length > 0
+    ? touchedPaths.filter((candidatePath) => !contractPaths.includes(candidatePath))
+    : [];
   const providerBoundSignals = shouldAvoidProviderPathAutonomousEdits(state.repairSignals);
   const restrictToControlPlane = shouldRestrictAutonomousEditsToControlPlane(state);
   const recentFailures = Math.max(
@@ -5470,11 +7397,16 @@ async function reviewAutonomousEditsNode(state: ControlPlaneState): Promise<Part
       .filter((value): value is string => Boolean(value));
     proposalReasonByPath.set(normalizedPath, reasonParts.join(' | '));
   }
+  const allowScopedProviderPathEdits = shouldAllowScopedProviderPathAutonomousEdits(
+    state,
+    touchedPaths,
+    proposalReasonByPath,
+  );
   const weakestPathFitScore = touchedPaths.length > 0
     ? Math.min(...touchedPaths.map((candidatePath) => scoreAutonomousEditPathFit(state, candidatePath, proposalReasonByPath.get(candidatePath) || '')))
     : 0;
 
-  if (providerBoundSignals && providerPathTouches.length > 0) {
+  if (providerBoundSignals && !allowScopedProviderPathEdits && providerPathTouches.length > 0) {
     const reason = `Rejected autonomous edit batch before apply: provider-bound repair signals are active, so provider-file edits are not allowed (${providerPathTouches.join(', ')}).`;
     return buildAutonomousEditReviewRejectionPatch(state, reason, {
       proposedEdits: state.proposedEdits.filter((edit) => !String(edit.path || '').trim().startsWith('apps/api/providers/')),
@@ -5488,6 +7420,11 @@ async function reviewAutonomousEditsNode(state: ControlPlaneState): Promise<Part
 
   if (recentFailures > 0 && isBroadPlan) {
     const reason = `Rejected autonomous edit batch before apply: recent repair validation failures are present, so only narrowly scoped follow-up edits are allowed.`;
+    return buildAutonomousEditReviewRejectionPatch(state, reason);
+  }
+
+  if (offContractTouches.length > 0) {
+    const reason = `Rejected autonomous edit batch before apply: proposed edits must stay inside the autonomous contract paths (${contractPaths.join(', ')}); off-contract paths were proposed (${offContractTouches.join(', ')}).`;
     return buildAutonomousEditReviewRejectionPatch(state, reason);
   }
 
@@ -5511,6 +7448,11 @@ async function reviewAutonomousEditsNode(state: ControlPlaneState): Promise<Part
     weakestPathFitScore,
     providerBoundSignals,
     restrictToControlPlane,
+    autonomousContract: {
+      summary: state.autonomousContractSummary,
+      checks: state.autonomousContractChecks,
+      paths: contractPaths,
+    },
     recentFailures,
     existingPlannerNotes: compactStringArrayForAi(state.plannerNotes, 12),
   };
@@ -5531,6 +7473,172 @@ async function reviewAutonomousEditsNode(state: ControlPlaneState): Promise<Part
     autonomousEditReviewReason: reason,
     autonomousEditNotes: appendUniqueNotes(state.autonomousEditNotes, [reason]),
   };
+}
+
+async function executePlannedMcpActions(
+  state: ControlPlaneState,
+  plannedActions: McpPlannedAction[],
+): Promise<Partial<ControlPlaneState>> {
+  if (plannedActions.length === 0) {
+    return {
+      executedMcpActions: state.executedMcpActions,
+    };
+  }
+
+  const configsByServer = new Map(
+    loadMcpServers(resolveMcpConfigPath(state)).map((server) => [server.name, server] as const),
+  );
+  const inspectionsByServer = new Map(
+    state.mcpInspections.map((inspection) => [inspection.server, inspection] as const),
+  );
+  const actionsByServer = new Map<string, McpPlannedAction[]>();
+  for (const action of plannedActions) {
+    const bucket = actionsByServer.get(action.server) || [];
+    bucket.push(action);
+    actionsByServer.set(action.server, bucket);
+  }
+
+  const executedMcpActions: McpExecutedAction[] = [...state.executedMcpActions];
+  const notes: string[] = [];
+
+  for (const [serverName, actions] of actionsByServer.entries()) {
+    const config = configsByServer.get(serverName);
+    const inspection = inspectionsByServer.get(serverName);
+
+    if (!config) {
+      for (const action of actions) {
+        executedMcpActions.push(McpExecutedActionSchema.parse({
+          ...action,
+          status: 'failed',
+          outputSummary: `MCP server ${serverName} is not configured.`,
+          outputPreview: `MCP server ${serverName} is not configured.`,
+        }));
+      }
+      notes.push(`MCP action group ${serverName} failed: server is not configured.`);
+      continue;
+    }
+
+    if (config.disabled) {
+      for (const action of actions) {
+        executedMcpActions.push(McpExecutedActionSchema.parse({
+          ...action,
+          status: 'skipped',
+          outputSummary: `MCP server ${serverName} is disabled in config.`,
+          outputPreview: `MCP server ${serverName} is disabled in config.`,
+        }));
+      }
+      notes.push(`MCP action group ${serverName} skipped: server is disabled in config.`);
+      continue;
+    }
+
+    if (inspection?.status !== 'connected') {
+      for (const action of actions) {
+        executedMcpActions.push(McpExecutedActionSchema.parse({
+          ...action,
+          status: 'failed',
+          outputSummary: `MCP server ${serverName} is not connected.`,
+          outputPreview: inspection?.message || `MCP server ${serverName} is not connected.`,
+        }));
+      }
+      notes.push(`MCP action group ${serverName} failed: ${inspection?.message || 'server is not connected.'}`);
+      continue;
+    }
+
+    try {
+      await withConnectedMcpClient(
+        config,
+        state.repoRoot,
+        `MCP action group ${serverName}`,
+        async (client) => {
+          for (const action of actions) {
+            if (!mcpInspectionHasTool(inspection, action.tool)) {
+              const message = `Tool ${action.tool} is not available on MCP server ${serverName}.`;
+              executedMcpActions.push(McpExecutedActionSchema.parse({
+                ...action,
+                status: 'skipped',
+                outputSummary: message,
+                outputPreview: message,
+              }));
+              notes.push(`MCP action skipped: ${serverName}.${action.tool} — ${message}`);
+              continue;
+            }
+
+            try {
+              const result = await withTimeout(
+                client.callTool({
+                  name: action.tool,
+                  arguments: action.arguments,
+                } as any),
+                MCP_ACTION_TIMEOUT_MS,
+                `MCP action ${serverName}.${action.tool}`,
+              );
+              const summarized = summarizeMcpCallResult(result);
+              executedMcpActions.push(McpExecutedActionSchema.parse({
+                ...action,
+                status: summarized.failed ? 'failed' : 'success',
+                outputSummary: summarized.summary,
+                outputPreview: summarized.preview,
+              }));
+              notes.push(`MCP action ${summarized.failed ? 'failed' : 'success'}: ${serverName}.${action.tool} — ${summarized.summary}`);
+            } catch (error: any) {
+              const message = redactSensitiveText(error?.message || String(error));
+              executedMcpActions.push(McpExecutedActionSchema.parse({
+                ...action,
+                status: 'failed',
+                outputSummary: truncateTextMiddle(message, 320),
+                outputPreview: truncateTextMiddle(message, MCP_ACTION_OUTPUT_PREVIEW_MAX_CHARS),
+              }));
+              notes.push(`MCP action failed: ${serverName}.${action.tool} — ${truncateTextMiddle(message, 320)}`);
+            }
+          }
+        },
+      );
+    } catch (error: any) {
+      const message = redactSensitiveText(error?.message || String(error));
+      for (const action of actions) {
+        if (executedMcpActions.some((entry) => entry.id === action.id)) continue;
+        executedMcpActions.push(McpExecutedActionSchema.parse({
+          ...action,
+          status: 'failed',
+          outputSummary: truncateTextMiddle(message, 320),
+          outputPreview: truncateTextMiddle(message, MCP_ACTION_OUTPUT_PREVIEW_MAX_CHARS),
+        }));
+      }
+      notes.push(`MCP action group ${serverName} failed before tool execution: ${truncateTextMiddle(message, 320)}`);
+    }
+  }
+
+  return {
+    executedMcpActions,
+    mcpActionNotes: appendUniqueNotes(state.mcpActionNotes, notes),
+    plannerNotes: appendUniqueNotes(state.plannerNotes, notes),
+  };
+}
+
+async function preplanMcpActionsNode(state: ControlPlaneState): Promise<Partial<ControlPlaneState>> {
+  if (!shouldRunPreplanMcpActionsForState(state)) {
+    return {
+      executedMcpActions: state.executedMcpActions,
+    };
+  }
+
+  return executePlannedMcpActions(
+    state,
+    getPendingMcpActions(state, { safeOnly: true }),
+  );
+}
+
+async function runMcpActionsNode(state: ControlPlaneState): Promise<Partial<ControlPlaneState>> {
+  if (!shouldRunMcpActionsForState(state)) {
+    return {
+      executedMcpActions: state.executedMcpActions,
+    };
+  }
+
+  return executePlannedMcpActions(
+    state,
+    getPendingMcpActions(state),
+  );
 }
 
 async function applyAutonomousEditsNode(state: ControlPlaneState): Promise<Partial<ControlPlaneState>> {
@@ -6195,6 +8303,11 @@ async function mergePlanNode(state: ControlPlaneState): Promise<Partial<ControlP
       `status=${inspection?.status || 'skipped'} command=${server.command} args=${server.args.join(' ')} envKeys=${server.envKeys.join(',') || 'none'} tools=${toolNames} alwaysAllow=${server.alwaysAllow.join(',') || 'none'} disabled=${server.disabled ? 'true' : 'false'} message=${inspection?.message || 'No inspection result.'}`,
     );
   });
+  const plannedMcpActionJobs = state.plannedMcpActions.map((action) => buildNoteJob(
+    `planned-mcp-action-${action.id}`,
+    `Planned MCP action ${action.server}.${action.tool}`,
+    `${action.title} risk=${action.risk}${action.alwaysAllow ? ' alwaysAllow=true' : ''} args=${JSON.stringify(action.arguments)} reason=${action.reason}`,
+  ));
   const autonomousEditJobs = state.proposedEdits.map((edit, index) => buildNoteJob(
     `autonomous-edit-${index + 1}`,
     `Autonomous edit ${index + 1}`,
@@ -6217,6 +8330,7 @@ async function mergePlanNode(state: ControlPlaneState): Promise<Partial<ControlP
     jobs: [
       ...noteJobs,
       ...mcpJobs,
+      ...plannedMcpActionJobs,
       ...governanceFlagJobs,
       ...governanceMutationJobs,
       ...(state.autonomousEditReviewDecision === 'rejected' ? [] : autonomousEditJobs),
@@ -6229,11 +8343,20 @@ async function mergePlanNode(state: ControlPlaneState): Promise<Partial<ControlP
 
 function shouldExecuteNode(state: ControlPlaneState): 'approvalGate' | 'summarize' {
   if (!state.executePlan) return 'summarize';
-  return shouldApplyAutonomousEditsForState(state) || shouldRunJobsForState(state) ? 'approvalGate' : 'summarize';
+  return shouldRunMcpActionsForState(state) || shouldApplyAutonomousEditsForState(state) || shouldRunJobsForState(state)
+    ? 'approvalGate'
+    : 'summarize';
 }
 
-function shouldContinueAfterApproval(state: ControlPlaneState): 'applyAutonomousEdits' | 'runJobs' | 'summarize' {
+function shouldContinueAfterApproval(state: ControlPlaneState): 'runMcpActions' | 'applyAutonomousEdits' | 'runJobs' | 'summarize' {
   if (state.approvalGranted === false) return 'summarize';
+  if (shouldRunMcpActionsForState(state)) return 'runMcpActions';
+  if (shouldApplyAutonomousEditsForState(state)) return 'applyAutonomousEdits';
+  if (shouldRunJobsForState(state)) return 'runJobs';
+  return 'summarize';
+}
+
+function shouldContinueAfterMcpActions(state: ControlPlaneState): 'applyAutonomousEdits' | 'runJobs' | 'summarize' {
   if (shouldApplyAutonomousEditsForState(state)) return 'applyAutonomousEdits';
   if (shouldRunJobsForState(state)) return 'runJobs';
   return 'summarize';
@@ -6404,6 +8527,15 @@ async function summarizeNode(state: ControlPlaneState): Promise<Partial<ControlP
   if (state.improvementSignals.length > 0) {
     lines.push(`Improvement signals: ${state.improvementSignals.slice(0, 5).join(' | ')}`);
   }
+  if (state.autonomousContractSummary.trim()) {
+    lines.push(`Autonomous contract: ${state.autonomousContractSummary}`);
+  }
+  if (state.autonomousContractChecks.length > 0) {
+    lines.push(`Autonomous contract checks: ${state.autonomousContractChecks.join(' | ')}`);
+  }
+  if (state.autonomousContractPaths.length > 0) {
+    lines.push(`Autonomous contract paths: ${state.autonomousContractPaths.join(', ')}`);
+  }
   if (state.autonomousEditEnabled) {
     lines.push(`Autonomous loop: ${state.autonomousOperationMode}/${state.repairStatus}${state.repairDecisionReason.trim() ? ` — ${state.repairDecisionReason}` : ''}`);
     if (state.autonomousPlannerAgentCount > 0) {
@@ -6468,6 +8600,14 @@ async function summarizeNode(state: ControlPlaneState): Promise<Partial<ControlP
   if (state.pendingApprovals.length > 0) {
     lines.push(`Risk controls: ${state.pendingApprovals.map((approval) => approval.title).join('; ')}`);
   }
+  if (state.plannedMcpActions.length > 0) {
+    lines.push(`Planned MCP actions: ${state.plannedMcpActions.map((action) => `${action.server}.${action.tool}`).join(', ')}`);
+  }
+  if (state.executedMcpActions.length > 0) {
+    for (const action of state.executedMcpActions) {
+      lines.push(`MCP ${action.status}: ${action.title} (${action.server}.${action.tool})${action.outputSummary ? ` — ${action.outputSummary}` : ''}`);
+    }
+  }
 
   if (jobs.length === 0) {
     if (state.autonomousEditEnabled && state.autonomousOperationMode === 'repair' && state.proposedEdits.length === 0) {
@@ -6494,10 +8634,14 @@ function buildControlPlaneGraph(checkpointer: any, store?: BaseStore) {
     .addNode('qualityAgent', qualityAgentNode)
     .addNode('deployAgent', deployAgentNode)
     .addNode('repairIntent', repairIntentNode)
+    .addNode('autonomousContract', autonomousContractNode)
+    .addNode('planMcpActions', planMcpActionsNode)
+    .addNode('preplanMcpActions', preplanMcpActionsNode)
     .addNode('autonomousEditPlanner', autonomousEditPlannerNode)
     .addNode('reviewAutonomousEdits', reviewAutonomousEditsNode)
     .addNode('mergePlan', mergePlanNode)
     .addNode('approvalGate', approvalGateNode)
+    .addNode('runMcpActions', runMcpActionsNode)
     .addNode('applyAutonomousEdits', applyAutonomousEditsNode)
     .addNode('repairValidate', repairValidateNode)
     .addNode('repairEvaluate', repairEvaluateNode)
@@ -6514,11 +8658,15 @@ function buildControlPlaneGraph(checkpointer: any, store?: BaseStore) {
     .addEdge('buildAgent', 'qualityAgent')
     .addEdge('qualityAgent', 'deployAgent')
     .addEdge('deployAgent', 'repairIntent')
-    .addEdge('repairIntent', 'autonomousEditPlanner')
+    .addEdge('repairIntent', 'autonomousContract')
+    .addEdge('autonomousContract', 'planMcpActions')
+    .addEdge('planMcpActions', 'preplanMcpActions')
+    .addEdge('preplanMcpActions', 'autonomousEditPlanner')
     .addEdge('autonomousEditPlanner', 'reviewAutonomousEdits')
     .addEdge('reviewAutonomousEdits', 'mergePlan')
     .addConditionalEdges('mergePlan', shouldExecuteNode, ['approvalGate', 'summarize'])
-    .addConditionalEdges('approvalGate', shouldContinueAfterApproval, ['applyAutonomousEdits', 'runJobs', 'summarize'])
+    .addConditionalEdges('approvalGate', shouldContinueAfterApproval, ['runMcpActions', 'applyAutonomousEdits', 'runJobs', 'summarize'])
+    .addConditionalEdges('runMcpActions', shouldContinueAfterMcpActions, ['applyAutonomousEdits', 'runJobs', 'summarize'])
     .addConditionalEdges('applyAutonomousEdits', shouldContinueAfterAutonomousEdits, ['repairValidate', 'rollbackRepair', 'runJobs', 'summarize'])
     .addEdge('repairValidate', 'repairEvaluate')
     .addEdge('repairEvaluate', 'repairDecision')

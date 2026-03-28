@@ -120,37 +120,53 @@ function buildPricingCandidates(modelId: string): string[] {
 
 function resolveOfficialPricing(modelId: string): PricingSeed | null {
   for (const candidate of buildPricingCandidates(modelId)) {
-    const price = OFFICIAL_PRICES[candidate];
-    if (price) return price;
-
-    const directAudioFamilyBase = candidate.match(/^(.*?-(?:transcribe|tts))(?:-\d{4}(?:-\d{2}){0,2})$/)?.[1];
-    if (directAudioFamilyBase) {
-      const audioFamilyPrice = OFFICIAL_PRICES[directAudioFamilyBase];
-      if (audioFamilyPrice) return audioFamilyPrice;
+    const candidateKeys = new Set<string>([candidate]);
+    const slashIndex = candidate.indexOf('/');
+    if (slashIndex > 0 && slashIndex < candidate.length - 1) {
+      const unprefixed = candidate.slice(slashIndex + 1);
+      candidateKeys.add(unprefixed);
+      candidateKeys.add(splitModelId(unprefixed).baseId);
     }
 
-    const datedVariantBase = candidate.match(/^(.*?)-\d{4}(?:-\d{2}){0,2}$/)?.[1];
-    if (datedVariantBase) {
-      const basePrice = OFFICIAL_PRICES[datedVariantBase];
-      if (basePrice) return basePrice;
+    for (const candidateKey of candidateKeys) {
+      const price = OFFICIAL_PRICES[candidateKey];
+      if (price) return price;
 
-      const datedAudioFamilyBase = datedVariantBase.match(/^(.*?-(?:transcribe|tts))(?:-\d{4}(?:-\d{2}){0,2})$/)?.[1];
-      if (datedAudioFamilyBase) {
-        const audioFamilyPrice = OFFICIAL_PRICES[datedAudioFamilyBase];
+      const unprefixedBaseId = splitModelId(candidateKey).baseId;
+      if (unprefixedBaseId && unprefixedBaseId !== candidateKey) {
+        const baseIdPrice = OFFICIAL_PRICES[unprefixedBaseId];
+        if (baseIdPrice) return baseIdPrice;
+      }
+
+      const directAudioFamilyBase = candidateKey.match(/^(.*?-(?:transcribe|tts))(?:-\d{4}(?:-\d{2}){0,2})$/)?.[1];
+      if (directAudioFamilyBase) {
+        const audioFamilyPrice = OFFICIAL_PRICES[directAudioFamilyBase];
         if (audioFamilyPrice) return audioFamilyPrice;
       }
-    }
 
-    const numericSuffixBase = candidate.match(/^(.*?)-\d{3,}$/)?.[1];
-    if (numericSuffixBase) {
-      const basePrice = OFFICIAL_PRICES[numericSuffixBase];
-      if (basePrice) return basePrice;
-    }
+      const datedVariantBase = candidateKey.match(/^(.*?)-\d{4}(?:-\d{2}){0,2}$/)?.[1];
+      if (datedVariantBase) {
+        const basePrice = OFFICIAL_PRICES[datedVariantBase];
+        if (basePrice) return basePrice;
 
-    const genericVersionBase = candidate.match(/^(.*?)-\d+(?:-\d+)*$/)?.[1];
-    if (genericVersionBase && genericVersionBase !== candidate) {
-      const basePrice = OFFICIAL_PRICES[genericVersionBase];
-      if (basePrice) return basePrice;
+        const datedAudioFamilyBase = datedVariantBase.match(/^(.*?-(?:transcribe|tts))(?:-\d{4}(?:-\d{2}){0,2})$/)?.[1];
+        if (datedAudioFamilyBase) {
+          const audioFamilyPrice = OFFICIAL_PRICES[datedAudioFamilyBase];
+          if (audioFamilyPrice) return audioFamilyPrice;
+        }
+      }
+
+      const numericSuffixBase = candidateKey.match(/^(.*?)-\d{3,}$/)?.[1];
+      if (numericSuffixBase) {
+        const basePrice = OFFICIAL_PRICES[numericSuffixBase];
+        if (basePrice) return basePrice;
+      }
+
+      const genericVersionBase = candidateKey.match(/^(.*?)-\d+(?:-\d+)*$/)?.[1];
+      if (genericVersionBase && genericVersionBase !== candidateKey) {
+        const basePrice = OFFICIAL_PRICES[genericVersionBase];
+        if (basePrice) return basePrice;
+      }
     }
   }
   return null;

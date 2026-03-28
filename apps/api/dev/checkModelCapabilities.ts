@@ -16,10 +16,10 @@ const modelsPath = path.resolve(__dirname, '..', 'models.json');
 
 const patterns = {
   imageInput: [/vision/, /gpt-4o/, /gpt-4-vision/, /vl/, /multi_modal/],
-  imageOutput: [/image/, /imagen/, /dall-e/, /veo/, /sora/, /imagine/],
+  imageOutput: [/image/, /imagen/, /dall-e/, /veo/, /sora/, /(?:^|[-_/])imagine(?:[-_/]|$)/],
   audioInput: [/whisper/, /asr/, /transcribe/, /audio\-input/],
   audioOutput: [/tts/, /audio/],
-  toolCalling: [/function/, /tool[_-]?call/, /tool-use/, /deep-research/, /computer-use/, /^o3/, /^o4/],
+  toolCalling: [/function/, /tool[_-]?call(?:ing)?/, /tool-use/, /deep-research/, /computer-use/, /^o3/, /^o4/, /(?:^|[-_/])agent(?:ic)?(?:[-_/]|$)/, /(?:^|[-_/])reasoner(?:[-_/]|$)/],
 };
 
 function loadModels(): ModelDefinition[] {

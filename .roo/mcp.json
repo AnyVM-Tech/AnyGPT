@@ -1,13 +1,16 @@
 {
 	"mcpServers": {
 		"brave-search": {
-			"command": "npx",
+			"type": "stdio",
+			"command": "bash",
 			"args": [
-				"-y",
-				"@modelcontextprotocol/server-brave-search"
+				"./bun.sh",
+				"run",
+				"./apps/langgraph-control-plane/src/mcpSearchServer.ts"
 			],
 			"env": {
-				"BRAVE_API_KEY": "BSAnaws8pXPT_xG8hu0yASDRA53y9i-"
+				"SEARCH_PROVIDER": "searxng",
+				"SEARXNG_BASE_URL": "http://10.87.212.49:8080"
 			},
 			"alwaysAllow": [
 				"brave_web_search",

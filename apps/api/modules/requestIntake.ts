@@ -37,7 +37,11 @@ function bytesToMegabytes(bytes?: number | null): number | null {
 
 function getMemoryProfileKey(label: string, extra: Record<string, unknown>): string {
   const requestId = typeof extra.requestId === 'string' ? extra.requestId : '';
-  return requestId ? `${label}:${requestId}` : label;
+  const route = typeof extra.route === 'string' ? extra.route : '';
+  if (requestId && route) return `${label}:${route}:${requestId}`;
+  if (requestId) return `${label}:${requestId}`;
+  if (route) return `${label}:${route}`;
+  return label;
 }
 
 function releaseRequestBodyCache(request: Request): void {
@@ -97,24 +101,39 @@ export async function withBufferedRequestBody<T>(
     contentLengthBytes,
     ...(options.extra ?? {}),
   };
-  logMemoryProfile(`${options.label}:before-read`, logBase);
+  logMemoryProfile(`${options.label}:before-read`, {
+    ...logBase,
+    skippedBodyReadPermit: contentLengthBytes === 0,
+    skippedBodyBufferRead: contentLengthBytes === 0,
+  });
 
-  const releasePermit = await acquireRequestBodyReadPermit(options.label, contentLengthBytes);
+  const shouldAcquirePermit = contentLengthBytes !== 0;
+  const releasePermit = shouldAcquirePermit
+    ? await acquireRequestBodyReadPermit(options.label, contentLengthBytes)
+    : () => {};
   let rawBody: Buffer | null = null;
   let bodyBytes: number | null = null;
   let succeeded = false;
   try {
-    rawBody = await request.buffer();
+    if (contentLengthBytes === 0) {
+      rawBody = Buffer.alloc(0);
+    } else {
+      rawBody = await request.buffer();
+    }
     bodyBytes = rawBody.length;
     logMemoryProfile(`${options.label}:after-read`, {
       ...logBase,
       bodyBytes,
+      skippedBodyReadPermit: !shouldAcquirePermit,
+      skippedBodyBufferRead: contentLengthBytes === 0,
     });
     const result = await reader(rawBody, contentLengthBytes);
     succeeded = true;
     logMemoryProfile(`${options.label}:after-parse`, {
       ...logBase,
       bodyBytes,
+      skippedBodyReadPermit: !shouldAcquirePermit,
+      skippedBodyBufferRead: contentLengthBytes === 0,
     });
     return result;
   } finally {
@@ -127,6 +146,8 @@ export async function withBufferedRequestBody<T>(
       ...logBase,
       bodyBytes,
       parsed: succeeded,
+      skippedBodyReadPermit: !shouldAcquirePermit,
+      skippedBodyBufferRead: contentLengthBytes === 0,
     });
   }
 }
@@ -135,5 +156,15 @@ export async function readJsonRequestBody<T = any>(
   request: Request,
   options: RequestBodyOptions,
 ): Promise<T> {
-  return withBufferedRequestBody(request, options, (rawBody) => JSON.parse(rawBody.toString('utf8')) as T);
+  return withBufferedRequestBody(request, options, (rawBody) => {
+    try {
+      return JSON.parse(rawBody.toString('utf8')) as T;
+    } catch (error) {
+      const parseError = new Error('Invalid JSON request body.');
+      (parseError as Error & { statusCode?: number; code?: string; cause?: unknown }).statusCode = 400;
+      (parseError as Error & { statusCode?: number; code?: string; cause?: unknown }).code = 'INVALID_JSON_BODY';
+      (parseError as Error & { statusCode?: number; code?: string; cause?: unknown }).cause = error;
+      throw parseError;
+    }
+  });
 }

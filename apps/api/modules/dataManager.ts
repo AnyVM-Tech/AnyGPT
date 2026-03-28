@@ -1248,11 +1248,15 @@ class DataManager {
                         currentRaw = await txClient.get(legacyRedisKey);
                     }
 
-                    let currentData = currentRaw ? (JSON.parse(currentRaw) as T) : (defaultEmptyData[dataType] as T);
+                    let currentData = currentRaw
+                        ? (JSON.parse(currentRaw) as T)
+                        : this.cloneData(defaultEmptyData[dataType] as T);
                     if (dataType === 'keys') {
                         currentData = this.normalizeKeysSchema(currentData as KeysFile).normalized as T;
                     }
-                    let updated = await updater(this.cloneData(currentData));
+                    // `currentData` is already a fresh value parsed from Redis for this transaction,
+                    // so avoid cloning the full dataset again on hot update paths (especially providers).
+                    let updated = await updater(currentData);
                     if (dataType === 'keys') {
                         updated = this.normalizeKeysSchema(updated as KeysFile).normalized as T;
                     }
@@ -1320,11 +1324,18 @@ class DataManager {
 
             const pending = pendingFsWrites.get(dataType);
             if (pending?.timer) {
-                clearTimeout(pending.timer);
+                // Keep the already-scheduled flush time so steady traffic cannot postpone writes forever.
+                pending.data = fileStringifiedData;
+                pending.filePath = filePath;
+                return;
             }
+
+            const pendingWrite = { timer: null as unknown as NodeJS.Timeout, data: fileStringifiedData, filePath };
             const timer = setTimeout(async () => {
+                const latestPending = pendingFsWrites.get(dataType);
+                if (!latestPending) return;
                 try {
-                    await writeFileAtomic(filePath, fileStringifiedData);
+                    await writeFileAtomic(latestPending.filePath, latestPending.data);
                 } catch (writeErr) {
                     console.error(`[DataManager] Failed writing ${dataType} to filesystem mirror (delayed):`, writeErr);
                 } finally {
@@ -1332,7 +1343,8 @@ class DataManager {
                 }
             }, keysFilesystemSyncIntervalMs);
 
-            pendingFsWrites.set(dataType, { timer, data: fileStringifiedData, filePath });
+            pendingWrite.timer = timer;
+            pendingFsWrites.set(dataType, pendingWrite);
             return;
         }
 

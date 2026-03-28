@@ -5,6 +5,54 @@ import path from 'node:path';
 
 declare const Bun: any;
 
+function parseBooleanEnv(raw: string | undefined, fallback: boolean): boolean {
+	if (raw === undefined) return fallback;
+	const normalized = raw.trim().toLowerCase();
+	if (!normalized) return fallback;
+	if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+	if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+	return fallback;
+}
+
+function parseNonNegativeInteger(raw: string | undefined, fallback: number, min: number = 0): number {
+	const parsed = raw !== undefined ? Number(raw) : fallback;
+	const safe = Number.isFinite(parsed) ? parsed : fallback;
+	return Math.max(min, Math.floor(safe));
+}
+
+function parseBytesFromMeminfoLine(rawLine: string | undefined): number | null {
+	if (!rawLine) return null;
+	const match = rawLine.match(/:\s*(\d+)\s*kB/i);
+	if (!match) return null;
+	const kilobytes = Number(match[1]);
+	return Number.isFinite(kilobytes) ? kilobytes * 1024 : null;
+}
+
+function readMemAvailableBytes(): number | null {
+	try {
+		const meminfo = fs.readFileSync('/proc/meminfo', 'utf8');
+		const line = meminfo
+			.split('\n')
+			.find((entry) => entry.startsWith('MemAvailable:'));
+		return parseBytesFromMeminfoLine(line);
+	} catch {
+		return null;
+	}
+}
+
+function readWorkerStatusBytes(pid: number, key: 'VmSwap' | 'VmRSS'): number | null {
+	if (!Number.isFinite(pid) || pid <= 0) return null;
+	try {
+		const status = fs.readFileSync(`/proc/${pid}/status`, 'utf8');
+		const line = status
+			.split('\n')
+			.find((entry) => entry.startsWith(`${key}:`));
+		return parseBytesFromMeminfoLine(line);
+	} catch {
+		return null;
+	}
+}
+
 function parseWorkerCount(raw: string | undefined): number {
 	if (!raw) return 1;
 	const normalized = raw.trim().toLowerCase();
@@ -39,6 +87,42 @@ const SHUTDOWN_TIMEOUT_MS = (() => {
 	const safe = Number.isFinite(parsed) ? parsed : fallback;
 	return Math.max(SERVER_SHUTDOWN_GRACE_MS, safe);
 })();
+const SWAP_RECYCLE_ENABLED = parseBooleanEnv(
+	process.env.CLUSTER_SWAP_RECYCLE_ENABLED,
+	WORKER_COUNT > 1,
+);
+const SWAP_RECYCLE_CHECK_INTERVAL_MS = parseNonNegativeInteger(
+	process.env.CLUSTER_SWAP_RECYCLE_CHECK_INTERVAL_MS,
+	60_000,
+	10_000,
+);
+const SWAP_RECYCLE_MIN_AGE_MS = parseNonNegativeInteger(
+	process.env.CLUSTER_SWAP_RECYCLE_MIN_AGE_MS,
+	15 * 60_000,
+	60_000,
+);
+const SWAP_RECYCLE_COOLDOWN_MS = parseNonNegativeInteger(
+	process.env.CLUSTER_SWAP_RECYCLE_COOLDOWN_MS,
+	5 * 60_000,
+	30_000,
+);
+const SWAP_RECYCLE_TERM_GRACE_MS = parseNonNegativeInteger(
+	process.env.CLUSTER_SWAP_RECYCLE_TERM_GRACE_MS,
+	Math.min(SERVER_SHUTDOWN_GRACE_MS, 15_000),
+	1_000,
+);
+const SWAP_RECYCLE_MIN_MEM_AVAILABLE_MB = parseNonNegativeInteger(
+	process.env.CLUSTER_SWAP_RECYCLE_MIN_MEM_AVAILABLE_MB,
+	8 * 1024,
+	512,
+);
+const SWAP_RECYCLE_MAX_WORKER_SWAP_MB = parseNonNegativeInteger(
+	process.env.CLUSTER_SWAP_RECYCLE_MAX_WORKER_SWAP_MB,
+	4 * 1024,
+	256,
+);
+const SWAP_RECYCLE_MIN_MEM_AVAILABLE_BYTES = SWAP_RECYCLE_MIN_MEM_AVAILABLE_MB * 1024 * 1024;
+const SWAP_RECYCLE_MAX_WORKER_SWAP_BYTES = SWAP_RECYCLE_MAX_WORKER_SWAP_MB * 1024 * 1024;
 const PORT_STRIDE = Math.max(0, Number(process.env.CLUSTER_PORT_STRIDE || 0));
 const BASE_PORT = Number(process.env.PORT || 3000) || 3000;
 const SOURCE_SCRIPT_PATH = fileURLToPath(new URL('./server.bun.ts', import.meta.url));
@@ -62,6 +146,13 @@ const LAUNCH_LOCK_FILE = path.join(
 );
 
 type WorkerProcess = any;
+type WorkerMemorySnapshot = {
+	index: number;
+	pid: number;
+	rssBytes: number;
+	swapBytes: number;
+	ageMs: number;
+};
 
 type LaunchLockRecord = {
 	pid: number;
@@ -72,7 +163,11 @@ type LaunchLockRecord = {
 };
 
 const workers = new Map<number, WorkerProcess>();
+const workerSpawnedAtMs = new Map<number, number>();
+const workerRecycleTimers = new Map<number, NodeJS.Timeout>();
+const workerRecycleReasons = new Map<number, string>();
 let shuttingDown = false;
+let lastWorkerRecycleAt = 0;
 
 function isPidAlive(pid: number | undefined): boolean {
 	if (!pid || !Number.isFinite(pid) || pid <= 0) return false;
@@ -185,25 +280,120 @@ function spawnWorker(index: number): void {
 	});
 
 	workers.set(index, child);
+	workerSpawnedAtMs.set(index, Date.now());
 	console.log(`[Launcher] Spawned Bun worker #${index + 1} (pid ${child.pid}).`);
 
 	child.exited.then((code: number) => {
 		workers.delete(index);
+		workerSpawnedAtMs.delete(index);
+		const recycleTimer = workerRecycleTimers.get(index);
+		if (recycleTimer) {
+			clearTimeout(recycleTimer);
+			workerRecycleTimers.delete(index);
+		}
+		workerRecycleReasons.delete(index);
 		if (shuttingDown) return;
 		console.warn(`[Launcher] Bun worker #${index + 1} exited with code ${code}. Respawning...`);
 		setTimeout(() => spawnWorker(index), RESTART_DELAY_MS);
 	}).catch((error: unknown) => {
 		workers.delete(index);
+		workerSpawnedAtMs.delete(index);
+		const recycleTimer = workerRecycleTimers.get(index);
+		if (recycleTimer) {
+			clearTimeout(recycleTimer);
+			workerRecycleTimers.delete(index);
+		}
+		workerRecycleReasons.delete(index);
 		if (shuttingDown) return;
 		console.warn(`[Launcher] Bun worker #${index + 1} failed: ${error}. Respawning...`);
 		setTimeout(() => spawnWorker(index), RESTART_DELAY_MS);
 	});
 }
 
+function collectWorkerMemorySnapshots(): WorkerMemorySnapshot[] {
+	const now = Date.now();
+	const snapshots: WorkerMemorySnapshot[] = [];
+
+	for (const [index, child] of workers.entries()) {
+		const pid = Number(child?.pid || 0);
+		if (!Number.isFinite(pid) || pid <= 0) continue;
+		const rssBytes = readWorkerStatusBytes(pid, 'VmRSS') ?? 0;
+		const swapBytes = readWorkerStatusBytes(pid, 'VmSwap') ?? 0;
+		const spawnedAtMs = workerSpawnedAtMs.get(index) ?? now;
+		snapshots.push({
+			index,
+			pid,
+			rssBytes,
+			swapBytes,
+			ageMs: Math.max(0, now - spawnedAtMs),
+		});
+	}
+
+	return snapshots;
+}
+
+function requestWorkerRecycle(snapshot: WorkerMemorySnapshot, memAvailableBytes: number): void {
+	if (workerRecycleReasons.has(snapshot.index)) return;
+	const child = workers.get(snapshot.index);
+	if (!child) return;
+
+	const reason = `swap=${(snapshot.swapBytes / (1024 * 1024)).toFixed(0)}MB with mem_available=${(memAvailableBytes / (1024 * 1024)).toFixed(0)}MB after ${(snapshot.ageMs / 60_000).toFixed(1)}m`;
+	workerRecycleReasons.set(snapshot.index, reason);
+	lastWorkerRecycleAt = Date.now();
+	console.warn(
+		`[Launcher] Recycling Bun worker #${snapshot.index + 1} (pid ${snapshot.pid}) to reclaim stale swap (${reason}).`,
+	);
+	try {
+		child.kill('SIGTERM');
+	} catch {
+		workerRecycleReasons.delete(snapshot.index);
+		return;
+	}
+
+	const timer = setTimeout(() => {
+		const liveChild = workers.get(snapshot.index);
+		if (!liveChild) return;
+		if (Number(liveChild?.pid || 0) !== snapshot.pid) return;
+		console.warn(
+			`[Launcher] Bun worker #${snapshot.index + 1} (pid ${snapshot.pid}) did not exit after swap recycle request; sending SIGKILL.`,
+		);
+		try {
+			liveChild.kill('SIGKILL');
+		} catch {
+			// Ignore forced recycle failures; normal exit handling will clear the state if the process exits.
+		}
+	}, SWAP_RECYCLE_TERM_GRACE_MS);
+	timer.unref();
+	workerRecycleTimers.set(snapshot.index, timer);
+}
+
+function maybeRecycleSwappedWorker(): void {
+	if (!SWAP_RECYCLE_ENABLED || shuttingDown) return;
+	if (workers.size <= 1) return;
+	if (Date.now() - lastWorkerRecycleAt < SWAP_RECYCLE_COOLDOWN_MS) return;
+
+	const memAvailableBytes = readMemAvailableBytes();
+	if (memAvailableBytes === null || memAvailableBytes < SWAP_RECYCLE_MIN_MEM_AVAILABLE_BYTES) return;
+
+	const candidate = collectWorkerMemorySnapshots()
+		.filter((snapshot) => snapshot.swapBytes >= SWAP_RECYCLE_MAX_WORKER_SWAP_BYTES)
+		.filter((snapshot) => snapshot.ageMs >= SWAP_RECYCLE_MIN_AGE_MS)
+		.filter((snapshot) => !workerRecycleReasons.has(snapshot.index))
+		.sort((left, right) => right.swapBytes - left.swapBytes)[0];
+
+	if (!candidate) return;
+	requestWorkerRecycle(candidate, memAvailableBytes);
+}
+
 function shutdown(signal: NodeJS.Signals): void {
 	if (shuttingDown) return;
 	shuttingDown = true;
 	console.log(`[Launcher] Received ${signal}. Stopping ${workers.size} Bun worker(s)...`);
+	for (const timer of workerRecycleTimers.values()) {
+		clearTimeout(timer);
+	}
+	workerRecycleTimers.clear();
+	workerRecycleReasons.clear();
 	for (const child of workers.values()) {
 		try {
 			child.kill(signal);
@@ -238,6 +428,14 @@ async function main(): Promise<void> {
 
 	for (let index = 0; index < WORKER_COUNT; index += 1) {
 		spawnWorker(index);
+	}
+
+	if (SWAP_RECYCLE_ENABLED) {
+		console.log(
+			`[Launcher] Swap recycle watchdog enabled (worker_swap_mb>=${SWAP_RECYCLE_MAX_WORKER_SWAP_MB}, mem_available_mb>=${SWAP_RECYCLE_MIN_MEM_AVAILABLE_MB}, min_age_ms=${SWAP_RECYCLE_MIN_AGE_MS}).`,
+		);
+		const interval = setInterval(() => maybeRecycleSwappedWorker(), SWAP_RECYCLE_CHECK_INTERVAL_MS);
+		interval.unref();
 	}
 
 	// Keep the launcher process alive while workers run.

@@ -35,6 +35,9 @@ type ParsedArgs = {
   continuous: boolean;
   autonomous: boolean;
   autonomousEditEnabled: boolean;
+  mcpActionEnabled: boolean;
+  maxMcpActions: number;
+  mcpTargetUrls: string[];
   editAllowlist: string[];
   editDenylist: string[];
   maxEditActions: number;
@@ -92,6 +95,9 @@ type RunnerStatus = {
   lastAppliedEditPaths?: string[];
   recentAutonomousEditFailures?: unknown[];
   recentAutonomousLearningNotes?: string[];
+  noProgressStreak?: number;
+  noProgressReason?: string;
+  lastProgressSignature?: string;
   repairStatus?: string;
   repairDecisionReason?: string;
   repairIntentSummary?: string;
@@ -256,6 +262,7 @@ const DEFAULT_RUNNER_STATUS_PATH = './apps/langgraph-control-plane/.control-plan
 const DEFAULT_CONTROL_PLANE_PROMPT_IDENTIFIER = 'anygpt-control-plane-agent';
 const DEFAULT_CONTROL_PLANE_PROMPT_CHANNEL = 'live';
 const DEFAULT_CONTROL_PLANE_PROMPT_SYNC_CHANNEL = 'default';
+const MAX_NO_PROGRESS_STREAK = 3;
 const DEFAULT_AUTONOMOUS_FULL_COVERAGE_SCOPES = ['repo', 'api', 'api-experimental', 'control-plane', 'repo-surface'];
 const EXPANSIVE_SCOPE_ALIASES = new Set(['all', 'everything', 'adaptive', '*']);
 const DEFAULT_REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
@@ -272,6 +279,14 @@ const RUNNER_STREAM_CHUNK_TIMEOUT_MS = (() => {
     ?? 180_000,
   );
   return Math.max(15_000, Number.isFinite(configured) ? Math.floor(configured) : 180_000);
+})();
+const RUNNER_CHECKPOINT_HISTORY_LIMIT = (() => {
+  const configured = Number(
+    process.env.CONTROL_PLANE_RUNNER_CHECKPOINT_HISTORY_LIMIT
+    ?? process.env.CONTROL_PLANE_MAX_CHECKPOINTS_PER_NAMESPACE
+    ?? 96,
+  );
+  return Math.max(12, Number.isFinite(configured) ? Math.floor(configured) : 96);
 })();
 const MULTI_RUNNER_COORDINATOR_POLL_MS = 2_000;
 const MULTI_RUNNER_RESTART_DELAY_MS = 1_500;
@@ -1005,6 +1020,9 @@ function createBaseRunnerStatus(parsedArgs: ParsedArgs): RunnerStatus {
     evaluationGateScorecardStatus: 'not-evaluated',
     evaluationGateBaselineExperiment: parsedArgs.evaluationGatePolicy.baselineExperimentName || '',
     evaluationGateComparisonUrl: '',
+    noProgressStreak: 0,
+    noProgressReason: '',
+    lastProgressSignature: '',
     repairStatus: parsedArgs.autonomousEditEnabled ? 'idle' : 'not-needed',
     repairDecisionReason: '',
     repairIntentSummary: '',
@@ -1074,7 +1092,7 @@ async function collectCheckpointHistorySeed(
   try {
     for await (const state of graph.getStateHistory(config as any)) {
       history.push(state);
-      if (history.length >= 12) break;
+      if (history.length >= RUNNER_CHECKPOINT_HISTORY_LIMIT) break;
     }
   } catch {
     return {};
@@ -1112,7 +1130,7 @@ function buildInitialGraphInput(
   const seededFailedEdits = Array.isArray(runnerStatus.recentAutonomousEditFailures)
     ? runnerStatus.recentAutonomousEditFailures
         .map((entry) => AppliedAutonomousEditSchema.safeParse(entry))
-        .flatMap((result) => result.success ? [result.data] : [])
+        .flatMap((result) => result.success && shouldCarryForwardAutonomousEditFailure(result.data) ? [result.data] : [])
     : [];
 
   return ControlPlaneStateSchema.parse({
@@ -1135,8 +1153,31 @@ function buildInitialGraphInput(
   });
 }
 
+function shouldCarryForwardAutonomousEditFailure(failure: ReturnType<typeof AppliedAutonomousEditSchema.parse>): boolean {
+  const message = String(failure?.message || '').trim().toLowerCase();
+  if (!message) return false;
+
+  // Keep only failures that benefit from refreshed anchored context,
+  // explicit compile-shape cleanup, or manual narrowing on the next pass.
+  // General build/typecheck failures are still dropped once they are out of
+  // the current batch so they do not permanently bias later repair planning.
+  if (/unused local symbols|declared but its value is never read/.test(message)) {
+    return true;
+  }
+  if (/cannot redeclare block-scoped variable|duplicate identifier|duplicate function implementation|same-file typescript diagnostics/.test(message)) {
+    return true;
+  }
+
+  if (/typecheck|build validation|compile validation/.test(message)) {
+    return false;
+  }
+
+  return /replace target text was not found|anchor fragment|anchored block|matched \d+ times|preflight/i.test(message);
+}
+
 function deriveRecentAutonomousEditFailures(
   appliedEdits: unknown,
+  autonomousEditNotes: unknown,
   previousFailures: unknown[] | undefined,
 ): unknown[] {
   const parsedAppliedEdits = Array.isArray(appliedEdits)
@@ -1144,15 +1185,44 @@ function deriveRecentAutonomousEditFailures(
         .map((entry) => AppliedAutonomousEditSchema.safeParse(entry))
         .flatMap((result) => result.success ? [result.data] : [])
     : [];
-  const failedEdits = parsedAppliedEdits.filter((edit: any) => edit?.status === 'failed').slice(-4);
+  const syntheticFailures = Array.isArray(autonomousEditNotes)
+    ? autonomousEditNotes
+        .map((entry) => String(entry || '').trim())
+        .filter(Boolean)
+        .slice(-24)
+        .map((note) => note.match(/Skipped autonomous (replace|write) proposal for ([^:]+):\s*(.+)$/i))
+        .flatMap((match) => {
+          if (!match) return [];
+          const type = String(match[1] || '').trim().toLowerCase();
+          const path = String(match[2] || '').trim();
+          const message = String(match[3] || '').trim();
+          if (!path || !message) return [];
+          const parsed = AppliedAutonomousEditSchema.safeParse({
+            type,
+            path,
+            reason: '',
+            status: 'failed',
+            message,
+          });
+          return parsed.success ? [parsed.data] : [];
+        })
+    : [];
+  const failedEdits = [...parsedAppliedEdits, ...syntheticFailures]
+    .filter((edit: any) => edit?.status === 'failed')
+    .filter((edit: any) => shouldCarryForwardAutonomousEditFailure(edit))
+    .slice(-6);
 
   if (failedEdits.length > 0) {
-    return failedEdits;
+    return failedEdits.slice(-4);
   }
   if (parsedAppliedEdits.some((edit: any) => edit?.status === 'applied')) {
     return [];
   }
-  return Array.isArray(previousFailures) ? previousFailures : [];
+  return Array.isArray(previousFailures)
+    ? previousFailures
+        .map((entry) => AppliedAutonomousEditSchema.safeParse(entry))
+        .flatMap((result) => result.success && shouldCarryForwardAutonomousEditFailure(result.data) ? [result.data] : [])
+    : [];
 }
 
 function deriveRecentAutonomousLearningNotes(
@@ -1183,6 +1253,27 @@ function deriveRecentAutonomousLearningNotes(
     const message = String(failure.message || '').trim();
     if (/Replace target text was not found|anchor fragment|anchored block|matched \d+ times/i.test(message)) {
       notes.add('When replace anchors fail, prefer refreshed anchored excerpts or narrower blocks before retrying the same path.');
+    }
+    if (/unused local symbols|declared but its value is never read/i.test(message)) {
+      notes.add('When an autonomous edit introduces unused locals, do not retry the same path with another helper/predicate/detector addition unless the same patch clearly wires that declaration into an existing branch and resolves the compile failure.');
+    }
+    if (/cannot redeclare block-scoped variable|duplicate identifier|duplicate function implementation|same-file typescript diagnostics/i.test(message)) {
+      notes.add('When an autonomous edit introduces duplicate declarations in the same file, do not retry the same path unless the next proposal explicitly removes, renames, or consolidates the conflicting declaration.');
+    }
+  }
+
+  const recentAutonomousEditNotes = Array.isArray(result.autonomousEditNotes)
+    ? result.autonomousEditNotes.map((entry) => String(entry || '').trim()).filter(Boolean).slice(-16)
+    : [];
+  for (const note of recentAutonomousEditNotes) {
+    if (/Skipped autonomous replace proposal for apps\/api\/modules\/modelUpdater\.ts: .*'key' is declared but its value is never read\./i.test(note)) {
+      notes.add('When editing apps/api/modules/modelUpdater.ts for capability-skip normalization, reuse the existing normalizedKey branch inside collectAvailabilityConstraintMetadata rather than introducing another [key, value] loop that leaves key unused.');
+    }
+    if (/Skipped autonomous replace proposal for apps\/api\/modules\/modelUpdater\.ts: Replace target text was not found in the file\. First anchor fragment: if \(providerCount === 0\) \{/i.test(note)) {
+      notes.add('When revisiting apps/api/modules/modelUpdater.ts failed paths, anchor around collectAvailabilityConstraintMetadata, hasAvailabilityConstraint, or the constrained-model retention branch instead of the older providerCount===0 block.');
+    }
+    if (/duplicate package\.json scripts/i.test(note)) {
+      notes.add('When editing package.json, preserve unique scripts keys and update an existing workspace/frontend alias instead of adding another script entry with the same name.');
     }
   }
 
@@ -1243,6 +1334,69 @@ function summarizeTerminalRunFailure(result: unknown): string {
   }
 
   return '';
+}
+
+function deriveNoProgressSignature(result: Record<string, unknown>): string {
+  const proposedEdits = Array.isArray(result.proposedEdits)
+    ? result.proposedEdits
+        .map((edit: any) => `${String(edit?.type || '').trim()}:${String(edit?.path || '').trim()}:${String(edit?.reason || '').trim()}`)
+        .filter((entry: string) => entry !== '::')
+        .slice(0, 6)
+    : [];
+  const appliedPaths = Array.isArray(result.appliedEdits)
+    ? result.appliedEdits
+        .filter((edit: any) => edit?.status === 'applied' && typeof edit?.path === 'string')
+        .map((edit: any) => String(edit.path || '').trim())
+        .filter(Boolean)
+        .slice(0, 6)
+    : [];
+  const executedJobSummary = Array.isArray(result.executedJobs)
+    ? result.executedJobs
+        .filter((job: any) => job?.status === 'failed' || (job?.status === 'success' && job?.kind !== 'note'))
+        .map((job: any) => `${String(job?.status || '').trim()}:${String(job?.title || '').trim()}:${typeof job?.exitCode === 'number' ? job.exitCode : 'n/a'}`)
+        .slice(0, 6)
+    : [];
+
+  return JSON.stringify({
+    repairStatus: typeof result.repairStatus === 'string' ? result.repairStatus.trim() : '',
+    repairDecisionReason: typeof result.repairDecisionReason === 'string' ? result.repairDecisionReason.trim() : '',
+    repairIntentSummary: typeof result.repairIntentSummary === 'string' ? result.repairIntentSummary.trim() : '',
+    improvementIntentSummary: typeof result.improvementIntentSummary === 'string' ? result.improvementIntentSummary.trim() : '',
+    proposedEdits,
+    appliedPaths,
+    executedJobSummary,
+  });
+}
+
+function hasMeaningfulIterationProgress(result: Record<string, unknown>): boolean {
+  const appliedEditCount = Array.isArray(result.appliedEdits)
+    ? result.appliedEdits.filter((edit: any) => edit?.status === 'applied').length
+    : 0;
+  if (appliedEditCount > 0) return true;
+
+  const promotedPathCount = Array.isArray(result.repairPromotedPaths)
+    ? result.repairPromotedPaths.map((entry: any) => String(entry || '').trim()).filter(Boolean).length
+    : 0;
+  if (promotedPathCount > 0) return true;
+
+  const rollbackPathCount = Array.isArray(result.repairRollbackPaths)
+    ? result.repairRollbackPaths.map((entry: any) => String(entry || '').trim()).filter(Boolean).length
+    : 0;
+  if (rollbackPathCount > 0) return true;
+
+  const successfulExecutableJobs = Array.isArray(result.executedJobs)
+    ? result.executedJobs.filter((job: any) => job?.status === 'success' && job?.kind !== 'note').length
+    : 0;
+  return successfulExecutableJobs > 0;
+}
+
+function getNoProgressDelayMs(baseIntervalMs: number, noProgressStreak: number): number {
+  const normalizedBase = Number.isFinite(baseIntervalMs) ? Math.max(1_000, Math.floor(baseIntervalMs)) : 1_000;
+  const normalizedStreak = Number.isFinite(noProgressStreak) ? Math.max(0, Math.floor(noProgressStreak)) : 0;
+  if (normalizedStreak < MAX_NO_PROGRESS_STREAK) return normalizedBase;
+
+  const backoffStep = Math.min(3, normalizedStreak - MAX_NO_PROGRESS_STREAK + 1);
+  return Math.min(30_000, Math.max(5_000, normalizedBase * (2 ** backoffStep)));
 }
 
 function formatError(error: unknown): string {
@@ -1360,7 +1514,13 @@ function buildRunnerInvocationArgs(parsedArgs: ParsedArgs): string[] {
     `--stream-mode=${parsedArgs.streamMode}`,
     `--edit-allowlist=${parsedArgs.editAllowlist.join(',')}`,
     `--scope-expansion=${parsedArgs.scopeExpansionMode}`,
+    `--mcp-actions=${parsedArgs.mcpActionEnabled ? 'true' : 'false'}`,
+    `--max-mcp-actions=${parsedArgs.maxMcpActions}`,
   ];
+
+  if (parsedArgs.mcpTargetUrls.length > 0) {
+    args.push(`--mcp-target-urls=${parsedArgs.mcpTargetUrls.join(',')}`);
+  }
 
   if (parsedArgs.pidFilePath) {
     args.push(`--pid-file=${parsedArgs.pidFilePath}`);
@@ -1458,6 +1618,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   let continuous = false;
   let autonomous = false;
   let autonomousEditEnabled = false;
+  let mcpActionEnabled = false;
   let multiRunner = false;
   let subgraphs = false;
 
@@ -1484,10 +1645,15 @@ function parseArgs(argv: string[]): ParsedArgs {
       executePlan = true;
       autoApprove = true;
       autonomousEditEnabled = true;
+      mcpActionEnabled = true;
       continue;
     }
     if (arg === '--autonomous-edits') {
       autonomousEditEnabled = true;
+      continue;
+    }
+    if (arg === '--mcp-actions') {
+      mcpActionEnabled = true;
       continue;
     }
     if (arg === '--multi-runner') {
@@ -1522,6 +1688,11 @@ function parseArgs(argv: string[]): ParsedArgs {
   );
   const maxIterations = parseMaxIterations(argMap.get('max-iterations'));
   const maxEditActions = parseIntegerArg(argMap.get('max-edit-actions'), 12, 1);
+  const maxMcpActions = parseIntegerArg(
+    argMap.get('max-mcp-actions') || process.env.CONTROL_PLANE_MAX_MCP_ACTIONS,
+    4,
+    0,
+  );
   const coordinatorChildId = String(argMap.get('coordinator-child') || '').trim() || undefined;
   const coordinatorParentThreadId = String(argMap.get('coordinator-parent-thread-id') || '').trim() || undefined;
   const scopeExpansionMode = parseScopeExpansionMode(
@@ -1564,6 +1735,16 @@ function parseArgs(argv: string[]): ParsedArgs {
     || argMap.get('autonomous-edit-enabled')
     || process.env.CONTROL_PLANE_AUTONOMOUS_EDITS,
     autonomousEditEnabled,
+  );
+  mcpActionEnabled = parseBooleanArg(
+    argMap.get('mcp-actions')
+    || process.env.CONTROL_PLANE_MCP_ACTIONS,
+    mcpActionEnabled,
+  );
+  const mcpTargetUrls = parseStringArrayArg(
+    argMap.get('mcp-target-urls')
+    || argMap.get('mcp-target-url')
+    || process.env.CONTROL_PLANE_MCP_TARGET_URLS,
   );
 
   const evaluationGatePolicy: ControlPlaneEvaluationGatePolicy = {
@@ -1627,6 +1808,9 @@ function parseArgs(argv: string[]): ParsedArgs {
     continuous,
     autonomous,
     autonomousEditEnabled,
+    mcpActionEnabled,
+    maxMcpActions,
+    mcpTargetUrls,
     editAllowlist,
     editDenylist,
     maxEditActions,
@@ -1955,10 +2139,11 @@ function buildCoordinatorChildArgs(parsedArgs: ParsedArgs, spec: CoordinatorChil
 
 function spawnCoordinatorChild(parsedArgs: ParsedArgs, runtime: CoordinatorChildRuntime): void {
   fs.mkdirSync(path.dirname(runtime.spec.logFilePath), { recursive: true });
-  fs.appendFileSync(
+  const logFlags = runtime.restartCount === 0 ? 'w' : 'a';
+  fs.writeFileSync(
     runtime.spec.logFilePath,
-    `\n[${new Date().toISOString()}] coordinator spawning ${runtime.spec.id} (${runtime.spec.label})\n`,
-    'utf8',
+    `${logFlags === 'w' ? '' : '\n'}[${new Date().toISOString()}] coordinator spawning ${runtime.spec.id} (${runtime.spec.label})\n`,
+    { encoding: 'utf8', flag: logFlags },
   );
 
   const child = spawn('bash', buildCoordinatorChildArgs(parsedArgs, runtime.spec), {
@@ -2276,7 +2461,7 @@ async function main() {
     await runMultiRunnerCoordinator(parsedArgs);
     return;
   }
-  const { graph: controlPlaneGraph, checkpointer, store } = await createControlPlaneGraph({
+  const { graph: controlPlaneGraph, store } = await createControlPlaneGraph({
     repoRoot: parsedArgs.repoRoot,
     checkpointPath: parsedArgs.checkpointPath,
   });
@@ -2300,6 +2485,70 @@ async function main() {
     try {
       const { result, sawInterrupt } = await runGraphOnce(parsedArgs, controlPlaneGraph, runnerStatus);
       const terminalFailureSummary = summarizeTerminalRunFailure(result);
+      const resultRecord = result as Record<string, unknown>;
+      const progressSignature = deriveNoProgressSignature(resultRecord);
+      const meaningfulProgress = hasMeaningfulIterationProgress(resultRecord);
+      const previousNoProgressStreak = typeof runnerStatus.noProgressStreak === 'number'
+        ? runnerStatus.noProgressStreak
+        : 0;
+      const noProgressStreak = meaningfulProgress
+        ? 0
+        : (
+          progressSignature
+          && runnerStatus.lastProgressSignature === progressSignature
+            ? previousNoProgressStreak + 1
+            : 1
+        );
+      const noProgressReason = noProgressStreak >= MAX_NO_PROGRESS_STREAK
+        ? `No-progress loop guard: repeated the same non-progress outcome ${noProgressStreak} time(s); back off and require a stronger path-bounded change or an explicit no-op.`
+        : '';
+      const recentAutonomousLearningNotes = deriveRecentAutonomousLearningNotes(
+        resultRecord,
+        runnerStatus.recentAutonomousLearningNotes,
+      );
+      const sameThreadValidationObserved = Boolean(
+        resultRecord.langSmithSameThreadRunObserved
+        || resultRecord.sameThreadLangSmithRunObserved
+        || resultRecord.sameThreadValidationObserved,
+      );
+      const sameThreadPendingThreadId = typeof resultRecord.sameThreadPendingThreadId === 'string'
+        ? resultRecord.sameThreadPendingThreadId.trim()
+        : '';
+      const sameThreadPendingObserved = Boolean(
+        resultRecord.sameThreadLangSmithPendingObserved
+        || resultRecord.langSmithSameThreadPendingObserved
+        || sameThreadPendingThreadId,
+      );
+      const partialReadinessObserved = Boolean(
+        resultRecord.controlPlanePartialReadinessObserved
+        || resultRecord.startupFlushedSoonAfterReady
+        || resultRecord.serverStartedThenExited
+      );
+      const operatorFacingNoRunDeferReason = !sameThreadValidationObserved
+        ? (
+            sameThreadPendingObserved && partialReadinessObserved
+              ? `No fresh same-thread LangSmith control-plane run/trace was completed for thread ${sameThreadPendingThreadId || 'unknown-thread'}; sampled LangSmith visibility is pending-only and startup evidence is partial readiness only because the control-plane registered graphs, started workers, or reported server-running before flushing/exiting. Cross-thread activity does not satisfy this iteration, so preserve a clear no-run defer reason until one fresh same-thread run/trace with explicit goal context and a passed smoke/typecheck result exists.`
+              :
+            partialReadinessObserved
+              ? 'No fresh same-thread LangSmith control-plane run/trace was observed for this iteration; startup logs only provide partial readiness evidence because the control-plane registered graphs, started workers, or reported server-running before flushing/exiting. Preserve a no-run defer reason until the same thread emits a fresh completed LangSmith run/trace with explicit goal context and control-plane smoke/typecheck passes.'
+              :             partialReadinessObserved
+              ? `No fresh same-thread LangSmith control-plane run/trace was observed for thread ${runnerStatus.threadId}. Control-plane startup showed only partial readiness evidence (for example graph registration, worker startup, or server-running followed by an immediate flush/exit), so do not treat this iteration as validated yet.`
+              :
+          sameThreadPendingObserved && partialReadinessObserved
+            ? `No fresh same-thread LangSmith control-plane run/trace was completed for this iteration; pending same-thread visibility for ${sameThreadPendingThreadId || 'the current control-plane thread'} and startup logs that registered graphs, started workers, or reported server-running before an immediate flush/exit are only partial observability plus partial readiness evidence. Preserve a clear operator-facing no-run defer reason until same-thread validation and smoke/typecheck results exist.`
+            : sameThreadPendingObserved
+              ? `No fresh same-thread LangSmith control-plane run/trace was completed for this iteration; pending same-thread visibility for ${sameThreadPendingThreadId || 'the current control-plane thread'} is partial observability evidence only, not completed validation. Preserve a clear operator-facing no-run defer reason until same-thread validation and smoke/typecheck results exist.`
+              : partialReadinessObserved
+                ? 'No fresh same-thread LangSmith control-plane run/trace was completed for this iteration; startup logs showed graph registration, worker startup, or server-running evidence followed by an immediate flush/exit, which is partial readiness evidence only. Preserve a clear operator-facing no-run defer reason until same-thread validation and smoke/typecheck results exist.'
+                : 'No fresh same-thread LangSmith control-plane run/trace was observed for this iteration; treat any startup logs as readiness evidence only and preserve a clear operator-facing no-run defer reason until same-thread validation and smoke/typecheck results exist.'
+        )
+        : '';
+      if (noProgressReason && !recentAutonomousLearningNotes.includes('When the same outcome repeats without new edits or job deltas, either propose one stronger path-bounded change or explicitly no-op and defer instead of re-planning the same idea.')) {
+        recentAutonomousLearningNotes.push('When the same outcome repeats without new edits or job deltas, either propose one stronger path-bounded change or explicitly no-op and defer instead of re-planning the same idea.');
+      }
+      if (operatorFacingNoRunDeferReason && !recentAutonomousLearningNotes.includes(operatorFacingNoRunDeferReason)) {
+        recentAutonomousLearningNotes.push(operatorFacingNoRunDeferReason);
+      }
       consecutiveTerminalFailures = terminalFailureSummary
         ? consecutiveTerminalFailures + 1
         : 0;
@@ -2320,12 +2569,13 @@ async function main() {
           : [],
         recentAutonomousEditFailures: deriveRecentAutonomousEditFailures(
           result.appliedEdits,
+          result.autonomousEditNotes,
           runnerStatus.recentAutonomousEditFailures,
         ),
-        recentAutonomousLearningNotes: deriveRecentAutonomousLearningNotes(
-          result as Record<string, unknown>,
-          runnerStatus.recentAutonomousLearningNotes,
-        ),
+        recentAutonomousLearningNotes,
+        noProgressStreak,
+        noProgressReason,
+        lastProgressSignature: progressSignature,
         effectiveScopes: Array.isArray((result as any).effectiveScopes)
           ? (result as any).effectiveScopes.map((scope: any) => String(scope || '').trim()).filter(Boolean)
           : runnerStatus.effectiveScopes,
@@ -2653,7 +2903,9 @@ async function main() {
               .filter(Boolean)
               .slice(0, 20)
           : [],
-        summary: result.summary,
+        summary: noProgressReason && typeof result.summary === 'string' && result.summary.trim()
+          ? `${result.summary}\nNo-progress guard: ${noProgressReason}`
+          : result.summary,
         lastRunCompletedAt: new Date().toISOString(),
       });
       await writeSemanticMemoryNotes(
@@ -2680,10 +2932,6 @@ async function main() {
         break;
       }
 
-      await checkpointer.deleteThread(parsedArgs.threadId).catch((error) => {
-        console.warn(`[langgraph-control-plane] Failed to compact completed checkpoint thread ${parsedArgs.threadId}: ${formatError(error)}`);
-      });
-
       if (parsedArgs.maxIterations !== null && iteration >= parsedArgs.maxIterations) {
         runnerStatus = mergeRunnerStatus(runnerStatus, {
           running: false,
@@ -2695,7 +2943,7 @@ async function main() {
 
       const nextDelayMs = terminalFailureSummary
         ? getContinuousRetryDelayMs(consecutiveTerminalFailures)
-        : parsedArgs.intervalMs;
+        : getNoProgressDelayMs(parsedArgs.intervalMs, runnerStatus.noProgressStreak || 0);
       runnerStatus = mergeRunnerStatus(runnerStatus, {
         running: true,
         phase: terminalFailureSummary ? 'failed' : 'sleeping',
@@ -2703,6 +2951,8 @@ async function main() {
       writeRunnerStatus(parsedArgs.statusFilePath, runnerStatus);
       if (terminalFailureSummary) {
         console.log(`\n[langgraph-control-plane] iteration ended with failure but continuous mode is enabled; sleeping ${nextDelayMs}ms before retry...`);
+      } else if ((runnerStatus.noProgressStreak || 0) >= MAX_NO_PROGRESS_STREAK && runnerStatus.noProgressReason) {
+        console.log(`\n[langgraph-control-plane] ${runnerStatus.noProgressReason} Sleeping ${nextDelayMs}ms before the next iteration...`);
       } else {
         console.log(`\n[langgraph-control-plane] sleeping ${nextDelayMs}ms before next iteration...`);
       }

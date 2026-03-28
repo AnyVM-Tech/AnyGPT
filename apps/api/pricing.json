@@ -3114,6 +3114,50 @@
       "source": "official",
       "updated_at": "2026-03-23T06:57:36.802Z",
       "per_request": 0.5
+    },
+    "gemini-embedding-2-preview": {
+      "input": 0.15,
+      "output": 0,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "lyria-3-clip-preview": {
+      "input": 0,
+      "output": 0,
+      "source": "manual",
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "per_request": 0.02
+    },
+    "lyria-3-pro-preview": {
+      "input": 0,
+      "output": 0,
+      "source": "manual",
+      "updated_at": "2026-03-23T06:57:36.802Z",
+      "per_request": 0.08
+    },
+    "reka/reka-edge": {
+      "input": 0.4,
+      "output": 1.6,
+      "source": "manual",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "openrouter/bodybuilder": {
+      "input": 0.2,
+      "output": 0.8,
+      "source": "manual",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "openrouter/auto": {
+      "input": 0.2,
+      "output": 0.8,
+      "source": "manual",
+      "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "deepseek/deepseek-r1": {
+      "input": 0.55,
+      "output": 2.19,
+      "source": "official",
+      "updated_at": "2026-03-23T06:57:36.802Z"
     }
   }
 }

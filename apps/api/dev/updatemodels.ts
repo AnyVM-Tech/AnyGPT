@@ -10,14 +10,153 @@ type ModelsFile = {
     providers?: number;
     throughput?: number;
     capabilities?: string[];
+    availability?: {
+      reason?: string;
+      unavailable_reason?: string;
+      removal_reason?: string;
+      capability_blocked?: string[];
+      capability_skips?: Record<string, string>;
+    };
   }>;
+};
+
+type ProviderModelMeta = {
+  removed?: boolean;
+  unavailable?: boolean;
+  disabled?: boolean;
+  capabilities?: string[];
+  capability_blocked?: string[];
+  capability_skips?: Record<string, string>;
+  availability?: {
+    reason?: string;
+    unavailable_reason?: string;
+    removal_reason?: string;
+    capability_blocked?: string[];
+    capability_skips?: Record<string, string>;
+  };
+  reason?: string;
+  unavailable_reason?: string;
+  removal_reason?: string;
 };
 
 type ProviderFile = Array<{
   id: string;
   disabled?: boolean;
-  models?: Record<string, unknown>;
+  models?: Record<string, ProviderModelMeta | null>;
 }>;
+
+function isNonChatModel(modelId: string): 'tts' | 'stt' | 'image-gen' | 'video-gen' | 'embedding' | false {
+  const normalized = String(modelId || '').toLowerCase();
+  if (normalized.startsWith('tts-') || normalized.includes('-tts')) return 'tts';
+  if (normalized.startsWith('whisper') || normalized.includes('transcribe')) return 'stt';
+  if (
+    normalized.startsWith('sora')
+    || normalized.startsWith('veo-')
+    || normalized.includes('grok-imagine-video')
+    || normalized.includes('imagine-video')
+  ) return 'video-gen';
+  if (
+    normalized.startsWith('dall-e')
+    || normalized.includes('gpt-image')
+    || normalized.includes('chatgpt-image')
+    || normalized.includes('image-gen')
+    || normalized.includes('imagegen')
+    || normalized.startsWith('imagen')
+    || normalized.includes('imagen')
+    || normalized.includes('nano-banana')
+    || normalized.includes('grok-imagine')
+    || normalized.includes('grok-2-image')
+  ) return 'image-gen';
+  if (normalized.includes('embedding')) return 'embedding';
+  return false;
+}
+
+function isAvailabilityConstraintReason(value: unknown): boolean {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized) return false;
+  return /provider[_ -]?model[_ -]?removed|provider[_ -]?cap[_ -]?blocked|image generation unavailable|unavailable in provider region|unavailable in country|provider region|country|regional availability|unsupported image output/.test(normalized);
+}
+
+function collectAvailabilityConstraintMetadata(meta: ProviderModelMeta | null | undefined): {
+  blockedCapabilities: string[];
+  capabilitySkips: Record<string, string>;
+  reasonTexts: string[];
+} {
+  if (!meta || typeof meta !== 'object') {
+    return {
+      blockedCapabilities: [],
+      capabilitySkips: {},
+      reasonTexts: [],
+    };
+  }
+
+  const blockedCapabilities = Array.from(new Set([
+    ...(Array.isArray(meta.capability_blocked) ? meta.capability_blocked : []),
+    ...(Array.isArray(meta.availability?.capability_blocked) ? meta.availability.capability_blocked : []),
+  ]
+    .map((entry) => String(entry || '').trim().toLowerCase())
+    .filter(Boolean)));
+
+  const capabilitySkips: Record<string, string> = {};
+  for (const source of [meta.availability?.capability_skips, meta.capability_skips]) {
+    if (!source || typeof source !== 'object') continue;
+    for (const [key, value] of Object.entries(source as Record<string, unknown>)) {
+      if (typeof value !== 'string' || !value.trim()) continue;
+      capabilitySkips[key] = value;
+    }
+  }
+
+  const reasonTexts = [
+    meta.reason,
+    meta.unavailable_reason,
+    meta.removal_reason,
+    meta.availability?.reason,
+    meta.availability?.unavailable_reason,
+    meta.availability?.removal_reason,
+  ]
+    .map((entry) => String(entry || '').trim())
+    .filter(Boolean);
+
+  return { blockedCapabilities, capabilitySkips, reasonTexts };
+}
+
+function hasAvailabilityConstraint(modelId: string, meta: ProviderModelMeta | null | undefined): boolean {
+  if (!meta || typeof meta !== 'object') return false;
+  if (meta.removed || meta.unavailable || meta.disabled) return true;
+
+  const { blockedCapabilities, capabilitySkips, reasonTexts } = collectAvailabilityConstraintMetadata(meta);
+  const nonChatType = isNonChatModel(modelId);
+
+  if ((nonChatType === 'image-gen' || nonChatType === 'video-gen') && (
+    blockedCapabilities.includes('image_output')
+    || typeof capabilitySkips.image_output === 'string'
+    || reasonTexts.some((reason) => isAvailabilityConstraintReason(reason))
+  )) {
+    return true;
+  }
+
+  if (nonChatType === 'tts' && (
+    blockedCapabilities.includes('audio_output')
+    || typeof capabilitySkips.audio_output === 'string'
+  )) {
+    return true;
+  }
+
+  if (nonChatType === 'stt' && (
+    blockedCapabilities.includes('audio_input')
+    || typeof capabilitySkips.audio_input === 'string'
+  )) {
+    return true;
+  }
+
+  return false;
+}
+
+function shouldCountProviderModel(modelId: string, meta: ProviderModelMeta | null | undefined): boolean {
+  if (!meta || typeof meta !== 'object') return true;
+  if (meta.removed || meta.unavailable || meta.disabled) return false;
+  return !hasAvailabilityConstraint(modelId, meta);
+}
 
 function guessOwnedBy(modelId: string): string {
   const lower = modelId.toLowerCase();
@@ -89,11 +228,20 @@ function main() {
 
   const activeProviderCounts: Record<string, number> = {};
   const availableModels = new Set<string>();
+  const providerSeenModels = new Set<string>();
+
+  const constrainedModelIds = new Set<string>();
 
   for (const provider of providers) {
-    if (provider.disabled) continue;
     if (!provider.models) continue;
-    for (const modelId of Object.keys(provider.models)) {
+    for (const [modelId, modelMeta] of Object.entries(provider.models)) {
+      const meta = modelMeta as ProviderModelMeta | null;
+      providerSeenModels.add(modelId);
+      if (hasAvailabilityConstraint(modelId, meta)) {
+        constrainedModelIds.add(modelId);
+      }
+
+      if (provider.disabled || !shouldCountProviderModel(modelId, meta)) continue;
       availableModels.add(modelId);
       activeProviderCounts[modelId] = (activeProviderCounts[modelId] || 0) + 1;
     }
@@ -101,19 +249,31 @@ function main() {
 
   const updatedModels: ModelsFile['data'] = [];
   let changes = false;
+  const existingIds = new Set(modelsFile.data.map((m) => m.id));
 
   for (const model of modelsFile.data) {
     const count = activeProviderCounts[model.id] || 0;
-    if (count === 0) {
-      console.log(`Removing ${model.id}: no active providers`);
+    const isConstrained = constrainedModelIds.has(model.id);
+    const isStillCatalogPresent = providerSeenModels.has(model.id);
+    const shouldRetainAsConstrained = count === 0 && isConstrained && isStillCatalogPresent;
+    const shouldRetainExistingModel = count > 0 || shouldRetainAsConstrained;
+
+    if (!shouldRetainExistingModel) {
       changes = true;
+      console.log(`Removed ${model.id} because it has 0 active providers and no availability constraint`);
       continue;
     }
 
     if (model.providers !== count) {
       model.providers = count;
       changes = true;
-      console.log(`Updated ${model.id} providers -> ${count}`);
+      if (shouldRetainAsConstrained) {
+        console.log(`Retained ${model.id} with 0 active providers (availability constrained)`);
+      } else {
+        console.log(`Updated ${model.id} providers -> ${count}`);
+      }
+    } else if (shouldRetainAsConstrained) {
+      console.log(`Retained ${model.id} with 0 active providers (availability constrained)`);
     }
     if (!model.owned_by || model.owned_by === 'unknown') {
       const guessed = guessOwnedBy(model.id);
@@ -126,19 +286,26 @@ function main() {
     updatedModels.push(model);
   }
 
-  const existingIds = new Set(updatedModels.map((m) => m.id));
   for (const modelId of availableModels) {
     if (existingIds.has(modelId)) continue;
+    const isConstrained = constrainedModelIds.has(modelId);
+    const providerCount = activeProviderCounts[modelId] ?? 0;
+
+    if (isConstrained) {
+      console.log(`Skipped adding ${modelId} because it is marked as availability-constrained during provider sync`);
+      continue;
+    }
+
     const newModel = {
       id: modelId,
       object: 'model',
       created: Date.now(),
       owned_by: guessOwnedBy(modelId),
-      providers: activeProviderCounts[modelId],
+      providers: providerCount,
     };
     updatedModels.push(newModel);
     changes = true;
-    console.log(`Added ${modelId} (${activeProviderCounts[modelId]} provider(s))`);
+    console.log(`Added ${modelId} (${providerCount} provider(s))`);
   }
 
   if (!changes) {

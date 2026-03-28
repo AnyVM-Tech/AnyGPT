@@ -75,6 +75,28 @@ const DEFAULT_AUTONOMOUS_EDIT_ALLOWLIST = ['*'];
 
 const DEFAULT_AUTONOMOUS_EDIT_DENYLIST: string[] = [];
 
+const AUTONOMOUS_EDIT_CONTEXT_BINARY_EXTENSIONS = new Set([
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.gif',
+  '.webp',
+  '.ico',
+  '.bmp',
+  '.avif',
+  '.woff',
+  '.woff2',
+  '.ttf',
+  '.otf',
+  '.mp3',
+  '.wav',
+  '.ogg',
+  '.mp4',
+  '.webm',
+  '.zip',
+  '.pdf',
+]);
+
 const LARGE_FILE_AUTONOMOUS_CONTEXT_ANCHORS: Record<string, string[]> = {
   'apps/langgraph-control-plane/src/index.ts': [
     'function parseArgs(',
@@ -94,8 +116,20 @@ const LARGE_FILE_AUTONOMOUS_CONTEXT_ANCHORS: Record<string, string[]> = {
     'const DEFAULT_CONTROL_PLANE_AUTONOMOUS_EDIT_PROMPT = [',
     'const DEFAULT_CONTROL_PLANE_PROMPT_BUNDLE = ControlPlanePromptBundleSchema.parse({',
     'function buildControlPlaneLangSmithProjectMetadata(',
+    'function buildProviderSyncChurnNotes(',
+    'function appendUniqueNotes(',
     'async function callAiCodeEditAgent(',
     'async function autonomousEditPlannerNode(',
+  ],
+  'apps/langgraph-control-plane/src/studioGraph.ts': [
+    'const repoRoot = path.resolve(',
+    'const graph = await createPersistentStudioControlPlaneGraph({',
+    'export { graph };',
+  ],
+  'apps/langgraph-control-plane/langgraph.json': [
+    '"graphs": {',
+    '"control-plane": "./dist/studioGraph.js:graph"',
+    '"env": "../../.env.local"',
   ],
   'apps/api/providers/openai.ts': [
     'reasoning_effort',
@@ -108,16 +142,49 @@ const LARGE_FILE_AUTONOMOUS_CONTEXT_ANCHORS: Record<string, string[]> = {
     'function isLikelyUnsupportedRemoteMediaUrl(',
     'function isGeminiCatalogAuthFailure(',
     'function getCachedGeminiCatalogAuthFailure(',
+    'async resolveModelIdForMethod(',
+    "method: 'generateContent' | 'streamGenerateContent',",
+    "const resolved = await this.resolveModelIdForMethod(activeMessage.model.id, 'generateContent');",
     'private async getModelCatalog(',
     'function mapGemini',
   ],
   'apps/api/providers/handler.ts': [
     'export async function handleProviderRequest(',
     'function selectProvider',
+    'let skippedByCooldown = 0;',
+    'skippedByCooldown++;',
+    'attemptedProviders = attemptedProviderList;',
+    'requestRetryWorthless',
+    'providerSwitchWorthless',
+    'failureOrigin',
+    'shouldSkipGeminiProviderForMessage(',
+  ],
+  'apps/api/modules/errorClassification.ts': [
+    'export function isInvalidProviderCredentialError(',
+    'export function isProviderAuthConfigurationError(',
+    'export function isProviderAuthOrConfigurationError(',
+    'export function isToolUnsupportedError(',
+    'const geminiRegionalOrCapabilityBlock =',
+    "message.includes('resource has been exhausted') ||",
+    "message.includes('quota exhausted') ||",
   ],
   'apps/api/modules/openaiRouteUtils.ts': [
     'export function',
     'function normalize',
+  ],
+  'apps/api/modules/openaiProviderSelection.ts': [
+    'export async function getModelCapabilities(',
+    'export async function enforceModelCapabilities(',
+    'export async function pickOpenAIProviderKey(',
+    'function hasRecentRateLimitOrTimeoutSignal(',
+    'export async function inspectVideoGenProviderAvailability(',
+    'export async function pickAnyXaiProviderKey(',
+  ],
+  'apps/api/providers/openrouter.ts': [
+    'function isOpenRouterToolUseUnsupportedError(',
+    'export class OpenRouterAI implements IAIProvider {',
+    'async sendMessage(',
+    'handleResponseError(',
   ],
   'apps/api/modules/requestQueue.ts': [
     'function getBaselineTierRps()',
@@ -126,9 +193,13 @@ const LARGE_FILE_AUTONOMOUS_CONTEXT_ANCHORS: Record<string, string[]> = {
     'export const requestQueue = new RequestQueue(',
   ],
   'apps/api/modules/modelUpdater.ts': [
+    'function collectAvailabilityConstraintMetadata(',
+    'function hasAvailabilityConstraint(',
+    'function isProbeEntryEmpty(',
     'function loadBasePricing()',
     'function loadPricingCache()',
     'function normalizeResolvedPricing(',
+    'const constrainedModelIds = new Set<string>();',
     'refreshProviderCountsInModelsFile',
   ],
   'apps/api/modules/responsesHistory.ts': [
@@ -140,6 +211,16 @@ const LARGE_FILE_AUTONOMOUS_CONTEXT_ANCHORS: Record<string, string[]> = {
     'function resolveOfficialPricing(',
     'function resolveOpenRouterPricing(',
     'const OFFICIAL_PRICES:',
+  ],
+  'apps/api/dev/updatemodels.ts': [
+    'function collectAvailabilityConstraintMetadata(',
+    'function hasAvailabilityConstraint(',
+    'function shouldCountProviderModel(',
+    'function guessOwnedBy(',
+    'function loadJson(',
+    'function saveJson(',
+    'const constrainedModelIds = new Set<string>();',
+    'function main() {',
   ],
   'apps/api/routes/models.ts': [
     'router.get(',
@@ -153,6 +234,23 @@ function normalizeRepoRelativePath(rawPath: string): string {
     .replace(/\\/g, '/')
     .replace(/^\.\//, '')
     .replace(/\/+/g, '/');
+}
+
+function shouldSkipAutonomousEditContextFile(candidatePath: string, raw: string): boolean {
+  const extension = path.extname(String(candidatePath || '').trim()).toLowerCase();
+  if (AUTONOMOUS_EDIT_CONTEXT_BINARY_EXTENSIONS.has(extension)) {
+    return true;
+  }
+
+  if (extension === '.svg' && /\bdata:image\/[a-z0-9.+-]+;base64,/i.test(raw)) {
+    return true;
+  }
+
+  if (raw.length > 20_000 && /\bdata:image\/[a-z0-9.+-]+;base64,/i.test(raw)) {
+    return true;
+  }
+
+  return false;
 }
 
 function splitCommaSeparatedPaths(value: string | undefined): string[] {
@@ -610,11 +708,14 @@ export function buildAutonomousEditCandidatePaths(scopes: string[]): string[] {
     'apps/langgraph-control-plane/README.md',
   ]);
 
+  const hasAnyScope = (...scopeIds: string[]): boolean =>
+    scopeIds.some((scopeId) => normalizedScopes.includes(scopeId));
+
   if (normalizedScopes.includes('repo') || normalizedScopes.includes('control-plane')) {
     candidates.add('apps/langgraph-control-plane/package.json');
   }
 
-  if (normalizedScopes.includes('repo') || normalizedScopes.includes('api') || normalizedScopes.includes('api-experimental')) {
+  if (hasAnyScope('repo', 'api', 'api-experimental', 'api-routing', 'api-runtime', 'api-data', 'api-platform')) {
     candidates.add('apps/api/providers/openai.ts');
     candidates.add('apps/api/providers/gemini.ts');
     candidates.add('apps/api/providers/deepseek.ts');
@@ -665,6 +766,57 @@ export function buildAutonomousEditCandidatePaths(scopes: string[]): string[] {
     candidates.add('apps/api/ws/wsServer.ts');
   }
 
+  if (hasAnyScope('api-routing')) {
+    candidates.add('apps/api/providers/handler.ts');
+    candidates.add('apps/api/providers/openrouter.ts');
+    candidates.add('apps/api/routes/openai.ts');
+    candidates.add('apps/api/modules/openaiProviderSelection.ts');
+    candidates.add('apps/api/modules/openaiRequestSupport.ts');
+    candidates.add('apps/api/modules/openaiRouteSupport.ts');
+    candidates.add('apps/api/modules/openaiRouteUtils.ts');
+    candidates.add('apps/api/modules/openaiResponsesFormat.ts');
+    candidates.add('apps/api/modules/geminiMediaValidation.ts');
+    candidates.add('apps/api/modules/responsesHistory.ts');
+  }
+
+  if (hasAnyScope('api-runtime')) {
+    candidates.add('apps/api/modules/requestQueue.ts');
+    candidates.add('apps/api/modules/requestIntake.ts');
+    candidates.add('apps/api/modules/rateLimit.ts');
+    candidates.add('apps/api/modules/rateLimitRedis.ts');
+    candidates.add('apps/api/modules/tokenEstimation.ts');
+    candidates.add('apps/api/modules/userData.ts');
+    candidates.add('apps/api/modules/errorClassification.ts');
+    candidates.add('apps/api/modules/errorLogger.ts');
+    candidates.add('apps/api/modules/middlewareFactory.ts');
+  }
+
+  if (hasAnyScope('api-data')) {
+    candidates.add('apps/api/models.json');
+    candidates.add('apps/api/pricing.json');
+    candidates.add('apps/api/routes/models.ts');
+    candidates.add('apps/api/modules/modelUpdater.ts');
+    candidates.add('apps/api/modules/dataManager.ts');
+    candidates.add('apps/api/modules/adminKeySync.ts');
+    candidates.add('apps/api/modules/keyChecker.ts');
+    candidates.add('apps/api/modules/db.ts');
+    candidates.add('apps/api/dev/fetchPricing.ts');
+    candidates.add('apps/api/dev/checkModelCapabilities.ts');
+    candidates.add('apps/api/dev/refreshModels.ts');
+    candidates.add('apps/api/dev/updatemodels.ts');
+    candidates.add('apps/api/dev/updateproviders.ts');
+    candidates.add('apps/api/README.md');
+    candidates.add('apps/api/package.json');
+  }
+
+  if (hasAnyScope('api-platform')) {
+    candidates.add('apps/api/server.ts');
+    candidates.add('apps/api/server.launcher.bun.ts');
+    candidates.add('apps/api/ws/wsServer.ts');
+    candidates.add('apps/api/anygpt-api.service');
+    candidates.add('apps/api/anygpt-experimental.service');
+  }
+
   if (normalizedScopes.includes('repo') || normalizedScopes.includes('control-plane')) {
     candidates.add('apps/langgraph-control-plane/langgraph.json');
     candidates.add('apps/langgraph-control-plane/governance-profiles.json');
@@ -672,7 +824,7 @@ export function buildAutonomousEditCandidatePaths(scopes: string[]): string[] {
     candidates.add('apps/langgraph-control-plane/src/studioGraph.ts');
   }
 
-  if (normalizedScopes.includes('repo') || normalizedScopes.includes('repo-surface')) {
+  if (hasAnyScope('repo', 'repo-surface', 'workspace-surface', 'homepage-surface', 'ui-surface')) {
     candidates.add('tsconfig.json');
     candidates.add('pnpm-workspace.yaml');
     candidates.add('SETUP.md');
@@ -685,6 +837,32 @@ export function buildAutonomousEditCandidatePaths(scopes: string[]): string[] {
     candidates.add('apps/homepage/public/style.css');
     candidates.add('apps/ui/package.json');
     candidates.add('apps/ui/README.md');
+    candidates.add('apps/ui/librechat/client/index.html');
+    candidates.add('apps/ui/librechat/client/src/App.jsx');
+    candidates.add('apps/ui/librechat/client/src/main.jsx');
+    candidates.add('apps/ui/librechat/client/src/style.css');
+    candidates.add('apps/ui/scripts/dev.sh');
+    candidates.add('apps/ui/scripts/start.sh');
+    candidates.add('apps/ui/scripts/stop.sh');
+    candidates.add('apps/ui/scripts/sync-config.sh');
+    candidates.add('apps/ui/scripts/sync-librechat.sh');
+  }
+
+  if (hasAnyScope('homepage-surface')) {
+    candidates.add('apps/homepage/package.json');
+    candidates.add('apps/homepage/serve.js');
+    candidates.add('apps/homepage/public/index.html');
+    candidates.add('apps/homepage/public/script.js');
+    candidates.add('apps/homepage/public/style.css');
+  }
+
+  if (hasAnyScope('ui-surface')) {
+    candidates.add('apps/ui/package.json');
+    candidates.add('apps/ui/README.md');
+    candidates.add('apps/ui/librechat/client/index.html');
+    candidates.add('apps/ui/librechat/client/src/App.jsx');
+    candidates.add('apps/ui/librechat/client/src/main.jsx');
+    candidates.add('apps/ui/librechat/client/src/style.css');
     candidates.add('apps/ui/scripts/dev.sh');
     candidates.add('apps/ui/scripts/start.sh');
     candidates.add('apps/ui/scripts/stop.sh');
@@ -725,6 +903,9 @@ export function readAutonomousEditContext(
 
     try {
       const raw = fs.readFileSync(absolutePath, 'utf8');
+      if (shouldSkipAutonomousEditContextFile(check.normalizedPath, raw)) {
+        continue;
+      }
       const anchorHints = uniqueAnchors(preferredAnchorsByPath[check.normalizedPath] || []).slice(0, 6);
       const excerpt = buildAutonomousEditContextContent(
         raw,
@@ -803,7 +984,17 @@ function buildNormalizedSkippedEdit(action: AutonomousEditAction, normalizedPath
   });
 }
 
-function collectUnusedLocalDiagnosticsForFile(filePath: string, sourceText: string): string[] {
+const AUTONOMOUS_EDIT_TYPESCRIPT_DIAGNOSTIC_CODES = new Set([6133, 2300, 2393, 2451]);
+
+type AutonomousEditTypeScriptDiagnostic = {
+  code: number;
+  message: string;
+};
+
+function collectTypeScriptDiagnosticsForFile(
+  filePath: string,
+  sourceText: string,
+): AutonomousEditTypeScriptDiagnostic[] {
   const compilerOptions: ts.CompilerOptions = {
     target: ts.ScriptTarget.ES2022,
     module: ts.ModuleKind.ESNext,
@@ -854,23 +1045,36 @@ function collectUnusedLocalDiagnosticsForFile(filePath: string, sourceText: stri
 
   const program = ts.createProgram([normalizedFilePath], compilerOptions, compilerHost);
   return ts.getPreEmitDiagnostics(program)
-    .filter((diagnostic) => diagnostic.code === 6133 && diagnostic.file && path.resolve(diagnostic.file.fileName) === normalizedFilePath)
-    .map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n').trim())
-    .filter(Boolean);
+    .filter((diagnostic) => AUTONOMOUS_EDIT_TYPESCRIPT_DIAGNOSTIC_CODES.has(diagnostic.code))
+    .filter((diagnostic) => diagnostic.file && path.resolve(diagnostic.file.fileName) === normalizedFilePath)
+    .map((diagnostic) => ({
+      code: diagnostic.code,
+      message: ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n').trim(),
+    }))
+    .filter((diagnostic) => Boolean(diagnostic.message));
 }
 
-function buildUnusedLocalFailureMessage(diagnostics: string[]): string {
-  const uniqueDiagnostics = Array.from(new Set(
+function buildTypeScriptDiagnosticFailureMessage(
+  diagnostics: AutonomousEditTypeScriptDiagnostic[],
+): string {
+  const uniqueDiagnostics = Array.from(new Map(
     diagnostics
-      .map((entry) => String(entry || '').trim())
-      .filter(Boolean),
-  ));
-  const preview = uniqueDiagnostics.slice(0, 3).join(' | ');
+      .map((entry) => [entry.code, String(entry.message || '').trim()] as const)
+      .filter(([, message]) => Boolean(message)),
+  ).entries()).map(([code, message]) => ({ code, message }));
+
+  const preview = uniqueDiagnostics.slice(0, 3).map((entry) => entry.message).join(' | ');
   const suffix = uniqueDiagnostics.length > 3 ? ` (+${uniqueDiagnostics.length - 3} more)` : '';
-  return `Autonomous edit introduced unused local symbols and was rejected: ${preview}${suffix}`;
+  if (uniqueDiagnostics.every((entry) => entry.code === 6133)) {
+    return `Autonomous edit introduced unused local symbols and was rejected: ${preview}${suffix}`;
+  }
+  if (uniqueDiagnostics.some((entry) => entry.code === 2451 || entry.code === 2300 || entry.code === 2393)) {
+    return `Autonomous edit introduced duplicate declarations and was rejected: ${preview}${suffix}`;
+  }
+  return `Autonomous edit introduced same-file TypeScript diagnostics and was rejected: ${preview}${suffix}`;
 }
 
-function validateAutonomousEditUnusedLocals(
+function validateAutonomousEditTypeScriptDiagnostics(
   absolutePath: string,
   nextContent: string,
 ): { ok: true } | { ok: false; message: string } {
@@ -878,14 +1082,284 @@ function validateAutonomousEditUnusedLocals(
     return { ok: true };
   }
 
-  const diagnostics = collectUnusedLocalDiagnosticsForFile(absolutePath, nextContent);
+  const diagnostics = collectTypeScriptDiagnosticsForFile(absolutePath, nextContent);
   if (diagnostics.length === 0) {
     return { ok: true };
   }
 
   return {
     ok: false,
-    message: buildUnusedLocalFailureMessage(diagnostics),
+    message: buildTypeScriptDiagnosticFailureMessage(diagnostics),
+  };
+}
+
+function buildInvalidJsonFailureMessage(error: unknown): string {
+  const detail = error instanceof Error ? error.message : String(error);
+  return `Autonomous edit produced invalid JSON and was rejected: ${detail}`;
+}
+
+function findDuplicatePackageJsonScriptKeys(sourceText: string): string[] {
+  const source = String(sourceText || '');
+  if (!source.trim()) return [];
+
+  const duplicates = new Set<string>();
+  let index = 0;
+
+  const skipWhitespace = (): void => {
+    while (index < source.length && /\s/.test(source[index]!)) {
+      index += 1;
+    }
+  };
+
+  const expect = (char: string): void => {
+    if (source[index] !== char) {
+      throw new Error(`expected ${char}`);
+    }
+    index += 1;
+  };
+
+  const readString = (): string => {
+    expect('"');
+    let value = '';
+    let escape = false;
+    while (index < source.length) {
+      const char = source[index]!;
+      index += 1;
+      if (escape) {
+        value += char;
+        escape = false;
+        continue;
+      }
+      if (char === '\\') {
+        escape = true;
+        continue;
+      }
+      if (char === '"') {
+        return value;
+      }
+      value += char;
+    }
+    throw new Error('unterminated string');
+  };
+
+  const skipPrimitive = (): void => {
+    while (index < source.length && !/[\s,\]}]/.test(source[index]!)) {
+      index += 1;
+    }
+  };
+
+  const skipValue = (): void => {
+    skipWhitespace();
+    const char = source[index];
+    if (char === '"') {
+      readString();
+      return;
+    }
+    if (char === '{') {
+      skipObject();
+      return;
+    }
+    if (char === '[') {
+      skipArray();
+      return;
+    }
+    skipPrimitive();
+  };
+
+  const skipArray = (): void => {
+    expect('[');
+    skipWhitespace();
+    while (index < source.length && source[index] !== ']') {
+      skipValue();
+      skipWhitespace();
+      if (source[index] === ',') {
+        index += 1;
+        skipWhitespace();
+      }
+    }
+    expect(']');
+  };
+
+  const skipObject = (): void => {
+    expect('{');
+    skipWhitespace();
+    while (index < source.length && source[index] !== '}') {
+      readString();
+      skipWhitespace();
+      expect(':');
+      skipWhitespace();
+      skipValue();
+      skipWhitespace();
+      if (source[index] === ',') {
+        index += 1;
+        skipWhitespace();
+      }
+    }
+    expect('}');
+  };
+
+  const scanScriptsObject = (): void => {
+    expect('{');
+    skipWhitespace();
+    const seen = new Set<string>();
+    while (index < source.length && source[index] !== '}') {
+      const key = readString();
+      if (seen.has(key)) {
+        duplicates.add(key);
+      } else {
+        seen.add(key);
+      }
+      skipWhitespace();
+      expect(':');
+      skipWhitespace();
+      skipValue();
+      skipWhitespace();
+      if (source[index] === ',') {
+        index += 1;
+        skipWhitespace();
+      }
+    }
+    expect('}');
+  };
+
+  skipWhitespace();
+  expect('{');
+  skipWhitespace();
+  while (index < source.length && source[index] !== '}') {
+    const key = readString();
+    skipWhitespace();
+    expect(':');
+    skipWhitespace();
+    if (key === 'scripts' && source[index] === '{') {
+      scanScriptsObject();
+    } else {
+      skipValue();
+    }
+    skipWhitespace();
+    if (source[index] === ',') {
+      index += 1;
+      skipWhitespace();
+    }
+  }
+
+  return Array.from(duplicates);
+}
+
+function buildDuplicatePackageJsonScriptsFailureMessage(keys: string[]): string {
+  const uniqueKeys = Array.from(new Set(
+    keys
+      .map((entry) => String(entry || '').trim())
+      .filter(Boolean),
+  ));
+  const preview = uniqueKeys.slice(0, 4).join(', ');
+  const suffix = uniqueKeys.length > 4 ? ` (+${uniqueKeys.length - 4} more)` : '';
+  return `Autonomous edit introduced duplicate package.json scripts and was rejected: ${preview}${suffix}`;
+}
+
+function validateAutonomousEditJson(
+  absolutePath: string,
+  nextContent: string,
+): { ok: true } | { ok: false; message: string } {
+  if (!absolutePath.endsWith('.json')) {
+    return { ok: true };
+  }
+
+  try {
+    JSON.parse(nextContent);
+    return { ok: true };
+  } catch (error: unknown) {
+    return {
+      ok: false,
+      message: buildInvalidJsonFailureMessage(error),
+    };
+  }
+}
+
+function validateAutonomousEditPackageJson(
+  absolutePath: string,
+  nextContent: string,
+): { ok: true } | { ok: false; message: string } {
+  if (path.basename(absolutePath) !== 'package.json') {
+    return { ok: true };
+  }
+
+  const duplicateScriptKeys = findDuplicatePackageJsonScriptKeys(nextContent);
+  if (duplicateScriptKeys.length === 0) {
+    return { ok: true };
+  }
+
+  return {
+    ok: false,
+    message: buildDuplicatePackageJsonScriptsFailureMessage(duplicateScriptKeys),
+  };
+}
+
+function validateAutonomousEditContent(
+  absolutePath: string,
+  nextContent: string,
+): { ok: true } | { ok: false; message: string } {
+  const jsonValidation = validateAutonomousEditJson(absolutePath, nextContent);
+  if (!jsonValidation.ok) {
+    return jsonValidation;
+  }
+  const packageJsonValidation = validateAutonomousEditPackageJson(absolutePath, nextContent);
+  if (!packageJsonValidation.ok) {
+    return packageJsonValidation;
+  }
+  return validateAutonomousEditTypeScriptDiagnostics(absolutePath, nextContent);
+}
+
+function previewReplaceActionContent(
+  current: string,
+  find: string,
+  replace: string,
+): { ok: true; nextContent: string } | { ok: false; message: string } {
+  const matchCount = countOccurrences(current, find);
+  if (matchCount > 1) {
+    return {
+      ok: false,
+      message: `Replace target text matched ${matchCount} times in the file; provide a more specific anchored block.`,
+    };
+  }
+
+  if (matchCount === 0) {
+    const indentationInsensitiveMatch = findIndentationInsensitiveReplaceWindow(current, find);
+    if (indentationInsensitiveMatch.kind === 'multiple') {
+      return {
+        ok: false,
+        message: `Replace target text was not found exactly and indentation-insensitive matching found ${indentationInsensitiveMatch.count} candidate blocks; provide a more specific anchored block.`,
+      };
+    }
+    if (indentationInsensitiveMatch.kind === 'unique') {
+      return {
+        ok: true,
+        nextContent: `${current.slice(0, indentationInsensitiveMatch.start)}${reindentBlock(replace, indentationInsensitiveMatch.indent)}${current.slice(indentationInsensitiveMatch.end)}`,
+      };
+    }
+
+    const anchorFragmentMatch = findAnchorFragmentReplaceWindow(current, find);
+    if (anchorFragmentMatch.kind === 'multiple') {
+      return {
+        ok: false,
+        message: `Replace target text was not found exactly and anchor-fragment matching found ${anchorFragmentMatch.count} candidate blocks; provide a more specific anchored block.`,
+      };
+    }
+    if (anchorFragmentMatch.kind === 'unique') {
+      return {
+        ok: true,
+        nextContent: `${current.slice(0, anchorFragmentMatch.start)}${reindentBlock(replace, anchorFragmentMatch.indent)}${current.slice(anchorFragmentMatch.end)}`,
+      };
+    }
+
+    return {
+      ok: false,
+      message: buildReplaceFailureDiagnostic(current, find),
+    };
+  }
+
+  return {
+    ok: true,
+    nextContent: current.replace(find, replace),
   };
 }
 
@@ -903,6 +1377,7 @@ export function preflightAutonomousEditAction(
   const absolutePath = path.resolve(repoRoot, check.normalizedPath);
   if (action.type === 'replace') {
     const find = typeof action.find === 'string' ? action.find : '';
+    const replace = typeof action.replace === 'string' ? action.replace : '';
     if (!find) {
       return buildNormalizedFailedEdit(action, check.normalizedPath, 'Replace action is missing a find string.');
     }
@@ -911,25 +1386,18 @@ export function preflightAutonomousEditAction(
     }
 
     const current = fs.readFileSync(absolutePath, 'utf8');
-    const matchCount = countOccurrences(current, find);
-    if (matchCount > 1) {
-      return buildNormalizedFailedEdit(action, check.normalizedPath, `Replace target text matched ${matchCount} times in the file; provide a more specific anchored block.`);
+    const preview = previewReplaceActionContent(current, find, replace);
+    if (!preview.ok) {
+      return buildNormalizedFailedEdit(action, check.normalizedPath, preview.message);
     }
-    if (matchCount === 0) {
-      const indentationInsensitiveMatch = findIndentationInsensitiveReplaceWindow(current, find);
-      if (indentationInsensitiveMatch.kind === 'multiple') {
-        return buildNormalizedFailedEdit(action, check.normalizedPath, `Replace target text was not found exactly and indentation-insensitive matching found ${indentationInsensitiveMatch.count} candidate blocks; provide a more specific anchored block.`);
-      }
-      if (indentationInsensitiveMatch.kind === 'none') {
-        const anchorFragmentMatch = findAnchorFragmentReplaceWindow(current, find);
-        if (anchorFragmentMatch.kind === 'multiple') {
-          return buildNormalizedFailedEdit(action, check.normalizedPath, `Replace target text was not found exactly and anchor-fragment matching found ${anchorFragmentMatch.count} candidate blocks; provide a more specific anchored block.`);
-        }
-        if (anchorFragmentMatch.kind === 'unique') {
-          return null;
-        }
-        return buildNormalizedFailedEdit(action, check.normalizedPath, buildReplaceFailureDiagnostic(current, find));
-      }
+
+    if (preview.nextContent === current) {
+      return buildNormalizedFailedEdit(action, check.normalizedPath, 'No content change was produced by the replace action.');
+    }
+
+    const contentValidation = validateAutonomousEditContent(absolutePath, preview.nextContent);
+    if (!contentValidation.ok) {
+      return buildNormalizedFailedEdit(action, check.normalizedPath, contentValidation.message);
     }
     return null;
   }
@@ -937,6 +1405,13 @@ export function preflightAutonomousEditAction(
   const content = typeof action.content === 'string' ? action.content : '';
   if (!content) {
     return buildNormalizedFailedEdit(action, check.normalizedPath, 'Write action is missing content.');
+  }
+  if (fs.existsSync(absolutePath) && fs.readFileSync(absolutePath, 'utf8') === content) {
+    return buildNormalizedFailedEdit(action, check.normalizedPath, 'Write action produced no content change.');
+  }
+  const contentValidation = validateAutonomousEditContent(absolutePath, content);
+  if (!contentValidation.ok) {
+    return buildNormalizedFailedEdit(action, check.normalizedPath, contentValidation.message);
   }
   return null;
 }
@@ -1087,13 +1562,13 @@ export function applyAutonomousEditsWithManifest(
               continue;
             }
 
-            const unusedLocalValidation = validateAutonomousEditUnusedLocals(absolutePath, next);
-            if (!unusedLocalValidation.ok) {
+            const contentValidation = validateAutonomousEditContent(absolutePath, next);
+            if (!contentValidation.ok) {
               resultsByIndex.set(index, AppliedAutonomousEditSchema.parse({
                 ...action,
                 path: check.normalizedPath,
                 status: 'failed',
-                message: unusedLocalValidation.message,
+                message: contentValidation.message,
               }));
               continue;
             }
@@ -1135,13 +1610,13 @@ export function applyAutonomousEditsWithManifest(
               continue;
             }
 
-            const unusedLocalValidation = validateAutonomousEditUnusedLocals(absolutePath, next);
-            if (!unusedLocalValidation.ok) {
+            const contentValidation = validateAutonomousEditContent(absolutePath, next);
+            if (!contentValidation.ok) {
               resultsByIndex.set(index, AppliedAutonomousEditSchema.parse({
                 ...action,
                 path: check.normalizedPath,
                 status: 'failed',
-                message: unusedLocalValidation.message,
+                message: contentValidation.message,
               }));
               continue;
             }
@@ -1189,13 +1664,13 @@ export function applyAutonomousEditsWithManifest(
           continue;
         }
 
-        const unusedLocalValidation = validateAutonomousEditUnusedLocals(absolutePath, next);
-        if (!unusedLocalValidation.ok) {
+        const contentValidation = validateAutonomousEditContent(absolutePath, next);
+        if (!contentValidation.ok) {
           resultsByIndex.set(index, AppliedAutonomousEditSchema.parse({
             ...action,
             path: check.normalizedPath,
             status: 'failed',
-            message: unusedLocalValidation.message,
+            message: contentValidation.message,
           }));
           continue;
         }
@@ -1237,13 +1712,13 @@ export function applyAutonomousEditsWithManifest(
         }
       }
 
-      const unusedLocalValidation = validateAutonomousEditUnusedLocals(absolutePath, content);
-      if (!unusedLocalValidation.ok) {
+      const contentValidation = validateAutonomousEditContent(absolutePath, content);
+      if (!contentValidation.ok) {
         resultsByIndex.set(index, AppliedAutonomousEditSchema.parse({
           ...action,
           path: check.normalizedPath,
           status: 'failed',
-          message: unusedLocalValidation.message,
+          message: contentValidation.message,
         }));
         continue;
       }

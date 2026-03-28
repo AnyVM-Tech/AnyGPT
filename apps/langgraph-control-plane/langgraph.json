@@ -1,7 +1,7 @@
 {
   "node_version": "20",
   "graphs": {
-    "control-plane": "./src/studioGraph.ts:graph"
+    "control-plane": "./dist/studioGraph.js:graph"
   },
   "env": "../../.env.local"
 }

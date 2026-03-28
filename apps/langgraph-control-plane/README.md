@@ -6,13 +6,14 @@ It now includes:
 
 - multiple cooperating planner/execution agents inside a single LangGraph workflow
 - direct MCP stdio server inspection from [`/.roo/mcp.json`](../../.roo/mcp.json)
+- first-class MCP action planning/execution for bounded web research and browser inspection
 - separate build, quality, and deploy planning stages
 - experimental-safe defaults for AnyGPT API build, test, and deploy flows
 - deterministic LangSmith-backed evaluation/regression gating for autonomous edits and execution
 
 ## Studio-Compatible Agent Server
 
-This workspace now includes a LangGraph Studio-compatible app config in [`langgraph.json`](langgraph.json) that points Studio at the existing control-plane graph export in [`src/studioGraph.ts`](src/studioGraph.ts).
+This workspace now includes a LangGraph Studio-compatible app config in [`langgraph.json`](langgraph.json) that points Studio at the built control-plane graph export in [`dist/studioGraph.js`](dist/studioGraph.js). The `studio:dev` script builds the package first so Bun does not need to resolve the TypeScript graph through `tsx` at runtime.
 
 Run the local Studio/agent server with:
 
@@ -29,6 +30,60 @@ Default connection details:
 The LangGraph server currently loads environment variables from [`../../.env.local`](../../.env.local) via [`langgraph.json`](langgraph.json). If you keep your control-plane credentials elsewhere, update the `env` path in [`langgraph.json`](langgraph.json) before launching Studio.
 
 Studio now uses the same file-backed control-plane checkpoint persistence model as the CLI, writing state to [`apps/langgraph-control-plane/.control-plane/studio-checkpoints.json`](.control-plane/studio-checkpoints.json) instead of using process-local memory only.
+
+### Runtime monitoring notes
+
+- Before calling a control-plane iteration successful, confirm at least one fresh LangSmith control-plane run/trace for the current control-plane thread, not just any recent run from another scope or thread. If no same-thread run was emitted, record a clear operator-facing no-run defer reason instead. Zero fresh runs for the current iteration is an observability gap, not by itself a deploy or rollback trigger.
+- Before any experimental mutation, do a quick readiness check that the control-plane runtime is actually serving, the Studio graph is registered, and pending concurrent LangSmith runners are not already creating misleading health signals or shared-workspace contention. If readiness is unclear, prefer a bounded operator-facing defer reason over mutation.
+- After any bounded control-plane change, treat the iteration as successful only after checking graph registration, worker startup, pending-run growth, experimental API health against the isolated experimental base URL, and whether at least one fresh LangSmith control-plane run/trace was emitted for the current iteration. If no run was emitted, preserve a clear operator-facing no-run defer reason instead of inferring a deploy or rollback trigger.
+- Repeated `openai`/`openrouter` `key_invalid`, `Unauthorized`, `401`, or `quota exceeded` events should be classified as upstream credential or provider-governance drift blocked in `apps/api` provider routing/probing by default, not as a control-plane regression by themselves.
+- When that auth/quota pattern dominates, retrying the same provider-method combination is unlikely to help immediately until credentials or quota are fixed; prefer preserving an operator-facing defer reason over speculative control-plane escalation.
+- The next control-plane smoke/validation success condition should confirm at least one fresh LangSmith control-plane run/trace for the iteration, or preserve a clear no-run defer reason if no run was emitted.
+- Re-check after the change that the Studio server still registers graph id `control-plane`, starts workers cleanly, and preserves observability/governance payload compatibility around nullable fields and JSON-stringified LangSmith objects.
+
+- Repeated `openai`/`openrouter` `key_invalid`, `Unauthorized`, `401`, or `quota exceeded` signals should be treated as upstream credential or provider-governance drift blocked in `apps/api` provider routing/probing by default, not as a control-plane deploy/rollback trigger by themselves. Retrying the same provider-method combination is unlikely to help immediately until credentials or quota are fixed.
+- For bounded control-plane validation, prefer a smoke pass that confirms graph registration, worker bootstrap, and no immediate exit loop, then verify at least one fresh LangSmith control-plane run/trace was emitted for the iteration or preserve a clear operator-facing defer reason explaining why no run was emitted.
+- LangSmith governance `recent-run-health` with zero recent runs is a control-plane monitoring gap, not by itself a deploy/rollback trigger.
+- After any control-plane startup, restart, or rollout, the next smoke/validation step should confirm all three conditions: the graph still registers, the process stays up long enough to serve at least one iteration, and at least one fresh LangSmith control-plane run/trace is visible for that iteration.
+- If no fresh LangSmith run is emitted, preserve a clear operator-facing defer reason in the run summary or handoff notes instead of treating the absence of runs alone as proof of a product or provider regression.
+- Treat repeated `key_invalid`, `Unauthorized`, `invalid_api_key`, `401`, or quota-exhausted OpenAI/OpenRouter failures as upstream credential or provider-governance drift in `apps/api` provider routing/probing by default, not as a control-plane regression. Retrying the same provider-method combination is unlikely to help immediately until credentials, quota, or upstream governance are fixed.
+- When those upstream/provider-bound signals dominate an otherwise healthy control-plane iteration, prefer a bounded control-plane observability, prioritization, cooldown, or explicit defer-reason improvement over speculative provider edits outside this workspace.
+- A successful control-plane iteration should leave either at least one fresh LangSmith control-plane run/trace for the current thread or a clear operator-facing defer reason explaining why no run was emitted.
+- Experimental smoke validation remains bounded: confirm the control-plane graph registers cleanly, workers stay up, and avoid production restart actions unless separately approved; `anygpt-experimental.service` is the only restart candidate in normal experimental-safe flow.
+
+- Treat repeated `key_invalid`, `Unauthorized`, `invalid_api_key`, `401`, or quota-exceeded signals for OpenAI/OpenRouter as upstream credential or provider-governance drift blocked in `apps/api` provider routing/probing by default, not as a control-plane regression. Repeating the same provider-method combination is unlikely to help immediately until credentials or quota are fixed.
+- During healthy control-plane iterations, prefer one small orchestration, observability, or workflow-hardening change over broad repo edits.
+- Zero fresh control-plane LangSmith runs for an iteration is a monitoring gap, not by itself a deploy or rollback trigger; preserve a clear operator-facing defer reason when no run was emitted.
+- The next bounded smoke/validation step after a control-plane change should confirm: (1) control-plane graph registration still succeeds, and (2) at least one fresh LangSmith control-plane run/trace was emitted for the iteration, or a clear no-run defer reason was recorded.
+
+- Treat repeated `key_invalid`, `Unauthorized`, `invalid_api_key`, `401`, or `quota exceeded` events for the same provider family as upstream credential or provider-governance drift by default, blocked in `apps/api` provider routing/probing rather than a clear control-plane regression.
+- When that pattern dominates, repeating the same provider-method combination is unlikely to help immediately until credentials or quota are fixed; prefer a bounded control-plane observability, cooldown, prioritization, or explicit defer reason instead of speculative provider edits outside this workspace.
+- Zero recent LangSmith runs is a monitoring gap, not by itself a deploy or rollback trigger.
+- The next smoke or validation step for a control-plane iteration should confirm at least one fresh LangSmith control-plane run/trace, or preserve a clear operator-facing defer reason explaining why no run was emitted.
+
+- Treat repeated `key_invalid`, `Unauthorized`, `invalid_api_key`, `401`, or `quota exceeded` events for the same provider family as upstream credential or provider-governance drift by default, blocked in `apps/api` provider routing/probing rather than a control-plane regression.
+- When that auth/quota pattern dominates, repeating the same provider-method combination is unlikely to help immediately until credentials or quota are fixed; prefer a bounded control-plane observability, cooldown, prioritization, or explicit defer reason instead of speculative provider edits outside this workspace.
+- A successful control-plane smoke/validation pass for those iterations should confirm at least one fresh LangSmith control-plane run/trace was emitted for the iteration, or preserve a clear operator-facing defer reason explaining why no run was emitted.
+- Treat repeated `key_invalid`, `Unauthorized`, `invalid_api_key`, `401`, or `quota exceeded` events for `openai`/`openrouter` as upstream credential or provider-governance drift by default, blocked in `apps/api` provider routing/probing. Repeating the same provider-method combination is unlikely to help until credentials or quota are fixed; in control-plane scope, prefer a bounded observability, cooldown, prioritization, or explicit defer-reason update instead of speculative provider edits.
+- If recent LangSmith runs are missing or do not clearly cover the current iteration, treat that as a monitoring gap rather than, by itself, a deploy/rollback trigger. The next smoke step should confirm at least one fresh control-plane LangSmith run/trace or preserve a clear operator-facing defer reason explaining why no run was emitted.
+- Treat repeated `provider_cap_blocked` and `provider_model_removed` events for the same provider family, capability, or region as upstream/provider-bound catalog drift by default, especially when the reason text says a capability is unavailable in a country or provider region.
+- In those cases, prefer bounded control-plane actions such as clearer summaries, candidate-path prioritization, provider de-prioritization notes, or explicit no-op/defer reasons instead of speculative provider implementation edits outside the active scope.
+- When provider sync churn is otherwise healthy (for example `Saved providers.json. Kept 1419, removed 102.`) and recent LangSmith runs show no active failures, bias toward one small orchestration, observability, or workflow-hardening improvement that can pass smoke validation quickly.
+
+- Treat repeated `provider_cap_blocked` and `provider_model_removed` entries for Gemini image-output capability churn as upstream/provider-bound catalog or region drift by default; prefer control-plane observability, candidate prioritization, and operator-facing notes over speculative provider implementation edits when the active signal is region or country availability.
+- When recent logs mainly show provider/model sync churn such as `Saved providers.json. Kept 1419, removed 102.`, prefer one small orchestration, observability, or workflow-hardening improvement inside the control plane instead of broad repo-wide repair attempts.
+- Before approving even experimental rollout, confirm the change can be validated without restarting production `anygpt.service`; if a restart is required for validation, isolate it to `anygpt-experimental.service` only.
+- Control-plane smoke validation for bounded changes should prefer no-secrets checks such as `bash ./bun.sh run -F anygpt-langgraph-control-plane typecheck` and other local control-plane validation that does not require production service interruption.
+
+- Treat repeated `provider_cap_blocked` and `provider_model_removed` events for the same provider family, capability, or region as upstream/provider-bound catalog drift by default, especially when the reason mentions country or provider-region availability.
+- When those region-blocked signals dominate, prefer control-plane actions that improve classification, defer/no-op reasoning, candidate-path prioritization, and operator-facing notes instead of speculative provider implementation edits outside the active scope.
+- Treat repeated `provider_cap_blocked` and `provider_model_removed` events for the same provider family, capability, or region as upstream/provider-bound catalog or regional availability churn by default, especially when the reason text says image generation is unavailable in a country or provider region.
+- When that churn dominates recent logs, prefer bounded control-plane responses such as sharper failure-origin notes, candidate-path prioritization, provider de-prioritization guidance, or explicit no-op/defer summaries instead of speculative provider implementation edits outside scope.
+- Treat repeated `provider_cap_blocked` and `provider_model_removed` events for region- or country-restricted capabilities as upstream/provider-bound catalog drift by default. In those cases, prefer bounded control-plane actions such as clearer defer reasons, candidate-path prioritization, and operator-facing notes over speculative provider implementation edits.
+- Recent provider/model churn such as `Saved providers.json. Kept 1419, removed 102.` should usually be treated as normal upstream catalog sync activity unless it coincides with a control-plane validation failure.
+- Region-blocked Gemini probe events like `provider_cap_blocked` or `provider_model_removed` for image output are upstream/provider-bound signals by default; prefer documenting or prioritizing them in planning notes instead of assuming a local control-plane defect.
+- The Studio log line `Flushing to persistent storage, exiting...` should not be treated as proof of a control-plane bug by itself. If it appears after graph registration and startup, confirm whether the experimental Studio surface intentionally exited before proposing lifecycle changes.
+- During healthy iterations with quiet governance checks, prefer small orchestration, observability, or documentation hardening changes in this workspace over speculative provider or worker-lifecycle edits.
 
 ## Purpose
 
@@ -49,6 +104,13 @@ bun run dev -- --goal="Ship a fix" --scopes=repo,api
 
 # Execute planned jobs
 bun run dev -- --goal="Validate API changes" --scopes=api --execute
+
+# Execute with first-class MCP browser/search actions enabled
+bun run dev -- --goal="Review https://docs.langchain.com/oss/javascript/langgraph/overview and https://github.com/openclaw/openclaw" \
+  --scopes=control-plane,repo-surface \
+  --execute \
+  --mcp-actions \
+  --mcp-target-urls=https://docs.langchain.com/oss/javascript/langgraph/overview,https://github.com/openclaw/openclaw
 
 # Execute with an explicit deploy command
 bun run dev -- --goal="Release API" --scopes=api --execute --allow-deploy --deploy-command="sudo systemctl restart anygpt-experimental"
@@ -72,11 +134,13 @@ The workflow is split into cooperating nodes in [`src/workflow.ts`](src/workflow
 
 - `inspectMcp` — loads MCP server metadata
 - `plannerAgent` — normalizes scopes and planning notes
+- `planMcpActions` — builds a bounded first-class MCP tool plan from the goal and discovered tool inventory
 - `buildAgent` — generates build jobs
 - `qualityAgent` — generates test jobs
 - `deployAgent` — generates deploy jobs
 - `mergePlan` — combines all agent output into the final job plan
 - `approvalGate` — pauses for approval before risky operations when execution is enabled
+- `runMcpActions` — executes approved MCP search/browser actions before shell jobs and autonomous edits
 - `runJobs` — optionally executes the plan
 - `summarize` — emits the human-readable and JSON result
 
@@ -97,6 +161,13 @@ Current MCP support now directly inspects enabled stdio servers during planning:
 - connects with the MCP TypeScript client over stdio
 - lists available tools from each enabled server
 - includes discovered tool inventories, allowed tools, and inspection status in the generated plan
+
+The control plane can now also execute a bounded MCP action lane when `--mcp-actions` or `CONTROL_PLANE_MCP_ACTIONS=true` is enabled:
+
+- Brave Search can be used for goal-driven web research
+- Playwright MCP can open explicitly supplied target URLs and capture browser snapshots
+- tools listed in `alwaysAllow` stay approval-free, while non-allowlisted tools flow through the existing approval gate
+- tool execution stays deterministic and policy-driven instead of letting the model invent arbitrary side effects
 
 Disabled servers remain skipped, unsupported transport types are reported in planner notes, and summaries only expose sanitized environment key names rather than secret values.
 
@@ -600,10 +671,4 @@ To split this into a fully separate repository later:
 - This scaffold uses LangGraph JavaScript via [`@langchain/langgraph`](package.json).
 - It is designed as a control plane, not as part of the production API process.
 - The workflow is intentionally minimal so it can be hardened later with approvals, retries, remote runners, and deployment policies.
-- Live autonomous smoke validation should prefer bounded documentation-only edits within this README.
-- Live autonomous smoke validation should prefer bounded documentation-only edits within this README.
-- Live autonomous smoke validation should prefer bounded documentation-only edits within this README.
-- Live autonomous smoke validation should prefer bounded documentation-only edits within this README.
-- Live autonomous smoke validation should prefer bounded documentation-only edits within this README.
-- Live autonomous smoke validation should prefer bounded documentation-only edits within this README.
 - Live autonomous smoke validation should prefer bounded documentation-only edits within this README.

@@ -253,6 +253,8 @@ export function startSseHeartbeat(
 	const writeHeartbeat = () => {
 		if (stopped) return;
 		const responseAny = response as any;
+		const socketLike = responseAny?.socket ?? responseAny?.stream ?? responseAny?.raw;
+		const now = Date.now();
 		const noLongerWritable =
 			response.completed ||
 			responseAny?.destroyed === true ||
@@ -264,20 +266,42 @@ export function startSseHeartbeat(
 			responseAny?.aborted === true ||
 			responseAny?.finished === true ||
 			responseAny?.ended === true ||
-			responseAny?.socket?.destroyed === true ||
-			responseAny?.stream?.destroyed === true ||
-			responseAny?.raw?.destroyed === true;
+			responseAny?.errored === true ||
+			responseAny?.headersSent === false ||
+			socketLike?.destroyed === true ||
+			socketLike?.writable === false ||
+			socketLike?.closed === true ||
+			socketLike?.errored === true;
 		if (noLongerWritable) {
 			stop();
 			return;
 		}
-		if (Date.now() - lastWriteAt < intervalMs) return;
+		const pendingDrain =
+			responseAny?.writableNeedDrain === true ||
+			socketLike?.writableNeedDrain === true;
+		if (pendingDrain) return;
+		if (now - lastWriteAt < intervalMs) return;
 		try {
 			const result = response.write(payload);
 			if (result === false) {
+				const pendingDrainAfterWrite =
+					responseAny?.writableNeedDrain === true ||
+					socketLike?.writableNeedDrain === true;
+				if (
+					response.completed ||
+					responseAny?.destroyed === true ||
+					responseAny?.writableEnded === true ||
+					responseAny?.writableFinished === true ||
+					responseAny?.closed === true ||
+					responseAny?.aborted === true ||
+					socketLike?.destroyed === true ||
+					socketLike?.writable === false ||
+					(!pendingDrainAfterWrite && socketLike?.closed === true)
+				) {
+					stop();
+				}
 				return;
 			}
-			const now = Date.now();
 			emitted += 1;
 			lastWriteAt = now;
 			lastHeartbeatAt = now;
@@ -285,7 +309,6 @@ export function startSseHeartbeat(
 			stop();
 		}
 	};
-
 	const timer = setInterval(writeHeartbeat, intervalMs);
 	if (typeof (timer as { unref?: () => void }).unref === 'function') {
 		timer.unref();

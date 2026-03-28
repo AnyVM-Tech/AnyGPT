@@ -310,6 +310,15 @@ const providerRateLimitStarts = new Map<string, number>();
 const providerRateLimitWindows = new Map<string, number[]>();
 const providerFastSkips = new Map<string, number>();
 const COOLDOWN_EVICTION_INTERVAL_MS = 5 * 60 * 1000; // Sweep expired entries every 5 minutes
+const PROVIDER_RATE_LIMIT_TRACKING_TTL_MS = (() => {
+	const fallback = Number.isFinite(RATE_LIMIT_WAIT_MAX_MS)
+		? Math.max(10 * 60 * 1000, Math.floor(RATE_LIMIT_WAIT_MAX_MS * 4))
+		: 10 * 60 * 1000;
+	const raw = Number(
+		process.env.PROVIDER_RATE_LIMIT_TRACKING_TTL_MS ?? fallback
+	);
+	return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : fallback;
+})();
 const DISTRIBUTED_PROVIDER_BUCKET_LUA = `
 local bucket_key = KEYS[1]
 local now_ms = tonumber(ARGV[1])
@@ -371,9 +380,34 @@ const _cooldownEvictionTimer = setInterval(() => {
 			evicted++;
 		}
 	}
+	for (const [key, startedAt] of providerRateLimitStarts) {
+		if (now - startedAt >= PROVIDER_RATE_LIMIT_TRACKING_TTL_MS) {
+			providerRateLimitStarts.delete(key);
+			evicted++;
+		}
+	}
+	for (const [key, timestamps] of providerRateLimitWindows) {
+		if (!Array.isArray(timestamps) || timestamps.length === 0) {
+			providerRateLimitWindows.delete(key);
+			evicted++;
+			continue;
+		}
+		const active = timestamps.filter(
+			timestamp => now - timestamp < PROVIDER_RATE_LIMIT_TRACKING_TTL_MS
+		);
+		if (active.length > 0) {
+			if (active.length !== timestamps.length) {
+				providerRateLimitWindows.set(key, active);
+			}
+		} else {
+			providerRateLimitWindows.delete(key);
+			evicted++;
+		}
+	}
 	if (evicted > 0) {
 		console.log(
-			`[CooldownEviction] Swept ${evicted} expired cooldown entries. Remaining: ${providerCooldowns.size}`
+			`[CooldownEviction] Swept ${evicted} expired cooldown/rate-limit entries. ` +
+				`Remaining cooldowns=${providerCooldowns.size}, rateWindows=${providerRateLimitWindows.size}`
 		);
 	}
 }, COOLDOWN_EVICTION_INTERVAL_MS);
@@ -1643,6 +1677,12 @@ export class MessageHandler {
 			if (modalities.includes('image')) required.add('image_output');
 			if (modalities.includes('audio')) required.add('audio_output');
 			if (message?.audio) required.add('audio_output');
+			if (
+				(Array.isArray(message?.tools) && message.tools.length > 0) ||
+				typeof message?.tool_choice !== 'undefined'
+			) {
+				required.add('tool_calling');
+			}
 		});
 
 		// Heuristic: if the requested model name implies image generation, demand image_output
@@ -1932,13 +1972,34 @@ export class MessageHandler {
 		if (!required || required.size === 0) return providers;
 		return providers.filter(provider => {
 			const modelData = provider.models?.[modelId];
-			if ((modelData as any)?.disabled) return false;
-			const skips = (modelData as any)?.capability_skips as
-				| Partial<Record<ModelCapability, string>>
-				| undefined;
-			if (!skips) return true;
+			if (
+				(modelData as any)?.disabled ||
+				(modelData as any)?.removed ||
+				(modelData as any)?.unavailable
+			) return false;
+			const skips = ((modelData as any)?.capability_skips || {}) as
+				Partial<Record<ModelCapability, string>>;
+			const blocked = Array.isArray((modelData as any)?.capability_blocked)
+				? ((modelData as any).capability_blocked as unknown[])
+					.map((cap) => String(cap || '').trim().toLowerCase())
+					.filter(Boolean)
+				: [];
+			const availableCaps = Array.isArray((modelData as any)?.capabilities)
+				? ((modelData as any).capabilities as unknown[])
+					.map((cap) => String(cap || '').trim().toLowerCase())
+					.filter(Boolean)
+				: [];
+			const normalizedAvailableCaps =
+				availableCaps.length > 0 ? new Set(availableCaps) : null;
 			for (const cap of required) {
 				if (skips[cap]) return false;
+				if (blocked.includes(String(cap).toLowerCase())) return false;
+				if (
+					normalizedAvailableCaps &&
+					!normalizedAvailableCaps.has(String(cap).toLowerCase())
+				) {
+					return false;
+				}
 			}
 			return true;
 		});

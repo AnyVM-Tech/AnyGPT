@@ -9,9 +9,12 @@ LOG_FILE="$CONTROL_DIR/live-autonomous-runner.log"
 PID_FILE="$CONTROL_DIR/live-autonomous-runner.pid"
 ENV_FILE="$CONTROL_DIR/live-autonomous-runner.env"
 EXEC_SCRIPT="$ROOT_DIR/scripts/control-plane-autonomous-runner-exec.sh"
+CHILD_PID_GLOB="$CONTROL_DIR/live-autonomous-runner"*.pid
+CHILD_STATUS_GLOB="$CONTROL_DIR/live-autonomous-runner-status."*.json
 USER_SERVICE_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 UNIT_NAME="anygpt-control-plane-autonomous-runner.service"
 UNIT_FILE="$USER_SERVICE_DIR/$UNIT_NAME"
+SYSTEM_UNIT_FILE="/etc/systemd/system/$UNIT_NAME"
 
 DEFAULT_GOAL='Continuously monitor, fix, and improve AnyGPT across the repo, checking API, control-plane, UI, homepage, runtime health, routing, model availability, governance drift, and bounded safe improvements.'
 DEFAULT_SCOPES='repo,api,api-experimental,control-plane,repo-surface'
@@ -43,12 +46,320 @@ is_pid_alive() {
   kill -0 "$pid" 2>/dev/null
 }
 
+user_systemd_available() {
+  systemctl --user show-environment >/dev/null 2>&1
+}
+
+system_systemd_available() {
+  systemctl show-environment >/dev/null 2>&1
+}
+
+direct_runner_pid() {
+  local pid
+  pid="$(read_pid 2>/dev/null || true)"
+  if [[ -n "$pid" ]] && is_pid_alive "$pid"; then
+    printf '%s\n' "$pid"
+    return 0
+  fi
+
+  local pid_file candidate
+  shopt -s nullglob
+  for pid_file in $CHILD_PID_GLOB; do
+    candidate="$(tr -d '[:space:]' < "$pid_file" 2>/dev/null || true)"
+    if [[ -n "$candidate" ]] && is_pid_alive "$candidate"; then
+      printf '%s\n' "$candidate"
+      shopt -u nullglob
+      return 0
+    fi
+  done
+  shopt -u nullglob
+  return 1
+}
+
+direct_runner_state() {
+  local pid
+  pid="$(direct_runner_pid)"
+  if [[ -n "$pid" ]] && is_pid_alive "$pid"; then
+    printf 'active\n'
+    return 0
+  fi
+  printf 'inactive\n'
+}
+
+any_child_pid_files_alive() {
+  local pid_file pid
+  shopt -s nullglob
+  for pid_file in $CHILD_PID_GLOB; do
+    pid="$(tr -d '[:space:]' < "$pid_file" 2>/dev/null || true)"
+    if [[ -n "$pid" ]] && is_pid_alive "$pid"; then
+      shopt -u nullglob
+      return 0
+    fi
+  done
+  shopt -u nullglob
+  return 1
+}
+
+remove_stale_child_pid_files() {
+  local pid_file pid
+  shopt -s nullglob
+  for pid_file in $CHILD_PID_GLOB; do
+    pid="$(tr -d '[:space:]' < "$pid_file" 2>/dev/null || true)"
+    if [[ -z "$pid" ]]; then
+      rm -f "$pid_file"
+      continue
+    fi
+    if ! is_pid_alive "$pid"; then
+      rm -f "$pid_file"
+    fi
+  done
+  shopt -u nullglob
+}
+
+lane_pid_file_for_status() {
+  local status_file="$1"
+  local base lane
+  base="$(basename "$status_file")"
+  lane="${base#live-autonomous-runner-status.}"
+  lane="${lane%.json}"
+  if [[ -z "$lane" || "$lane" == "$base" ]]; then
+    return 1
+  fi
+  printf '%s/live-autonomous-runner.%s.pid\n' "$CONTROL_DIR" "$lane"
+}
+
+normalize_stale_child_status_files() {
+  local status_file pid_file pid
+  shopt -s nullglob
+  for status_file in $CHILD_STATUS_GLOB; do
+    if [[ "$status_file" == "$STATUS_FILE" || "$status_file" == *.previous ]]; then
+      continue
+    fi
+
+    pid_file="$(lane_pid_file_for_status "$status_file" 2>/dev/null || true)"
+    if [[ -n "$pid_file" && -f "$pid_file" ]]; then
+      pid="$(tr -d '[:space:]' < "$pid_file" 2>/dev/null || true)"
+      if [[ -n "$pid" ]] && is_pid_alive "$pid"; then
+        continue
+      fi
+    fi
+
+    "$ROOT_DIR/bun.sh" -e '
+      import fs from "node:fs";
+
+      const statusPath = process.argv[1];
+      if (!statusPath || !fs.existsSync(statusPath)) process.exit(0);
+
+      let parsed;
+      try {
+        parsed = JSON.parse(fs.readFileSync(statusPath, "utf8"));
+      } catch {
+        process.exit(0);
+      }
+
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        process.exit(0);
+      }
+
+      const now = new Date().toISOString();
+      const staleNote = "Lane inactive. No live PID was found for this status file.";
+      parsed.running = false;
+      parsed.phase = "completed";
+      parsed.lastUpdatedAt = now;
+      if (typeof parsed.summary === "string" && parsed.summary.trim()) {
+        if (!parsed.summary.includes(staleNote)) {
+          parsed.summary = `${parsed.summary}\n\n[cleaned] ${staleNote}`;
+        }
+      } else {
+        parsed.summary = staleNote;
+      }
+
+      fs.writeFileSync(statusPath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
+    ' -- "$status_file"
+  done
+  shopt -u nullglob
+}
+
+all_child_pid_files_dead() {
+  local pid_file pid
+  shopt -s nullglob
+  for pid_file in $CHILD_PID_GLOB; do
+    pid="$(tr -d '[:space:]' < "$pid_file" 2>/dev/null || true)"
+    if [[ -n "$pid" ]] && is_pid_alive "$pid"; then
+      shopt -u nullglob
+      return 1
+    fi
+  done
+  shopt -u nullglob
+  return 0
+}
+
+normalize_stale_status_file() {
+  if [[ ! -f "$STATUS_FILE" ]]; then
+    return 0
+  fi
+
+  "$ROOT_DIR/bun.sh" -e '
+    import fs from "node:fs";
+
+    const statusPath = process.argv[1];
+    if (!statusPath || !fs.existsSync(statusPath)) process.exit(0);
+
+    let parsed;
+    try {
+      parsed = JSON.parse(fs.readFileSync(statusPath, "utf8"));
+    } catch {
+      process.exit(0);
+    }
+
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      process.exit(0);
+    }
+
+    const now = new Date().toISOString();
+    const staleNote = "Runner inactive. Stale runtime state was cleaned.";
+    parsed.running = false;
+    parsed.phase = "completed";
+    parsed.lastUpdatedAt = now;
+    if (typeof parsed.summary === "string" && parsed.summary.trim()) {
+      if (!parsed.summary.includes(staleNote)) {
+        parsed.summary = `${parsed.summary}\n\n[cleaned] ${staleNote}`;
+      }
+    } else {
+      parsed.summary = staleNote;
+    }
+
+    if (Array.isArray(parsed.coordinatedRunners)) {
+      parsed.coordinatedRunners = parsed.coordinatedRunners.map((runner) => {
+        if (!runner || typeof runner !== "object") return runner;
+        return {
+          ...runner,
+          running: false,
+          phase: "completed",
+        };
+      });
+    }
+
+    fs.writeFileSync(statusPath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
+  ' -- "$STATUS_FILE"
+}
+
+normalize_active_child_status_file() {
+  if [[ ! -f "$STATUS_FILE" ]]; then
+    return 0
+  fi
+
+  "$ROOT_DIR/bun.sh" -e '
+    import fs from "node:fs";
+
+    const statusPath = process.argv[1];
+    if (!statusPath || !fs.existsSync(statusPath)) process.exit(0);
+
+    let parsed;
+    try {
+      parsed = JSON.parse(fs.readFileSync(statusPath, "utf8"));
+    } catch {
+      process.exit(0);
+    }
+
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      process.exit(0);
+    }
+
+    const now = new Date().toISOString();
+    const note = "Child autonomous lanes are still active; status was reattached after coordinator PID drift.";
+    parsed.running = true;
+    parsed.phase = "streaming";
+    parsed.lastUpdatedAt = now;
+    if (typeof parsed.summary === "string" && parsed.summary.trim()) {
+      if (!parsed.summary.includes(note)) {
+        parsed.summary = `${parsed.summary}\n\n[reattached] ${note}`;
+      }
+    } else {
+      parsed.summary = note;
+    }
+
+    if (Array.isArray(parsed.coordinatedRunners)) {
+      parsed.coordinatedRunners = parsed.coordinatedRunners.map((runner) => {
+        if (!runner || typeof runner !== "object") return runner;
+        return {
+          ...runner,
+          running: true,
+          phase: runner.phase && runner.phase !== "completed" ? runner.phase : "streaming",
+        };
+      });
+    }
+
+    fs.writeFileSync(statusPath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
+  ' -- "$STATUS_FILE"
+}
+
+cleanup_stale_runtime_state() {
+  remove_stale_child_pid_files
+  normalize_stale_child_status_files
+
+  local state pid
+  state="$(service_state)"
+  pid="$(service_main_pid)"
+
+  if [[ "$state" == "active" || "$state" == "activating" || "$state" == "deactivating" ]]; then
+    if [[ ! -f "$PID_FILE" ]] && any_child_pid_files_alive; then
+      normalize_active_child_status_file
+    fi
+    return 0
+  fi
+
+  if [[ -n "$pid" && "$pid" != "0" ]] && is_pid_alive "$pid"; then
+    return 0
+  fi
+
+  if any_child_pid_files_alive; then
+    normalize_active_child_status_file
+    return 0
+  fi
+
+  rm -f "$PID_FILE"
+  if all_child_pid_files_dead; then
+    normalize_stale_status_file
+  fi
+}
+
 service_state() {
-  systemctl --user is-active "$UNIT_NAME" 2>/dev/null || true
+  local state=""
+  if user_systemd_available; then
+    state="$(systemctl --user is-active "$UNIT_NAME" 2>/dev/null || true)"
+    if [[ "$state" == "active" || "$state" == "activating" || "$state" == "deactivating" ]]; then
+      printf '%s\n' "$state"
+      return 0
+    fi
+  fi
+  if system_systemd_available; then
+    state="$(systemctl is-active "$UNIT_NAME" 2>/dev/null || true)"
+    if [[ "$state" == "active" || "$state" == "activating" || "$state" == "deactivating" ]]; then
+      printf '%s\n' "$state"
+      return 0
+    fi
+  fi
+  direct_runner_state
 }
 
 service_main_pid() {
-  systemctl --user show --property MainPID --value "$UNIT_NAME" 2>/dev/null || true
+  local state="" pid=""
+  if user_systemd_available; then
+    state="$(systemctl --user is-active "$UNIT_NAME" 2>/dev/null || true)"
+    if [[ "$state" == "active" || "$state" == "activating" || "$state" == "deactivating" ]]; then
+      systemctl --user show --property MainPID --value "$UNIT_NAME" 2>/dev/null || true
+      return 0
+    fi
+  fi
+  if system_systemd_available; then
+    state="$(systemctl is-active "$UNIT_NAME" 2>/dev/null || true)"
+    if [[ "$state" == "active" || "$state" == "activating" || "$state" == "deactivating" ]]; then
+      systemctl show --property MainPID --value "$UNIT_NAME" 2>/dev/null || true
+      return 0
+    fi
+  fi
+  direct_runner_pid
 }
 
 write_env_var() {
@@ -111,11 +422,60 @@ WantedBy=default.target
 EOF
 }
 
+write_system_unit_file() {
+  cat > "$SYSTEM_UNIT_FILE" <<EOF
+[Unit]
+Description=AnyGPT LangGraph autonomous control-plane runner
+After=network.target anygpt.service anygpt-experimental.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=$ROOT_DIR
+ExecStart=$EXEC_SCRIPT
+Restart=always
+RestartSec=5
+KillMode=mixed
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target
+EOF
+}
+
 rotate_runtime_files() {
   if [[ -f "$STATUS_FILE" ]]; then mv "$STATUS_FILE" "$STATUS_FILE.previous"; fi
   if [[ -f "$CHECKPOINT_FILE" ]]; then mv "$CHECKPOINT_FILE" "$CHECKPOINT_FILE.previous"; fi
   if [[ -f "$LOG_FILE" ]]; then mv "$LOG_FILE" "$LOG_FILE.previous"; fi
   rm -f "$PID_FILE"
+  remove_stale_child_pid_files
+}
+
+terminate_direct_runner_processes() {
+  local pid pid_file child_pid
+  if pid="$(read_pid 2>/dev/null)" && is_pid_alive "$pid"; then
+    kill -TERM "$pid" 2>/dev/null || true
+    sleep 1
+    if is_pid_alive "$pid"; then
+      kill -KILL "$pid" 2>/dev/null || true
+    fi
+  fi
+
+  shopt -s nullglob
+  for pid_file in $CHILD_PID_GLOB; do
+    child_pid="$(tr -d '[:space:]' < "$pid_file" 2>/dev/null || true)"
+    if [[ -n "$child_pid" ]] && is_pid_alive "$child_pid"; then
+      kill -TERM "$child_pid" 2>/dev/null || true
+    fi
+  done
+  sleep 1
+  for pid_file in $CHILD_PID_GLOB; do
+    child_pid="$(tr -d '[:space:]' < "$pid_file" 2>/dev/null || true)"
+    if [[ -n "$child_pid" ]] && is_pid_alive "$child_pid"; then
+      kill -KILL "$child_pid" 2>/dev/null || true
+    fi
+  done
+  shopt -u nullglob
 }
 
 start_runner() {
@@ -141,43 +501,100 @@ start_runner() {
   rotate_runtime_files
   write_env_file "$goal" "$scopes" "$interval_ms" "$max_edit_actions" "$edit_allowlist" "$edit_denylist" "$agent_parallelism" "$multi_runner" "$log_tail_lines" "$auto_restart_experimental" "$auto_restart_production"
   chmod +x "$EXEC_SCRIPT"
-  write_unit_file
+  if user_systemd_available; then
+    write_unit_file
 
-  systemctl --user daemon-reload
-  systemctl --user reset-failed "$UNIT_NAME" >/dev/null 2>&1 || true
-  systemctl --user start "$UNIT_NAME"
+    systemctl --user daemon-reload
+    systemctl --user reset-failed "$UNIT_NAME" >/dev/null 2>&1 || true
+    systemctl --user start "$UNIT_NAME"
 
-  for _ in $(seq 1 20); do
+    for _ in $(seq 1 20); do
+      state="$(service_state)"
+      if [[ "$state" == "active" || "$state" == "activating" ]]; then
+        echo "Runner started (service_state=$state pid=$(service_main_pid))"
+        return 0
+      fi
+      sleep 0.5
+    done
+
+    echo "Runner failed to start; check $LOG_FILE and systemctl --user status $UNIT_NAME" >&2
+    return 1
+  fi
+
+  if system_systemd_available; then
+    write_system_unit_file
+    systemctl daemon-reload
+    systemctl reset-failed "$UNIT_NAME" >/dev/null 2>&1 || true
+    systemctl enable "$UNIT_NAME" >/dev/null 2>&1 || true
+    systemctl start "$UNIT_NAME"
+
+    for _ in $(seq 1 20); do
+      state="$(service_state)"
+      if [[ "$state" == "active" || "$state" == "activating" ]]; then
+        echo "Runner started (service_state=$state pid=$(service_main_pid))"
+        return 0
+      fi
+      sleep 0.5
+    done
+
+    echo "Runner failed to start; check $LOG_FILE and systemctl status $UNIT_NAME" >&2
+    return 1
+  fi
+
+  nohup bash "$EXEC_SCRIPT" >/dev/null 2>&1 &
+  local bootstrap_pid=$!
+  printf '%s\n' "$bootstrap_pid" > "$PID_FILE"
+
+  for _ in $(seq 1 40); do
     state="$(service_state)"
-    if [[ "$state" == "active" || "$state" == "activating" ]]; then
-      echo "Runner started (service_state=$state pid=$(service_main_pid))"
-      return 0
+    local active_pid
+    active_pid="$(service_main_pid)"
+    if [[ "$state" == "active" && -n "$active_pid" ]] && is_pid_alive "$active_pid"; then
+      if [[ -f "$STATUS_FILE" ]]; then
+        echo "Runner started (service_state=$state pid=$active_pid)"
+        return 0
+      fi
+    fi
+    if ! is_pid_alive "$bootstrap_pid"; then
+      break
     fi
     sleep 0.5
   done
 
-  echo "Runner failed to start; check $LOG_FILE and systemctl --user status $UNIT_NAME" >&2
+  if [[ -f "$LOG_FILE" ]]; then
+    echo "Runner failed to start in direct mode; recent log output:" >&2
+    tail -n 40 "$LOG_FILE" >&2 || true
+  else
+    echo "Runner failed to start in direct mode and no log file was written." >&2
+  fi
   return 1
 }
 
 stop_runner() {
-  local state
+  cleanup_stale_runtime_state
+  local state user_state="" system_state=""
   state="$(service_state)"
-  if [[ "$state" == "active" || "$state" == "activating" || "$state" == "deactivating" ]]; then
+  if user_systemd_available; then
+    user_state="$(systemctl --user is-active "$UNIT_NAME" 2>/dev/null || true)"
+  fi
+  if system_systemd_available; then
+    system_state="$(systemctl is-active "$UNIT_NAME" 2>/dev/null || true)"
+  fi
+
+  if [[ "$user_state" == "active" || "$user_state" == "activating" || "$user_state" == "deactivating" ]]; then
     systemctl --user stop "$UNIT_NAME" || true
+  elif [[ "$system_state" == "active" || "$system_state" == "activating" || "$system_state" == "deactivating" ]]; then
+    systemctl stop "$UNIT_NAME" || true
+  else
+    terminate_direct_runner_processes
   fi
 
   for _ in $(seq 1 20); do
     state="$(service_state)"
     if [[ -z "$state" || "$state" == "inactive" || "$state" == "failed" ]]; then
-      if pid="$(read_pid 2>/dev/null)" && is_pid_alive "$pid"; then
-        kill -TERM "$pid" 2>/dev/null || true
-        sleep 1
-        if is_pid_alive "$pid"; then
-          kill -KILL "$pid" 2>/dev/null || true
-        fi
-      fi
       rm -f "$PID_FILE"
+      remove_stale_child_pid_files
+      normalize_stale_status_file
       echo "Runner stopped"
       return 0
     fi
@@ -185,14 +602,15 @@ stop_runner() {
   done
 
   if pid="$(read_pid 2>/dev/null)" && is_pid_alive "$pid"; then
-    kill -KILL "$pid" 2>/dev/null || true
-    sleep 1
+    terminate_direct_runner_processes
     rm -f "$PID_FILE"
+    remove_stale_child_pid_files
+    normalize_stale_status_file
     echo "Runner stopped after SIGKILL"
     exit 0
   fi
 
-  echo "Runner did not stop cleanly; check systemctl --user status $UNIT_NAME" >&2
+  echo "Runner did not stop cleanly; check systemctl status $UNIT_NAME or $LOG_FILE" >&2
   return 1
 }
 
@@ -202,6 +620,7 @@ restart_runner() {
 }
 
 status_runner() {
+  cleanup_stale_runtime_state
   local state pid
   state="$(service_state)"
   pid="$(service_main_pid)"

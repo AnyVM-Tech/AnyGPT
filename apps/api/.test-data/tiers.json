@@ -29,7 +29,7 @@
   "forbiele_5m_500rpd": {
     "rps": 0,
     "rpm": 0,
-    "rpd": 600,
+    "rpd": 700,
     "soft_rpd": 500,
     "billing_period_request_target": 15000,
     "max_tokens": 5000000,

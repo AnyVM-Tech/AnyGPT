@@ -132,14 +132,38 @@ async function sendModelsResponse(request: any, response: any) {
         const tierId = validation.userData.tier;
         const tier = validation.tierLimits;
         const filtered = filterModelsForTier(modelsData, tier);
+        const visibleModelCount = Array.isArray(filtered.data) ? filtered.data.length : 0;
+        const totalModelCount = Array.isArray(modelsData?.data) ? modelsData.data.length : visibleModelCount;
+        const catalogUpdatedAt = typeof (modelsData as any)?.updated_at === 'string'
+            ? (modelsData as any).updated_at
+            : '';
+        const visibleProviderCount = filtered.data.reduce((sum, model) => sum + (typeof model.providers === 'number' ? model.providers : 0), 0);
+        const totalProviderCount = modelsData.data.reduce((sum, model) => sum + (typeof model.providers === 'number' ? model.providers : 0), 0);
         response.setHeader('Cache-Control', 'private, no-store');
         response.setHeader('X-AnyGPT-Plan', tierId);
-        response.setHeader('X-AnyGPT-Visible-Models', String(Array.isArray(filtered.data) ? filtered.data.length : 0));
+        response.setHeader('X-AnyGPT-Visible-Models', String(visibleModelCount));
+        response.setHeader('X-AnyGPT-Total-Models', String(totalModelCount));
+        response.setHeader('X-AnyGPT-Visible-Providers', String(visibleProviderCount));
+        response.setHeader('X-AnyGPT-Total-Providers', String(totalProviderCount));
+        response.setHeader('X-AnyGPT-Models-Filtered', visibleModelCount === totalModelCount ? '0' : '1');
+        response.setHeader('X-AnyGPT-Providers-Filtered', visibleProviderCount === totalProviderCount ? '0' : '1');
+        response.setHeader('X-AnyGPT-Plan-Included', includePlan ? '1' : '0');
+        if (catalogUpdatedAt) {
+            response.setHeader('X-AnyGPT-Models-Updated-At', catalogUpdatedAt);
+        }
+        const catalogState = !catalogUpdatedAt
+            ? 'missing-updated-at'
+            : visibleModelCount === 0
+                ? 'empty'
+                : visibleModelCount < totalModelCount || visibleProviderCount < totalProviderCount
+                    ? 'filtered'
+                    : 'fresh';
+        response.setHeader('X-AnyGPT-Models-Catalog-State', catalogState);
         if (includePlan) {
             return response.json({
                 ...filtered,
                 plan: buildPublicPlanPayload(tierId, tier, {
-                    visibleModelCount: Array.isArray(filtered.data) ? filtered.data.length : 0,
+                    visibleModelCount,
                 }),
             });
         }

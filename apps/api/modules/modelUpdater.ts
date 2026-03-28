@@ -50,7 +50,6 @@ function extractTokenSpeed(modelData: any): number | null {
 
 let basePricingCache: Record<string, BasePricing> | null = null;
 let supplementalPricingCache: Record<string, BasePricing> | null = null;
-let competitorMultsCache: Record<string, number> | null = null;
 const API_WORKSPACE_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const configuredLogDirectory = (process.env.ANYGPT_LOG_DIR || '').trim();
 const LOG_DIR = configuredLogDirectory
@@ -94,25 +93,122 @@ function inferCapabilitiesFromStoredResults(entry?: Record<string, string>): str
 
 function shouldCountProviderModel(modelId: string, modelData: any): boolean {
     if (!modelData || typeof modelData !== 'object') return false;
-    if (modelData.disabled === true) return false;
+    if (modelData.disabled === true || modelData.removed === true || modelData.unavailable === true) return false;
 
-    const skips = modelData.capability_skips && typeof modelData.capability_skips === 'object'
-        ? modelData.capability_skips as Record<string, string>
-        : {};
+    const availability = collectAvailabilityConstraintMetadata(modelData);
     const nonChatType = isNonChatModel(modelId);
-    if (nonChatType === 'image-gen' && typeof skips.image_output === 'string' && skips.image_output.trim()) {
+    const hasReasonConstraint = availability.reasonTexts.some((reason) => isAvailabilityConstraintReason(reason));
+
+    if (nonChatType === 'image-gen' && (
+        typeof availability.skips.image_output === 'string' && availability.skips.image_output.trim()
+        || availability.blocked.includes('image_output')
+        || hasReasonConstraint
+    )) {
         return false;
     }
-    if (nonChatType === 'video-gen' && typeof skips.image_output === 'string' && skips.image_output.trim()) {
+    if (nonChatType === 'video-gen' && (
+        typeof availability.skips.image_output === 'string' && availability.skips.image_output.trim()
+        || availability.blocked.includes('image_output')
+        || hasReasonConstraint
+    )) {
         return false;
     }
-    if (nonChatType === 'tts' && typeof skips.audio_output === 'string' && skips.audio_output.trim()) {
+    if (nonChatType === 'tts' && (
+        typeof availability.skips.audio_output === 'string' && availability.skips.audio_output.trim()
+        || availability.blocked.includes('audio_output')
+    )) {
         return false;
     }
-    if (nonChatType === 'stt' && typeof skips.audio_input === 'string' && skips.audio_input.trim()) {
+    if (nonChatType === 'stt' && (
+        typeof availability.skips.audio_input === 'string' && availability.skips.audio_input.trim()
+        || availability.blocked.includes('audio_input')
+    )) {
         return false;
     }
     return true;
+}
+
+function collectAvailabilityConstraintMetadata(modelData: any): {
+    blocked: string[];
+    skips: Record<string, string>;
+    reasonTexts: string[];
+} {
+    if (!modelData || typeof modelData !== 'object') {
+        return {
+            blocked: [],
+            skips: {},
+            reasonTexts: [],
+        };
+    }
+
+    const blocked = Array.from(new Set([
+        ...(Array.isArray(modelData.capability_blocked) ? modelData.capability_blocked : []),
+        ...(Array.isArray(modelData.availability?.capability_blocked) ? modelData.availability.capability_blocked : []),
+    ]
+        .map((entry: unknown) => String(entry || '').trim().toLowerCase())
+        .filter(Boolean)));
+
+    const skips: Record<string, string> = {};
+    for (const source of [modelData.availability?.capability_skips, modelData.capability_skips]) {
+        if (!source || typeof source !== 'object') continue;
+        for (const [key, value] of Object.entries(source as Record<string, unknown>)) {
+            if (typeof value !== 'string' || !value.trim()) continue;
+            const normalizedKey = String(key || '').trim().toLowerCase();
+            if (!normalizedKey) continue;
+            skips[normalizedKey] = value.trim();
+        }
+    }
+
+    const reasonTexts = [
+        modelData.reason,
+        modelData.unavailable_reason,
+        modelData.removal_reason,
+        modelData.availability?.reason,
+        modelData.availability?.unavailable_reason,
+        modelData.availability?.removal_reason,
+    ]
+        .map((entry) => String(entry || '').trim())
+        .filter(Boolean);
+
+    return { blocked, skips, reasonTexts };
+}
+
+function isAvailabilityConstraintReason(value: unknown): boolean {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (!normalized) return false;
+    return /provider[_ -]?model[_ -]?removed|provider[_ -]?cap[_ -]?blocked|image generation unavailable|generation unavailable|unavailable in provider region|unavailable in country|provider region|provider-region|blocked in provider region|blocked in country|country|regional availability|region(?:al)? availability|geo(?:graph(?:ic)?)? restriction|country availability|unsupported image output/.test(normalized);
+}
+
+function hasAvailabilityConstraint(modelId: string, modelData: any): boolean {
+    if (!modelData || typeof modelData !== 'object') return false;
+    if (modelData.removed === true || modelData.unavailable === true || modelData.disabled === true) return true;
+
+    const availability = collectAvailabilityConstraintMetadata(modelData);
+    const nonChatType = isNonChatModel(modelId);
+
+    if ((nonChatType === 'image-gen' || nonChatType === 'video-gen') && (
+        typeof availability.skips.image_output === 'string' && availability.skips.image_output.trim()
+        || availability.blocked.includes('image_output')
+        || availability.reasonTexts.some((reason) => isAvailabilityConstraintReason(reason))
+    )) {
+        return true;
+    }
+
+    if (nonChatType === 'tts' && (
+        typeof availability.skips.audio_output === 'string' && availability.skips.audio_output.trim()
+        || availability.blocked.includes('audio_output')
+    )) {
+        return true;
+    }
+
+    if (nonChatType === 'stt' && (
+        typeof availability.skips.audio_input === 'string' && availability.skips.audio_input.trim()
+        || availability.blocked.includes('audio_input')
+    )) {
+        return true;
+    }
+
+    return false;
 }
 
 function getRememberedCapabilities(
@@ -645,12 +741,20 @@ export async function refreshProviderCountsInModelsFile(options: { notifyProbes?
         const activeProviderCounts: { [modelId: string]: number } = {};
         const knownProviderCounts: { [modelId: string]: number } = {};
         const availableModelIds = new Set<string>();
+        const constrainedModelIds = new Set<string>();
         const modelTpsSamples: { [modelId: string]: number[] } = {};
 
         for (const provider of providersData) {
             if (!provider.models) continue;
             for (const modelId in provider.models) {
                 const modelData = provider.models[modelId] as any;
+                const hasConstraint = hasAvailabilityConstraint(modelId, modelData);
+                if (hasConstraint) {
+                    constrainedModelIds.add(modelId);
+                }
+                if (!provider.disabled && !modelData?.disabled && !modelData?.unavailable && !modelData?.removed && !hasConstraint) {
+                    availableModelIds.add(modelId);
+                }
                 if (!shouldCountProviderModel(modelId, modelData)) {
                     continue;
                 }
@@ -658,6 +762,9 @@ export async function refreshProviderCountsInModelsFile(options: { notifyProbes?
 
                 if (!provider.disabled) { // Consider a provider active if 'disabled' is false or undefined
                     activeProviderCounts[modelId] = (activeProviderCounts[modelId] || 0) + 1;
+                    availableModelIds.add(modelId);
+                } else if (hasAvailabilityConstraint(modelId, modelData)) {
+                    constrainedModelIds.add(modelId);
                     availableModelIds.add(modelId);
 
                     // Collect TPS data for throughput calculation
@@ -689,6 +796,8 @@ export async function refreshProviderCountsInModelsFile(options: { notifyProbes?
         for (const model of modelsFile.data) {
             const newProviderCount = activeProviderCounts[model.id] || 0;
             const knownProviderCount = knownProviderCounts[model.id] || 0;
+            const isConstrained = constrainedModelIds.has(model.id);
+            const shouldRetainAsConstrained = newProviderCount === 0 && isConstrained;
             const rememberedCaps = getRememberedCapabilities(model.id, model.capabilities, capabilitiesCache, probeData);
             if (isPricingRecord((model as any).pricing)) {
                 pricingCache[model.id] = clonePricingRecord((model as any).pricing);
@@ -708,12 +817,16 @@ export async function refreshProviderCountsInModelsFile(options: { notifyProbes?
                 }
             }
             
-            if (newProviderCount > 0) {
+            if (newProviderCount > 0 || shouldRetainAsConstrained) {
                 if (model.providers !== newProviderCount) {
                     const oldProviderCount = model.providers;
                     model.providers = newProviderCount;
                     changesMade = true;
-                    console.log(`Updated provider count for ${model.id}: ${oldProviderCount} -> ${newProviderCount}`);
+                    if (shouldRetainAsConstrained) {
+                        console.log(`Retained ${model.id} with 0 active providers due to availability constraints (${oldProviderCount} -> ${newProviderCount})`);
+                    } else {
+                        console.log(`Updated provider count for ${model.id}: ${oldProviderCount} -> ${newProviderCount}`);
+                    }
                 }
                 if (!model.owned_by || model.owned_by === 'unknown') {
                     const guessedOwner = guessOwnedBy(model.id);
@@ -723,25 +836,29 @@ export async function refreshProviderCountsInModelsFile(options: { notifyProbes?
                         console.log(`Updated owner for ${model.id}: ${guessedOwner}`);
                     }
                 }
-                // Dynamic pricing based on provider availability
-                const dynamicPrice = calculateDynamicPricing(model.id, Math.max(newProviderCount, knownProviderCount));
-                const rememberedPricing = isPricingRecord(pricingCache[model.id]) ? pricingCache[model.id] : null;
-                const nextPricing = dynamicPrice
-                    ? clonePricingRecord(dynamicPrice)
-                    : (rememberedPricing ? clonePricingRecord(rememberedPricing) : buildZeroPricing());
-                if (JSON.stringify((model as any).pricing || null) !== JSON.stringify(nextPricing)) {
-                    (model as any).pricing = nextPricing;
-                    changesMade = true;
-                }
-                pricingCache[model.id] = clonePricingRecord((model as any).pricing);
-                // Update throughput from real provider TPS data
-                const realThroughput = modelThroughput[model.id];
-                if (realThroughput && realThroughput > 0) {
-                    const currentThroughput = (model as any).throughput;
-                    if (currentThroughput !== realThroughput) {
-                        (model as any).throughput = realThroughput;
+                if (newProviderCount > 0) {
+                    // Dynamic pricing based on provider availability
+                    const dynamicPrice = calculateDynamicPricing(model.id, Math.max(newProviderCount, knownProviderCount));
+                    const rememberedPricing = isPricingRecord(pricingCache[model.id]) ? pricingCache[model.id] : null;
+                    const nextPricing = dynamicPrice
+                        ? clonePricingRecord(dynamicPrice)
+                        : (rememberedPricing ? clonePricingRecord(rememberedPricing) : buildZeroPricing());
+                    if (JSON.stringify((model as any).pricing || null) !== JSON.stringify(nextPricing)) {
+                        (model as any).pricing = nextPricing;
                         changesMade = true;
                     }
+                    pricingCache[model.id] = clonePricingRecord((model as any).pricing);
+                    // Update throughput from real provider TPS data
+                    const realThroughput = modelThroughput[model.id];
+                    if (realThroughput && realThroughput > 0) {
+                        const currentThroughput = (model as any).throughput;
+                        if (currentThroughput !== realThroughput) {
+                            (model as any).throughput = realThroughput;
+                            changesMade = true;
+                        }
+                    }
+                } else if (shouldRetainAsConstrained) {
+                    console.log(`Retaining ${model.id} with 0 active providers because only availability-constrained providers remain.`);
                 }
                 updatedModels.push(model);
             } else {
@@ -792,6 +909,36 @@ export async function refreshProviderCountsInModelsFile(options: { notifyProbes?
                 console.log(`Added new model ${modelId} with ${providerCount} active / ${knownProviderCount} known provider(s), owned by: ${newModel.owned_by}`);
                 changesMade = true;
             }
+        }
+
+        for (const modelId of constrainedModelIds) {
+            if (existingModelIds.has(modelId)) continue;
+            if (updatedModels.some((model) => model.id === modelId)) continue;
+
+            const newModel: any = {
+                id: modelId,
+                object: MODEL_OBJECT_TYPE,
+                created: Date.now(),
+                owned_by: guessOwnedBy(modelId),
+                providers: 0,
+                throughput: 50,
+            };
+            const rememberedCaps = getRememberedCapabilities(modelId, undefined, capabilitiesCache, probeData);
+            if (rememberedCaps.length > 0) {
+                newModel.capabilities = [...rememberedCaps];
+                const cachedCaps = capabilitiesCache[modelId];
+                if (!cachedCaps || !areCapabilitiesEqual(cachedCaps, rememberedCaps)) {
+                    capabilitiesCache[modelId] = [...rememberedCaps];
+                }
+            }
+            const rememberedPricing = isPricingRecord(pricingCache[modelId]) ? pricingCache[modelId] : null;
+            newModel.pricing = rememberedPricing
+                ? clonePricingRecord(rememberedPricing)
+                : buildZeroPricing();
+            pricingCache[modelId] = clonePricingRecord(newModel.pricing);
+            updatedModels.push(newModel);
+            console.log(`Retained constrained model ${modelId} with 0 active providers due to availability constraints.`);
+            changesMade = true;
         }
 
         // Normalize key order for consistent JSON output

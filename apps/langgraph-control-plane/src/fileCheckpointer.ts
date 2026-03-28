@@ -22,9 +22,15 @@ const FILE_CHECKPOINTER_MAX_THREADS = (() => {
   return Math.max(1, Math.floor(raw));
 })();
 
+const FILE_CHECKPOINTER_MAX_ITERATIONS_PER_NAMESPACE = (() => {
+  const raw = Number(process.env.CONTROL_PLANE_MAX_CHECKPOINT_ITERATIONS ?? 4);
+  if (!Number.isFinite(raw) || raw < 1) return 4;
+  return Math.max(1, Math.floor(raw));
+})();
+
 const FILE_CHECKPOINTER_MAX_CHECKPOINTS_PER_NAMESPACE = (() => {
-  const raw = Number(process.env.CONTROL_PLANE_MAX_CHECKPOINTS_PER_NAMESPACE ?? 12);
-  if (!Number.isFinite(raw) || raw < 1) return 12;
+  const raw = Number(process.env.CONTROL_PLANE_MAX_CHECKPOINTS_PER_NAMESPACE ?? 96);
+  if (!Number.isFinite(raw) || raw < 1) return 96;
   return Math.max(1, Math.floor(raw));
 })();
 
@@ -108,24 +114,63 @@ function restoreWrites(writes: PersistedWrites | undefined): InMemoryWrites {
   );
 }
 
-function readCheckpointTimestamp(value: Uint8Array): number {
+function parseJsonBytes(value: Uint8Array): Record<string, any> | null {
   try {
-    const parsed = JSON.parse(Buffer.from(value).toString('utf8')) as { ts?: string };
-    const timestamp = Date.parse(String(parsed?.ts || ''));
-    return Number.isFinite(timestamp) ? timestamp : 0;
+    const parsed = JSON.parse(Buffer.from(value).toString('utf8'));
+    return parsed && typeof parsed === 'object' ? parsed as Record<string, any> : null;
   } catch {
-    return 0;
+    return null;
   }
+}
+
+function readCheckpointTimestamp(value: Uint8Array): number {
+  const parsed = parseJsonBytes(value);
+  const timestamp = Date.parse(String(parsed?.ts || ''));
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function readCheckpointSource(value: Uint8Array): string {
+  const parsed = parseJsonBytes(value);
+  const source = String(parsed?.source || '').trim().toLowerCase();
+  return source;
+}
+
+function compactNamespaceCheckpoints(
+  checkpoints: Record<string, [Uint8Array, Uint8Array, string | undefined]>,
+): Record<string, [Uint8Array, Uint8Array, string | undefined]> {
+  const sortedCheckpoints = Object.entries(checkpoints || {})
+    .sort((left, right) => readCheckpointTimestamp(right[1][0]) - readCheckpointTimestamp(left[1][0]));
+  if (sortedCheckpoints.length <= 1) {
+    return Object.fromEntries(sortedCheckpoints);
+  }
+
+  const retained: Array<[string, [Uint8Array, Uint8Array, string | undefined]]> = [];
+  let retainedIterationCount = 0;
+
+  for (const entry of sortedCheckpoints) {
+    retained.push(entry);
+    if (readCheckpointSource(entry[1][1]) === 'input') {
+      retainedIterationCount += 1;
+      if (retainedIterationCount >= FILE_CHECKPOINTER_MAX_ITERATIONS_PER_NAMESPACE) {
+        break;
+      }
+    }
+    if (retained.length >= FILE_CHECKPOINTER_MAX_CHECKPOINTS_PER_NAMESPACE) {
+      break;
+    }
+  }
+
+  if (retained.length > FILE_CHECKPOINTER_MAX_CHECKPOINTS_PER_NAMESPACE) {
+    retained.length = FILE_CHECKPOINTER_MAX_CHECKPOINTS_PER_NAMESPACE;
+  }
+  return Object.fromEntries(retained);
 }
 
 function compactStorage(storage: InMemoryStorage): InMemoryStorage {
   const threadEntries = Object.entries(storage || {}).map(([threadId, namespaces]) => {
     const compactedNamespaces = Object.fromEntries(
       Object.entries(namespaces || {}).map(([namespace, checkpoints]) => {
-        const sortedCheckpoints = Object.entries(checkpoints || {})
-          .sort((left, right) => readCheckpointTimestamp(right[1][0]) - readCheckpointTimestamp(left[1][0]))
-          .slice(0, FILE_CHECKPOINTER_MAX_CHECKPOINTS_PER_NAMESPACE);
-        return [namespace, Object.fromEntries(sortedCheckpoints)];
+        return [namespace, compactNamespaceCheckpoints(checkpoints || {})];
       }),
     );
     const latestTimestamp = Object.values(compactedNamespaces).reduce((maxTimestamp, checkpoints) => {

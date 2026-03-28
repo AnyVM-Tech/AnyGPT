@@ -1,7 +1,7 @@
 import express from 'express';
 import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import rateLimit from 'express-rate-limit';
 
@@ -158,6 +158,32 @@ app.get('/api/live-metrics', spaLimiter, async (_req, res) => {
       timestamp: new Date().toISOString(),
     });
   }
+});
+
+app.get('/favicon.ico', (_req, res) => {
+  const publicDir = path.join(__dirname, 'public');
+  const iconCandidates = [
+    { filePath: path.join(publicDir, 'favicon.ico'), contentType: 'image/x-icon' },
+    { filePath: path.join(publicDir, 'AnyGPT.png'), contentType: 'image/png' },
+    { filePath: path.join(publicDir, 'favicon.svg'), contentType: 'image/svg+xml' },
+  ];
+  const icon = iconCandidates.find(({ filePath }) => existsSync(filePath));
+
+  res.set('Cache-Control', 'public, max-age=86400, immutable');
+
+  if (!icon) {
+    res.status(204).end();
+    return;
+  }
+
+  res.sendFile(icon.filePath, {
+    headers: {
+      'Content-Type': icon.contentType,
+    },
+  }, (error) => {
+    if (!error || res.headersSent) return;
+    res.status(204).end();
+  });
 });
 
 app.use(express.static(path.join(__dirname, 'public')));

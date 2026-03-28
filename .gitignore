@@ -23,6 +23,9 @@ Thumbs.db
 
 # Cache directories
 /.cache
+/.codeql/
+/.codeql-test/
+/.tools/
 
 # Temp directories
 apps/api/.tmp/

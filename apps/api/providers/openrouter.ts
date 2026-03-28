@@ -17,125 +17,8 @@ function isOpenRouterToolUseUnsupportedError(error: any): boolean {
       || error?.message
       || ''
   );
-  return status === 404 && /no endpoints found that support (tool use|the tool|the provided ['"]tool_choice['"] value)/i.test(message);
+  return status === 404 && /no endpoints found that support (tool use|the tool|the provided ['\"]tool_choice['\"] value)|no allowed providers are available for the selected model/i.test(message);
 }
-
-function isOpenRouterAuthConfigurationError(error: any): boolean {
-  const status = Number(error?.response?.status || error?.status || 0);
-  const message = String(
-    error?.response?.data?.error?.message
-      || error?.response?.data?.message
-      || error?.message
-      || ''
-  ).toLowerCase();
-  const code = String(
-    error?.response?.data?.error?.code
-      || error?.response?.data?.code
-      || ''
-  ).toLowerCase();
-
-  if (code === 'user_not_found') return true;
-  if (status === 401 || status === 403) return true;
-  return (
-    message.includes('user_not_found') ||
-    message.includes('user not found') ||
-    message.includes('invalid api key') ||
-    message.includes('incorrect api key') ||
-    message.includes('unauthorized') ||
-    message.includes('forbidden') ||
-    message.includes('authentication')
-  );
-}
-
-function isOpenRouterAuthFailure(error: any): boolean {
-  const status = Number(error?.response?.status || error?.status || 0);
-  const message = String(
-    error?.response?.data?.error?.message
-      || error?.response?.data?.message
-      || error?.message
-      || ''
-  ).toLowerCase();
-  const code = String(
-    error?.response?.data?.error?.code
-      || error?.response?.data?.code
-      || ''
-  ).toLowerCase();
-
-  if (status === 401 || status === 403) return true;
-  if (code.includes('auth') || code.includes('unauthorized') || code.includes('forbidden')) return true;
-  return (
-    message.includes('auth:user_not_found') ||
-    message.includes('user_not_found') ||
-    message.includes('invalid api key') ||
-    message.includes('incorrect api key') ||
-    message.includes('unauthorized') ||
-    message.includes('forbidden') ||
-    message.includes('authentication')
-  );
-}
-
-function markRetryableOpenRouterRoutingError(target: Error, error: any): Error {
-  if (isOpenRouterToolUseUnsupportedError(error)) {
-    (target as any).retryable = true;
-    (target as any).providerSwitchWorthless = false;
-  }
-  return target;
-}
-
-function annotateOpenRouterCapabilityError(target: any, error: any): void {
-  if (!target || !isOpenRouterToolUseUnsupportedError(error)) return;
-  target.status = 404;
-  target.statusCode = 404;
-  target.code = 'OPENROUTER_TOOL_USE_UNSUPPORTED';
-  target.retryable = false;
-  target.providerSwitchWorthless = true;
-  target.requestRetryWorthless = true;
-}
-
-function isTransientOpenRouterError(error: any): boolean {
-  const status = Number(error?.response?.status || error?.status || 0);
-  const message = String(
-    error?.response?.data?.error?.message
-      || error?.response?.data?.message
-      || error?.message
-      || ''
-  ).toLowerCase();
-
-  if (status === 408 || status === 409 || status === 425 || status === 429) {
-    return true;
-  }
-
-  if (status >= 500 && status < 600) {
-    return true;
-  }
-
-  if (
-    status === 402 && (
-      message.includes('payment required') ||
-      message.includes('insufficient credits') ||
-      message.includes('insufficient credit') ||
-      message.includes('quota') ||
-      message.includes('balance') ||
-      message.includes('credits')
-    )
-  ) {
-    return true;
-  }
-
-  return false;
-}
-
-function stripUnsupportedToolUse(payload: Record<string, any>): Record<string, any> {
-  const next = { ...payload };
-  delete next.tools;
-  delete next.tool_choice;
-  return next;
-}
-
-function hasUsableTools(tools: any): boolean {
-  return Array.isArray(tools) && tools.length > 0;
-}
-
 /**
  * OpenRouter provider: OpenAI-compatible but requires Referer and X-Title headers.
  */
@@ -279,7 +162,7 @@ export class OpenRouterAI implements IAIProvider {
   private isPrivateIpv4(ip: string): boolean {
     const parts = ip.split('.').map((n) => Number(n));
     if (parts.length !== 4 || parts.some((n) => Number.isNaN(n))) return false;
-    const [a, b, c, d] = parts;
+    const [a, b, c] = parts;
     if (a === 10) return true;
     if (a === 127) return true;
     if (a === 169 && b === 254) return true;
@@ -1007,11 +890,118 @@ export class OpenRouterAI implements IAIProvider {
       });
       const msg = this.extractErrorMessage(error, 'Unknown OpenRouter error');
       const wrappedError = new Error(`OpenRouter API call failed: ${msg} (latency ${latency}ms)`);
+      const status = Number(error?.response?.status || error?.status || 0);
+      const lowerMsg = msg.toLowerCase();
+      const isCredentialOrQuotaFailure =
+        status === 401 ||
+        status === 402 ||
+        status === 403 ||
+        /unauthorized|invalid api key|invalid_api_key|incorrect api key|authentication failed|forbidden|insufficient credits|quota exceeded|billing|payment required|no allowed providers are available for the selected model/i.test(msg) ||
+        /quota exceeded|insufficient credits|insufficient balance|payment required|billing|credits required|key_no_quota|no credits/i.test(msg);
+      if (
+        isCredentialOrQuotaFailure
+      ) {
+        (wrappedError as any).status = 402;
+        (wrappedError as any).retryable = false;
+        (wrappedError as any).providerSwitchWorthless = true;
+        (wrappedError as any).requestRetryWorthless = true;
+      }
+      if (
+        status === 401 ||
+        /unauthorized|invalid api key|invalid_api_key|incorrect api key|authentication/i.test(msg)
+      ) {
+        (wrappedError as any).status = 401;
+        (wrappedError as any).retryable = false;
+        (wrappedError as any).providerSwitchWorthless = true;
+        (wrappedError as any).requestRetryWorthless = true;
+        (wrappedError as any).reason = 'openrouter_auth_invalid';
+      } else if (
+        status === 402 ||
+        /quota exceeded|insufficient credits|payment required|billing|credits required|key_no_quota/i.test(msg)
+      ) {
+        (wrappedError as any).status = 402;
+        (wrappedError as any).retryable = false;
+        (wrappedError as any).providerSwitchWorthless = true;
+        (wrappedError as any).requestRetryWorthless = true;
+        (wrappedError as any).reason = 'openrouter_billing_exhausted';
+        (wrappedError as any).retryable = false;
+        (wrappedError as any).providerSwitchWorthless = true;
+        (wrappedError as any).requestRetryWorthless = true;
+      } else if (
+        status === 402 ||
+        /quota exceeded|insufficient credits|payment required|billing|credits? exhausted|no credits|balance/i.test(msg)
+      ) {
+        (wrappedError as any).status = 402;
+        (wrappedError as any).retryable = false;
+        (wrappedError as any).providerSwitchWorthless = true;
+        (wrappedError as any).requestRetryWorthless = true;
+        (wrappedError as any).statusCode = 402;
+        (wrappedError as any).code = 'key_no_quota';
+        (wrappedError as any).retryable = false;
+        (wrappedError as any).failureOrigin = 'provider_quota';
+        (wrappedError as any).providerSwitchWorthless = true;
+        (wrappedError as any).requestRetryWorthless = true;
+      } else if (
+        status === 401 ||
+        /unauthorized|invalid api key|invalid_api_key|incorrect api key/i.test(msg)
+      ) {
+        (wrappedError as any).status = 401;
+        (wrappedError as any).statusCode = 401;
+      }
+      if (
+        status === 402 ||
+        /quota exceeded|insufficient credits|payment required|billing|credits required|key_no_quota/i.test(lowerMsg)
+      ) {
+        (wrappedError as any).status = 402;
+        (wrappedError as any).statusCode = 402;
+        (wrappedError as any).code = 'key_no_quota';
+        (wrappedError as any).failureOrigin = 'provider_quota';
+        (wrappedError as any).retryable = false;
+        (wrappedError as any).providerSwitchWorthless = true;
+        (wrappedError as any).requestRetryWorthless = true;
+      }
+      if (
+        status === 401 ||
+        /unauthorized|invalid api key|invalid_api_key|incorrect api key/i.test(msg)
+      ) {
+        (wrappedError as any).status = 401;
+        (wrappedError as any).statusCode = 401;
+        (wrappedError as any).code = 'invalid_api_key';
+        (wrappedError as any).retryable = false;
+        (wrappedError as any).failureOrigin = 'provider_auth';
+        (wrappedError as any).providerSwitchWorthless = true;
+        (wrappedError as any).requestRetryWorthless = true;
+      }
+      if (
+        status === 402 ||
+        /quota exceeded|insufficient credits|payment required|billing/i.test(lowerMsg)
+      ) {
+        (wrappedError as any).status = 402;
+        (wrappedError as any).statusCode = 402;
+        (wrappedError as any).code = 'key_no_quota';
+        (wrappedError as any).retryable = false;
+        (wrappedError as any).failureOrigin = 'provider_quota';
+        (wrappedError as any).providerSwitchWorthless = true;
+        (wrappedError as any).requestRetryWorthless = true;
+      }
       if (/no endpoints found that support tool use/i.test(msg)) {
         (wrappedError as any).status = 404;
         (wrappedError as any).code = 'OPENROUTER_TOOL_USE_UNSUPPORTED';
         (wrappedError as any).retryable = false;
         (wrappedError as any).providerIncompatible = true;
+        (wrappedError as any).providerSwitchWorthless = true;
+        (wrappedError as any).requestRetryWorthless = true;
+      }
+      if (
+        status === 402 ||
+        /quota exceeded|insufficient credits|payment required|billing|credits? required|no allowed providers are available/i.test(msg)
+      ) {
+        (wrappedError as any).status = status || 402;
+        (wrappedError as any).code = 'OPENROUTER_PROVIDER_GOVERNANCE_BLOCKED';
+        (wrappedError as any).retryable = false;
+        (wrappedError as any).failureOrigin = 'provider_governance';
+        (wrappedError as any).providerSwitchWorthless = true;
+        (wrappedError as any).requestRetryWorthless = true;
       }
       (wrappedError as any).__providerUniqueLogged = true;
       throw wrappedError;

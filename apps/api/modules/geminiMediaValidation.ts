@@ -125,6 +125,66 @@ function classifyRemoteMedia(value: unknown): 'none' | 'remote' | 'private' {
   return sawRemote ? 'remote' : 'none';
 }
 
+function containsUnsupportedGeminiAudioMime(value: unknown): boolean {
+  if (!value) return false;
+  if (Array.isArray(value)) {
+    return value.some((entry) => containsUnsupportedGeminiAudioMime(entry));
+  }
+  if (typeof value !== 'object') return false;
+
+  const record = value as Record<string, unknown>;
+  const type = typeof record.type === 'string' ? record.type.toLowerCase() : '';
+  const mimeType = typeof record.mime_type === 'string'
+    ? record.mime_type.toLowerCase()
+    : typeof record.mimeType === 'string'
+      ? record.mimeType.toLowerCase()
+      : typeof record.format === 'string'
+        ? record.format.toLowerCase()
+        : '';
+
+  if (
+    type === 'input_audio' &&
+    (mimeType === 'audio/s16le' || mimeType === 's16le' || mimeType === 'pcm' || mimeType === 'audio/pcm')
+  ) {
+    return true;
+  }
+
+  if (record.input_audio && containsUnsupportedGeminiAudioMime(record.input_audio)) {
+    return true;
+  }
+
+  return Object.values(record).some((nested) => nested !== value && containsUnsupportedGeminiAudioMime(nested));
+}
+
+function collectRequestModelIds(body: Record<string, unknown>): string[] {
+  const candidates = [
+    body.model,
+    (body as any)?.modelId,
+    (body as any)?.model_id,
+    (body as any)?.metadata?.model,
+    (body as any)?.metadata?.modelId,
+    (body as any)?.metadata?.model_id,
+  ];
+
+  return candidates
+    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    .map((value) => value.trim().toLowerCase());
+}
+
+function requestTargetsLyriaPreview(body: Record<string, unknown>): boolean {
+  return collectRequestModelIds(body).some((modelId) => modelId.includes('lyria-3-pro-preview'));
+}
+
+function containsToolChoiceRequest(value: unknown): boolean {
+  if (!value) return false;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    return normalized.length > 0 && normalized !== 'none';
+  }
+  if (typeof value === 'object') return true;
+  return false;
+}
+
 export function validateGeminiRemoteMediaRequest(body: unknown): GeminiRemoteMediaValidationResult | null {
   if (!body || typeof body !== "object") return null;
   const request = body as Record<string, unknown>;
@@ -151,10 +211,265 @@ export function validateGeminiRemoteMediaRequest(body: unknown): GeminiRemoteMed
     return null;
   };
 
-  return (
+  if (
+    containsUnsupportedGeminiAudioMime(request.messages) ||
+    containsUnsupportedGeminiAudioMime(request.input) ||
+    containsUnsupportedGeminiAudioMime(request.contents)
+  ) {
+    const lyriaPreviewTarget = requestTargetsLyriaPreview(request);
+    return {
+      status: 400,
+      code: 'GEMINI_UNSUPPORTED_AUDIO_MIME',
+      retryable: false,
+      clientMessage: lyriaPreviewTarget
+        ? 'Invalid request: lyria-3-pro-preview does not support Gemini generateContent audio_input with raw PCM audio/s16le. This is an upstream/provider-bound Gemini capability mismatch; retrying the same Gemini provider-method combination is unlikely to help. Use a supported audio format or transcode before sending.'
+        : 'Invalid request: Gemini does not accept raw PCM audio/s16le input for this route. This is an upstream/provider-bound Gemini capability mismatch for generateContent; retrying the same Gemini provider-method combination is unlikely to help. Use a supported audio format or transcode before sending.',
+      providerSwitchWorthless: true,
+      requestRetryWorthless: true,
+      reason: 'unsupported_audio_mime_type_for_gemini',
+      detail: lyriaPreviewTarget
+        ? 'gemini_generatecontent_audio_input_unsupported_audio_s16le_lyria_3_pro_preview'
+        : 'gemini_generatecontent_audio_input_unsupported_audio_s16le',
+    };
+  }
+
+  if (requestTargetsLyriaPreview(request) && containsToolChoiceRequest(request.tool_choice ?? request.toolChoice)) {
+    return {
+      status: 400,
+      code: 'GEMINI_TOOL_CALLING_UNSUPPORTED_MODEL',
+      retryable: false,
+      clientMessage: 'Invalid request: lyria-3-pro-preview does not support Gemini function calling for this route. This is an upstream/provider-bound Gemini capability mismatch; retrying the same Gemini provider-method combination is unlikely to help.',
+      providerSwitchWorthless: true,
+      requestRetryWorthless: true,
+      reason: 'gemini_tool_calling_not_enabled_for_model',
+      detail: 'gemini_generatecontent_tool_calling_not_enabled_lyria_3_pro_preview',
+    };
+  }
+
+  if (requestTargetsLyriaPreview(request) && Array.isArray(request.modalities) && request.modalities.some((value: unknown) => String(value || '').toLowerCase().trim() === 'image')) {
+    return {
+      status: 400,
+      code: 'GEMINI_IMAGE_OUTPUT_UNSUPPORTED_MODEL',
+      retryable: false,
+      clientMessage: 'Invalid request: lyria-3-pro-preview image generation is unavailable for this Gemini route in the current country/provider region. This is an upstream/provider-bound Gemini capability mismatch and regional catalog drift; retrying the same Gemini provider-method combination is unlikely to help.',
+      providerSwitchWorthless: true,
+      requestRetryWorthless: true,
+      reason: 'gemini_image_output_unavailable_for_model_region',
+      detail: 'gemini_generatecontent_image_output_blocked_lyria_3_pro_preview',
+    };
+  }
+
+  if (requestTargetsLyriaPreview(request) && Array.isArray(request.modalities) && request.modalities.some((value: unknown) => String(value || '').toLowerCase().trim() === 'audio')) {
+    return {
+      status: 400,
+      code: 'GEMINI_AUDIO_OUTPUT_UNSUPPORTED_MODEL',
+      retryable: false,
+      clientMessage: 'Invalid request: lyria-3-pro-preview does not support Gemini audio output for this route. This is an upstream/provider-bound Gemini capability mismatch; retrying the same Gemini provider-method combination is unlikely to help.',
+      providerSwitchWorthless: true,
+      requestRetryWorthless: true,
+      reason: 'gemini_audio_output_not_enabled_for_model',
+      detail: 'gemini_generatecontent_audio_output_not_enabled_lyria_3_pro_preview',
+    };
+  }
+
+  const mediaValidation =
     classifyAndBuild(request.messages, 'in_messages') ||
     classifyAndBuild(request.input, 'in_input') ||
     classifyAndBuild(request.contents, 'in_contents') ||
-    null
-  );
+    null;
+
+  if (requestTargetsLyriaPreview(request)) {
+    const audioMimeHints = [
+      'audio/',
+      'audio/s16le',
+      'audio/wav',
+      'audio/x-wav',
+      'audio/mpeg',
+      'audio/mp3',
+      'audio/ogg',
+      'audio/webm',
+      'audio/flac',
+      'audio/aac',
+      'audio/mp4',
+      'application/ogg',
+    ];
+    const requestJson = JSON.stringify(request ?? {}).toLowerCase();
+    const hasAudioMimeHint = audioMimeHints.some((hint) => requestJson.includes(hint));
+    const hasToolCallingHint =
+      requestJson.includes('tool_choice') ||
+      requestJson.includes('tool_calls') ||
+      requestJson.includes('function_declarations') ||
+      requestJson.includes('functioncallingconfig') ||
+      (Array.isArray((request as any)?.tools) && (request as any).tools.length > 0);
+    if (mediaValidation?.reason === 'audio_input_unsupported_for_model' || hasAudioMimeHint) {
+      return {
+        status: 400,
+        code: 'GEMINI_AUDIO_INPUT_UNSUPPORTED_MODEL',
+        retryable: false,
+        clientMessage: 'Invalid request: lyria-3-pro-preview does not support Gemini audio input for this route. This is an upstream/provider-bound Gemini capability mismatch; retrying the same Gemini provider-method combination is unlikely to help.',
+        providerSwitchWorthless: true,
+        requestRetryWorthless: true,
+        reason: 'gemini_audio_input_not_enabled_for_model',
+        detail: hasAudioMimeHint
+          ? 'gemini_generatecontent_audio_input_mime_hint_unsupported_lyria_3_pro_preview'
+          : 'gemini_generatecontent_audio_input_unsupported_lyria_3_pro_preview',
+      };
+    }
+    if (hasToolCallingHint) {
+      return {
+        status: 400,
+        code: 'GEMINI_TOOL_CALLING_UNSUPPORTED_MODEL',
+        retryable: false,
+        clientMessage: 'Invalid request: lyria-3-pro-preview does not support Gemini tool calling for this route. This is an upstream/provider-bound Gemini capability mismatch; retrying the same Gemini provider-method combination is unlikely to help.',
+        providerSwitchWorthless: true,
+        requestRetryWorthless: true,
+        reason: 'gemini_tool_calling_not_enabled_for_model',
+        detail: 'gemini_generatecontent_tool_calling_unsupported_lyria_3_pro_preview',
+      };
+    }
+  }
+
+  return mediaValidation;
 }
+
+export function isGeminiRequestRetryWorthless(body: unknown): boolean {
+  const validation = validateGeminiRemoteMediaRequest(body);
+  return Boolean(validation?.requestRetryWorthless || validation?.providerSwitchWorthless);
+}
+
+export function validateGeminiModelCapabilityRequest(modelId: string, body: unknown): GeminiRemoteMediaValidationResult | null {
+  const normalizedModelId = String(modelId || '').trim().toLowerCase();
+  if (normalizedModelId !== 'lyria-3-pro-preview') return null;
+
+  const request = body && typeof body === 'object' ? body as Record<string, any> : {};
+  const requestJson = (() => {
+    try {
+      return JSON.stringify(request).toLowerCase();
+    } catch {
+      return '';
+    }
+  })();
+
+  const hasAudioMimeHint =
+    requestJson.includes('audio/s16le') ||
+    requestJson.includes('audio/') ||
+    requestJson.includes('input_audio') ||
+    requestJson.includes('input_audio_file') ||
+    requestJson.includes('input_audio_format') ||
+    requestJson.includes('audio_url') ||
+    requestJson.includes('audio_data') ||
+    requestJson.includes('audio_bytes') ||
+    requestJson.includes('inline_data') && requestJson.includes('mime_type') && requestJson.includes('audio') ||
+    requestJson.includes('file_data') && requestJson.includes('mime_type') && requestJson.includes('audio') ||
+    requestJson.includes('type') && requestJson.includes('input_audio');  if (hasAudioMimeHint) {
+    return {
+      status: 400,
+      code: 'GEMINI_AUDIO_INPUT_UNSUPPORTED_MODEL',
+      retryable: false,
+      clientMessage: 'Invalid request: lyria-3-pro-preview does not support Gemini audio input for this route. This is an upstream/provider-bound Gemini capability mismatch; retrying the same Gemini provider-method combination is unlikely to help.',
+      providerSwitchWorthless: true,
+      requestRetryWorthless: true,
+      reason: 'gemini_audio_input_not_enabled_for_model',
+      detail: 'gemini_generatecontent_audio_input_unsupported_lyria_3_pro_preview',
+    };
+  }
+
+  const hasImageGenerationHint =
+    requestJson.includes('image_generation') ||
+    requestJson.includes('image output') ||
+    requestJson.includes('image_output') ||
+    requestJson.includes('generated_images') ||
+    requestJson.includes('generated image') ||
+    requestJson.includes('modalities') && requestJson.includes('image') ||
+    requestJson.includes('response_format') && requestJson.includes('image') ||
+    requestJson.includes('output_format') && requestJson.includes('image');
+
+    if (hasImageGenerationHint) {
+      return {
+        status: 400,
+        code: 'GEMINI_IMAGE_OUTPUT_UNSUPPORTED_MODEL',
+        retryable: false,
+        clientMessage: 'Invalid request: lyria-3-pro-preview image generation is unavailable for this Gemini route. This matches an upstream/provider-bound Gemini capability mismatch and regional catalog drift; retrying the same Gemini provider-method combination is unlikely to help.',
+        providerSwitchWorthless: true,
+        requestRetryWorthless: true,
+        reason: 'gemini_image_output_unavailable_for_model',
+        detail: 'gemini_image_output_blocked_or_unavailable_lyria_3_pro_preview',
+      };
+    }
+
+    const hasAudioInputHint =
+      requestJson.includes('input_audio') ||
+      requestJson.includes('input_audio_buffer') ||
+      requestJson.includes('input_audio_data') ||
+      requestJson.includes('audio_url') ||
+      requestJson.includes('input_audio_file') ||
+      requestJson.includes('input_audio_transcription') ||
+      requestJson.includes('input_audio_format') ||
+      requestJson.includes('input_audio_bytes') ||
+      requestJson.includes('input_audio_base64') ||
+      requestJson.includes('audio/mpeg') ||
+      requestJson.includes('audio/mp3') ||
+      requestJson.includes('audio/wav') ||
+      requestJson.includes('audio/webm') ||
+      requestJson.includes('audio/ogg') ||
+      requestJson.includes('audio/s16le') ||
+      requestJson.includes('transcript');
+
+    if (hasAudioInputHint) {
+      return {
+        status: 400,
+        code: 'GEMINI_AUDIO_INPUT_UNSUPPORTED_MODEL',
+        retryable: false,
+        clientMessage: 'Invalid request: lyria-3-pro-preview does not support Gemini audio input for this route, including unsupported mime types such as audio/s16le. This matches an upstream/provider-bound Gemini capability mismatch; retrying the same Gemini provider-method combination is unlikely to help.',
+        providerSwitchWorthless: true,
+        requestRetryWorthless: true,
+        reason: 'gemini_audio_input_unsupported_for_model',
+        detail: 'gemini_generatecontent_audio_input_unsupported_lyria_3_pro_preview',
+      };
+    }
+
+    const hasToolCallingHint =
+      requestJson.includes('tool_choice') ||
+      requestJson.includes('tool_calls') ||
+      requestJson.includes('\"tools\"') ||
+      requestJson.includes('function_declarations') ||
+      requestJson.includes('function_calling');
+
+    if (hasToolCallingHint) {
+      return {
+        status: 400,
+        code: 'GEMINI_TOOL_CALLING_UNSUPPORTED_MODEL',
+        retryable: false,
+        clientMessage: 'Invalid request: lyria-3-pro-preview does not support Gemini tool calling for this route. This matches an upstream/provider-bound Gemini capability mismatch; retrying the same Gemini provider-method combination is unlikely to help.',
+        providerSwitchWorthless: true,
+        requestRetryWorthless: true,
+        reason: 'gemini_tool_calling_not_enabled_for_model',
+        detail: 'gemini_generatecontent_tool_calling_unsupported_lyria_3_pro_preview',
+      };
+    }
+
+    const hasImageOutputHint =
+      requestJson.includes('image_output') ||
+      requestJson.includes('image_generation') ||
+      requestJson.includes('generate image') ||
+      requestJson.includes('generated_images') ||
+      requestJson.includes('response_format') ||
+      requestJson.includes('modalities') ||
+      requestJson.includes('image/png') ||
+      requestJson.includes('image/jpeg');
+
+    if (hasImageOutputHint) {
+      return {
+        status: 400,
+        code: 'GEMINI_IMAGE_OUTPUT_UNSUPPORTED_MODEL',
+        retryable: false,
+        clientMessage: 'Invalid request: lyria-3-pro-preview does not support Gemini image output for this route in the current provider region/country. This matches an upstream/provider-bound Gemini capability mismatch and regional catalog drift family; retrying the same Gemini provider-method combination is unlikely to help.',
+        providerSwitchWorthless: true,
+        requestRetryWorthless: true,
+        reason: 'gemini_image_output_unavailable_for_model_region',
+        detail: 'gemini_image_output_region_blocked_lyria_3_pro_preview',
+      };
+    }
+
+    return null;
+  }
