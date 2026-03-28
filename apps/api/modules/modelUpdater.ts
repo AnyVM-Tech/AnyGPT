@@ -181,30 +181,44 @@ function isAvailabilityConstraintReason(value: unknown): boolean {
 
 function hasAvailabilityConstraint(modelId: string, modelData: any): boolean {
     if (!modelData || typeof modelData !== 'object') return false;
-    if (modelData.removed === true || modelData.unavailable === true || modelData.disabled === true) return true;
 
     const availability = collectAvailabilityConstraintMetadata(modelData);
+    if (modelData.removed === true || modelData.unavailable === true) return true;
+    if (modelData.disabled === true) {
+        return availability.reasonTexts.some((reason) => isAvailabilityConstraintReason(reason))
+            || availability.blocked.length > 0
+            || Object.keys(availability.skips).length > 0;
+    }
+
     const nonChatType = isNonChatModel(modelId);
+    const hasImageConstraint = (
+        typeof availability.skips.image_output === 'string' && availability.skips.image_output.trim()
+    ) || availability.blocked.includes('image_output');
+    const hasAudioOutputConstraint = (
+        typeof availability.skips.audio_output === 'string' && availability.skips.audio_output.trim()
+    ) || availability.blocked.includes('audio_output');
+    const hasAudioInputConstraint = (
+        typeof availability.skips.audio_input === 'string' && availability.skips.audio_input.trim()
+    ) || availability.blocked.includes('audio_input');
+
+    if (availability.reasonTexts.some((reason) => isAvailabilityConstraintReason(reason)) && (
+        hasImageConstraint || hasAudioOutputConstraint || hasAudioInputConstraint
+    )) {
+        return true;
+    }
 
     if ((nonChatType === 'image-gen' || nonChatType === 'video-gen') && (
-        typeof availability.skips.image_output === 'string' && availability.skips.image_output.trim()
-        || availability.blocked.includes('image_output')
+        hasImageConstraint
         || availability.reasonTexts.some((reason) => isAvailabilityConstraintReason(reason))
     )) {
         return true;
     }
 
-    if (nonChatType === 'tts' && (
-        typeof availability.skips.audio_output === 'string' && availability.skips.audio_output.trim()
-        || availability.blocked.includes('audio_output')
-    )) {
+    if (nonChatType === 'tts' && hasAudioOutputConstraint) {
         return true;
     }
 
-    if (nonChatType === 'stt' && (
-        typeof availability.skips.audio_input === 'string' && availability.skips.audio_input.trim()
-        || availability.blocked.includes('audio_input')
-    )) {
+    if (nonChatType === 'stt' && hasAudioInputConstraint) {
         return true;
     }
 
@@ -762,10 +776,11 @@ export async function refreshProviderCountsInModelsFile(options: { notifyProbes?
 
                 if (!provider.disabled) { // Consider a provider active if 'disabled' is false or undefined
                     activeProviderCounts[modelId] = (activeProviderCounts[modelId] || 0) + 1;
-                    availableModelIds.add(modelId);
-                } else if (hasAvailabilityConstraint(modelId, modelData)) {
+                    if (!modelData?.disabled && !modelData?.unavailable && !modelData?.removed && !hasConstraint) {
+                        availableModelIds.add(modelId);
+                    }
+                } else if (hasConstraint) {
                     constrainedModelIds.add(modelId);
-                    availableModelIds.add(modelId);
 
                     // Collect TPS data for throughput calculation
                     const tps = extractTokenSpeed(modelData);

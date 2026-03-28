@@ -407,12 +407,24 @@ export function validateGeminiModelCapabilityRequest(modelId: string, body: unkn
       requestJson.includes('input_audio_format') ||
       requestJson.includes('input_audio_bytes') ||
       requestJson.includes('input_audio_base64') ||
+      requestJson.includes('audio_url') ||
+      requestJson.includes('audio_data') ||
+      requestJson.includes('audio_base64') ||
+      requestJson.includes('audio_bytes') ||
+      requestJson.includes('audio_content') ||
       requestJson.includes('audio/mpeg') ||
       requestJson.includes('audio/mp3') ||
       requestJson.includes('audio/wav') ||
       requestJson.includes('audio/webm') ||
       requestJson.includes('audio/ogg') ||
+      requestJson.includes('audio/flac') ||
+      requestJson.includes('audio/aac') ||
+      requestJson.includes('audio/x-wav') ||
+      requestJson.includes('audio/pcm') ||
+      requestJson.includes('audio/l16') ||
       requestJson.includes('audio/s16le') ||
+      requestJson.includes('audio/raw') ||
+      requestJson.includes('audio/linear16') ||
       requestJson.includes('transcript');
 
     if (hasAudioInputHint) {

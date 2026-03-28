@@ -21,6 +21,7 @@ if [[ " $SUPPORTED_MODES " != *" $MODE "* ]]; then
   echo "    bun run frontend:install-check      # install-check plus frontend typecheck" >&2
   echo "    bun run frontend:preflight          # bounded workspace-surface preflight" >&2
   echo "    bun run frontend:preflight:ready    # install-check plus readiness-only validation" >&2
+  echo "    bun run frontend:preflight:status   # operator-facing preflight status/defer summary" >&2
   echo "    bash ./scripts/run-frontend-stack.sh doctor  # operator-focused frontend workspace diagnostics" >&2
   echo "  next: rerun with one of the supported script modes above or use the package.json aliases, preferably 'bun run frontend:preflight', 'bun run frontend:preflight:ready', or the doctor mode for bounded diagnostics, to avoid ambiguous workspace-surface startup failures" >&2
   echo "  validation: confirm at least one fresh same-thread LangSmith control-plane run/trace for this iteration with explicit goal context plus a passed workspace or control-plane smoke/typecheck result, or preserve this clear operator-facing no-run defer reason if no run was emitted" >&2

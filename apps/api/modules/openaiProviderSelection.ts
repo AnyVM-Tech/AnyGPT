@@ -3,6 +3,7 @@ import type { Response } from '../lib/uws-compat.js';
 import { dataManager, type LoadedProviders, type LoadedProviderData, type ModelsFileStructure } from './dataManager.js';
 import type { ModelCapability } from '../providers/interfaces.js';
 import { isGptImageModelId, isSoraVideoModelId, resolveSoraVideoModelId } from './openaiRouteUtils.js';
+import { containsOpenAiApiKeyHelpLink, urlHasExpectedHostname } from './urlGuards.js';
 
 const MODEL_CAPS_CACHE_MS = Math.max(1000, Number(process.env.MODEL_CAPS_CACHE_MS ?? 5000));
 const XAI_PROVIDER_KEY_CACHE_MS = Math.max(1000, Number(process.env.XAI_PROVIDER_KEY_CACHE_MS ?? 5000));
@@ -71,11 +72,10 @@ function hasRecentRateLimitOrTimeoutSignal(provider: LoadedProviderData): boolea
 function hasOpenRouterBillingFailureSignal(provider: LoadedProviderData): boolean {
   const providerId = String(provider?.id || '').toLowerCase();
   const providerType = String((provider as any)?.provider || (provider as any)?.type || '').toLowerCase();
-  const providerUrl = String((provider as any)?.provider_url || '').toLowerCase();
   const isOpenRouter =
     providerId.includes('openrouter') ||
     providerType.includes('openrouter') ||
-    providerUrl.includes('openrouter.ai');
+    urlHasExpectedHostname((provider as any)?.provider_url, 'openrouter.ai');
   if (!isOpenRouter) return false;
 
   const lastError = String((provider as any)?.lastError || (provider as any)?.last_error || '').toLowerCase();
@@ -104,7 +104,7 @@ function hasInvalidOpenAiKeySignal(provider: LoadedProviderData): boolean {
     lastError.includes('invalid_api_key') ||
     lastError.includes('api key provided is invalid') ||
     lastError.includes('api key not found') ||
-    lastError.includes('you can find your api key at https://platform.openai.com/account/api-keys')
+    containsOpenAiApiKeyHelpLink(lastError)
   );
 }
 

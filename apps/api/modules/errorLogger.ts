@@ -55,6 +55,7 @@ const logToRedis = process.env.ERROR_LOG_TO_REDIS === 'true';
 const redisLogKey = process.env.REDIS_ERROR_LOG_KEY || 'api:error_logs';
 const redisMaxLogEntries = parseInt(process.env.REDIS_ERROR_LOG_MAX_ENTRIES || '1000', 10);
 const providerUniqueRedisKey = process.env.REDIS_PROVIDER_UNIQUE_ERROR_KEY || 'api:provider_unique_error_fingerprints';
+const providerUniqueFingerprintSecret = process.env.PROVIDER_UNIQUE_ERROR_HASH_SECRET || providerUniqueRedisKey;
 
 logger.debug(`[ErrorLogger] Current working directory: ${process.cwd()}`);
 logger.debug(`[ErrorLogger] Log directory target: ${logDirectory}`);
@@ -145,10 +146,11 @@ const FINGERPRINT_OMIT_KEYS = new Set([
 
 function sanitizeValue(value: any): any {
     if (typeof value === 'string') {
-        if (MAX_DETAIL_STRING_LENGTH > 0 && value.length > MAX_DETAIL_STRING_LENGTH) {
-            return `${value.slice(0, MAX_DETAIL_STRING_LENGTH)}…`;
+        const sanitized = sanitizeProviderErrorText(value);
+        if (MAX_DETAIL_STRING_LENGTH > 0 && sanitized.length > MAX_DETAIL_STRING_LENGTH) {
+            return `${sanitized.slice(0, MAX_DETAIL_STRING_LENGTH)}…`;
         }
-        return value;
+        return sanitized;
     }
     if (Array.isArray(value)) {
         return value.slice(0, 20).map((entry) => sanitizeValue(entry));
@@ -416,6 +418,13 @@ function classifyFingerprintErrorText(text: string): string {
     return lower;
 }
 
+function classifyFingerprintErrorTextKind(text: string): string {
+    const normalized = normalizeFingerprintString(text).toLowerCase();
+    if (!normalized) return '';
+    const classified = classifyFingerprintErrorText(text);
+    return classified && classified !== normalized ? classified : 'other';
+}
+
 function buildFingerprintErrorSummary(details: Record<string, any> | undefined): Record<string, any> | undefined {
     if (!details || typeof details !== 'object') return undefined;
 
@@ -431,12 +440,12 @@ function buildFingerprintErrorSummary(details: Record<string, any> | undefined):
         statusCode: details.statusCode,
         responseStatus: details.responseStatus,
         responseStatusText: details.responseStatusText,
-        messageKind: typeof details.message === 'string' ? classifyFingerprintErrorText(details.message) : undefined,
+        messageKind: typeof details.message === 'string' ? classifyFingerprintErrorTextKind(details.message) : undefined,
     };
 
     if (responseError && typeof responseError === 'object') {
         summary.responseError = {
-            kind: typeof responseError.message === 'string' ? classifyFingerprintErrorText(responseError.message) : undefined,
+            kind: typeof responseError.message === 'string' ? classifyFingerprintErrorTextKind(responseError.message) : undefined,
             code: responseError.code,
             type: responseError.type,
             status: responseError.status,
@@ -449,7 +458,7 @@ function buildFingerprintErrorSummary(details: Record<string, any> | undefined):
             provider_name: metadata.provider_name,
             provider_id: metadata.provider_id,
             is_byok: metadata.is_byok,
-            rawKind: typeof metadata.raw === 'string' ? classifyFingerprintErrorText(metadata.raw) : undefined,
+            rawKind: typeof metadata.raw === 'string' ? classifyFingerprintErrorTextKind(metadata.raw) : undefined,
         };
     }
 
@@ -460,10 +469,12 @@ function buildProviderUniqueErrorFingerprint(entry: Omit<ProviderUniqueErrorLogE
     const fingerprintPayload = stableValue({
         provider: normalizeProviderFingerprintKey(entry.provider),
         operation: entry.operation,
-        errorMessage: normalizeFingerprintString(entry.errorMessage),
+        errorMessageKind: classifyFingerprintErrorTextKind(entry.errorMessage),
         errorSummary: buildFingerprintErrorSummary(entry.errorDetails),
     });
-    return crypto.createHash('sha256').update(JSON.stringify(fingerprintPayload)).digest('hex');
+    return crypto
+        .scryptSync(JSON.stringify(fingerprintPayload), providerUniqueFingerprintSecret, 32)
+        .toString('hex');
 }
 
 async function reserveProviderUniqueFingerprint(fingerprint: string): Promise<boolean> {
@@ -506,7 +517,7 @@ function isProviderAttemptAggregateError(message: string): boolean {
 }
 
 function sanitizeProviderErrorSummary(message: string): string {
-    const normalized = String(message || '')
+    const normalized = sanitizeProviderErrorText(String(message || ''))
         .replace(/https?:\/\/\S+/gi, '[url]')
         .replace(/\s+/g, ' ')
         .trim();
@@ -644,6 +655,9 @@ export async function logUniqueProviderError(context: ProviderErrorLogContext): 
         const provider = String(context.provider || '').trim();
         const operation = String(context.operation || '').trim();
         if (!provider || !operation) return;
+        const summarizedErrorMessage = sanitizeProviderErrorSummary(
+            String(context.error?.message || context.error || 'Unknown provider error')
+        ) || 'Unknown provider error';
 
         const entryWithoutFingerprint: Omit<ProviderUniqueErrorLogEntry, 'timestamp' | 'fingerprint'> = {
             provider,
@@ -653,7 +667,7 @@ export async function logUniqueProviderError(context: ProviderErrorLogContext): 
             ...(typeof context.latencyMs === 'number' && Number.isFinite(context.latencyMs)
                 ? { latencyMs: Math.max(0, Math.round(context.latencyMs)) }
                 : {}),
-            errorMessage: String(context.error?.message || context.error || 'Unknown provider error'),
+            errorMessage: summarizedErrorMessage,
             errorDetails: buildProviderErrorDetails(context.error, context.extra),
         };
 
@@ -718,9 +732,9 @@ export async function logError(error: any, request?: Request): Promise<void> {
             details: Object.keys(details).length > 0 ? details : undefined,
         });
 
-        logEntry.errorMessage = normalized.message;
+        logEntry.errorMessage = sanitizeProviderErrorText(normalized.message);
         if (normalized.stack) {
-            logEntry.errorStack = normalized.stack;
+            logEntry.errorStack = sanitizeProviderErrorText(normalized.stack);
         }
         if (normalized.details && Object.keys(normalized.details).length > 0) {
             logEntry.errorDetails = sanitizeDetails(normalized.details);
@@ -736,15 +750,15 @@ export async function logError(error: any, request?: Request): Promise<void> {
             details: Object.keys(otherProps).length > 0 ? otherProps : undefined,
         });
 
-        logEntry.errorMessage = normalized.message;
+        logEntry.errorMessage = sanitizeProviderErrorText(normalized.message);
         if (normalized.stack) {
-            logEntry.errorStack = normalized.stack;
+            logEntry.errorStack = sanitizeProviderErrorText(normalized.stack);
         }
         if (normalized.details && Object.keys(normalized.details).length > 0) {
             logEntry.errorDetails = sanitizeDetails(normalized.details);
         }
     } else if (typeof error === 'string') {
-        logEntry.errorMessage = error || '(empty string error)';
+        logEntry.errorMessage = sanitizeProviderErrorText(error || '(empty string error)');
     } else {
         logEntry.errorMessage = `Unexpected error type: ${typeof error}`;
         try {

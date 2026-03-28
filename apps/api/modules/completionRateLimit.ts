@@ -1,5 +1,6 @@
 import redis, { redisReadyPromise } from './db.js';
 import { logger } from './logger.js';
+import { hashToken } from './redaction.js';
 import {
   evaluateRateLimitCounts,
   incrementInMemoryRateCounts,
@@ -65,7 +66,8 @@ export function evaluateCompletionRateLimit(
 }
 
 export function logCompletionRateLimitIncrementFailure(apiKey: string, error: unknown): void {
+  const keyId = hashToken(apiKey).slice(0, 12);
   logger.warn(
-    `[RateLimit] Failed to persist successful completion counters for key ${apiKey.slice(0, 4)}...${apiKey.slice(-4)}: ${error instanceof Error ? error.message : String(error)}`,
+    `[RateLimit] Failed to persist successful completion counters for key ${keyId}: ${error instanceof Error ? error.message : String(error)}`,
   );
 }

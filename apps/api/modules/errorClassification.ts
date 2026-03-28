@@ -5,6 +5,8 @@
  * across providers/handler.ts and routes/openai.ts.
  */
 
+import { containsOpenAiApiKeyHelpLink } from './urlGuards.js';
+
 // --- Rate-limit / Quota ---
 
 export function isRateLimitOrQuotaError(error: any): boolean {
@@ -183,6 +185,45 @@ export function isRateLimitOrQuotaError(error: any): boolean {
 		message.includes('payment required to access this model') ||
 		message.includes('credits are required') ||
 		message.includes('credit balance required') ||
+		message.includes('insufficient funds') ||
+		message.includes('insufficient credits remaining') ||
+		message.includes('no credits remaining') ||
+		message.includes('out of credits') ||
+		message.includes('account balance too low') ||
+		message.includes('balance too low') ||
+		message.includes('billing quota exceeded') ||
+		message.includes('monthly spend limit reached') ||
+		message.includes('spend limit reached') ||
+		message.includes('payment required due to insufficient balance') ||
+		message.includes('insufficient credits to process request') ||
+		message.includes('insufficient credits remaining') ||
+		message.includes('credit balance too low') ||
+		message.includes('account balance too low') ||
+		message.includes('billing quota exceeded') ||
+		message.includes('billing hard limit reached') ||
+		message.includes('payment required by provider') ||
+		message.includes('provider requires payment') ||
+		message.includes('insufficient funds') ||
+		message.includes('insufficient credits remaining') ||
+		message.includes('out of credits') ||
+		message.includes('no credits remaining') ||
+		message.includes('account balance too low') ||
+		message.includes('balance too low') ||
+		message.includes('billing quota exceeded') ||
+		message.includes('monthly quota exceeded') ||
+		message.includes('usage limit reached') ||
+		message.includes('spending limit reached') ||
+		message.includes('402 payment required') ||
+		message.includes('credit balance is too low') ||
+		message.includes('credits exhausted') ||
+		message.includes('credit balance exhausted') ||
+		message.includes('insufficient credits') ||
+		message.includes('insufficient credit') ||
+		message.includes('insufficient balance') ||
+		message.includes('billing hard limit') ||
+		message.includes('billing disabled') ||
+		message.includes('billing has been disabled') ||
+		message.includes('key_no_quota') ||
 		message.includes('credit balance is insufficient') ||
 		message.includes('insufficient funds') ||
 		message.includes('out of credits') ||
@@ -2093,7 +2134,7 @@ export function isProviderAuthConfigurationError(error: any): boolean {
 		message.includes('unauthorized') ||
 		message.includes('forbidden') ||
 		message.includes('please pass a valid api key') ||
-		message.includes('you can find your api key at https://platform.openai.com/account/api-keys')
+		containsOpenAiApiKeyHelpLink(message)
 	);
 }
 
@@ -2138,7 +2179,7 @@ export function isInvalidApiKeyError(error: any): boolean {
 			message.includes('api_key_invalid') ||
 			message.includes('api key expired') ||
 			message.includes('api key not valid') ||
-			message.includes('you can find your api key at https://platform.openai.com/account/api-keys')
+			containsOpenAiApiKeyHelpLink(message)
 		)) ||
 		message.includes('invalid api key') ||
 		message.includes('incorrect api key provided') ||
@@ -2147,7 +2188,7 @@ export function isInvalidApiKeyError(error: any): boolean {
 		message.includes('api_key_invalid') ||
 		message.includes('api key expired') ||
 		message.includes('api key not valid') ||
-		message.includes('you can find your api key at https://platform.openai.com/account/api-keys')
+		containsOpenAiApiKeyHelpLink(message)
 	);
 }
 
@@ -2196,7 +2237,7 @@ export function isProviderAuthOrConfigurationError(error: any): boolean {
 		message.includes('payment required') ||
 		message.includes('billing disabled') ||
 		message.includes('billing has been disabled') ||
-		message.includes('you can find your api key at https://platform.openai.com/account/api-keys') ||
+		containsOpenAiApiKeyHelpLink(message) ||
 		message.includes('unauthorized') ||
 		message.includes('authentication failed')
 	);
@@ -2404,6 +2445,24 @@ export function isToolUnsupportedError(error: any): boolean {
 		message.includes('invalid api key') ||
 		message.includes('invalid_api_key') ||
 		message.includes('expired api key') ||
+		message.includes('payment required') ||
+		message.includes('provider payment required') ||
+		message.includes('payment required for this request') ||
+		message.includes('payment required to access this model') ||
+		message.includes('payment method required') ||
+		message.includes('payment overdue') ||
+		message.includes('insufficient credits') ||
+		message.includes('insufficient credit') ||
+		message.includes('insufficient balance') ||
+		message.includes('credit balance is too low') ||
+		message.includes('credits exhausted') ||
+		message.includes('credit balance exhausted') ||
+		message.includes('quota payment required') ||
+		message.includes('status code 402') ||
+		message.includes('status 402') ||
+		message.includes('payment required') ||
+		message.includes('quota payment required') ||
+		message.includes('provider payment required') ||
 		status === 402 ||
 		message.includes('status 402') ||
 		message.includes('payment required') ||

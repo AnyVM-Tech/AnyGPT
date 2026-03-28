@@ -10,6 +10,7 @@ import {
 import { fetchWithTimeout } from '../modules/http.js';
 import { logUniqueProviderError } from '../modules/errorLogger.js';
 import { normalizeImageFetchReferer } from '../modules/openaiRequestSupport.js';
+import { textMentionsHostname } from '../modules/urlGuards.js';
 import dns from 'node:dns/promises';
 import net from 'node:net';
 // Removed imports related to compute and Provider state
@@ -158,7 +159,7 @@ const GEMINI_SHARED_CATALOG_AUTH_FAILURE_CACHE_KEY = '__shared_project_auth_fail
 
 function isGeminiProjectAuthFailureMessage(message: string | undefined): boolean {
   const normalized = String(message || '').toLowerCase();
-  return normalized.includes('generativelanguage.googleapis.com')
+  return textMentionsHostname(normalized, 'generativelanguage.googleapis.com')
     || normalized.includes('generative language api has not been used in project')
     || normalized.includes('api activation')
     || normalized.includes('permission_denied');

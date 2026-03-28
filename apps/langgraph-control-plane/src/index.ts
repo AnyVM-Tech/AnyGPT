@@ -2511,6 +2511,9 @@ async function main() {
         || resultRecord.sameThreadLangSmithRunObserved
         || resultRecord.sameThreadValidationObserved,
       );
+      const currentThreadId = typeof parsedArgs.threadId === 'string'
+        ? parsedArgs.threadId.trim()
+        : '';
       const sameThreadPendingThreadId = typeof resultRecord.sameThreadPendingThreadId === 'string'
         ? resultRecord.sameThreadPendingThreadId.trim()
         : '';
@@ -2527,10 +2530,10 @@ async function main() {
       const operatorFacingNoRunDeferReason = !sameThreadValidationObserved
         ? (
             sameThreadPendingObserved && partialReadinessObserved
-              ? `No fresh same-thread LangSmith control-plane run/trace was completed for thread ${sameThreadPendingThreadId || 'unknown-thread'}; sampled LangSmith visibility is pending-only and startup evidence is partial readiness only because the control-plane registered graphs, started workers, or reported server-running before flushing/exiting. Cross-thread activity does not satisfy this iteration, so preserve a clear no-run defer reason until one fresh same-thread run/trace with explicit goal context and a passed smoke/typecheck result exists.`
+              ? `No fresh same-thread LangSmith control-plane run/trace was completed for current thread ${currentThreadId || 'unknown-thread'}; sampled LangSmith visibility is pending-only for thread ${sameThreadPendingThreadId || 'unknown-thread'} and startup evidence is partial readiness only because the control-plane registered graphs, started workers, or reported server-running before flushing/exiting. Cross-thread activity does not satisfy this iteration, so preserve a clear no-run defer reason until one fresh same-thread run/trace with explicit goal context and a passed smoke/typecheck result exists.`
               :
             partialReadinessObserved
-              ? 'No fresh same-thread LangSmith control-plane run/trace was observed for this iteration; startup logs only provide partial readiness evidence because the control-plane registered graphs, started workers, or reported server-running before flushing/exiting. Preserve a no-run defer reason until the same thread emits a fresh completed LangSmith run/trace with explicit goal context and control-plane smoke/typecheck passes.'
+              ? `No fresh same-thread LangSmith control-plane run/trace was observed for current thread ${currentThreadId || 'unknown-thread'} during this iteration; startup logs only provide partial readiness evidence because the control-plane registered graphs, started workers, or reported server-running before flushing/exiting. Preserve a no-run defer reason until the same thread emits a fresh completed LangSmith run/trace with explicit goal context and control-plane smoke/typecheck passes.`
               :             partialReadinessObserved
               ? `No fresh same-thread LangSmith control-plane run/trace was observed for thread ${runnerStatus.threadId}. Control-plane startup showed only partial readiness evidence (for example graph registration, worker startup, or server-running followed by an immediate flush/exit), so do not treat this iteration as validated yet.`
               :

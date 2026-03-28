@@ -420,7 +420,13 @@ const CONTROL_PLANE_GOVERNANCE_PROFILE_FILE = 'apps/langgraph-control-plane/gove
 const DEFAULT_CONTROL_PLANE_AUTONOMOUS_EDIT_PROMPT = [
   'You are the autonomous code edit agent for the AnyGPT LangGraph control plane. Produce only safe, bounded code changes within the allowlist and prefer the smallest viable edit.',
   'When CodeQL or SARIF findings are available, treat them as code-local repair signals. Prefer the smallest fix in the referenced file, mention the CodeQL rule id or short description in the summary and edit reason, and avoid broad unrelated edits when a named finding already points to a specific path.',
+  'When the active repair signal is a CodeQL or SARIF finding that points to a file outside the current allowlist or locked control-plane scope, require the summary and each edit reason to explicitly name the blocked file or subsystem, classify the direct fix as blocked by scope, and prefer one small control-plane orchestration, observability, workflow-hardening, or operator-facing defer-reason improvement in an allowed control-plane file instead of proposing unreachable edits.',
   'When LangSmith feedback shows repair_smoke_passed=0 or contains_goal_context=0, treat that as a control-plane workflow-hardening signal. In the summary and each edit reason, explicitly restate the active goal and the active repair signal in plain language, name the current control-plane thread when available, name the exact touched control-plane file or subsystem, and state the next smoke/validation success condition as either at least one fresh same-thread LangSmith control-plane run/trace with explicit goal context and a passed control-plane smoke/typecheck result, or a clear operator-facing defer reason explaining why no run or smoke result was emitted. Do not treat cross-thread activity, older iterations, or pending-only visibility as satisfying the current thread.',
+  'When the active repair signal is a CodeQL or SARIF finding that points to a file outside the current allowlist or locked control-plane scope, require the summary and each edit reason to explicitly name the blocked file or subsystem, classify the finding as blocked by scope rather than silently actionable, and prefer one small control-plane orchestration, observability, workflow-hardening, or explicit defer-reason improvement in an allowed control-plane file instead of proposing unreachable edits.',
+  'When the active repair signal is a CodeQL or SARIF finding that points to a file outside the current allowlist or locked control-plane scope, require the summary and each edit reason to explicitly name the blocked file or subsystem, classify the finding as out-of-scope for this bounded control-plane iteration, and prefer one small control-plane orchestration, observability, or workflow-hardening change instead of implying the underlying apps/api issue was fixed.',
+  'When the active repair signal is a CodeQL or SARIF finding that points to a file outside the current allowlist or locked control-plane scope, require the summary and each edit reason to explicitly name the blocked file or subsystem, classify direct repair there as out of scope for the current thread, and prefer one small control-plane workflow-hardening, observability, or defer-reason improvement in an allowed control-plane file instead of proposing unreachable edits.',
+  'When the active repair signal is a CodeQL or SARIF finding that points to a file outside the current allowlist or locked control-plane scope, require the summary and each edit reason to explicitly name the blocked file or subsystem, classify the finding as scope-blocked rather than silently ignored, and preserve a clear operator-facing defer reason instead of proposing unreachable edits. In that case, prefer one small control-plane orchestration, observability, or workflow-hardening change that improves how the blocked finding is surfaced, and still require the next validation success condition to be at least one fresh same-thread LangSmith control-plane run/trace with explicit goal context plus a passed control-plane smoke/typecheck result, or a clear no-run defer reason if no run was emitted.',
+  'When active repair signals are CodeQL findings such as js/clear-text-logging or js/insufficient-password-hash that point to apps/api files outside the current control-plane allowlist, require the summary and each edit reason to name the exact blocked apps/api path, say the finding is scope-blocked for the current control-plane thread, and prefer one bounded control-plane workflow-hardening or observability change that makes the blocked finding visible to operators rather than proposing unreachable source edits.',
   'Even during healthy control-plane improvement iterations with passing governance, require summaries and edit reasons to explicitly confirm the current iteration still needs one fresh same-thread LangSmith control-plane run/trace rather than relying on runs from other threads or older iterations. Before calling the iteration successful, explicitly check and mention control-plane startup/health evidence such as graph registration, worker startup, server-running logs, LangSmith metadata wiring, pending-run visibility for the same thread, and prompt fallback telemetry when available. If same-thread LangSmith evidence is only pending, explicitly call that partial observability evidence, name the exact pending thread, and preserve a no-run defer reason instead of treating pending-only visibility as completed validation. If startup logs show graph registration, worker startup, or server-running evidence but also show an immediate flush, exit, or shutdown soon after startup, explicitly classify that as partial readiness evidence rather than completed validation and preserve a clear operator-facing no-run defer reason unless a fresh same-thread LangSmith control-plane run/trace and smoke/typecheck result are also present. If both conditions happen together for the current thread — pending same-thread LangSmith visibility and startup logs that immediately flush or exit — require the summary and each edit reason to describe that combined state as partial observability plus partial readiness only, not a successful validation run. If recent LangSmith activity is dominated by other threads while the current control-plane thread has no fresh completed run, explicitly say cross-thread activity does not satisfy this iteration for the current thread and preserve the no-run defer reason. If those readiness or observability signals are missing, preserve a clear operator-facing no-run defer reason instead of claiming success.',
   'When LangSmith governance flags recent-run-health because no recent runs are available, treat it as a control-plane observability gap rather than a provider or product-code regression by default. Zero recent LangSmith runs is a monitoring gap, not by itself a deploy/rollback trigger. In control-plane scope, prefer one small orchestration, observability, or workflow-hardening change that increases the chance of producing or surfacing at least one recent LangSmith run, trace, or operator-facing defer reason, and name that success condition in the summary and edit reason. The next smoke/validation step must confirm at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
   'When recent LangSmith runs are healthy but mostly belong to other threads or scopes, treat that as a same-thread control-plane observability gap for the current iteration rather than proof that this thread already emitted validation evidence. In the summary and each edit reason, explicitly name the current control-plane thread when available and require either one fresh same-thread LangSmith control-plane run/trace with goal context for this iteration or a clear operator-facing no-run defer reason explaining why no run was emitted.',
@@ -4747,6 +4753,8 @@ function listRecentCodeQlCandidatePaths(state: ControlPlaneState): string[] {
   const seededCandidates = [
     path.resolve(state.repoRoot, 'codeql-results.sarif'),
     path.resolve(state.repoRoot, 'codeql-results.sarif.json'),
+    path.resolve(state.repoRoot, '.codeql', 'api-codeql-results.sarif'),
+    path.resolve(state.repoRoot, '.codeql', 'api-codeql-results.sarif.json'),
     path.resolve(state.repoRoot, '.codeql', 'control-plane-results.sarif'),
     path.resolve(state.repoRoot, '.codeql', 'control-plane-results.sarif.json'),
     path.resolve(state.repoRoot, '.codeql', 'repo-codeql-results.sarif'),
@@ -4774,18 +4782,39 @@ function listRecentCodeQlCandidatePaths(state: ControlPlaneState): string[] {
     .slice(0, CODEQL_RESULT_FILE_LIMIT);
 }
 
+type AutomaticCodeQlTarget = 'control-plane' | 'api' | 'repo' | null;
+
+function resolveAutomaticCodeQlTarget(state: ControlPlaneState): AutomaticCodeQlTarget {
+  const scopes = new Set(getEffectiveScopes(state));
+  const hasApiScope = (
+    scopes.has('api')
+    || scopes.has('api-experimental')
+    || scopes.has('api-routing')
+    || scopes.has('api-runtime')
+    || scopes.has('api-data')
+    || scopes.has('api-platform')
+  );
+
+  if (hasApiScope) return 'api';
+  if (scopes.has('control-plane')) return 'control-plane';
+  if (scopes.has('repo')) return 'repo';
+  return null;
+}
+
 function shouldAutoRunCodeQl(state: ControlPlaneState): boolean {
   if (!CODEQL_AUTORUN_ENABLED) return false;
-  const scopes = new Set(getEffectiveScopes(state));
-  return scopes.has('repo') || scopes.has('control-plane');
+  return resolveAutomaticCodeQlTarget(state) !== null;
 }
 
 function resolveAutomaticCodeQlResultPath(state: ControlPlaneState): string {
   const configured = String(process.env.CONTROL_PLANE_CODEQL_RESULT_PATH || '').trim();
   if (configured) return path.resolve(state.repoRoot, configured);
 
-  const scopes = new Set(getEffectiveScopes(state));
-  if (scopes.has('control-plane')) {
+  const target = resolveAutomaticCodeQlTarget(state);
+  if (target === 'api') {
+    return path.resolve(state.repoRoot, '.codeql', 'api-codeql-results.sarif');
+  }
+  if (target === 'control-plane') {
     return path.resolve(state.repoRoot, '.codeql', 'control-plane-results.sarif');
   }
 
@@ -4796,10 +4825,12 @@ function resolveAutomaticCodeQlDatabasePath(state: ControlPlaneState): string {
   const configured = String(process.env.CONTROL_PLANE_CODEQL_DATABASE_PATH || '').trim();
   if (configured) return path.resolve(state.repoRoot, configured);
 
-  const scopes = new Set(getEffectiveScopes(state));
-  const databaseName = scopes.has('control-plane')
-    ? 'control-plane-db-javascript'
-    : 'repo-db-javascript';
+  const target = resolveAutomaticCodeQlTarget(state);
+  const databaseName = target === 'api'
+    ? 'api-db-javascript'
+    : target === 'control-plane'
+      ? 'control-plane-db-javascript'
+      : 'repo-db-javascript';
   return path.resolve(state.repoRoot, '.codeql', databaseName);
 }
 
@@ -4807,9 +4838,13 @@ function resolveAutomaticCodeQlSourceRoot(state: ControlPlaneState): string {
   const configured = String(process.env.CONTROL_PLANE_CODEQL_SOURCE_ROOT || '').trim();
   if (configured) return path.resolve(state.repoRoot, configured);
 
-  const scopes = new Set(getEffectiveScopes(state));
+  const target = resolveAutomaticCodeQlTarget(state);
+  const apiRoot = path.resolve(state.repoRoot, 'apps', 'api');
   const controlPlaneRoot = path.resolve(state.repoRoot, 'apps', 'langgraph-control-plane');
-  if (scopes.has('control-plane') && fs.existsSync(controlPlaneRoot)) {
+  if (target === 'api' && fs.existsSync(apiRoot)) {
+    return apiRoot;
+  }
+  if (target === 'control-plane' && fs.existsSync(controlPlaneRoot)) {
     return controlPlaneRoot;
   }
 
@@ -4817,9 +4852,8 @@ function resolveAutomaticCodeQlSourceRoot(state: ControlPlaneState): string {
 }
 
 function shouldTrackCodeQlSourceFreshness(state: ControlPlaneState, sourceRoot: string): boolean {
-  const controlPlaneRoot = path.resolve(state.repoRoot, 'apps', 'langgraph-control-plane');
   const normalizedSourceRoot = path.resolve(sourceRoot);
-  return normalizedSourceRoot === controlPlaneRoot || normalizedSourceRoot.startsWith(`${controlPlaneRoot}${path.sep}`);
+  return fs.existsSync(normalizedSourceRoot);
 }
 
 function getNewestCodeQlSourceState(sourceRoot: string): { newestSourceMtimeMs: number; newestSourcePath: string } {
@@ -4968,7 +5002,62 @@ async function ensureAutomaticCodeQlSarif(state: ControlPlaneState): Promise<str
   return [`CodeQL autorun: generated ${resultRelativePath} with ${findingCount} finding(s)${freshnessSuffix}.`];
 }
 
-function normalizeCodeQlFindingPath(repoRoot: string, sarifPath: string, rawUri: string | undefined): string {
+function resolveAutomaticCodeQlSourceRootForSarif(repoRoot: string, sarifPath: string): string {
+  const configured = String(process.env.CONTROL_PLANE_CODEQL_SOURCE_ROOT || '').trim();
+  if (configured) return path.resolve(repoRoot, configured);
+
+  const normalizedSarifPath = path.resolve(sarifPath);
+  const fileName = path.basename(normalizedSarifPath).toLowerCase();
+  if (fileName.includes('api-codeql-results')) {
+    return path.resolve(repoRoot, 'apps', 'api');
+  }
+  if (fileName.includes('control-plane-results')) {
+    return path.resolve(repoRoot, 'apps', 'langgraph-control-plane');
+  }
+  return repoRoot;
+}
+
+function resolveCodeQlFindingBasePath(
+  repoRoot: string,
+  sarifPath: string,
+  rawUriBaseId: string | undefined,
+  originalUriBaseIds: Record<string, any> | undefined,
+): string {
+  const normalizedUriBaseId = String(rawUriBaseId || '').trim();
+  if (!normalizedUriBaseId) return '';
+
+  if (normalizedUriBaseId === '%SRCROOT%') {
+    return resolveAutomaticCodeQlSourceRootForSarif(repoRoot, sarifPath);
+  }
+
+  const baseDescriptor = originalUriBaseIds && typeof originalUriBaseIds === 'object'
+    ? originalUriBaseIds[normalizedUriBaseId]
+    : undefined;
+  const baseUri = typeof baseDescriptor?.uri === 'string'
+    ? baseDescriptor.uri.trim()
+    : '';
+  if (!baseUri) return '';
+
+  try {
+    if (baseUri.startsWith('file://')) {
+      return fileURLToPath(baseUri);
+    }
+    if (path.isAbsolute(baseUri)) {
+      return baseUri;
+    }
+    return path.resolve(path.dirname(sarifPath), decodeURIComponent(baseUri));
+  } catch {
+    return '';
+  }
+}
+
+function normalizeCodeQlFindingPath(
+  repoRoot: string,
+  sarifPath: string,
+  rawUri: string | undefined,
+  rawUriBaseId?: string,
+  originalUriBaseIds?: Record<string, any>,
+): string {
   const uri = String(rawUri || '').trim();
   if (!uri) return '';
 
@@ -4980,10 +5069,20 @@ function normalizeCodeQlFindingPath(repoRoot: string, sarifPath: string, rawUri:
       resolvedPath = uri;
     } else {
       const decoded = decodeURIComponent(uri);
-      const fromRepoRoot = path.resolve(repoRoot, decoded);
-      resolvedPath = fs.existsSync(fromRepoRoot)
-        ? fromRepoRoot
-        : path.resolve(path.dirname(sarifPath), decoded);
+      const fromBasePath = resolveCodeQlFindingBasePath(
+        repoRoot,
+        sarifPath,
+        rawUriBaseId,
+        originalUriBaseIds,
+      );
+      if (fromBasePath) {
+        resolvedPath = path.resolve(fromBasePath, decoded);
+      } else {
+        const fromRepoRoot = path.resolve(repoRoot, decoded);
+        resolvedPath = fs.existsSync(fromRepoRoot)
+          ? fromRepoRoot
+          : path.resolve(path.dirname(sarifPath), decoded);
+      }
     }
   } catch {
     return '';
@@ -5034,7 +5133,22 @@ function summarizeCodeQlSarif(state: ControlPlaneState, sarifPath: string): LogI
           typeof physicalLocation?.artifactLocation?.uri === 'string'
             ? physicalLocation.artifactLocation.uri
             : '',
+          typeof physicalLocation?.artifactLocation?.uriBaseId === 'string'
+            ? physicalLocation.artifactLocation.uriBaseId
+            : '',
+          run?.originalUriBaseIds && typeof run.originalUriBaseIds === 'object'
+            ? run.originalUriBaseIds as Record<string, any>
+            : undefined,
         );
+        if (
+          findingPath
+          && (
+            /(?:^|\/)dist\//.test(findingPath)
+            || findingPath.endsWith('.d.ts')
+          )
+        ) {
+          continue;
+        }
         const lineNumber = typeof physicalLocation?.region?.startLine === 'number'
           ? physicalLocation.region.startLine
           : null;

@@ -46,6 +46,10 @@ import { hashToken } from '../modules/redaction.js';
 import { logUniqueProviderError } from '../modules/errorLogger.js';
 import { logMemoryProfile } from '../modules/requestIntake.js';
 import {
+	containsOpenAiApiKeyHelpLink,
+	textMentionsHostname
+} from '../modules/urlGuards.js';
+import {
 	readEnvNumber,
 	type TokenBreakdown,
 	estimateTokensFromText,
@@ -4273,7 +4277,7 @@ function shouldSkipGeminiProviderForMessage(
 		combined.includes('generative language api is disabled') ||
 		combined.includes('service_disabled') ||
 		combined.includes('accessnotconfigured') ||
-		combined.includes('generativelanguage.googleapis.com') ||
+		textMentionsHostname(combined, 'generativelanguage.googleapis.com') ||
 		combined.includes('gemini_project_auth_failure') ||
 		combined.includes('api key not valid') ||
 		combined.includes('api key not found') ||
@@ -4307,9 +4311,7 @@ function shouldSkipGeminiProviderForMessage(
 		combined.includes('invalid api key') ||
 		combined.includes('incorrect api key provided') ||
 		combined.includes('invalid_api_key') ||
-		combined.includes(
-			'you can find your api key at https://platform.openai.com/account/api-keys'
-		)
+		containsOpenAiApiKeyHelpLink(combined)
 	) {
 		return true;
 	}

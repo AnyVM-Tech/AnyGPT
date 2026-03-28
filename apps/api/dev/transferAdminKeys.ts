@@ -4,6 +4,7 @@ import axios from 'axios';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { createHash } from 'crypto';
 import { hashToken } from '../modules/redaction.js';
+import { urlHasExpectedHostname } from '../modules/urlGuards.js';
 import type { Provider, Model } from '../providers/interfaces.js';
 import { dataManager, LoadedProviders } from '../modules/dataManager.js';
 import { refreshProviderCountsInModelsFile } from '../modules/modelUpdater.js';
@@ -144,12 +145,11 @@ function getProviderFamily(provider: string): ProviderFamily {
 
 function resolveExistingProviderFamily(providerEntry: Pick<Provider, 'id' | 'provider_url'>): string | null {
   const id = String(providerEntry.id || '').toLowerCase();
-  const url = String(providerEntry.provider_url || '').toLowerCase();
-  if (id.includes('openai') || url.includes('api.openai.com')) return 'openai';
-  if (id.includes('openrouter') || url.includes('openrouter.ai')) return 'openrouter';
-  if (id.includes('deepseek') || url.includes('api.deepseek.com')) return 'deepseek';
-  if (id.includes('xai') || id.includes('x-ai') || url.includes('api.x.ai')) return 'xai';
-  if (id.includes('gemini') || id === 'google' || url.includes('generativelanguage.googleapis.com')) return 'gemini';
+  if (id.includes('openai') || urlHasExpectedHostname(providerEntry.provider_url, 'api.openai.com')) return 'openai';
+  if (id.includes('openrouter') || urlHasExpectedHostname(providerEntry.provider_url, 'openrouter.ai')) return 'openrouter';
+  if (id.includes('deepseek') || urlHasExpectedHostname(providerEntry.provider_url, 'api.deepseek.com')) return 'deepseek';
+  if (id.includes('xai') || id.includes('x-ai') || urlHasExpectedHostname(providerEntry.provider_url, 'api.x.ai')) return 'xai';
+  if (id.includes('gemini') || id === 'google' || urlHasExpectedHostname(providerEntry.provider_url, 'generativelanguage.googleapis.com')) return 'gemini';
   return null;
 }
 
@@ -664,6 +664,7 @@ async function main() {
       await Promise.all(batch.map(async (entry) => {
         try {
           const validation = await validateKey(entry);
+          const keyId = hashId(entry.key);
           const probePartition = partitionModelsByProbeStatus(
             validation.models,
             probeTested,
@@ -671,10 +672,10 @@ async function main() {
             pendingImportedModelIds
           );
           if (probePartition.pendingModels.length > 0) {
-            console.log(`ℹ️  ${entry.provider} key ${entry.key.slice(0, 6)}...: queued ${probePartition.pendingModels.length} new model(s) for probing`);
+            console.log(`ℹ️  ${entry.provider} key ${keyId}: queued ${probePartition.pendingModels.length} new model(s) for probing`);
           }
           if (probePartition.skippedFineTunes > 0) {
-            console.log(`ℹ️  ${entry.provider} key ${entry.key.slice(0, 6)}...: skipped ${probePartition.skippedFineTunes} private fine-tune model(s)`);
+            console.log(`ℹ️  ${entry.provider} key ${keyId}: skipped ${probePartition.skippedFineTunes} private fine-tune model(s)`);
           }
           const importModels = Array.from(new Set([...probePartition.readyModels, ...probePartition.pendingModels]));
           if (importModels.length === 0) {
