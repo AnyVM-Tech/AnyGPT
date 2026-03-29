@@ -22,13 +22,17 @@ function isOpenRouterToolUseUnsupportedError(error: any): boolean {
     lowerMessage.includes('tool use') ||
     lowerMessage.includes('tool_choice') ||
     lowerMessage.includes('client-side tools') ||
-    lowerMessage.includes('function calling');
+    lowerMessage.includes('function calling') ||
+    lowerMessage.includes('tools for multi-agent models') ||
+    lowerMessage.includes('[probe:tool_calling]');
+  const isProviderAvailabilityOrGovernanceFailure =
+    /no endpoints found that support (tool use|the tool|the provided ['\"]tool_choice['\"] value)|no allowed providers are available for the selected model|no providers? available|provider routing/i.test(message);
+  const isToolCallingGovernanceFailure =
+    isToolCallingRequest && /beta access|invalid argument|not supported|unsupported/i.test(lowerMessage);
   return (
-    (status === 404 || status === 400) &&
-    (
-      /no endpoints found that support (tool use|the tool|the provided ['\"]tool_choice['\"] value)|no allowed providers are available for the selected model/i.test(message) ||
-      (isToolCallingRequest && /beta access|invalid argument/i.test(lowerMessage))
-    )
+    ((status === 400 || status === 404 || status === 422) && isToolCallingRequest) ||
+    ((status === 400 || status === 422) && isToolCallingGovernanceFailure) ||
+    ((status === 400 || status === 404) && isProviderAvailabilityOrGovernanceFailure)
   );
 }
 /**

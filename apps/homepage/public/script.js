@@ -13,8 +13,118 @@ const LOGIN_URL = '/login';        // LibreChat login (has Keycloak button)
 const DOCS_URL = '/openapi.json';
 const LIVE_METRICS_URL = '/api/live-metrics';
 const LIVE_METRICS_REFRESH_MS = 30_000;
+const LIVE_METRICS_REDUCED_MOTION_REFRESH_MS = 60_000;
+const LIVE_METRICS_REQUEST_TIMEOUT_MS = 8_000;
+const THEME_COLOR_DEFAULT = '#041140';
+const THEME_COLOR_HERO = '#010827';
+const DEFAULT_PAGE_TITLE = 'AnyGPT — Unified AI Workspace';
+const AUTHENTICATED_PAGE_TITLE = 'AnyGPT Workspace';
+const HIDDEN_PAGE_TITLE = 'AnyGPT — Come back to your workspace';
+const DASHBOARD_STORAGE_KEYS = ['anygpt:last-dashboard-url', 'librechat:last-dashboard-url'];
+const DARK_COLOR_SCHEME_QUERY = '(prefers-color-scheme: dark)';
 let liveMetricsRequestInFlight = false;
 let liveMetricsPollHandle = null;
+let liveMetricsVisibilityBound = false;
+let liveMetricsNetworkBound = false;
+let liveMetricsPageLifecycleBound = false;
+let liveMetricsMotionBound = false;
+let liveMetricsAbortController = null;
+let liveMetricsMotionQuery = null;
+let themeColorObserver = null;
+let colorSchemeThemeColorBound = false;
+let colorSchemeThemeQuery = null;
+let pageVisibilityTitleBound = false;
+let currentPageTitleBase = DEFAULT_PAGE_TITLE;
+
+function browserIsOffline() {
+  return typeof navigator !== 'undefined' && navigator.onLine === false;
+}
+
+function updatePageTitle() {
+  if (typeof document === 'undefined') return;
+  document.title = document.visibilityState === 'hidden'
+    ? HIDDEN_PAGE_TITLE
+    : currentPageTitleBase;
+}
+
+function setPageTitleBase(title) {
+  currentPageTitleBase = title || DEFAULT_PAGE_TITLE;
+  updatePageTitle();
+}
+
+function bindPageTitleVisibilityHandling() {
+  if (typeof document === 'undefined' || pageVisibilityTitleBound) {
+    return;
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    updatePageTitle();
+  });
+  pageVisibilityTitleBound = true;
+}
+
+function canPollLiveMetrics() {
+  const pageVisible = typeof document === 'undefined' || document.visibilityState === 'visible';
+  const networkAvailable = typeof navigator === 'undefined' || navigator.onLine !== false;
+  return pageVisible && networkAvailable;
+}
+
+function prefersReducedMotion() {
+  return typeof window !== 'undefined'
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+function getLiveMetricsRefreshMs() {
+  return prefersReducedMotion()
+    ? LIVE_METRICS_REDUCED_MOTION_REFRESH_MS
+    : LIVE_METRICS_REFRESH_MS;
+}
+
+function restartLiveMetricsPolling({ immediate = false } = {}) {
+  if (liveMetricsPollHandle) {
+    clearTimeout(liveMetricsPollHandle);
+    liveMetricsPollHandle = null;
+  }
+
+  if (!canPollLiveMetrics()) {
+    if (liveMetricsAbortController) {
+      liveMetricsAbortController.abort();
+      liveMetricsAbortController = null;
+    }
+    liveMetricsRequestInFlight = false;
+    return;
+  }
+
+  if (immediate) {
+    void refreshLiveMetrics();
+    return;
+  }
+
+  liveMetricsPollHandle = window.setTimeout(() => {
+    liveMetricsPollHandle = null;
+    void refreshLiveMetrics();
+  }, getLiveMetricsRefreshMs());
+}
+
+function bindLiveMetricsVisibilityHandling() {
+  if (typeof document !== 'undefined' && !liveMetricsVisibilityBound) {
+    document.addEventListener('visibilitychange', () => {
+      restartLiveMetricsPolling({ immediate: document.visibilityState === 'visible' });
+    });
+    liveMetricsVisibilityBound = true;
+  }
+
+  if (typeof window !== 'undefined' && !liveMetricsNetworkBound) {
+    window.addEventListener('online', () => {
+      restartLiveMetricsPolling({ immediate: true });
+    });
+    window.addEventListener('offline', () => {
+      restartLiveMetricsPolling({ immediate: false });
+    });
+    liveMetricsNetworkBound = true;
+  }
+}
 
 function formatMetricCount(value) {
   const num = Number(value);
@@ -113,9 +223,7 @@ function startLiveMetricsPolling() {
     return;
   }
 
-  liveMetricsPollHandle = window.setInterval(() => {
-    initLiveMetrics();
-  }, LIVE_METRICS_REFRESH_MS);
+  restartLiveMetricsPolling();
 }
 
 // Button templates
@@ -214,9 +322,11 @@ async function init() {
     });
 
     if (authenticated && keycloak.tokenParsed) {
-      // Auto-redirect authenticated users to the dashboard
-      // (covers post-Keycloak-login redirect back to /)
-      window.location.href = DASHBOARD_URL;
+      const profileName = keycloak.tokenParsed.name
+        || keycloak.tokenParsed.preferred_username
+        || keycloak.tokenParsed.given_name
+        || null;
+      render(true, profileName);
       return;
     }
   } catch (err) {

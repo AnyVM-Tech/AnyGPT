@@ -340,6 +340,19 @@ function buildOpenAIEmbeddingResponse(
 	};
 }
 
+function shouldStripSamplingParamsForModel(modelId: string): boolean {
+	const normalized = String(modelId || '')
+		.trim()
+		.toLowerCase()
+		.replace(/^openai\//, '');
+	if (!normalized) return false;
+	return (
+		normalized.startsWith('gpt-5') ||
+		normalized.startsWith('o3') ||
+		normalized.startsWith('o4')
+	);
+}
+
 function toGeminiEmbeddingModelPath(model: string): string {
 	return model.startsWith('models/') ? model : `models/${model}`;
 }
@@ -602,6 +615,7 @@ function extractResponsesRequestBody(requestBody: any): {
 		throw new Error('model parameter is required.');
 	}
 	const modelId = requestBody.model.trim();
+	const stripSamplingParams = shouldStripSamplingParamsForModel(modelId);
 
 	const rawInput = requestBody.input;
 	if (rawInput === undefined || rawInput === null) {
@@ -619,11 +633,14 @@ function extractResponsesRequestBody(requestBody: any): {
 			? requestBody.max_output_tokens
 			: undefined;
 	const temperature =
+		!stripSamplingParams &&
 		typeof requestBody.temperature === 'number'
 			? requestBody.temperature
 			: undefined;
 	const topP =
-		typeof requestBody.top_p === 'number' ? requestBody.top_p : undefined;
+		!stripSamplingParams && typeof requestBody.top_p === 'number'
+			? requestBody.top_p
+			: undefined;
 	const previousResponseId =
 		typeof requestBody.previous_response_id === 'string' &&
 		requestBody.previous_response_id.trim()
@@ -740,6 +757,85 @@ const embeddingsQueue = new RequestQueue(EMBEDDINGS_QUEUE_CONCURRENCY, {
 	label: 'embeddings-admission',
 	maxPending: EMBEDDINGS_QUEUE_MAX_PENDING
 });
+
+const INTERNAL_CONTROL_PLANE_RATE_LIMIT_WAIT_BUDGET_MS = Math.max(
+	0,
+	readEnvNumber('INTERNAL_CONTROL_PLANE_RATE_LIMIT_WAIT_BUDGET_MS', 60_000)
+);
+
+function resolveInternalRateLimitWaitBudgetMs(
+	request: Request
+): number | undefined {
+	const internalClient = String(
+		getHeaderValue(request.headers, 'x-anygpt-internal-client') || ''
+	)
+		.trim()
+		.toLowerCase();
+	if (
+		![
+			'control-plane',
+			'langgraph-control-plane',
+			'autonomous-runner'
+		].includes(internalClient)
+	) {
+		return undefined;
+	}
+
+	const requestedBudgetMs = Number(
+		getHeaderValue(request.headers, 'x-anygpt-rate-limit-wait-budget-ms') ||
+			''
+	);
+	if (Number.isFinite(requestedBudgetMs) && requestedBudgetMs >= 0) {
+		return Math.floor(requestedBudgetMs);
+	}
+
+	return INTERNAL_CONTROL_PLANE_RATE_LIMIT_WAIT_BUDGET_MS > 0
+		? INTERNAL_CONTROL_PLANE_RATE_LIMIT_WAIT_BUDGET_MS
+		: undefined;
+}
+
+function buildHandlerRequestOptions(
+	request: Request,
+	extra: Record<string, unknown> = {}
+): Record<string, unknown> {
+	const rateLimitWaitBudgetMs = resolveInternalRateLimitWaitBudgetMs(request);
+	const internalClient = String(
+		getHeaderValue(request.headers, 'x-anygpt-internal-client') || ''
+	)
+		.trim()
+		.toLowerCase();
+	return {
+		requestId: request.requestId,
+		...(typeof rateLimitWaitBudgetMs === 'number'
+			? { rateLimitWaitBudgetMs }
+			: {}),
+		...([
+			'control-plane',
+			'langgraph-control-plane',
+			'autonomous-runner'
+		].includes(internalClient)
+			? { allowStaleCooldownProbe: true }
+			: {}),
+		...extra
+	};
+}
+
+function resolveRetryAfterSeconds(
+	errorText: string,
+	errorMeta: any
+): number | null {
+	const extracted = extractRetryAfterSeconds(errorText);
+	if (extracted && extracted > 0) return extracted;
+	const explicitSeconds = Number(errorMeta?.retryAfterSeconds);
+	if (Number.isFinite(explicitSeconds) && explicitSeconds > 0) {
+		return Math.ceil(explicitSeconds);
+	}
+	const explicitMs = Number(errorMeta?.retryAfterMs);
+	if (Number.isFinite(explicitMs) && explicitMs > 0) {
+		return Math.ceil(explicitMs / 1000);
+	}
+	return null;
+}
 
 function attachQueueOverloadMetadata(
 	error: unknown,
@@ -2048,6 +2144,7 @@ openaiRouter.post(
 			}
 
 			const stream = Boolean(requestBody.stream);
+			const stripSamplingParams = shouldStripSamplingParamsForModel(modelId);
 
 			if (
 				requestBody?.reasoning === undefined &&
@@ -2224,10 +2321,12 @@ openaiRouter.post(
 						? requestBody.max_output_tokens
 						: undefined,
 				temperature:
+					!stripSamplingParams &&
 					typeof requestBody.temperature === 'number'
 						? requestBody.temperature
 						: undefined,
 				top_p:
+					!stripSamplingParams &&
 					typeof requestBody.top_p === 'number'
 						? requestBody.top_p
 						: undefined,
@@ -2277,7 +2376,7 @@ openaiRouter.post(
 							formattedMessages,
 							modelId,
 							userApiKey,
-							{ requestId: request.requestId }
+							buildHandlerRequestOptions(request)
 						);
 						const inferredToolCalls =
 							!result.tool_calls || result.tool_calls.length === 0
@@ -2427,11 +2526,10 @@ openaiRouter.post(
 							formattedMessages,
 							modelId,
 							userApiKey,
-							{
+							buildHandlerRequestOptions(request, {
 								disablePassthrough:
-									shouldDisableChatPassthrough,
-								requestId: request.requestId
-							}
+									shouldDisableChatPassthrough
+							})
 						);
 					const started = Date.now();
 					const requestId = `chatcmpl-${Date.now()}`;
@@ -2659,10 +2757,9 @@ openaiRouter.post(
 								formattedMessages,
 								modelId,
 								userApiKey,
-								{
-									disablePassthrough: true,
-									requestId: request.requestId
-								}
+								buildHandlerRequestOptions(request, {
+									disablePassthrough: true
+								})
 							);
 						for await (const fallbackResult of fallbackStreamHandler) {
 							if (fallbackResult.type === 'chunk') {
@@ -3042,7 +3139,7 @@ openaiRouter.post(
 					formattedMessages,
 					modelId,
 					userApiKey,
-					{ requestId: request.requestId }
+					buildHandlerRequestOptions(request)
 				);
 				const inferredToolCalls =
 					!result.tool_calls || result.tool_calls.length === 0
@@ -3138,7 +3235,10 @@ openaiRouter.post(
 			let clientReference =
 				'An unexpected error occurred while processing your chat request.';
 			const errorMeta = error as any;
-			const retryAfterSeconds = extractRetryAfterSeconds(errorText);
+			const retryAfterSeconds = resolveRetryAfterSeconds(
+				errorText,
+				errorMeta
+			);
 			const backpressureRetryAfterSeconds =
 				getBackpressureRetryAfterSeconds(error);
 			const rateLimitMessage = formatRateLimitMessage(retryAfterSeconds);
@@ -3877,11 +3977,10 @@ openaiRouter.post(
 							[message],
 							modelId,
 							userApiKey,
-							{
+							buildHandlerRequestOptions(request, {
 								disablePassthrough:
-									shouldDisableResponsesPassthrough,
-								requestId: request.requestId
-							}
+									shouldDisableResponsesPassthrough
+							})
 						);
 					let totalTokenUsage = 0;
 					let fullText = '';
@@ -4276,10 +4375,9 @@ openaiRouter.post(
 								[message],
 								modelId,
 								userApiKey,
-								{
-									disablePassthrough: true,
-									requestId: request.requestId
-								}
+								buildHandlerRequestOptions(request, {
+									disablePassthrough: true
+								})
 							);
 						for await (const fallbackResult of fallbackStreamHandler) {
 							if (fallbackResult.type === 'chunk') {
@@ -4653,7 +4751,7 @@ openaiRouter.post(
 				[message],
 				modelId,
 				userApiKey,
-				{ requestId: request.requestId }
+				buildHandlerRequestOptions(request)
 			);
 			const inferredToolCalls =
 				!result.tool_calls || result.tool_calls.length === 0
@@ -4752,7 +4850,10 @@ openaiRouter.post(
 			let clientReference =
 				'An unexpected error occurred while processing your responses request.';
 			const errorMeta = error as any;
-			const retryAfterSeconds = extractRetryAfterSeconds(errorText);
+			const retryAfterSeconds = resolveRetryAfterSeconds(
+				errorText,
+				errorMeta
+			);
 			const backpressureRetryAfterSeconds =
 				getBackpressureRetryAfterSeconds(error);
 			const rateLimitMessage = formatRateLimitMessage(retryAfterSeconds);
@@ -5194,7 +5295,7 @@ openaiRouter.post(
 				formattedMessages,
 				deploymentId,
 				userApiKey,
-				{ requestId: request.requestId }
+				buildHandlerRequestOptions(request)
 			);
 
 			const totalTokensUsed =

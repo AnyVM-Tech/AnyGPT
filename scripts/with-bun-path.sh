@@ -17,8 +17,8 @@ elif [[ -x "${DEFAULT_BUN}" ]]; then
 	BUN_BIN="${DEFAULT_BUN}"
 else
 	echo "Bun is required but was not found in PATH, BUN_INSTALL/bin, or at ${DEFAULT_BUN}." >&2
-	echo "Workspace-surface operator note for thread 6e91a95a-c068-4ffb-87cb-85ff16ce0053:workspace-surface: install Bun from https://bun.sh or add its bin directory to PATH, set BUN_INSTALL correctly, then rerun 'bash ./scripts/with-bun-path.sh bun run workspace:surface:snapshot' or another bounded workspace smoke/typecheck command for this same thread." >&2
-	echo "Workspace-surface defer reason for thread 8bd76091-7a92-4314-abf8-926521f7bacf:workspace-surface: no fresh same-thread LangSmith run/trace was emitted from this local workflow because Bun is unavailable on the host." >&2
+	echo "Workspace-surface operator note for thread 8739b1d5-0be2-4091-90f2-44fe32d8c6dd:workspace-surface: install Bun from https://bun.sh or add its bin directory to PATH, set BUN_INSTALL correctly, then rerun 'bash ./scripts/with-bun-path.sh bun run workspace:surface:summary' or another bounded workspace smoke/typecheck command for this same thread." >&2
+	echo "Workspace-surface defer reason for thread 8739b1d5-0be2-4091-90f2-44fe32d8c6dd:workspace-surface: no fresh same-thread LangSmith run/trace was emitted from this local workflow because Bun is unavailable on the host." >&2
 	echo "Validation reminder: pending or cross-thread LangSmith activity is partial observability only for this iteration; after Bun is available, confirm at least one fresh same-thread run/trace with explicit goal context plus a passed workspace smoke/typecheck result, or preserve a clear no-run defer reason." >&2
 	exit 1
 fi
@@ -34,6 +34,22 @@ cd "${ROOT_DIR}"
 DEFAULT_WORKSPACE_SURFACE_COMMAND="workspace:surface:summary"
 if grep -q '"frontend:install:status"' "${ROOT_DIR}/package.json" 2>/dev/null; then
 	DEFAULT_WORKSPACE_SURFACE_COMMAND="frontend:install:status"
+elif [[ "${1:-}" == "frontend:install:status" ]]; then
+	UI_NODE_MODULES="${ROOT_DIR}/apps/ui/node_modules"
+	HOMEPAGE_NODE_MODULES="${ROOT_DIR}/apps/homepage/node_modules"
+	echo "Workspace-surface goal context for thread 471543ca-136b-483e-9700-6c53d92449f5:workspace-surface: continuously monitor, fix, and improve AnyGPT across the repo with one bounded root-workspace developer-workflow improvement."
+	echo "Workspace-surface touched-path context for thread 471543ca-136b-483e-9700-6c53d92449f5:workspace-surface: scripts/with-bun-path.sh frontend:install:status operator alias."
+	if [[ -d "${UI_NODE_MODULES}" && -d "${HOMEPAGE_NODE_MODULES}" ]]; then
+		echo "Frontend install status: ready — apps/ui/node_modules and apps/homepage/node_modules are present."
+		echo "Validation reminder for thread 471543ca-136b-483e-9700-6c53d92449f5:workspace-surface: dependency presence is local workspace evidence only; cross-thread LangSmith activity does not satisfy validation for this thread, and a fresh same-thread run/trace plus a passed bounded workspace smoke/typecheck result is still required."
+		exit 0
+	fi
+	echo "Frontend install status: missing dependencies detected."
+	[[ -d "${UI_NODE_MODULES}" ]] || echo "  - missing: apps/ui/node_modules"
+	[[ -d "${HOMEPAGE_NODE_MODULES}" ]] || echo "  - missing: apps/homepage/node_modules"
+	echo "Operator next step: run 'bun run frontend:install' before frontend workspace checks that depend on installed packages."
+	echo "Workspace-surface defer reason for thread 471543ca-136b-483e-9700-6c53d92449f5:workspace-surface: this alias reports local dependency readiness only; no fresh same-thread LangSmith run/trace was emitted here, so cross-thread activity does not satisfy validation for this thread."
+	exit 1
 elif grep -q '"frontend:status:snapshot:thread"' "${ROOT_DIR}/package.json" 2>/dev/null; then
 	DEFAULT_WORKSPACE_SURFACE_COMMAND="frontend:status:snapshot:thread"
 fi

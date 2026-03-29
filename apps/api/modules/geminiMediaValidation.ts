@@ -116,7 +116,22 @@ function classifyRemoteMedia(value: unknown): 'none' | 'remote' | 'private' {
   }
 
   if (record.type === 'input_audio') {
-    for (const candidate of [record.audio, record.data]) {
+    for (const candidate of [record.audio, record.data, record.input_audio]) {
+      const marked = mark(classifyRemoteMedia(candidate));
+      if (marked) return marked;
+    }
+  }
+
+  if (record.input_audio && typeof record.input_audio === 'object') {
+    const nestedInputAudio = record.input_audio as Record<string, unknown>;
+    for (const candidate of [nestedInputAudio.audio, nestedInputAudio.data, nestedInputAudio.url]) {
+      const marked = mark(classifyRemoteMedia(candidate));
+      if (marked) return marked;
+    }
+  }
+
+  if (typeof record.mime_type === 'string' && record.mime_type.toLowerCase().startsWith('audio/')) {
+    for (const candidate of [record.audio, record.data, record.url, record.input_audio]) {
       const marked = mark(classifyRemoteMedia(candidate));
       if (marked) return marked;
     }
@@ -787,7 +802,7 @@ export function validateGeminiModelCapabilityRequest(modelId: string, body: unkn
           : 'Invalid request: this Gemini model does not support audio input for this route, including unsupported audio/s16le input. This matches an upstream/provider-bound Gemini capability mismatch, including recent unsupported audio-input probe failures; retrying the same Gemini provider-method combination is unlikely to help. Remove the audio input, convert the request to a supported Gemini audio format for a model that explicitly supports audio input, switch to a Gemini model that explicitly supports audio input, or use a non-Gemini route for the audio portion.';
         const imageOnlyMessage = 'Invalid request: lyria-3-pro-preview image generation is currently unavailable for this Gemini route in the active country/provider region. This matches the same upstream/provider-bound Gemini capability mismatch and regional catalog drift family, including recent provider_model_removed/provider_cap_blocked image-output signals; retrying the same Gemini provider-method combination is unlikely to help. Remove image generation from this request, switch to a Gemini model that explicitly supports the needed modality in the active region, or use a non-Gemini route for image generation.';
         const imageAndAudioMessage = hasImageAndAudioMismatchForLyria
-          ? 'Invalid request: lyria-3-pro-preview image generation is currently unavailable for this Gemini route in the active country/provider region, and the same request also includes Gemini audio input that this model does not support for this route, including unsupported audio/s16le input. This matches the same upstream/provider-bound Gemini capability mismatch and regional catalog drift family, including recent provider_model_removed/provider_cap_blocked image-output signals and unsupported audio/s16le probe failures; retrying the same Gemini provider-method combination is unlikely to help. Do not retry this request against another Gemini provider for the same model/method combination. Remove the audio input, remove image generation from this request, switch to a Gemini model that explicitly supports the needed modality in the active region, or use a non-Gemini route for the audio or image portion.'
+          ? 'Invalid request: lyria-3-pro-preview image generation is currently unavailable for this Gemini route in the active country/provider region, and the same request also includes Gemini audio input that this model does not support for this route, including unsupported audio/s16le input. This matches the same upstream/provider-bound Gemini capability mismatch and regional catalog drift family, including recent provider_model_removed/provider_cap_blocked image-output signals and unsupported audio/s16le probe failures; retrying the same Gemini provider-method combination is unlikely to help. Treat this as a routing-time compatibility block for the current Gemini model/method combination: do not retry this request against another Gemini provider for lyria-3-pro-preview, do not expect provider switching within Gemini to restore this blocked image/audio combination while the region and model capability mismatch remains, and mark both provider switching and request retry as worthless for the same Gemini lyria-3-pro-preview generateContent path until the request shape or model/region changes. Candidate selection should treat this exact Gemini image_output-plus-audio_input combination for lyria-3-pro-preview as exhausted for the current request shape and de-prioritize any repeated Gemini generateContent attempts for the same model family until the request shape, model, or active region changes. Also treat Gemini audio-only retries for lyria-3-pro-preview as exhausted when the request still carries unsupported audio/s16le input, and treat Gemini image-output retries for lyria-3-pro-preview as exhausted when the active provider region still blocks image generation. Also treat Gemini tool-calling on this same model family as suspect for the same request-shape family when recent probe results already show function calling is not enabled, so candidate selection should de-prioritize repeated Gemini retries for lyria-3-pro-preview until the request shape, model, or active region changes. Remove the audio input, remove image generation from this request, switch to a Gemini model that explicitly supports the needed modality in the active region, convert the audio to a Gemini-supported format on a model that explicitly supports audio input, or use a non-Gemini route for the audio or image portion.'
           : hasImageOnlyRegionMismatchForLyria
             ? imageOnlyMessage
             : audioOnlyMessage;
@@ -799,16 +814,16 @@ export function validateGeminiModelCapabilityRequest(modelId: string, body: unkn
               ? 'GEMINI_AUDIO_INPUT_UNSUPPORTED_MODEL'
               : 'GEMINI_AUDIO_INPUT_UNSUPPORTED_MODEL';
         const imageAndAudioReason = hasImageAndAudioMismatchForLyria
-          ? 'gemini_route_mismatch_image_output_region_blocked_and_audio_input_unsupported_for_lyria_3_pro_preview'
+          ? 'gemini_route_mismatch_image_output_region_or_capability_blocked_and_audio_input_unsupported_for_lyria_3_pro_preview'
           : hasImageOnlyRegionMismatchForLyria
-            ? 'gemini_route_mismatch_image_output_region_blocked_for_lyria_3_pro_preview'
+            ? 'gemini_route_mismatch_image_output_region_or_capability_blocked_for_lyria_3_pro_preview'
             : hasAnyAudioMismatchForLyria
               ? 'gemini_route_mismatch_audio_input_unsupported_for_lyria_3_pro_preview'
               : 'gemini_route_mismatch_audio_input_unsupported_for_model';
         const imageAndAudioDetail = hasImageAndAudioMismatchForLyria
-          ? 'gemini_generatecontent_route_mismatch_image_output_region_blocked_and_audio_s16le_unsupported_lyria_3_pro_preview'
+          ? 'gemini_generatecontent_route_mismatch_image_output_region_or_capability_blocked_and_audio_s16le_unsupported_lyria_3_pro_preview'
           : hasImageOnlyRegionMismatchForLyria
-            ? 'gemini_generatecontent_route_mismatch_image_output_region_blocked_lyria_3_pro_preview'
+            ? 'gemini_generatecontent_route_mismatch_image_output_region_or_capability_blocked_lyria_3_pro_preview'
             : hasAnyAudioMismatchForLyria
               ? 'gemini_generatecontent_route_mismatch_audio_s16le_unsupported_lyria_3_pro_preview'
               : 'gemini_generatecontent_route_mismatch_audio_input_unsupported_for_model';

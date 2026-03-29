@@ -505,8 +505,7 @@ export async function inspectVideoGenProviderAvailability(
       !hasInvalidOpenAiKeySignal(provider) &&
       !hasOpenRouterBillingFailureSignal(provider) &&
       !hasRecentGeminiCatalogAuthFailureSignal(provider)
-  );
-  const preferredAuthHealthyMatches =
+  );  const preferredAuthHealthyMatches =
     stableAuthHealthyMatches.length > 0
       ? stableAuthHealthyMatches
       : timeoutStableSupportedMatches.length > 0
@@ -638,6 +637,7 @@ export async function listAnyVideoProviders(): Promise<VideoGenerationProviderSe
   const matches = providers.filter((p: LoadedProviderData) =>
     !p.disabled &&
     (p.id.includes('xai') || p.id.includes('openai')) &&
+    !hasInvalidOpenAiKeySignal(p) &&
     !hasOpenRouterBillingFailureSignal(p) &&
     p.apiKey
   );

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
+import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -99,6 +100,11 @@ type RunnerStatus = {
   noProgressReason?: string;
   lastProgressSignature?: string;
   repairStatus?: string;
+  healthClass?: 'healthy' | 'degraded' | 'waiting_evidence' | 'blocked_external' | 'failed';
+  deferReason?: string;
+  evidenceStatus?: 'unknown' | 'not-required' | 'planned' | 'collected' | 'validated' | 'missing';
+  lastAiFailureClass?: 'none' | 'timeout' | 'backpressure' | 'malformed-output' | 'backend-error';
+  validationRequired?: boolean;
   repairDecisionReason?: string;
   repairIntentSummary?: string;
   repairSignalCount?: number;
@@ -225,6 +231,11 @@ type CoordinatedRunnerStatusEntry = {
   proposedEditCount: number;
   appliedEditCount: number;
   repairStatus?: string;
+  healthClass?: RunnerStatus['healthClass'];
+  deferReason?: string;
+  evidenceStatus?: RunnerStatus['evidenceStatus'];
+  lastAiFailureClass?: RunnerStatus['lastAiFailureClass'];
+  validationRequired?: boolean;
   lastError?: string;
   lastUpdatedAt?: string;
   restartedCount: number;
@@ -271,6 +282,7 @@ type CoordinatorChildRuntime = {
   lastSelfHealReason?: string;
   selfHealRequestedAtMs?: number;
   selfHealEscalateAtMs?: number;
+  lastAiBackpressureAtMs?: number;
 };
 
 const DEFAULT_RUNNER_STATUS_PATH = './apps/langgraph-control-plane/.control-plane/runner-status.json';
@@ -311,9 +323,43 @@ const RUNNER_CHECKPOINT_HISTORY_LIMIT = (() => {
 })();
 const MULTI_RUNNER_COORDINATOR_POLL_MS = 2_000;
 const MULTI_RUNNER_RESTART_DELAY_MS = 1_500;
-const MULTI_RUNNER_BACKGROUND_ACTIVE_CAP = (() => {
+const MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_MIN = (() => {
   const configured = Number(process.env.CONTROL_PLANE_MULTI_RUNNER_BACKGROUND_ACTIVE_CAP ?? 1);
   return Math.max(0, Number.isFinite(configured) ? Math.floor(configured) : 1);
+})();
+const MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_MAX = (() => {
+  const configured = Number(
+    process.env.CONTROL_PLANE_MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_MAX
+    ?? process.env.CONTROL_PLANE_MULTI_RUNNER_BACKGROUND_ACTIVE_CAP
+    ?? 2,
+  );
+  return Math.max(MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_MIN, Number.isFinite(configured) ? Math.floor(configured) : 2);
+})();
+const MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_BUSY_PERCENT = (() => {
+  const configured = Number(process.env.CONTROL_PLANE_MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_BUSY_PERCENT ?? 85);
+  return Math.max(50, Math.min(99, Number.isFinite(configured) ? configured : 85));
+})();
+const MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_COOLDOWN_PERCENT = (() => {
+  const configured = Number(process.env.CONTROL_PLANE_MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_COOLDOWN_PERCENT ?? 70);
+  return Math.max(20, Math.min(MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_BUSY_PERCENT, Number.isFinite(configured) ? configured : 70));
+})();
+const MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_WARMUP_MS = (() => {
+  const configured = Number(process.env.CONTROL_PLANE_MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_WARMUP_MS ?? 60_000);
+  return Math.max(0, Number.isFinite(configured) ? Math.floor(configured) : 60_000);
+})();
+const MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_WARMUP_MAX = (() => {
+  const configured = Number(process.env.CONTROL_PLANE_MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_WARMUP_MAX ?? 2);
+  const normalized = Number.isFinite(configured) ? Math.floor(configured) : 2;
+  return Math.max(0, Math.min(MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_MAX, normalized));
+})();
+const MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_BACKPRESSURE_MAX = (() => {
+  const configured = Number(process.env.CONTROL_PLANE_MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_BACKPRESSURE_MAX ?? 2);
+  const normalized = Number.isFinite(configured) ? Math.floor(configured) : 2;
+  return Math.max(0, Math.min(MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_MAX, normalized));
+})();
+const MULTI_RUNNER_AI_BACKPRESSURE_COOLDOWN_MS = (() => {
+  const configured = Number(process.env.CONTROL_PLANE_MULTI_RUNNER_AI_BACKPRESSURE_COOLDOWN_MS ?? 45_000);
+  return Math.max(5_000, Number.isFinite(configured) ? Math.floor(configured) : 45_000);
 })();
 const MULTI_RUNNER_SELF_HEAL_STATUS_STALE_MS = (() => {
   const configured = Number(process.env.CONTROL_PLANE_MULTI_RUNNER_SELF_HEAL_STATUS_STALE_MS ?? 60_000);
@@ -345,6 +391,76 @@ const runnerStatusWriteCache = new Map<string, {
   lastWriteAtMs: number;
   lastComparable: string;
 }>();
+
+type CpuSnapshot = {
+  idle: number;
+  total: number;
+};
+
+function readCpuSnapshot(): CpuSnapshot | null {
+  try {
+    const raw = fs.readFileSync('/proc/stat', 'utf8');
+    const line = raw.split('\n').find((entry) => entry.startsWith('cpu '));
+    if (!line) return null;
+    const parts = line.trim().split(/\s+/).slice(1).map((entry) => Number(entry));
+    if (parts.length < 5 || parts.some((value) => !Number.isFinite(value))) return null;
+    const idle = (parts[3] || 0) + (parts[4] || 0);
+    const total = parts.reduce((sum, value) => sum + value, 0);
+    return { idle, total };
+  } catch {
+    return null;
+  }
+}
+
+function computeCpuBusyPercent(previous: CpuSnapshot | null, next: CpuSnapshot | null): number | null {
+  if (!previous || !next) return null;
+  const totalDelta = next.total - previous.total;
+  const idleDelta = next.idle - previous.idle;
+  if (!Number.isFinite(totalDelta) || totalDelta <= 0) return null;
+  const busyPercent = (1 - Math.max(0, idleDelta) / totalDelta) * 100;
+  return Math.max(0, Math.min(100, busyPercent));
+}
+
+function resolveAdaptiveBackgroundActiveCap(cpuBusyPercent: number | null): number {
+  if (MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_MAX <= MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_MIN) {
+    return MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_MIN;
+  }
+  if (cpuBusyPercent === null) {
+    return MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_MIN;
+  }
+  if (cpuBusyPercent >= MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_BUSY_PERCENT) {
+    return MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_MIN;
+  }
+  if (cpuBusyPercent <= MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_COOLDOWN_PERCENT) {
+    return MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_MAX;
+  }
+  return Math.max(
+    MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_MIN,
+    Math.min(
+      MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_MAX,
+      MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_MAX - 1,
+    ),
+  );
+}
+
+function isAiBackendBackpressureText(value: unknown): boolean {
+  const text = String(value || '').trim().toLowerCase();
+  if (!text) return false;
+  return /request queue is busy/.test(text)
+    || /service temporarily unavailable/.test(text)
+    || /retry in a few seconds/.test(text)
+    || (/status code 503/.test(text) && /queue|busy|retry/.test(text));
+}
+
+function coordinatorChildStatusHasAiBackpressure(status: Partial<RunnerStatus> | undefined): boolean {
+  if (!status) return false;
+  return [
+    status.summary,
+    status.lastError,
+    status.repairDecisionReason,
+    status.noProgressReason,
+  ].some((value) => isAiBackendBackpressureText(value));
+}
 
 function loadEnvForControlPlane(repoRoot: string): void {
   const candidates = [
@@ -550,6 +666,17 @@ function readRunnerStatusSnapshot(statusFilePath: string): Partial<RunnerStatus>
   }
 }
 
+function readCoordinatorChildStatusSnapshot(spec: CoordinatorChildSpec): Partial<RunnerStatus> | undefined {
+  const snapshot = readRunnerStatusSnapshot(spec.statusFilePath);
+  if (!snapshot) return undefined;
+  const snapshotThreadId = typeof snapshot.threadId === 'string' ? snapshot.threadId.trim() : '';
+  const expectedThreadId = String(spec.threadId || '').trim();
+  if (snapshotThreadId && expectedThreadId && snapshotThreadId !== expectedThreadId) {
+    return undefined;
+  }
+  return snapshot;
+}
+
 function parseIsoTimestampMs(value: unknown): number | undefined {
   if (typeof value !== 'string') return undefined;
   const parsed = Date.parse(value);
@@ -579,6 +706,11 @@ function buildCoordinatorChildSemanticProgressSignature(status: Partial<RunnerSt
   return JSON.stringify({
     phase: typeof status.phase === 'string' ? status.phase : '',
     repairStatus: typeof status.repairStatus === 'string' ? status.repairStatus : '',
+    healthClass: typeof status.healthClass === 'string' ? status.healthClass : '',
+    deferReason: typeof status.deferReason === 'string' ? status.deferReason.trim() : '',
+    evidenceStatus: typeof status.evidenceStatus === 'string' ? status.evidenceStatus : '',
+    lastAiFailureClass: typeof status.lastAiFailureClass === 'string' ? status.lastAiFailureClass : '',
+    validationRequired: status.validationRequired === true,
     summary: typeof status.summary === 'string' ? status.summary.trim() : '',
     proposedEditCount: typeof status.proposedEditCount === 'number' && Number.isFinite(status.proposedEditCount)
       ? status.proposedEditCount
@@ -1221,6 +1353,11 @@ function createBaseRunnerStatus(parsedArgs: ParsedArgs): RunnerStatus {
     noProgressReason: '',
     lastProgressSignature: '',
     repairStatus: parsedArgs.autonomousEditEnabled ? 'idle' : 'not-needed',
+    healthClass: 'healthy',
+    deferReason: '',
+    evidenceStatus: 'unknown',
+    lastAiFailureClass: 'none',
+    validationRequired: false,
     repairDecisionReason: '',
     repairIntentSummary: '',
     repairSignalCount: 0,
@@ -1318,6 +1455,43 @@ async function collectCheckpointHistorySeed(
     checkpointNextNodes,
     replayCheckpointId: replayCheckpointId || undefined,
   };
+}
+
+function buildCoordinatorChildParsedArgs(parsedArgs: ParsedArgs, spec: CoordinatorChildSpec): ParsedArgs {
+  return {
+    ...parsedArgs,
+    scopes: spec.scopes,
+    threadId: spec.threadId,
+    intervalMs: spec.intervalMs,
+    maxIterations: spec.maxIterations,
+    multiRunner: false,
+    coordinatorChildId: spec.id,
+    coordinatorParentThreadId: parsedArgs.threadId,
+    scopeExpansionMode: spec.scopeExpansionMode,
+    checkpointPath: spec.checkpointPath,
+    statusFilePath: spec.statusFilePath,
+    pidFilePath: spec.pidFilePath,
+    editAllowlist: spec.editAllowlist,
+    resumeValue: undefined,
+  };
+}
+
+function seedCoordinatorChildStatus(
+  parsedArgs: ParsedArgs,
+  spec: CoordinatorChildSpec,
+  options?: { running?: boolean; phase?: RunnerStatus['phase']; summary?: string },
+): void {
+  const childArgs = buildCoordinatorChildParsedArgs(parsedArgs, spec);
+  const seededStatus = mergeRunnerStatus(createBaseRunnerStatus(childArgs), {
+    running: options?.running === true,
+    phase: options?.phase || (options?.running === true ? 'starting' : 'completed'),
+    summary: options?.summary || (options?.running === true ? 'Waiting for graph output...' : 'Queued for background slot.'),
+    coordinatedRunnerCount: undefined,
+    coordinatedRunners: undefined,
+    coordinatorStrategy: undefined,
+    coordinatorPollMs: undefined,
+  });
+  writeRunnerStatus(spec.statusFilePath, seededStatus);
 }
 
 function buildInitialGraphInput(
@@ -1504,10 +1678,16 @@ function summarizeTerminalRunFailure(result: unknown): string {
   const repairStatus = typeof resultRecord.repairStatus === 'string'
     ? resultRecord.repairStatus.trim()
     : '';
+  const healthClass = typeof resultRecord.healthClass === 'string'
+    ? resultRecord.healthClass.trim()
+    : '';
   const repairDecisionReason = typeof resultRecord.repairDecisionReason === 'string'
     ? resultRecord.repairDecisionReason.trim()
     : '';
-  if (repairStatus === 'failed' || repairStatus === 'rolled-back') {
+  if (
+    (repairStatus === 'failed' || repairStatus === 'rolled-back')
+    && !['waiting_evidence', 'blocked_external'].includes(healthClass)
+  ) {
     return repairDecisionReason || (repairStatus === 'rolled-back'
       ? 'Autonomous repair failed and was rolled back.'
       : 'Autonomous repair failed.');
@@ -2357,26 +2537,16 @@ function buildCoordinatorChildSpecs(parsedArgs: ParsedArgs): CoordinatorChildSpe
 }
 
 function buildCoordinatorChildArgs(parsedArgs: ParsedArgs, spec: CoordinatorChildSpec): string[] {
-  return buildRunnerInvocationArgs({
-    ...parsedArgs,
-    scopes: spec.scopes,
-    threadId: spec.threadId,
-    intervalMs: spec.intervalMs,
-    maxIterations: spec.maxIterations,
-    multiRunner: false,
-    coordinatorChildId: spec.id,
-    coordinatorParentThreadId: parsedArgs.threadId,
-    scopeExpansionMode: spec.scopeExpansionMode,
-    checkpointPath: spec.checkpointPath,
-    statusFilePath: spec.statusFilePath,
-    pidFilePath: spec.pidFilePath,
-    editAllowlist: spec.editAllowlist,
-    resumeValue: undefined,
-  });
+  return buildRunnerInvocationArgs(buildCoordinatorChildParsedArgs(parsedArgs, spec));
 }
 
 function spawnCoordinatorChild(parsedArgs: ParsedArgs, runtime: CoordinatorChildRuntime): void {
   fs.mkdirSync(path.dirname(runtime.spec.logFilePath), { recursive: true });
+  seedCoordinatorChildStatus(parsedArgs, runtime.spec, {
+    running: true,
+    phase: 'starting',
+    summary: 'Waiting for graph output...',
+  });
   const logFlags = runtime.restartCount === 0 ? 'w' : 'a';
   fs.writeFileSync(
     runtime.spec.logFilePath,
@@ -2395,6 +2565,32 @@ function spawnCoordinatorChild(parsedArgs: ParsedArgs, runtime: CoordinatorChild
     ).trim() || 'gpt-5.4';
     childEnv.CONTROL_PLANE_AI_REASONING_EFFORT = String(
       process.env.CONTROL_PLANE_RESEARCH_SCOUT_AI_REASONING_EFFORT
+      || 'xhigh',
+    ).trim() || 'xhigh';
+    childEnv.CONTROL_PLANE_GRAPH_STALL_TIMEOUT_MS = String(
+      process.env.CONTROL_PLANE_RESEARCH_SCOUT_GRAPH_STALL_TIMEOUT_MS
+      || '600000',
+    ).trim() || '600000';
+    childEnv.CONTROL_PLANE_RESEARCH_SCOUT_LIGHTWEIGHT_INSPECT = String(
+      process.env.CONTROL_PLANE_RESEARCH_SCOUT_LIGHTWEIGHT_INSPECT
+      || 'true',
+    ).trim() || 'true';
+  } else if (runtime.spec.id === 'api-routing') {
+    childEnv.CONTROL_PLANE_AI_MODEL = String(
+      process.env.CONTROL_PLANE_API_ROUTING_AI_MODEL
+      || 'gpt-5.4',
+    ).trim() || 'gpt-5.4';
+    childEnv.CONTROL_PLANE_AI_REASONING_EFFORT = String(
+      process.env.CONTROL_PLANE_API_ROUTING_AI_REASONING_EFFORT
+      || 'xhigh',
+    ).trim() || 'xhigh';
+  } else if (runtime.spec.id === 'control-plane') {
+    childEnv.CONTROL_PLANE_AI_MODEL = String(
+      process.env.CONTROL_PLANE_CONTROL_PLANE_AI_MODEL
+      || 'gpt-5.4',
+    ).trim() || 'gpt-5.4';
+    childEnv.CONTROL_PLANE_AI_REASONING_EFFORT = String(
+      process.env.CONTROL_PLANE_CONTROL_PLANE_AI_REASONING_EFFORT
       || 'xhigh',
     ).trim() || 'xhigh';
   }
@@ -2473,9 +2669,10 @@ function selectNextCoordinatorBackgroundLaneToSpawn(
   parsedArgs: ParsedArgs,
   runtimes: CoordinatorChildRuntime[],
   nowMs: number,
+  backgroundActiveCap: number,
 ): CoordinatorChildRuntime | null {
-  if (MULTI_RUNNER_BACKGROUND_ACTIVE_CAP <= 0) return null;
-  if (getCoordinatorBackgroundActiveCount(runtimes) >= MULTI_RUNNER_BACKGROUND_ACTIVE_CAP) {
+  if (backgroundActiveCap <= 0) return null;
+  if (getCoordinatorBackgroundActiveCount(runtimes) >= backgroundActiveCap) {
     return null;
   }
 
@@ -2519,6 +2716,19 @@ function updateCoordinatorChildProgressObservation(runtime: CoordinatorChildRunt
   } else if (typeof runtime.lastSemanticProgressAtMs !== 'number') {
     runtime.lastSemanticProgressAtMs = nowMs;
   }
+}
+
+function updateCoordinatorChildAiBackpressureObservation(runtime: CoordinatorChildRuntime, nowMs: number): void {
+  if (coordinatorChildStatusHasAiBackpressure(runtime.lastStatus)) {
+    runtime.lastAiBackpressureAtMs = nowMs;
+  }
+}
+
+function resolveCoordinatorAiBackpressureActiveUntilMs(runtimes: CoordinatorChildRuntime[]): number {
+  return runtimes.reduce((latest, runtime) => {
+    if (typeof runtime.lastAiBackpressureAtMs !== 'number') return latest;
+    return Math.max(latest, runtime.lastAiBackpressureAtMs + MULTI_RUNNER_AI_BACKPRESSURE_COOLDOWN_MS);
+  }, 0);
 }
 
 function appendCoordinatorChildRuntimeNote(runtime: CoordinatorChildRuntime, message: string): void {
@@ -2665,12 +2875,21 @@ function collectCoordinatedRunnerEntry(runtime: CoordinatorChildRuntime): Coordi
     phase = running
       ? 'streaming'
       : (
+        (typeof status.healthClass === 'string' && status.healthClass === 'failed')
+        || (
         (typeof status.lastError === 'string' && status.lastError.trim())
         || runtime.lastSpawnError
         || (typeof runtime.lastExitCode === 'number' && runtime.lastExitCode !== 0)
+        )
       )
         ? 'failed'
         : 'completed';
+  }
+  if (
+    phase === 'failed'
+    && (status.healthClass === 'waiting_evidence' || status.healthClass === 'blocked_external')
+  ) {
+    phase = running ? 'streaming' : 'completed';
   }
 
   return {
@@ -2690,6 +2909,15 @@ function collectCoordinatedRunnerEntry(runtime: CoordinatorChildRuntime): Coordi
     proposedEditCount: typeof status.proposedEditCount === 'number' && Number.isFinite(status.proposedEditCount) ? status.proposedEditCount : 0,
     appliedEditCount: typeof status.appliedEditCount === 'number' && Number.isFinite(status.appliedEditCount) ? status.appliedEditCount : 0,
     repairStatus: typeof status.repairStatus === 'string' ? status.repairStatus : undefined,
+    healthClass: typeof status.healthClass === 'string' ? status.healthClass as RunnerStatus['healthClass'] : undefined,
+    deferReason: typeof status.deferReason === 'string' && status.deferReason.trim()
+      ? status.deferReason
+      : undefined,
+    evidenceStatus: typeof status.evidenceStatus === 'string' ? status.evidenceStatus as RunnerStatus['evidenceStatus'] : undefined,
+    lastAiFailureClass: typeof status.lastAiFailureClass === 'string'
+      ? status.lastAiFailureClass as RunnerStatus['lastAiFailureClass']
+      : undefined,
+    validationRequired: status.validationRequired === true,
     lastError: typeof status.lastError === 'string' && status.lastError.trim()
       ? status.lastError
       : runtime.lastSpawnError,
@@ -2705,7 +2933,8 @@ function collectCoordinatedRunnerEntry(runtime: CoordinatorChildRuntime): Coordi
 
 function summarizeCoordinatorRepairStatus(children: CoordinatedRunnerStatusEntry[]): RunnerStatus['repairStatus'] {
   const statuses = children.map((child) => String(child.repairStatus || '').trim()).filter(Boolean);
-  if (statuses.includes('failed')) return 'failed';
+  const failedChildren = children.filter((child) => child.healthClass === 'failed');
+  if (failedChildren.length > 0 || statuses.includes('failed')) return 'failed';
   if (statuses.includes('promoted')) return 'promoted';
   if (statuses.includes('planned')) return 'planned';
   if (statuses.includes('rolled-back')) return 'rolled-back';
@@ -2713,22 +2942,59 @@ function summarizeCoordinatorRepairStatus(children: CoordinatedRunnerStatusEntry
   return 'idle';
 }
 
-function buildCoordinatorSummary(parsedArgs: ParsedArgs, children: CoordinatedRunnerStatusEntry[]): string {
+function summarizeCoordinatorHealthClass(children: CoordinatedRunnerStatusEntry[]): RunnerStatus['healthClass'] {
+  const healthClasses = children.map((child) => String(child.healthClass || '').trim()).filter(Boolean);
+  if (healthClasses.includes('failed')) return 'failed';
+  if (healthClasses.includes('waiting_evidence')) return 'waiting_evidence';
+  if (healthClasses.includes('blocked_external')) return 'blocked_external';
+  if (healthClasses.includes('degraded')) return 'degraded';
+  return 'healthy';
+}
+
+function buildCoordinatorSummary(
+  parsedArgs: ParsedArgs,
+  children: CoordinatedRunnerStatusEntry[],
+  backgroundActiveCap: number,
+  cpuBusyPercent: number | null,
+  options: {
+    warmupRemainingMs?: number;
+    aiBackpressureRemainingMs?: number;
+  } = {},
+): string {
   const runningChildren = children.filter((child) => child.running);
-  const failedChildren = children.filter((child) => child.phase === 'failed' || Boolean(child.lastError));
+  const failedChildren = children.filter((child) => child.healthClass === 'failed');
+  const deferredChildren = children.filter((child) => child.healthClass === 'blocked_external' || child.healthClass === 'waiting_evidence');
+  const degradedChildren = children.filter((child) => child.healthClass === 'degraded');
   const selfHealedChildren = children.filter((child) => child.selfHealCount > 0);
   const backgroundRunningChildren = runningChildren.filter((child) => !['api-routing', 'api-runtime', 'control-plane'].includes(child.id));
   const lines = [
     `Goal: ${parsedArgs.goal}`,
     `Coordinator mode: multi-runner (${children.length} child lane(s), interval=${parsedArgs.intervalMs}ms)`,
-    `Background lane cap: ${MULTI_RUNNER_BACKGROUND_ACTIVE_CAP} concurrent background lane(s)`,
+    `Background lane cap: ${backgroundActiveCap}/${MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_MAX} concurrent background lane(s)${cpuBusyPercent !== null ? ` (cpu_busy=${cpuBusyPercent.toFixed(1)}%)` : ''}`,
     `Requested scopes: ${parsedArgs.scopes.join(', ')}`,
     `Children: ${children.map((child) => `${child.id}=${child.phase}${child.running ? '/running' : ''}`).join('; ') || 'none'}`,
     `Autonomous edits: ${children.reduce((sum, child) => sum + child.proposedEditCount, 0)} proposed, ${children.reduce((sum, child) => sum + child.appliedEditCount, 0)} applied`,
   ];
 
+  if ((options.warmupRemainingMs || 0) > 0 && backgroundActiveCap < MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_MAX) {
+    lines.push(
+      `Warmup throttle: limiting background lanes to ${backgroundActiveCap} for another ${formatDurationMs(options.warmupRemainingMs || 0)} while the coordinator ramps up.`,
+    );
+  }
+  if ((options.aiBackpressureRemainingMs || 0) > 0) {
+    lines.push(
+      `AI backpressure throttle: recent shared-backend queue saturation is limiting background lanes to ${backgroundActiveCap} for another ${formatDurationMs(options.aiBackpressureRemainingMs || 0)}.`,
+    );
+  }
+
   if (failedChildren.length > 0) {
     lines.push(`Failures: ${failedChildren.map((child) => `${child.id}${child.lastError ? ` (${child.lastError})` : ''}`).join('; ')}`);
+  }
+  if (deferredChildren.length > 0) {
+    lines.push(`Deferred lanes: ${deferredChildren.map((child) => `${child.id}${child.deferReason ? ` (${child.deferReason})` : ''}`).join('; ')}`);
+  }
+  if (degradedChildren.length > 0) {
+    lines.push(`Degraded lanes: ${degradedChildren.map((child) => `${child.id}${child.lastAiFailureClass ? ` (${child.lastAiFailureClass})` : ''}`).join('; ')}`);
   }
   if (selfHealedChildren.length > 0) {
     lines.push(
@@ -2779,6 +3045,11 @@ async function runMultiRunnerCoordinator(parsedArgs: ParsedArgs): Promise<void> 
       iteration: 0,
       proposedEditCount: 0,
       appliedEditCount: 0,
+      healthClass: 'healthy',
+      deferReason: '',
+      evidenceStatus: 'unknown',
+      lastAiFailureClass: 'none',
+      validationRequired: false,
       restartedCount: 0,
       selfHealCount: 0,
       scopeExpansionMode: spec.scopeExpansionMode,
@@ -2817,17 +3088,24 @@ async function runMultiRunnerCoordinator(parsedArgs: ParsedArgs): Promise<void> 
   process.on('SIGHUP', sighupHandler);
 
   try {
+    const coordinatorStartedAtMs = Date.now();
+    let previousCpuSnapshot = readCpuSnapshot();
     for (const runtime of childRuntimes) {
       const existingPid = readPidFile(runtime.spec.pidFilePath);
       if (isPidAlive(existingPid)) {
         runtime.pid = existingPid;
         runtime.lastSpawnedAtMs = Date.now();
-        runtime.lastStatus = readRunnerStatusSnapshot(runtime.spec.statusFilePath);
+        runtime.lastStatus = readCoordinatorChildStatusSnapshot(runtime.spec);
         runtime.lastSemanticProgressSignature = buildCoordinatorChildSemanticProgressSignature(runtime.lastStatus);
         runtime.lastSemanticProgressAtMs = Date.now();
         runtime.lastStatusHeartbeatAtMs = parseIsoTimestampMs(runtime.lastStatus?.lastUpdatedAt) ?? Date.now();
         continue;
       }
+      seedCoordinatorChildStatus(parsedArgs, runtime.spec, {
+        running: false,
+        phase: 'completed',
+        summary: isCoordinatorCoreLane(runtime) ? 'Waiting for core lane spawn...' : 'Queued for background slot.',
+      });
       if (isCoordinatorCoreLane(runtime)) {
         spawnCoordinatorChild(parsedArgs, runtime);
       } else {
@@ -2837,8 +3115,12 @@ async function runMultiRunnerCoordinator(parsedArgs: ParsedArgs): Promise<void> 
 
     while (true) {
       const nowMs = Date.now();
+      const nextCpuSnapshot = readCpuSnapshot();
+      const cpuBusyPercent = computeCpuBusyPercent(previousCpuSnapshot, nextCpuSnapshot);
+      previousCpuSnapshot = nextCpuSnapshot;
+      let backgroundActiveCap = resolveAdaptiveBackgroundActiveCap(cpuBusyPercent);
       for (const runtime of childRuntimes) {
-        runtime.lastStatus = readRunnerStatusSnapshot(runtime.spec.statusFilePath);
+        runtime.lastStatus = readCoordinatorChildStatusSnapshot(runtime.spec);
         const pidFromFile = readPidFile(runtime.spec.pidFilePath);
         if (!runtime.process) {
           if (isPidAlive(pidFromFile)) {
@@ -2849,6 +3131,7 @@ async function runMultiRunnerCoordinator(parsedArgs: ParsedArgs): Promise<void> 
         }
 
         updateCoordinatorChildProgressObservation(runtime, nowMs);
+        updateCoordinatorChildAiBackpressureObservation(runtime, nowMs);
         serviceCoordinatorChildSelfHeal(runtime, nowMs);
 
         const canRestart = !shuttingDown && canCoordinatorChildRestart(parsedArgs, runtime);
@@ -2866,8 +3149,21 @@ async function runMultiRunnerCoordinator(parsedArgs: ParsedArgs): Promise<void> 
         }
       }
 
+      const warmupRemainingMs = Math.max(
+        0,
+        (coordinatorStartedAtMs + MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_WARMUP_MS) - nowMs,
+      );
+      if (warmupRemainingMs > 0) {
+        backgroundActiveCap = Math.min(backgroundActiveCap, MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_WARMUP_MAX);
+      }
+      const aiBackpressureActiveUntilMs = resolveCoordinatorAiBackpressureActiveUntilMs(childRuntimes);
+      const aiBackpressureRemainingMs = Math.max(0, aiBackpressureActiveUntilMs - nowMs);
+      if (aiBackpressureRemainingMs > 0) {
+        backgroundActiveCap = Math.min(backgroundActiveCap, MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_BACKPRESSURE_MAX);
+      }
+
       while (!shuttingDown) {
-        const nextBackgroundLane = selectNextCoordinatorBackgroundLaneToSpawn(parsedArgs, childRuntimes, nowMs);
+        const nextBackgroundLane = selectNextCoordinatorBackgroundLaneToSpawn(parsedArgs, childRuntimes, nowMs, backgroundActiveCap);
         if (!nextBackgroundLane) break;
         nextBackgroundLane.restartCount += 1;
         spawnCoordinatorChild(parsedArgs, nextBackgroundLane);
@@ -2878,7 +3174,7 @@ async function runMultiRunnerCoordinator(parsedArgs: ParsedArgs): Promise<void> 
         ? 'paused'
         : coordinatedRunners.some((child) => child.running)
           ? 'streaming'
-          : coordinatedRunners.some((child) => child.phase === 'failed')
+          : coordinatedRunners.some((child) => child.healthClass === 'failed' || child.phase === 'failed')
             ? 'failed'
             : 'completed';
       const iteration = coordinatedRunners.reduce((maxIteration, child) => Math.max(maxIteration, child.iteration), 0);
@@ -2898,13 +3194,36 @@ async function runMultiRunnerCoordinator(parsedArgs: ParsedArgs): Promise<void> 
         appliedEditCount,
         lastAppliedEditPaths,
         repairStatus: summarizeCoordinatorRepairStatus(coordinatedRunners),
+        healthClass: summarizeCoordinatorHealthClass(coordinatedRunners),
+        deferReason: coordinatedRunners
+          .filter((child) => child.healthClass === 'blocked_external' || child.healthClass === 'waiting_evidence')
+          .map((child) => `${child.id}:${child.deferReason || child.healthClass}`)
+          .join('; '),
+        evidenceStatus: coordinatedRunners.some((child) => child.evidenceStatus === 'missing')
+          ? 'missing'
+          : coordinatedRunners.some((child) => child.evidenceStatus === 'planned')
+            ? 'planned'
+            : coordinatedRunners.some((child) => child.evidenceStatus === 'collected')
+              ? 'collected'
+              : coordinatedRunners.some((child) => child.evidenceStatus === 'validated')
+                ? 'validated'
+                : coordinatedRunners.every((child) => child.validationRequired === false)
+                  ? 'not-required'
+                  : 'unknown',
+        lastAiFailureClass: coordinatedRunners
+          .map((child) => child.lastAiFailureClass)
+          .find((value) => value && value !== 'none') || 'none',
+        validationRequired: coordinatedRunners.some((child) => child.validationRequired === true),
         repairDecisionReason: coordinatedRunners
           .filter((child) => child.repairStatus && child.repairStatus !== 'idle' && child.repairStatus !== 'not-needed')
           .map((child) => `${child.id}:${child.repairStatus}`)
           .join('; '),
         coordinatedRunnerCount: coordinatedRunners.length,
         coordinatedRunners,
-        summary: buildCoordinatorSummary(parsedArgs, coordinatedRunners),
+        summary: buildCoordinatorSummary(parsedArgs, coordinatedRunners, backgroundActiveCap, cpuBusyPercent, {
+          warmupRemainingMs,
+          aiBackpressureRemainingMs,
+        }),
         lastRunStartedAt: coordinatedRunners
           .map((child) => child.lastUpdatedAt || '')
           .filter(Boolean)
@@ -3090,6 +3409,21 @@ async function main() {
         repairStatus: typeof (result as any).repairStatus === 'string'
           ? (result as any).repairStatus
           : runnerStatus.repairStatus,
+        healthClass: typeof (result as any).healthClass === 'string'
+          ? (result as any).healthClass
+          : runnerStatus.healthClass,
+        deferReason: typeof (result as any).deferReason === 'string'
+          ? (result as any).deferReason
+          : runnerStatus.deferReason,
+        evidenceStatus: typeof (result as any).evidenceStatus === 'string'
+          ? (result as any).evidenceStatus
+          : runnerStatus.evidenceStatus,
+        lastAiFailureClass: typeof (result as any).lastAiFailureClass === 'string'
+          ? (result as any).lastAiFailureClass
+          : runnerStatus.lastAiFailureClass,
+        validationRequired: typeof (result as any).validationRequired === 'boolean'
+          ? (result as any).validationRequired
+          : runnerStatus.validationRequired,
         repairDecisionReason: typeof (result as any).repairDecisionReason === 'string'
           ? (result as any).repairDecisionReason
           : runnerStatus.repairDecisionReason,

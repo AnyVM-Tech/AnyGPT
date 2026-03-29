@@ -408,6 +408,15 @@ export class OpenAI implements IAIProvider {
 		);
 	}
 
+	private supportsSamplingParams(modelId: string): boolean {
+		const normalized = this.normalizeModelId(modelId);
+		return !(
+			normalized.startsWith('gpt-5') ||
+			normalized.startsWith('o3') ||
+			normalized.startsWith('o4')
+		);
+	}
+
 	private isResponsesEndpoint(url: string): boolean {
 		return url.includes('/v1/responses') || url.includes('/responses');
 	}
@@ -595,14 +604,18 @@ export class OpenAI implements IAIProvider {
 		target: Record<string, any>,
 		message: IMessage
 	) {
+		const supportsSamplingParams = this.supportsSamplingParams(
+			message.model.id
+		);
 		if (message.system) target.system = message.system;
 		if (message.response_format)
 			target.response_format = message.response_format;
 		if (typeof message.max_tokens === 'number')
 			target.max_tokens = message.max_tokens;
-		if (typeof message.temperature === 'number')
+		if (supportsSamplingParams && typeof message.temperature === 'number')
 			target.temperature = message.temperature;
-		if (typeof message.top_p === 'number') target.top_p = message.top_p;
+		if (supportsSamplingParams && typeof message.top_p === 'number')
+			target.top_p = message.top_p;
 		if (message.metadata) target.metadata = message.metadata;
 		if (typeof message.tools !== 'undefined') {
 			target.tools =
@@ -754,6 +767,9 @@ export class OpenAI implements IAIProvider {
 		target: Record<string, any>,
 		message: IMessage
 	) {
+		const supportsSamplingParams = this.supportsSamplingParams(
+			message.model.id
+		);
 		if (typeof message.max_output_tokens === 'number')
 			target.max_output_tokens = message.max_output_tokens;
 		if (
@@ -761,9 +777,10 @@ export class OpenAI implements IAIProvider {
 			typeof message.max_output_tokens !== 'number'
 		)
 			target.max_output_tokens = message.max_tokens;
-		if (typeof message.temperature === 'number')
+		if (supportsSamplingParams && typeof message.temperature === 'number')
 			target.temperature = message.temperature;
-		if (typeof message.top_p === 'number') target.top_p = message.top_p;
+		if (supportsSamplingParams && typeof message.top_p === 'number')
+			target.top_p = message.top_p;
 		if (message.metadata) target.metadata = message.metadata;
 		if (typeof message.tools !== 'undefined') {
 			target.tools =

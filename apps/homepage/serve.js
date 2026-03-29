@@ -187,7 +187,7 @@ function sendHomepageIcon(res, preferredContentType = null) {
   const icon = iconCandidates.find(({ filePath, contentType }) => {
     if (!existsSync(filePath)) return false;
     return !preferredContentType || contentType === preferredContentType;
-  }) || iconCandidates.find(({ filePath }) => existsSync(filePath));
+  }) || iconCandidates.find(({ filePath, contentType }) => existsSync(filePath) && contentType === 'image/svg+xml') || iconCandidates.find(({ filePath }) => existsSync(filePath));
 
   res.set('Cache-Control', 'public, max-age=86400, immutable');
 

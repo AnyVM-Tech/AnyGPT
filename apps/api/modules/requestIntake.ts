@@ -39,17 +39,17 @@ export type BackpressureHint = {
   emptyBody?: boolean;
   emptyBodySource?: 'declared_content_length' | 'observed_after_read';
   bodySizeClass?: 'empty' | 'known' | 'unknown';
-  requestSizeHint?: 'empty_body' | 'small_or_unknown' | 'large_known_body';
+  requestSizeHint?: 'empty_body' | 'small_known_body' | 'medium_known_body' | 'unknown_length_body' | 'large_known_body';
   requestBodySizeBucket?: 'empty' | 'unknown' | 'small' | 'medium' | 'large';
   requestBodyReadStrategy?: 'skip-empty-body' | 'buffer-known-length' | 'buffer-unknown-length' | 'buffer-observed-empty';
-  requestBodyReadPermitStrategy?: 'skip-empty-body' | 'bypass-small-known-body' | 'bypass-unknown-length-body' | 'queue-body-read';
-  failureOrigin?: 'runtime_capacity' | 'runtime_capacity_idle' | 'runtime_capacity_active' | 'runtime_capacity_large_known_body' | 'runtime_capacity_unknown_length_body';
+  requestBodyReadPermitStrategy?: 'skip-empty-body' | 'bypass-small-known-body' | 'bypass-medium-known-body' | 'bypass-unknown-length-body' | 'queue-body-read';
+  failureOrigin?: 'runtime_capacity' | 'runtime_capacity_idle' | 'runtime_capacity_active' | 'runtime_capacity_small_known_body' | 'runtime_capacity_small_known_body_idle' | 'runtime_capacity_small_known_body_active' | 'runtime_capacity_medium_known_body' | 'runtime_capacity_medium_known_body_idle' | 'runtime_capacity_medium_known_body_active' | 'runtime_capacity_large_known_body' | 'runtime_capacity_large_known_body_idle' | 'runtime_capacity_large_known_body_active' | 'runtime_capacity_unknown_length_body' | 'runtime_capacity_unknown_length_body_idle' | 'runtime_capacity_unknown_length_body_active' | 'queue_capacity' | 'queue_capacity_wait_timeout' | 'queue_capacity_overloaded';
   requestBodyObservedEmpty?: boolean;
   requestBodyDeclaredEmpty?: boolean;
   requestBodyReadPermitAcquired?: boolean;
   queueLane?: 'request-body-read';
   queueState?: string;
-  queuePressureOrigin?: 'idle_runtime_pressure' | 'active_runtime_pressure' | 'queue_backpressure';
+  queuePressureOrigin?: 'idle_runtime_pressure' | 'active_runtime_pressure' | 'small_or_unknown_body_idle_runtime_pressure' | 'small_or_unknown_body_active_runtime_pressure' | 'medium_known_body_idle_runtime_pressure' | 'medium_known_body_active_runtime_pressure' | 'large_known_body_runtime_pressure' | 'large_known_body_idle_runtime_pressure' | 'large_known_body_active_runtime_pressure' | 'unknown_length_body_idle_runtime_pressure' | 'unknown_length_body_active_runtime_pressure' | 'queue_backpressure';
   queuePressureScore?: number | null;
   queueUtilization?: number | null;
   queuePendingUtilization?: number | null;
@@ -180,15 +180,24 @@ export async function withBufferedRequestBody<T>(
   const requestSizeHint =
     contentLengthBytes === 0
       ? 'empty_body'
-      : contentLengthBytes === null || contentLengthBytes < 1024 * 1024
-        ? 'small_or_unknown'
-        : 'large_known_body';
+      : contentLengthBytes === null
+        ? 'unknown_length_body'
+        : contentLengthBytes < 64 * 1024
+          ? 'small_known_body'
+          : contentLengthBytes < 1024 * 1024
+            ? 'medium_known_body'
+            : 'large_known_body';
   const requestBodyReadPermitStrategy =
     contentLengthBytes === 0
       ? 'skip-empty-body'
-      : requestSizeHint === 'small_or_unknown' && contentLengthBytes !== null
-        ? 'bypass-small-known-body'
-        : 'queue-body-read';
+      : contentLengthBytes === null
+        ? 'bypass-unknown-length-body'
+        : requestSizeHint === 'small_known_body'
+          ? 'bypass-small-known-body'
+          : requestSizeHint === 'medium_known_body'
+            ? 'queue-body-read'
+            : 'queue-body-read';
+  const shouldAcquireBodyReadPermit = requestBodyReadPermitStrategy === 'queue-body-read';
   const logBase = {
     route: request.path,
     requestId: request.requestId,
@@ -198,17 +207,17 @@ export async function withBufferedRequestBody<T>(
     requestBodyReadStrategy,
     requestBodyReadPermitStrategy,
     requestSizeHint,
+    requestBodyReadPermitQueued: shouldAcquireBodyReadPermit,
     ...(options.extra ?? {}),
   };
   const skippedBodyBufferRead = contentLengthBytes === 0;
-  const skippedBodyReadPermit = requestBodyReadPermitStrategy !== 'queue-body-read';
+  const skippedBodyReadPermit = !shouldAcquireBodyReadPermit;
   logMemoryProfile(`${options.label}:before-read`, {
     ...logBase,
     skippedBodyReadPermit,
     skippedBodyBufferRead,
   });
 
-  const shouldAcquireBodyReadPermit = requestBodyReadPermitStrategy === 'queue-body-read';
   const releasePermit = shouldAcquireBodyReadPermit
     ? await acquireRequestBodyReadPermit(options.label, contentLengthBytes)
     : () => {};

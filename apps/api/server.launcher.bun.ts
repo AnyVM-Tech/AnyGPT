@@ -573,6 +573,17 @@ async function main(): Promise<void> {
 				: pendingRuns === 'unknown'
 					? 'same-thread-visibility-unknown'
 					: 'same-thread-pending-or-incomplete';
+			const promptSyncChannel = process.env.ANYGPT_PROMPT_SYNC_CHANNEL?.trim() || 'default';
+			const promptSyncEnabled = parseBooleanEnv(process.env.ANYGPT_PROMPT_SYNC_ENABLED, false);
+			const promptSyncUrl = process.env.ANYGPT_PROMPT_SYNC_URL?.trim() || 'missing';
+			const promptLiveChannelAvailable = parseBooleanEnv(process.env.ANYGPT_PROMPT_LIVE_CHANNEL_AVAILABLE, false);
+			const promptSyncState = promptSyncEnabled
+				? promptSyncUrl !== 'missing'
+					? 'synced'
+					: promptLiveChannelAvailable
+						? 'enabled_missing_url'
+						: 'fallback_risk'
+				: 'disabled';
 			const validationState = [
 				`thread_id=${validationThread}`,
 				`checked_at=${validationCheckedAt}`,
@@ -580,8 +591,15 @@ async function main(): Promise<void> {
 				`pending_runs=${pendingRuns}`,
 				`pending_runs_state=${pendingRunsState}`,
 				`validation_mode=${validationMode}`,
+				`configured_worker_count=${WORKER_COUNT}`,
+				`configured_restart_delay_ms=${RESTART_DELAY_MS}`,
 				'operator_readiness=partial',
 				'operator_validation=deferred',
+				`prompt_sync_channel=${promptSyncChannel.replace(/\s+/g, '_')}`,
+				`prompt_sync_enabled=${promptSyncEnabled ? 'true' : 'false'}`,
+				`prompt_live_channel_available=${promptLiveChannelAvailable ? 'true' : 'false'}`,
+				`prompt_sync_state=${promptSyncState}`,
+				`prompt_sync_url=${promptSyncUrl.replace(/\s+/g, '_')}`,
 				`operator_defer_reason=${validationDeferReason.replace(/\s+/g, '_')}`,
 			].join('\n');
 			fs.writeFileSync(`${validationStatePath}.tmp`, `${validationState}\n`, 'utf8');
@@ -606,6 +624,68 @@ async function main(): Promise<void> {
 		);
 	}
 
+	const experimentalValidationTarget =
+		process.env.ANYGPT_EXPERIMENTAL_STARTUP_VALIDATION_TARGET ||
+		process.env.ANYGPT_EXPERIMENTAL_API_BASE_URL ||
+		'unknown';
+	const localValidationTarget =
+		process.env.ANYGPT_EXPERIMENTAL_STARTUP_LOCAL_VALIDATION_TARGET ||
+		'unknown';
+	const startupValidationTimeoutSec =
+		process.env.ANYGPT_EXPERIMENTAL_STARTUP_HEALTHCHECK_TIMEOUT_SEC ||
+		'5';
+	const startupPrecheckIntervalSec =
+		process.env.ANYGPT_EXPERIMENTAL_STARTUP_PRECHECK_INTERVAL_SEC ||
+		'unknown';
+	const startupPrecheckMaxAgeSec =
+		process.env.ANYGPT_EXPERIMENTAL_STARTUP_PRECHECK_MAX_AGE_SEC ||
+		'300';
+	console.log(
+		`[Launcher] Experimental API startup-health note: this thread is focused on bounded api-platform observability for ${validationThread}; startup validation target=${experimentalValidationTarget} local_target=${localValidationTarget} timeout_sec=${startupValidationTimeoutSec}; startup_precheck_interval_sec=${startupPrecheckIntervalSec} startup_precheck_max_age_sec=${startupPrecheckMaxAgeSec}; if the upstream provider/runtime issue in apps/api/logs/provider-unique-errors.jsonl persists, retrying the same provider-method combination is unlikely to help until the provider is healthy again.`,
+	);
+	console.log(
+		`[Launcher] LangSmith observability note: active repair signal is recent-run-health with no recent LangSmith runs available for governance inspection for ${validationThread}; same-thread pending-only visibility is partial observability only for this thread, not completed validation, and cross-thread activity does not satisfy validation for ${validationThread}.`,
+	);
+	console.log(
+		`[Launcher] Operator-facing defer reason: active goal is a bounded api-platform startup-health improvement for ${validationThread}; only allowed api-platform files were changed in this iteration; apps/api/logs/provider-unique-errors.jsonl and the blocked apps/api provider/runtime routing subsystem remain out of scope and unrepaired here; cross-thread LangSmith activity does not satisfy validation for this thread; startup graph registration, worker startup, or server-running logs followed by flush/exit/shutdown are partial readiness evidence only; prompt sync enabled without a returned URL is prompt fallback drift risk only; configured_worker_count=${WORKER_COUNT}; experimental service target=${process.env.ANYGPT_EXPERIMENTAL_API_BASE_URL || 'unknown'} local_validation_target=${process.env.ANYGPT_EXPERIMENTAL_STARTUP_LOCAL_VALIDATION_TARGET || 'unknown'}; retrying the same upstream provider-method combination is unlikely to help until the blocked provider/runtime path is healthy again; zero fresh same-thread runs for this iteration is a monitoring gap rather than by itself a deploy or rollback trigger; the next success condition is at least one fresh same-thread LangSmith run/trace with explicit goal context for the api-platform thread plus a passed api-platform smoke/typecheck result for the touched path set, or a clear no-run defer reason if no run was emitted.`,
+	);
+	const launcherMemoryUsage = process.memoryUsage();
+	const memAvailableBytes = readMemAvailableBytes();
+	const startupHealthSnapshot = {
+		thread: validationThread,
+		goal: 'bounded api-platform startup-health improvement',
+		changedFiles: ['apps/api/server.launcher.bun.ts'],
+		blockedLogPath: 'apps/api/logs/provider-unique-errors.jsonl',
+		blockedSubsystem: 'apps/api provider/runtime routing',
+		providerIssueScope: 'out-of-scope',
+		providerRetryLikelyHelpful: false,
+		workerCount: WORKER_COUNT,
+		cpuCount: navigator.hardwareConcurrency,
+		launcherPid: process.pid,
+		launcherStartedAt: new Date(process.uptime() > 0 ? Date.now() - Math.round(process.uptime() * 1000) : Date.now()).toISOString(),
+		launcherUptimeSec: Math.round(process.uptime()),
+		launcherSnapshotAt: new Date().toISOString(),
+		launcherMemoryRssMb: Math.round(launcherMemoryUsage.rss / (1024 * 1024)),
+		launcherMemoryHeapUsedMb: Math.round(launcherMemoryUsage.heapUsed / (1024 * 1024)),
+		launcherMemoryExternalMb: Math.round(launcherMemoryUsage.external / (1024 * 1024)),
+		memAvailableMb: memAvailableBytes !== null ? Math.round(memAvailableBytes / (1024 * 1024)) : null,
+		experimentalServiceTarget: process.env.ANYGPT_EXPERIMENTAL_API_BASE_URL || 'unknown',
+		startupValidationTarget: experimentalValidationTarget,
+		localValidationTarget,
+		startupValidationBrowserLocalhostAligned:
+			experimentalValidationTarget === localValidationTarget ||
+			/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(\/|$)/i.test(experimentalValidationTarget),
+		startupValidationTimeoutSec,
+		startupPrecheckIntervalSec,
+		startupPrecheckMaxAgeSec,
+		crossThreadValidationSatisfied: false,
+		sameThreadValidationObserved: false,
+		readinessClassification: 'startup evidence only; completed validation still requires same-thread run and smoke/typecheck',
+		freshnessClassification: 'snapshot freshness is observability only and does not satisfy runtime validation by itself',
+		nextSuccessCondition:
+			'at least one fresh same-thread LangSmith api-platform run/trace with explicit goal context plus a passed api-platform smoke/typecheck result for the touched path set, or a clear no-run defer reason if no run is emitted',
+	};
+	console.log(`[Launcher] Startup health snapshot ${JSON.stringify(startupHealthSnapshot)}`);
 	for (let index = 0; index < WORKER_COUNT; index += 1) {
 		spawnWorker(index);
 	}

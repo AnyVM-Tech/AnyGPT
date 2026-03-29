@@ -1081,6 +1081,8 @@ interface HandleMessagesOptions extends Partial<IMessage> {
 	requestId?: string;
 	skipQueue?: boolean;
 	queueLane?: RequestQueueLane;
+	rateLimitWaitBudgetMs?: number;
+	allowStaleCooldownProbe?: boolean;
 }
 
 interface HandleStreamingOptions extends Partial<IMessage> {
@@ -1088,6 +1090,8 @@ interface HandleStreamingOptions extends Partial<IMessage> {
 	requestId?: string;
 	skipQueue?: boolean;
 	queueLane?: RequestQueueLane;
+	rateLimitWaitBudgetMs?: number;
+	allowStaleCooldownProbe?: boolean;
 }
 
 let providerConfigs: { [providerId: string]: ProviderConfig } = {};
@@ -1292,6 +1296,8 @@ export class MessageHandler {
 			requestId?: string;
 			skipQueue?: boolean;
 			queueLane?: RequestQueueLane;
+			rateLimitWaitBudgetMs?: number;
+			allowStaleCooldownProbe?: boolean;
 			disablePassthrough?: boolean;
 		}
 	): Partial<IMessage> {
@@ -1300,6 +1306,8 @@ export class MessageHandler {
 			requestId: _requestId,
 			skipQueue: _skipQueue,
 			queueLane: _queueLane,
+			rateLimitWaitBudgetMs: _rateLimitWaitBudgetMs,
+			allowStaleCooldownProbe: _allowStaleCooldownProbe,
 			disablePassthrough: _disablePassthrough,
 			...messageOverrides
 		} = options;
@@ -2659,6 +2667,13 @@ export class MessageHandler {
 		);
 		const requestId = normalizedArgs.requestId;
 		const options = normalizedArgs.options;
+		const rateLimitWaitBudgetMs =
+			typeof options?.rateLimitWaitBudgetMs === 'number' &&
+			Number.isFinite(options.rateLimitWaitBudgetMs)
+				? Math.max(0, Math.floor(options.rateLimitWaitBudgetMs))
+				: RATE_LIMIT_TOTAL_WAIT_BUDGET_MS;
+		const allowStaleCooldownProbe =
+			options?.allowStaleCooldownProbe === true;
 		const messageOverrides = this.extractMessageOverrides(options);
 		const shouldUseRequestQueue = !options?.skipQueue;
 		const requestQueue = getRequestQueueForLane(options?.queueLane);
@@ -2760,6 +2775,21 @@ export class MessageHandler {
 			let nextCooldownMs: number | null = null;
 			let nextCooldownEarlyWakeMs: number | null = null;
 			let attemptedSinceCooldown = false;
+			let staleCooldownProbeUsed = false;
+			const tryStaleCooldownProbe = (
+				providerId: string,
+				modelId: string,
+				reason: string
+			): boolean => {
+				if (!allowStaleCooldownProbe || staleCooldownProbeUsed) {
+					return false;
+				}
+				staleCooldownProbeUsed = true;
+				console.warn(
+					`[CooldownProbe] Ignoring ${reason} once for internal request on ${providerId}/${modelId}.`
+				);
+				return true;
+			};
 			for (;;) {
 				let releaseQueueSlot: (() => void) | null = null;
 				try {
@@ -2800,6 +2830,15 @@ export class MessageHandler {
 								modelId
 							))
 						) {
+							if (
+								tryStaleCooldownProbe(
+									providerId,
+									modelId,
+									'api-key cooldown'
+								)
+							) {
+								// Probe one candidate despite stale cooldown state.
+							} else {
 							skippedByCooldown++;
 							if (shouldRespectCooldowns) {
 								const remainingMs =
@@ -2821,6 +2860,7 @@ export class MessageHandler {
 								}
 							}
 							continue;
+							}
 						}
 						const distributedCooldownMs =
 							await getDistributedProviderCooldownMs(
@@ -2831,6 +2871,15 @@ export class MessageHandler {
 							distributedCooldownMs !== null &&
 							distributedCooldownMs > 0
 						) {
+							if (
+								tryStaleCooldownProbe(
+									providerId,
+									modelId,
+									'distributed provider cooldown'
+								)
+							) {
+								// Probe one candidate despite stale distributed cooldown state.
+							} else {
 							skippedByProviderRateLimit++;
 							if (
 								nextCooldownMs === null ||
@@ -2840,6 +2889,7 @@ export class MessageHandler {
 								nextCooldownEarlyWakeMs = null;
 							}
 							continue;
+							}
 						}
 						if (
 							providerApiKey &&
@@ -2858,6 +2908,15 @@ export class MessageHandler {
 									modelStats?.rate_limit_window_ms
 								);
 							if (waitMs > 0) {
+								if (
+									tryStaleCooldownProbe(
+										providerId,
+										modelId,
+										'provider rate-limit window'
+									)
+								) {
+									// Probe one candidate despite scheduled provider wait.
+								} else {
 								skippedByProviderRateLimit++;
 								if (
 									nextCooldownMs === null ||
@@ -2868,6 +2927,7 @@ export class MessageHandler {
 										earlyWakeMs ?? null;
 								}
 								continue;
+								}
 							}
 							const distributedPermit =
 								await acquireDistributedProviderPermit(
@@ -2876,6 +2936,15 @@ export class MessageHandler {
 									modelStats
 								);
 							if (!distributedPermit.allowed) {
+								if (
+									tryStaleCooldownProbe(
+										providerId,
+										modelId,
+										'distributed provider permit wait'
+									)
+								) {
+									// Probe one candidate despite permit backoff.
+								} else {
 								skippedByProviderRateLimit++;
 								if (
 									nextCooldownMs === null ||
@@ -2885,6 +2954,7 @@ export class MessageHandler {
 									nextCooldownEarlyWakeMs = null;
 								}
 								continue;
+								}
 							}
 						}
 						if (triedProviderIds.has(providerId)) continue;
@@ -3346,7 +3416,7 @@ export class MessageHandler {
 					skippedByCooldown > 0 || skippedByProviderRateLimit > 0;
 				const remainingCooldownWaitBudgetMs = Math.max(
 					0,
-					RATE_LIMIT_TOTAL_WAIT_BUDGET_MS - cooldownWaitSpentMs
+					rateLimitWaitBudgetMs - cooldownWaitSpentMs
 				);
 				const shouldRetryAfterCooldown =
 					hasCooldownSkips &&
@@ -3369,6 +3439,7 @@ export class MessageHandler {
 					stream: false,
 					cooldownMs: effectiveCooldownMs,
 					waitBudgetRemainingMs: remainingCooldownWaitBudgetMs,
+					totalWaitBudgetMs: rateLimitWaitBudgetMs,
 					earlyWakeMs: nextCooldownEarlyWakeMs,
 					requestAgeMs: cooldownWaitStartedAt - requestStartTime
 				});
@@ -3388,8 +3459,9 @@ export class MessageHandler {
 					cooldownMs: effectiveCooldownMs,
 					waitBudgetRemainingMs: Math.max(
 						0,
-						RATE_LIMIT_TOTAL_WAIT_BUDGET_MS - cooldownWaitSpentMs
+						rateLimitWaitBudgetMs - cooldownWaitSpentMs
 					),
+					totalWaitBudgetMs: rateLimitWaitBudgetMs,
 					earlyWakeMs: nextCooldownEarlyWakeMs,
 					waited,
 					waitElapsedMs,
@@ -3456,6 +3528,18 @@ export class MessageHandler {
 			(finalError as any).skippedByProviderRateLimit =
 				skippedByProviderRateLimit;
 			(finalError as any).allSkippedByRateLimit = allSkipped;
+			(finalError as any).rateLimitWaitBudgetMs =
+				rateLimitWaitBudgetMs;
+			if (nextCooldownMs !== null && Number.isFinite(nextCooldownMs)) {
+				(finalError as any).retryAfterMs = Math.max(
+					1000,
+					Math.ceil(nextCooldownMs)
+				);
+				(finalError as any).retryAfterSeconds = Math.max(
+					1,
+					Math.ceil(nextCooldownMs / 1000)
+				);
+			}
 			throw finalError;
 		};
 
@@ -3468,6 +3552,13 @@ export class MessageHandler {
 		apiKey: string,
 		options?: HandleStreamingOptions
 	): AsyncGenerator<any, void, unknown> {
+		const rateLimitWaitBudgetMs =
+			typeof options?.rateLimitWaitBudgetMs === 'number' &&
+			Number.isFinite(options.rateLimitWaitBudgetMs)
+				? Math.max(0, Math.floor(options.rateLimitWaitBudgetMs))
+				: RATE_LIMIT_TOTAL_WAIT_BUDGET_MS;
+		const allowStaleCooldownProbe =
+			options?.allowStaleCooldownProbe === true;
 		const messageOverrides = this.extractMessageOverrides(options);
 		const shouldUseRequestQueue = !options?.skipQueue;
 		const requestQueue = getRequestQueueForLane(options?.queueLane);
@@ -3560,6 +3651,21 @@ export class MessageHandler {
 		let nextCooldownMs: number | null = null;
 		let nextCooldownEarlyWakeMs: number | null = null;
 		let attemptedSinceCooldown = false;
+		let staleCooldownProbeUsed = false;
+		const tryStaleCooldownProbe = (
+			providerId: string,
+			modelId: string,
+			reason: string
+		): boolean => {
+			if (!allowStaleCooldownProbe || staleCooldownProbeUsed) {
+				return false;
+			}
+			staleCooldownProbeUsed = true;
+			console.warn(
+				`[CooldownProbe] Ignoring ${reason} once for internal streaming request on ${providerId}/${modelId}.`
+			);
+			return true;
+		};
 		for (;;) {
 			let releaseQueueSlot: (() => void) | null = null;
 			let queueReleased = false;
@@ -3607,6 +3713,15 @@ export class MessageHandler {
 							modelId
 						))
 					) {
+						if (
+							tryStaleCooldownProbe(
+								providerId,
+								modelId,
+								'api-key cooldown'
+							)
+						) {
+							// Probe one candidate despite stale cooldown state.
+						} else {
 						skippedByCooldown++;
 						if (shouldRespectCooldowns) {
 							const remainingMs =
@@ -3625,6 +3740,7 @@ export class MessageHandler {
 							}
 						}
 						continue;
+						}
 					}
 					const distributedCooldownMs =
 						await getDistributedProviderCooldownMs(
@@ -3635,6 +3751,15 @@ export class MessageHandler {
 						distributedCooldownMs !== null &&
 						distributedCooldownMs > 0
 					) {
+						if (
+							tryStaleCooldownProbe(
+								providerId,
+								modelId,
+								'distributed provider cooldown'
+							)
+						) {
+							// Probe one candidate despite stale distributed cooldown state.
+						} else {
 						skippedByProviderRateLimit++;
 						if (
 							nextCooldownMs === null ||
@@ -3644,6 +3769,7 @@ export class MessageHandler {
 							nextCooldownEarlyWakeMs = null;
 						}
 						continue;
+						}
 					}
 					if (providerApiKey && blockedApiKeys.has(providerApiKey)) {
 						skippedByBlockedKey++;
@@ -3659,6 +3785,15 @@ export class MessageHandler {
 								modelStats?.rate_limit_window_ms
 							);
 						if (waitMs > 0) {
+							if (
+								tryStaleCooldownProbe(
+									providerId,
+									modelId,
+									'provider rate-limit window'
+								)
+							) {
+								// Probe one candidate despite scheduled provider wait.
+							} else {
 							skippedByProviderRateLimit++;
 							if (
 								nextCooldownMs === null ||
@@ -3668,6 +3803,7 @@ export class MessageHandler {
 								nextCooldownEarlyWakeMs = earlyWakeMs ?? null;
 							}
 							continue;
+							}
 						}
 						const distributedPermit =
 							await acquireDistributedProviderPermit(
@@ -3676,6 +3812,15 @@ export class MessageHandler {
 								modelStats
 							);
 						if (!distributedPermit.allowed) {
+							if (
+								tryStaleCooldownProbe(
+									providerId,
+									modelId,
+									'distributed provider permit wait'
+								)
+							) {
+								// Probe one candidate despite permit backoff.
+							} else {
 							skippedByProviderRateLimit++;
 							if (
 								nextCooldownMs === null ||
@@ -3685,6 +3830,7 @@ export class MessageHandler {
 								nextCooldownEarlyWakeMs = null;
 							}
 							continue;
+							}
 						}
 					}
 					if (triedProviderIds.has(providerId)) continue;
@@ -4182,7 +4328,7 @@ export class MessageHandler {
 				skippedByCooldown > 0 || skippedByProviderRateLimit > 0;
 			const remainingCooldownWaitBudgetMs = Math.max(
 				0,
-				RATE_LIMIT_TOTAL_WAIT_BUDGET_MS - cooldownWaitSpentMs
+				rateLimitWaitBudgetMs - cooldownWaitSpentMs
 			);
 			const shouldRetryAfterCooldown =
 				hasCooldownSkips &&
@@ -4205,6 +4351,7 @@ export class MessageHandler {
 				stream: true,
 				cooldownMs: effectiveCooldownMs,
 				waitBudgetRemainingMs: remainingCooldownWaitBudgetMs,
+				totalWaitBudgetMs: rateLimitWaitBudgetMs,
 				earlyWakeMs: nextCooldownEarlyWakeMs,
 				requestAgeMs: cooldownWaitStartedAt - requestStartTime
 			});
@@ -4224,8 +4371,9 @@ export class MessageHandler {
 				cooldownMs: effectiveCooldownMs,
 				waitBudgetRemainingMs: Math.max(
 					0,
-					RATE_LIMIT_TOTAL_WAIT_BUDGET_MS - cooldownWaitSpentMs
+					rateLimitWaitBudgetMs - cooldownWaitSpentMs
 				),
+				totalWaitBudgetMs: rateLimitWaitBudgetMs,
 				earlyWakeMs: nextCooldownEarlyWakeMs,
 				waited,
 				waitElapsedMs,
@@ -4290,6 +4438,17 @@ export class MessageHandler {
 		(finalError as any).skippedByProviderRateLimit =
 			skippedByProviderRateLimit;
 		(finalError as any).allSkippedByRateLimit = allSkipped;
+		(finalError as any).rateLimitWaitBudgetMs = rateLimitWaitBudgetMs;
+		if (nextCooldownMs !== null && Number.isFinite(nextCooldownMs)) {
+			(finalError as any).retryAfterMs = Math.max(
+				1000,
+				Math.ceil(nextCooldownMs)
+			);
+			(finalError as any).retryAfterSeconds = Math.max(
+				1,
+				Math.ceil(nextCooldownMs / 1000)
+			);
+		}
 		throw finalError;
 	}
 

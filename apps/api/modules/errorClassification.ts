@@ -66,8 +66,7 @@ export function isRateLimitOrQuotaError(error: any): boolean {
 				status === 401 ||
 				status === 402
 			)
-		);		status === 401 ||
-		status === 402;
+		);
 	const upstreamAuthOrGovernanceDriftLike =
 		providerCredentialDriftLike ||
 		message.includes('unauthorized') ||
@@ -181,11 +180,100 @@ export function isRateLimitOrQuotaError(error: any): boolean {
 		message.includes('payment required to use this model') ||
 		message.includes('payment required to use this provider') ||
 		message.includes('payment required to use this endpoint') ||
+		message.includes('insufficient_quota') ||
+		message.includes('insufficient quota') ||
+		message.includes('quota exceeded') ||
+		message.includes('quota exceeded for this request') ||
+		message.includes('quota exceeded for your current plan') ||
+		message.includes('quota exceeded for this key') ||
+		message.includes('quota exceeded for requests') ||
+		message.includes('quota exceeded for tokens') ||
+		message.includes('quota exceeded for metric') ||
+		message.includes('quota exceeded for metric:') ||
+		message.includes('quota exceeded for requests per minute') ||
+		message.includes('quota exceeded for requests per day') ||
+		message.includes('quota exceeded for input token count') ||
+		message.includes('quota exceeded for output token count') ||
+		message.includes('key_no_quota') ||
+		message.includes('out of credits') ||
+		message.includes('credits are exhausted') ||
+		message.includes('billing hard limit has been reached') ||
+		message.includes('exceeded the prepaid balance') ||
+		message.includes('payment method required') ||
+		message.includes('payment method is required') ||
+		message.includes('402 payment required') ||
+		message.includes('quota exceeded for your project') ||
+		message.includes('quota exceeded for your account') ||
+		message.includes('quota exceeded for organization') ||
+		message.includes('quota exceeded for this organization') ||
+		message.includes('you exceeded your quota') ||
+		message.includes('current quota') ||
+		message.includes('billing hard limit') ||
+		message.includes('please check your plan and billing details') ||
+		message.includes('please check your plan or billing details') ||
+		message.includes('please check your billing details') ||
+		message.includes('please check your plan') ||
+		message.includes('upgrade your plan') ||
+		message.includes('add payment details') ||
+		message.includes('add a payment method') ||
+		message.includes('account balance is too low') ||
+		message.includes('out of credits') ||
+		message.includes('quota exceeded for metric') ||
+		message.includes('quotaid') ||
+		message.includes('resource_exhausted') ||
+		message.includes('generativelanguage.googleapis.com/generate_content') ||
+		message.includes('requests per minute per project per model') ||
+		message.includes('requests per day per project per model') ||
+		message.includes('free tier input token count') ||
+		message.includes('free tier requests') ||
+		message.includes('project has been suspended') ||
+		message.includes('consumer') && message.includes('has been suspended') ||
+		message.includes('api key expired') ||
+		message.includes('please renew the api key') ||
+		message.includes('generative language api has not been used in project') ||
+		message.includes('enable it by visiting') ||
+		message.includes('payment required') ||
+		message.includes('status code 402') ||
+		message.includes('402 payment required') ||
+		message.includes('exceeded your quota') ||
+		message.includes('out of quota') ||
+		message.includes('no quota remaining') ||
+		message.includes('credits have been exhausted') ||
+		message.includes('credits exhausted') ||
+		message.includes('billing hard limit has been reached') ||
+		message.includes('billing_not_active') ||
+		message.includes('account_not_active') ||
+		message.includes('monthly budget has been exceeded') ||
+		message.includes('reached your usage limit') ||
+		message.includes('usage limit reached') ||
 		status === 402 ||
 		message.includes('payment required') ||
 		message.includes('payment required to use your openrouter account') ||
 		message.includes('payment required to use your account') ||
 		message.includes('payment required to use this model') ||
+		message.includes('unsupported parameter') ||
+		message.includes('unsupported value for parameter') ||
+		message.includes('parameter is not supported with this model') ||
+		message.includes('not supported with this model') ||
+		message.includes('does not support parameter') ||
+		message.includes('does not support this parameter') ||
+		message.includes('model does not support parameter') ||
+		message.includes('unsupported setting for this model') ||
+		message.includes('temperature is not supported with this model') ||
+		message.includes('top_p is not supported with this model') ||
+		message.includes('reasoning_effort is not supported with this model') ||
+		message.includes('unsupported value for') ||
+		message.includes("unsupported parameter: 'temperature'") ||
+		message.includes('unsupported parameter: "temperature"') ||
+		message.includes('temperature is not supported with this model') ||
+		message.includes('temperature is not supported for this model') ||
+		message.includes('unsupported value for temperature') ||
+		message.includes('unsupported parameter') ||
+		message.includes('parameter is not supported with this model') ||
+		message.includes('not supported with this model') ||
+		message.includes('unsupported tool_choice') ||
+		message.includes('tool_choice is not supported') ||
+		message.includes('function calling not enabled') ||
 		message.includes('payment required to use this provider') ||
 		message.includes('payment required to use this endpoint') ||
 		message.includes('payment required to use this account') ||
@@ -1712,1812 +1800,160 @@ export function isInsufficientCreditsError(error: any): boolean {
 
 // --- Invalid Credentials ---
 
-export function isInvalidProviderCredentialError(error: any): boolean {
-const message = String(error?.message || error || '').toLowerCase();
-const status = Number((error as any)?.status || (error as any)?.statusCode || (error as any)?.response?.status || 0);
-const code = String((error as any)?.code || (error as any)?.error?.code || (error as any)?.response?.data?.error?.code || '').toLowerCase();
-const errorType = String((error as any)?.type || (error as any)?.error?.type || (error as any)?.response?.data?.error?.type || '').toLowerCase();
-const providerStatus = String((error as any)?.error?.status || (error as any)?.response?.data?.error?.status || '').toLowerCase();
-if (!message && status === 0 && !code && !errorType && !providerStatus) return false;
-return (
-	status === 401 ||
-	status === 403 ||
-	code === 'invalid_api_key' ||
-	code === 'invalid key' ||
-	code === 'invalid_key' ||
-	code === 'key_invalid' ||
-	code === 'invalidapikey' ||
-	code === 'invalidtoken' ||
-	code === 'invalid_token' ||
-	code === 'unauthorized' ||
-	code === 'forbidden' ||
-	code === 'permission_denied' ||
-	code === 'auth_error' ||
-	code === 'invalid_auth' ||
-	code === 'invalid_authentication' ||
-	code === 'invalid_credential' ||
-	code === 'invalid_credentials' ||
-	code === 'authenticationerror' ||
-	code === 'authentication_error' ||
-	code === 'authentication_failed' ||
-	providerStatus === 'permission_denied' ||
-	providerStatus === 'unauthenticated' ||
-	providerStatus === 'unauthorized' ||
-	providerStatus === 'forbidden' ||
-	message.includes('incorrect api key provided') ||
-	message.includes('invalid api key') ||
-	message.includes('invalid_api_key') ||
-	message.includes('api key provided') ||
-	message.includes('api key is invalid') ||
-	message.includes('invalid authentication') ||
-	message.includes('authentication failed') ||
-	message.includes('authentication error') ||
-	message.includes('invalid credentials') ||
-	message.includes('invalid credential') ||
-	message.includes('unauthorized') ||
-	message.includes('permission denied') ||
-	message.includes('forbidden') ||
-	message.includes('incorrect api key provided') ||
-	message.includes('invalid api key') ||
-	message.includes('invalid_api_key') ||
-	message.includes('invalid authentication') ||
-	message.includes('authentication failed') ||
-	message.includes('invalid credentials') ||
-	message.includes('invalid credential') ||
-	message.includes('unauthorized') ||
-	message.includes('api key provided') ||
-	message.includes('api key is invalid') ||
-	message.includes('the api key is invalid') ||
-	message.includes('provided api key') ||
-	code === 'bad_api_key' ||
-	code === 'bad_api_token' ||
-	code === 'api_key_invalid' ||
-	code === 'api_key_not_valid' ||
-	code === 'invalid_api_token' ||
-	code === 'invalid_auth_token' ||
-	code === 'invalid_bearer_token' ||
-	code === 'invalid_signature' ||
-	code === 'signature_invalid' ||
-	code === 'access_denied' ||
-	code === 'accessdenied' ||
-	code === 'unauthenticated' ||
-	message.includes('incorrect api key provided') ||
-	message.includes('invalid api key') ||
-	message.includes('invalid api-key') ||
-	message.includes('api key provided') ||
-	message.includes('authorization header') ||
-	message.includes('malformed authorization header') ||
-	providerStatus === 'unauthenticated' ||
-	providerStatus === 'permission_denied' ||
-	errorType === 'authentication_error' ||
-	errorType === 'invalid_request_error' ||
-	message.includes('incorrect api key provided') ||
-	message.includes('invalid api key') ||
-	message.includes('invalid api-key') ||
-	message.includes('invalid authentication') ||
-	message.includes('invalid credentials') ||
-	message.includes('authentication failed') ||
-	message.includes('failed authentication') ||
-	message.includes('unauthorized') ||
-	message.includes('not authorized') ||
-	message.includes('forbidden') ||
-	message.includes('permission denied') ||
-	message.includes('api key provided is invalid') ||
-	message.includes('api key is invalid') ||
-	message.includes('api key not valid') ||
-	message.includes('api key has expired') ||
-	message.includes('invalid token') ||
-	message.includes('token is invalid') ||
-	code === 'incorrect_api_key' ||
-	code === 'bad_api_key' ||
-	code === 'bad_api_token' ||
-	code === 'api_key_invalid' ||
-	code === 'api_key_not_found' ||
-	code === 'invalid_bearer_token' ||
-	code === 'invalid_signature' ||
-	code === 'signature_invalid' ||
-	code === 'organization_deactivated' ||
-	code === 'account_deactivated' ||
-	errorType === 'invalid_request_error' && (
-		message.includes('incorrect api key provided') ||
-		message.includes('invalid api key') ||
-		message.includes('incorrect api key')
-	) ||
-	message.includes('incorrect api key provided') ||
-	message.includes('invalid api key provided') ||
-	message.includes('invalid api key') ||
-	message.includes('invalid api token') ||
-	message.includes('invalid authentication') ||
-	message.includes('authentication failed') ||
-	message.includes('authentication error') ||
-	message.includes('unauthorized') ||
-	message.includes('forbidden') ||
-	message.includes('permission denied') ||
-	message.includes('api key not found') ||
-	message.includes('invalid bearer token') ||
-	message.includes('invalid signature') ||
-	message.includes('signature invalid') ||
-	message.includes('incorrect api key provided') ||
-	message.includes('invalid api key') ||
-	message.includes('invalid api-key') ||
-	message.includes('invalid authentication') ||
-	message.includes('invalid credentials') ||
-	message.includes('authentication failed') ||
-	message.includes('authentication error') ||
-	message.includes('unauthorized') ||
-	message.includes('api key provided') ||
-	providerStatus === 'unauthenticated' ||
-	providerStatus === 'permission_denied' ||
-	errorType === 'authentication_error' ||
-	errorType === 'invalid_request_error' ||
-	message.includes('incorrect api key provided') ||
-	message.includes('invalid api key') ||
-	message.includes('invalid api-key') ||
-	message.includes('invalid authentication') ||
-	message.includes('invalid credentials') ||
-	message.includes('authentication failed') ||
-	message.includes('authentication error') ||
-	message.includes('unauthorized') ||
-	message.includes('forbidden') ||
-	message.includes('api key provided is invalid') ||
-	message.includes('the api key provided is invalid') ||
-	message.includes('you didn\'t provide an api key') ||
-	message.includes('you did not provide an api key') ||
-	message.includes('no api key provided') ||
-	message.includes('api key not found') ||
-	message.includes('invalid or missing api key') ||
-	providerStatus === 'unauthenticated' ||
-	providerStatus === 'permission_denied' ||
-	errorType === 'authentication_error' ||
-	errorType === 'authenticationerror' ||
-	errorType === 'invalid_request_error' ||
-	message.includes('incorrect api key provided') ||
-	message.includes('invalid api key') ||
-	message.includes('invalid api-key') ||
-	message.includes('invalid authentication') ||
-	message.includes('invalid credentials') ||
-	message.includes('invalid credential') ||
-	message.includes('authentication failed') ||
-	message.includes('authentication error') ||
-	message.includes('unauthorized') ||
-	message.includes('forbidden') ||
-	message.includes('permission denied') ||
-	message.includes('api key provided')
-		&& (message.includes('incorrect') || message.includes('invalid')) ||
-	providerStatus === 'unauthenticated' ||
-	providerStatus === 'permission_denied' ||
-	message.includes('incorrect api key provided') ||
-	message.includes('invalid api key') ||
-	message.includes('invalid_api_key') ||
-	message.includes('invalid authentication') ||
-	message.includes('invalid credentials') ||
-	message.includes('authentication failed') ||
-	message.includes('failed authentication') ||
-	message.includes('api key not valid') ||
-	message.includes('api key is invalid') ||
-	message.includes('the api key is invalid') ||
-	message.includes('expired api key') ||
-	message.includes('malformed api key') ||
-	code === 'auth_failed' ||
-	code === 'bad_api_key' ||
-	code === 'billing_not_active' ||
-	code === 'account_not_active' ||
-	code === 'organization_deactivated' ||
-	providerStatus === 'permission_denied' ||
-	providerStatus === 'unauthenticated' ||
-	providerStatus === 'unauthorized' ||
-	errorType === 'invalid_request_error' ||
-	errorType === 'authentication_error' ||
-	errorType === 'authenticationerror' ||
-	message.includes('incorrect api key provided') ||
-	message.includes('invalid api key') ||
-	message.includes('invalid_api_key') ||
-	message.includes('invalid authentication') ||
-	message.includes('invalid credentials') ||
-	message.includes('authentication failed') ||
-	message.includes('api key provided') ||
-	message.includes('you can find your api key at') ||
-	message.includes('unauthorized') ||
-	message.includes('permission denied') ||
-	message.includes('forbidden') ||
-	message.includes('account not active') ||
-	message.includes('billing not active') ||
-	providerStatus === 'permission_denied' ||
-	providerStatus === 'unauthenticated' ||
-	providerStatus === 'unauthorized' ||
-	errorType === 'invalid_request_error' ||
-	errorType === 'authentication_error' ||
-	message.includes('incorrect api key provided') ||
-	message.includes('invalid api key') ||
-	message.includes('invalid_api_key') ||
-	message.includes('api key provided') ||
-	message.includes('unauthorized') ||
-	message.includes('authentication failed') ||
-	message.includes('authentication error') ||
-	message.includes('invalid authentication') ||
-	message.includes('invalid credentials') ||
-	message.includes('permission denied') ||
-	message.includes('forbidden') ||
-	message.includes('api key not valid') ||
-	message.includes('api key is invalid') ||
-	message.includes('the api key is invalid') ||
-	message.includes('the provided api key is invalid') ||
-	providerStatus === 'unauthenticated' ||
-	providerStatus === 'permission_denied' ||
-	errorType === 'authentication_error' ||
-	errorType === 'authenticationerror' ||
-	errorType === 'invalid_request_error' ||
-	message.includes('incorrect api key provided') ||
-	message.includes('invalid api key') ||
-	message.includes('invalid_api_key') ||
-	message.includes('api key provided is invalid') ||
-	message.includes('api key is invalid') ||
-	message.includes('api key not valid') ||
-	message.includes('invalid authentication') ||
-	message.includes('authentication failed') ||
-	message.includes('failed to authenticate') ||
-	message.includes('unauthorized') ||
-	message.includes('not authorized') ||
-	message.includes('forbidden') ||
-	code === 'account_deactivated' ||
-	errorType === 'invalid_api_key' ||
-	errorType === 'authentication_error' ||
-	errorType === 'authenticationfailed' ||
-	providerStatus === 'permission_denied' ||
-	providerStatus === 'unauthenticated' ||
-	message.includes('incorrect api key provided') ||
-	message.includes('invalid api key') ||
-	message.includes('invalid_api_key') ||
-	message.includes('invalid authentication') ||
-	message.includes('invalid credentials') ||
-	message.includes('authentication failed') ||
-	message.includes('unauthorized') ||
-	message.includes('api key provided is invalid') ||
-	message.includes('the api key provided is invalid') ||
-	errorType === 'invalid_authentication' ||
-	errorType === 'billing_not_active' ||
-	errorType === 'organization_deactivated' ||
-	errorType === 'account_deactivated' ||
-	message.includes('incorrect api key provided') ||
-	message.includes('invalid api key') ||
-	message.includes('invalid_api_key') ||
-	message.includes('api key provided') ||
-	message.includes('unauthorized') ||
-	message.includes('authentication failed') ||
-	message.includes('authentication error') ||
-	message.includes('invalid authentication') ||
-	message.includes('invalid credentials') ||
-	message.includes('invalid credential') ||
-	message.includes('bad api key') ||
-	message.includes('permission denied') ||
-	message.includes('forbidden') ||
-	message.includes('api key not found') ||
-	message.includes('api key not valid') ||
-	message.includes('incorrect api key provided') ||
-	message.includes('your account is not active') ||
-	message.includes('account is not active') ||
-	message.includes('api key expired') ||
-	message.includes('please renew the api key') ||
-	message.includes('incorrect api key provided') ||
-	message.includes('invalid api key') ||
-	message.includes('invalid_api_key') ||
-	message.includes('key_invalid') ||
-	message.includes('unauthorized') ||
-	message.includes('forbidden') ||
-	message.includes('account is not active') ||
-	message.includes('authentication failed') ||
-	message.includes('invalid api key') ||
-	message.includes('invalid_api_key') ||
-	message.includes('incorrect api key') ||
-	message.includes('unauthorized') ||
-	message.includes('authentication failed') ||
-	message.includes('authentication error') ||
-	message.includes('invalid authentication') ||
-	message.includes('invalid credentials') ||
-	message.includes('permission denied') ||
-	message.includes('forbidden') ||
-	message.includes('invalid api key') ||
-	message.includes('invalid_api_key') ||
-	message.includes('incorrect api key') ||
-	message.includes('invalid authentication') ||
-	message.includes('authentication failed') ||
-	message.includes('unauthorized') ||
-	message.includes('forbidden') ||
-	message.includes('permission denied') ||
-	message.includes('incorrect api key provided') ||
-	message.includes('invalid api key') ||
-	message.includes('invalid authentication') ||
-	message.includes('invalid credentials') ||
-	message.includes('invalid credential') ||
-	message.includes('authentication failed') ||
-	message.includes('authentication error') ||
-	message.includes('unauthorized') ||
-	message.includes('forbidden') ||
-	message.includes('permission denied') ||
-	message.includes('invalid credentials') ||
-	message.includes('invalid credential') ||
-	message.includes('invalid token') ||
-	message.includes('invalid bearer token') ||
-	message.includes('invalid authorization') ||
-	message.includes('authentication failed') ||
-	message.includes('authentication error') ||
-	message.includes('authorization failed') ||
-	message.includes('unauthorized') ||
-	message.includes('forbidden') ||
-	message.includes('access denied') ||
-	message.includes('invalid api key provided') ||
-	message.includes('invalid_api_key') ||
-	message.includes('key_invalid') ||
-	message.includes('unauthorized') ||
-	message.includes('unauthorized request') ||
-	message.includes('authentication failed') ||
-	message.includes('authentication error') ||
-	message.includes('invalid credentials') ||
-	message.includes('invalid credential') ||
-	message.includes('access token expired') ||
-	message.includes('token expired') ||
-	message.includes('invalid_api_key') ||
-	message.includes('invalid api credentials') ||
-	message.includes('invalid credentials') ||
-	message.includes('invalid authorization') ||
-	message.includes('unauthorized') ||
-	message.includes('authentication failed') ||
-	message.includes('authentication error') ||
-	message.includes('authorization failed') ||
-	message.includes('access token expired') ||
-	message.includes('token expired') ||
-	message.includes('invalid_api_key') ||
-	message.includes('unauthorized') ||
-	message.includes('unauthenticated') ||
-	message.includes('authentication failed') ||
-	message.includes('authentication error') ||
-	message.includes('invalid credentials') ||
-	message.includes('invalid credential') ||
-	message.includes('invalid token') ||
-	message.includes('invalid access token') ||
-	message.includes('access token expired') ||
-	message.includes('token expired') ||
-	message.includes('expired api key') ||
-	message.includes('api key is invalid') ||
-	message.includes('api key is missing') ||
-	message.includes('missing api key') ||
-	message.includes('invalid credentials') ||
-	message.includes('invalid api credentials') ||
-	message.includes('authentication failed') ||
-	message.includes('authentication error') ||
-	message.includes('unauthorized') ||
-	message.includes('forbidden') ||
-	message.includes('permission denied') ||
-	message.includes('access denied') ||
-	message.includes('api key is invalid') ||
-	message.includes('api key is missing') ||
-	message.includes('missing api key') ||
-	message.includes('invalid bearer token') ||
-	message.includes('bearer token is invalid') ||
-	message.includes('invalid token') ||
-	message.includes('token expired') ||
-	message.includes('expired token') ||
-	message.includes('project is not permitted') ||
-	message.includes('project has been suspended') ||
-	message.includes('account not active') ||
-	message.includes('account is not active') ||
-	message.includes('organization not found') ||
-	message.includes('does not have access to model') ||
-	message.includes('is not allowed to access this model') ||
-	message.includes('invalid api key provided') ||
-	message.includes('invalid_api_key') ||
-	message.includes('key_invalid') ||
-	message.includes('unauthorized') ||
-	message.includes('not authorized') ||
-	message.includes('authentication failed') ||
-	message.includes('authentication error') ||
-	message.includes('invalid credentials') ||
-	message.includes('invalid credential') ||
-	message.includes('forbidden') ||
-	message.includes('authentication failed') ||
-	message.includes('authentication error') ||
-	message.includes('unauthorized') ||
-	message.includes('unauthorised') ||
-	message.includes('invalid credentials') ||
-	message.includes('invalid credential') ||
-	message.includes('invalid token') ||
-	message.includes('invalid bearer token') ||
-	message.includes('access token expired') ||
-	message.includes('token expired') ||
-	message.includes('expired api key') ||
-	message.includes('expired access token') ||
-	message.includes('permission denied') ||
-	message.includes('forbidden') ||
-	message.includes('invalid credentials') ||
-	message.includes('invalid credential') ||
-	message.includes('authentication failed') ||
-	message.includes('authentication error') ||
-	message.includes('unauthorized') ||
-	message.includes('forbidden') ||
-	message.includes('access denied') ||
-	message.includes('invalid credentials') ||
-	message.includes('invalid credential') ||
-	message.includes('authentication failed') ||
-	message.includes('authentication error') ||
-	message.includes('unauthorized') ||
-	message.includes('forbidden') ||
-	message.includes('permission denied') ||
-	message.includes('access denied') ||
-	message.includes('invalid token') ||
-	message.includes('token is invalid') ||
-	message.includes('token has expired') ||
-	message.includes('expired api key') ||
-	message.includes('invalid credentials') ||
-	message.includes('invalid credential') ||
-	message.includes('authentication failed') ||
-	message.includes('authentication error') ||
-	message.includes('unauthorized') ||
-	message.includes('forbidden') ||
-	message.includes('permission denied') ||
-	message.includes('access denied') ||
-	message.includes('invalid token') ||
-	message.includes('expired token') ||
-	message.includes('token expired') ||
-	message.includes('invalid bearer token') ||
-	message.includes('invalid credentials') ||
-	message.includes('authentication failed') ||
-	message.includes('unauthorized') ||
-	message.includes('forbidden') ||
-	message.includes('permission denied') ||
-	message.includes('invalid token') ||
-	message.includes('token is invalid') ||
-	message.includes('token has expired') ||
-	message.includes('expired api key') ||
-	message.includes('invalid openai api key') ||
-	message.includes('invalid openrouter api key') ||
-	message.includes('invalid google api key') ||
-	message.includes('invalid authentication') ||
-	message.includes('invalid credentials') ||
-	message.includes('authentication failed') ||
-	message.includes('authentication error') ||
-	message.includes('unauthorized') ||
-	message.includes('forbidden') ||
-	message.includes('permission denied') ||
-	message.includes('access denied') ||
-	message.includes('invalid bearer token') ||
-	message.includes('bearer token') ||
-	message.includes('token expired') ||
-	message.includes('expired token') ||
-	message.includes('invalid token') ||
-	message.includes('unauthorized') ||
-	message.includes('forbidden') ||
-	message.includes('authentication failed') ||
-	message.includes('authentication error') ||
-	message.includes('invalid authentication') ||
-	message.includes('invalid credentials') ||
-	message.includes('permission denied') ||
-	message.includes('check your plan and billing details') ||
-	message.includes('billing details') ||
-	message.includes('payment required to use your openrouter account') ||
-	message.includes('payment required to use your account') ||
-	message.includes('payment required to use this provider') ||
-	message.includes('payment required to use this model') ||
-	message.includes('payment required for this request') ||
-	message.includes('insufficient credits') ||
-	message.includes('credit balance is too low') ||
-	message.includes('quota exceeded') ||
-	message.includes('quota has been exceeded') ||
-	message.includes('you exceeded your current quota') ||
-	message.includes('key_no_quota') ||
-	message.includes('invalid_api_key') ||
-	message.includes('invalid key') ||
-	message.includes('key invalid') ||
-	message.includes('key_invalid') ||
-	message.includes('unauthorized') ||
-	message.includes('authentication failed') ||
-	message.includes('authentication error') ||
-	message.includes('authentication required') ||
-	message.includes('invalid credentials') ||
-	message.includes('invalid credential') ||
-	message.includes('access token expired') ||
-	message.includes('expired api key') ||
-	message.includes('invalid_api_key') ||
-	message.includes('invalid authentication') ||
-	message.includes('authentication failed') ||
-	message.includes('authentication error') ||
-	message.includes('unauthorized') ||
-	message.includes('forbidden') ||
-	message.includes('permission denied') ||
-	message.includes('api key is invalid') ||
-	message.includes('api key is not valid') ||
-	message.includes('please pass a valid api key') ||
-	message.includes('please pass a valid api key.') ||
-	message.includes('please pass a valid api key') ||
-	message.includes('api key not valid. please pass a valid api key.') ||
-	message.includes('api key not found. please pass a valid api key.') ||
-	message.includes('invalid credentials') ||
-	message.includes('invalid credential') ||
-	message.includes('access denied') ||
-	message.includes('unauthorized') ||
-	message.includes('unauthorized request') ||
-	message.includes('authentication failed') ||
-	message.includes('authentication error') ||
-	message.includes('invalid authentication') ||
-	message.includes('invalid credentials') ||
-	message.includes('invalid credential') ||
-	message.includes('invalid token') ||
-	message.includes('access token expired') ||
-	message.includes('token expired') ||
-	message.includes('permission denied') ||
-	message.includes('forbidden') ||
-	message.includes('invalid authentication') ||
-	message.includes('invalid credentials') ||
-	message.includes('invalid api credentials') ||
-	message.includes('authentication failed') ||
-	message.includes('authentication error') ||
-	message.includes('unauthorized') ||
-	message.includes('unauthorised') ||
-	message.includes('forbidden') ||
-	message.includes('permission denied') ||
-	message.includes('access denied') ||
-	message.includes('access token expired') ||
-	message.includes('token expired') ||
-	message.includes('expired api key') ||
-	message.includes('expired access token') ||
-	message.includes('invalid key') ||
-	message.includes('key invalid') ||
-	message.includes('key_invalid') ||
-	message.includes('invalid credential') ||
-	message.includes('invalid credentials') ||
-	message.includes('authentication failed') ||
-	message.includes('authentication error') ||
-	message.includes('unauthorized') ||
-	message.includes('forbidden') ||
-	message.includes('permission denied') ||
-	message.includes('access denied') ||
-	message.includes('invalid authentication') ||
-	message.includes('authentication failed') ||
-	message.includes('authentication error') ||
-	message.includes('unauthorized') ||
-	message.includes('forbidden') ||
-	message.includes('permission denied') ||
-	message.includes('access denied') ||
-	message.includes('project is not authorized') ||
-	message.includes('api has not been used in project') ||
-	message.includes('api is disabled') ||
-	message.includes('service disabled') ||
-	message.includes('account not active') ||
-	message.includes('invalid authentication') ||
-	message.includes('authentication failed') ||
-	message.includes('authentication error') ||
-	message.includes('invalid credentials') ||
-	message.includes('invalid credential') ||
-	message.includes('unauthorized') ||
-	message.includes('forbidden') ||
-	message.includes('permission denied') ||
-	message.includes('access denied') ||
-	message.includes('api key is invalid') ||
-	message.includes('the api key is invalid') ||
-	message.includes('the provided api key is invalid') ||
-	message.includes('invalid or missing api key') ||
-	message.includes('no auth credentials found') ||
-	message.includes('failed to authenticate') ||
-	message.includes('unable to authenticate') ||
-	message.includes('invalid credentials') ||
-	message.includes('invalid credential') ||
-	message.includes('permission denied') ||
-	message.includes('access forbidden') ||
-	message.includes('forbidden') ||		message.includes('authentication failed') ||
-		message.includes('authentication error') ||
-		message.includes('authentication credentials were not provided') ||
-		message.includes('invalid authentication credentials') ||
-		message.includes('unauthorized') ||
-		message.includes('unauthorised') ||
-		message.includes('invalid token') ||
-		message.includes('invalid access token') ||
-		message.includes('invalid bearer token') ||
-		message.includes('bearer token') ||
-		message.includes('access token expired') ||
-		message.includes('token expired') ||
-		message.includes('expired api key') ||
-		message.includes('expired access token') ||
-		message.includes('unauthorized') ||
-		message.includes('unauthorized request') ||
-		message.includes('invalid auth') ||
-		message.includes('invalid token') ||
-		message.includes('token is invalid') ||
-		message.includes('access token expired') ||
-		message.includes('expired api key') ||
-		message.includes('expired access token') ||
-		message.includes('unauthorized') ||
-		message.includes('unauthenticated') ||
-		message.includes('invalid token') ||
-		message.includes('invalid access token') ||
-		message.includes('access token expired') ||
-		message.includes('token expired') ||
-		message.includes('expired api key') ||
-		message.includes('api key is invalid') ||
-		message.includes('api key is missing') ||
-		message.includes('invalid authorization header') ||
-		message.includes('authorization header is invalid') ||
-		message.includes('authorization header missing') ||
-		message.includes('missing api key') ||
-		message.includes('no api key provided') ||
-		message.includes('project is not permitted') ||
-		message.includes('project not permitted') ||
-		message.includes('account not active') ||
-		message.includes('organization not found') ||
-		message.includes('invalid organization') ||
-		message.includes('invalid authorization header') ||
-		message.includes('authorization header is malformed') ||
-		message.includes('authorization header missing') ||
-		message.includes('missing api key') ||
-		message.includes('missing api-key') ||
-		message.includes('missing authorization') ||
-		message.includes('unauthorized') ||
-		message.includes('expired api key') ||
-		message.includes('incorrect authentication credentials') ||
-		message.includes('invalid jwt') ||
-		message.includes('jwt expired') ||
-		message.includes('invalid token') ||
-		message.includes('token expired') ||
-		message.includes('invalid authentication credentials') ||
-		message.includes('invalid bearer token') ||
-		message.includes('bearer token') ||
-		message.includes('api key is invalid') ||
-		message.includes('provided api key') ||
-		message.includes('invalid or missing api key') ||
-		message.includes('access token expired') ||
-		message.includes('token has expired') ||
-		message.includes('invalid authentication credentials') ||
-		message.includes('invalid_api_key') ||
-		message.includes('key invalid') ||
-		message.includes('key_invalid') ||
-		message.includes('invalid key') ||
-		message.includes('invalid authorization') ||
-		message.includes('invalid authorization header') ||
-		message.includes('invalid bearer token') ||
-		message.includes('bearer token is invalid') ||
-		message.includes('api key is invalid') ||
-		message.includes('api key is missing') ||
-		message.includes('missing api key') ||
-		message.includes('api key is invalid') ||
-		message.includes('api key provided is invalid') ||
-		message.includes('invalid auth token') ||
-		message.includes('invalid bearer token') ||
-		message.includes('invalid access token') ||
-		message.includes('invalid token') ||
-		message.includes('bad api key') ||
-		message.includes('malformed api key') ||
-		message.includes('missing api key') ||
-		message.includes('missing authentication') ||
-		message.includes('authentication credentials were not provided') ||
-		message.includes('invalid or missing api key') ||
-		message.includes('invalid key') ||
-		message.includes('invalid token') ||
-		message.includes('bad api key') ||
-		message.includes('api key rejected') ||
-		message.includes('access token expired') ||
-		message.includes('token expired') ||
-		message.includes('invalid authorization') ||
-		message.includes('authorization failed') ||
-		message.includes('authorization error') ||
-		message.includes('invalid auth') ||
-		message.includes('invalid bearer token') ||
-		message.includes('bearer token is invalid') ||
-		message.includes('missing api key') ||
-		message.includes('missing authentication') ||
-		message.includes('no api key provided') ||
-		code === 'invalid_api_key' ||
-		errorType === 'invalid_request_error' ||
-		message.includes('invalid api key provided') ||
-		message.includes('invalid_api_key') ||
-		message.includes('authentication credentials were not provided') ||
-		message.includes('authorization header is missing') ||
-		message.includes('authorization header missing') ||
-		message.includes('invalid authorization header') ||
-		(status === 401 && (
-			code === 'err_bad_request' ||
-			errorType === 'authentication_error' ||
-			message.includes('status code 401') ||
-			message.includes('request failed with status code 401')
-		)) ||
-		message.includes('authorization header is missing') ||
-		message.includes('authorization header missing') ||
-		message.includes('invalid authorization header') ||
-		message.includes('authentication credentials were not provided') ||
-		message.includes('invalid jwt') ||
-		message.includes('jwt expired') ||
-		message.includes('token is invalid') ||
-		message.includes('token has expired') ||
-		status === 401 ||
-		(errorType === 'authentication_error' && status >= 400 && status < 500) ||
-		message.includes('authorization header is missing') ||
-		message.includes('authorization header missing') ||
-		message.includes('authorization header is invalid') ||
-		message.includes('invalid authorization header') ||
-		message.includes('invalid bearer token') ||
-		message.includes('bearer token is invalid') ||
-		message.includes('authentication credentials were not provided') ||
-		message.includes('invalid authentication') ||
-		status === 401 ||
-		message.includes('authentication credentials were missing') ||
-		message.includes('authentication credentials are missing') ||
-		message.includes('missing authentication credentials') ||
-		message.includes('invalid authorization header') ||
-		message.includes('authorization header is invalid') ||
-		message.includes('authorization header is missing') ||
-		message.includes('invalid bearer token') ||
-		message.includes('bearer token is invalid') ||
-		message.includes('invalid access token') ||
-		message.includes('access token is invalid') ||
-		message.includes('token is invalid') ||
-		message.includes('token has expired') ||
-		message.includes('token expired') ||
-		(status === 401 && code === 'err_bad_request') ||
-		message.includes('invalid api key provided') ||
-		message.includes('invalid authorization header') ||
-		message.includes('authentication credentials were not provided') ||
-		message.includes('the api key you provided is invalid') ||
-		message.includes('the provided api key is invalid') ||
-		message.includes('invalid jwt') ||
-		message.includes('invalid token') ||
-		message.includes('token is invalid') ||
-		message.includes('access token is invalid') ||
-		message.includes('bearer token is invalid') ||
-		message.includes('invalid signature') ||
-		message.includes('signature verification failed') ||
-		message.includes('account not active') ||
-		message.includes('account is not active') ||
-		message.includes('project is not authorized') ||
-		(status === 401 && (code === 'err_bad_request' || errorType === 'authentication_error')) ||
-		message.includes('missing authentication') ||
-		message.includes('missing authorization header') ||
-		message.includes('invalid authorization header') ||
-		message.includes('authorization header is invalid') ||
-		message.includes('authorization header is missing') ||
-		message.includes('authentication credentials were not provided') ||
-		message.includes('invalid bearer token') ||
-		message.includes('bearer token is invalid') ||
-		(status === 401 && (
-			code === 'invalid_api_key' ||
-			code === 'key_invalid' ||
-			errorType === 'invalid_request_error' ||
-			message.includes('api key') ||
-			message.includes('authorization') ||
-			message.includes('authentication')
-		)) ||
-		message.includes('missing api key') ||
-		message.includes('authorization header is missing') ||
-		message.includes('authorization header missing') ||
-		message.includes('invalid authorization header') ||
-		message.includes('bearer token is invalid') ||
-		message.includes('bearer token is missing') ||
-		message.includes('billing has not been enabled') ||
-		message.includes('billing account') ||
-		message.includes('payment required') ||
-		message.includes('payment required for this request') ||
-		message.includes('payment method') ||
-		message.includes('payment method required') ||
-		message.includes('payment is required') ||
-		message.includes('check your plan and billing details') ||
-		message.includes('plan and billing details') ||
-		message.includes('insufficient_quota') ||
-		message.includes('insufficient quota') ||
-		message.includes('quota exceeded') ||
-		message.includes('quota has been exceeded') ||
-		message.includes('you exceeded your current quota') ||
-		message.includes('credit balance is too low') ||
-		message.includes('insufficient credits') ||
-		message.includes('payment is required to use this api') ||
-		message.includes('billing hard limit has been reached') ||
-		message.includes('account is not active') ||
-		message.includes('account not active') ||
-		message.includes('subscription') ||
-		message.includes('no such user') ||
-		message.includes('insufficient credits') ||
-		message.includes('credit balance is too low') ||
-		message.includes('check your plan and billing details') ||
-		message.includes('quota exceeded') ||
-		message.includes('quota exhausted') ||
-		message.includes('quota exceeded for metric') ||
-		message.includes('quota exceeded for this project') ||
-		code === 'invalid_api_key' ||
-		code === 'key_invalid' ||
-		code === 'key_no_quota' ||
-		errorType === 'invalid_request_error' ||
-		status === 401 ||
-		status === 402 ||
-		message.includes('quota exceeded for this model') ||
-		message.includes('resource has been exhausted') ||
-		message.includes('resource exhausted') ||
-		message.includes('resource_exhausted') ||
-		message.includes('you exceeded your current quota') ||
-		message.includes('exceeded your current quota') ||
-		message.includes('insufficient credits') ||
-		message.includes('credit balance is too low') ||
-		message.includes('credit balance') ||
-		message.includes('key_no_quota') ||
-		message.includes('request failed with status code 401') ||
-		message.includes('request failed with status code 402') ||
-		message.includes('request failed with status code 403') ||
-		message.includes('insufficient_quota') ||
-		message.includes('insufficient quota') ||
-		message.includes('quota exceeded') ||
-		message.includes('quota exhausted') ||
-		message.includes('resource has been exhausted') ||
-		message.includes('resource exhausted') ||
-		message.includes('resource_exhausted') ||
-		message.includes('credit balance is too low') ||
-		message.includes('check your plan and billing details') ||
-		message.includes('billing details') ||
-		message.includes('key_no_quota') ||
-		message.includes('resource has been exhausted') ||
-		message.includes('resource exhausted') ||
-		message.includes('resource_exhausted') ||
-		message.includes('you exceeded your current quota') ||
-		message.includes('insufficient credits') ||
-		message.includes('check your plan and billing details') ||
-		message.includes('account not active') ||
-		message.includes('account deactivated') ||
-		message.includes('account suspended') ||
-		message.includes('request failed with status code 401') ||
-		message.includes('request failed with status code 402') ||
-		message.includes('status code 401') ||
-		(status === 401 && (code === 'err_bad_request' || code === 'unauthorized')) ||
-		(status === 402 && (
-			code === 'err_bad_request' ||
-			errorType === 'invalid_request_error' ||
-			message.includes('payment required') ||
-			message.includes('billing') ||
-			message.includes('credits') ||
-			message.includes('quota') ||
-			message.includes('plan')
-		) && (
-			message.includes('billing has not been enabled') ||
-			message.includes('billing account')
-		)) ||
-		message.includes('status code 402') ||
-		(status === 402 && code === 'err_bad_request') ||
-		message.includes('payment required') ||
-		message.includes('invalid_api_key') ||
-		message.includes('key_invalid') ||
-		message.includes('key not valid') ||
-		message.includes('key has expired') ||
-		message.includes('api key is invalid') ||
-		message.includes('api key is missing') ||
-		message.includes('api key is not valid') ||
-		message.includes('authorization header is missing') ||
-		message.includes('authorization header is invalid') ||
-		message.includes('unauthorized:') ||
-		message.includes('for security reasons, we do not expose') ||
-		message.includes('please check your plan and billing details') ||
-		message.includes('payment method') ||
-		message.includes('payment failed') ||
-		message.includes('payment is required') ||
-		message.includes('api key disabled') ||
-		message.includes('api key revoked') ||
-		message.includes('invalid_api_key') ||
-		message.includes('key_invalid') ||
-		message.includes('key_no_quota') ||
-		message.includes('quota exceeded') ||
-		message.includes('quota exceeded for metric') ||
-		message.includes('quota exceeded for this project') ||
-		message.includes('quota exceeded for this model') ||
-		message.includes('resource has been exhausted') ||
-		message.includes('resource exhausted') ||
-		message.includes('resource_exhausted') ||
-		message.includes('request failed with status code 402') ||
-		message.includes('status code 402') ||
-		message.includes('quota exceeded') ||
-		message.includes('quota exhausted') ||
-		message.includes('quota exceeded for metric') ||
-		message.includes('quota exceeded for this project') ||
-		message.includes('quota exceeded for this model') ||
-		message.includes('you exceeded your current quota') ||
-		message.includes('exceeded your current quota') ||
-		message.includes('insufficient credits') ||
-		message.includes('credit balance is too low') ||
-		message.includes('key_no_quota') ||
-		code === 'err_bad_request' && status === 402 ||
-		status === 402 ||
-		message.includes('payment required for this request') ||
-		message.includes('payment required for this model') ||
-		message.includes('quota exceeded') ||
-		message.includes('quota exhausted') ||
-		message.includes('quota exceeded') ||
-		message.includes('quota exhausted') ||
-		message.includes('out of credits') ||
-		message.includes('credits exhausted') ||
-		message.includes('insufficient credits') ||
-		message.includes('credit balance is too low') ||
-		message.includes('credit balance') ||
-		message.includes('quota exceeded for this model') ||
-		message.includes('quota limit reached') ||
-		message.includes('quota remaining') ||
-		message.includes('retryinfo') ||
-		message.includes('retry delay') ||
-		status === 401 ||
-		status === 402 ||
-		code === 'invalid_api_key' ||
-		errorType === 'invalid_request_error' ||
-		message.includes('you exceeded your current quota') ||
-		message.includes('check your plan and billing details') ||
-		message.includes('insufficient credits') ||
-		message.includes('credit balance is too low') ||
-		message.includes('key_no_quota') ||
-		status === 401 ||
-		status === 402 ||
-		code === 'invalid_api_key' ||
-		errorType === 'invalid_request_error' ||
-		message.includes('exceeded your current quota') ||
-		status === 402 ||
-		status === 429 ||
-		message.includes('quota exceeded for this project') ||
-		message.includes('quota exceeded for this request') ||
-		message.includes('quota exceeded for this model') ||
-		message.includes('resource has been exhausted') ||
-		message.includes('resource exhausted') ||
-		message.includes('resource_exhausted') ||
-		message.includes('resource has been exhausted') ||
-		message.includes('resource has been exhausted (e.g. check quota)') ||
-		message.includes('resource exhausted') ||
-		message.includes('resource_exhausted') ||
-		message.includes('payment required') ||
-		message.includes('check your plan and billing details') ||
-		message.includes('quota limit reached') ||
-		message.includes('quota remaining') ||
-		message.includes('quotaid') ||
-		message.includes('quotametric') ||
-		message.includes('retryinfo') ||
-		message.includes('resource has been exhausted') ||
-		message.includes('resource has been exhausted (e.g. check quota)') ||
-		message.includes('resource exhausted') ||
-		message.includes('resource_exhausted') ||
-		message.includes('payment required') ||
-		message.includes('payment required for this request') ||
-		message.includes('quotaid') ||
-		message.includes('quotametric') ||
-		message.includes('retryinfo') ||
-		message.includes('retry delay') ||
-		message.includes('quota exceeded for metric') ||
-		message.includes('resource has been exhausted') ||
-		message.includes('resource has been exhausted (e.g. check quota)') ||
-		message.includes('resource exhausted') ||
-		message.includes('resource_exhausted') ||
-		message.includes('payment required') ||
-		message.includes('payment method required') ||
-		message.includes('quotaid') ||
-		message.includes('quotametric') ||
-		message.includes('quota exceeded for this request') ||
-		message.includes('quota exceeded for this model') ||
-		message.includes('quota exceeded for metric') ||
-		message.includes('quota limit reached') ||
-		message.includes('resource has been exhausted') ||
-		message.includes('resource has been exhausted (e.g. check quota)') ||
-		message.includes('resource exhausted') ||
-		message.includes('resource_exhausted') ||
-		message.includes('free tier requests') ||
-		message.includes('free tier input token count') ||
-		message.includes('quotaid') ||
-		message.includes('quotametric') ||
-		message.includes('retryinfo') ||
-		message.includes('retry delay') ||
-		message.includes('payment required') ||
-		message.includes('payment required for this request') ||
-		message.includes('payment method required') ||
-		message.includes('payment failed') ||
-		message.includes('payment overdue') ||
-		message.includes('payment declined') ||
-		message.includes('status code 402') ||
-		message.includes('resource has been exhausted') ||
-		message.includes('resource has been exhausted (e.g. check quota)') ||
-		message.includes('resource_exhausted') ||
-		message.includes('check your plan and billing details') ||
-		message.includes('payment required') ||
-		message.includes('payment method required') ||
-		message.includes('status code 402') ||
-		status === 402 ||
-		message.includes('quota exceeded for this model') ||
-		message.includes('quota exceeded for metric') ||
-		message.includes('resource has been exhausted') ||
-		message.includes('resource has been exhausted (e.g. check quota)') ||
-		message.includes('resource_exhausted') ||
-		message.includes('resource exhausted') ||
-		message.includes('resource_exhausted') ||
-		message.includes('key invalid') ||
-		message.includes('key_invalid') ||
-		message.includes('invalid credential') ||
-		message.includes('invalid credentials') ||
-		message.includes('invalid token') ||
-		message.includes('invalid access token') ||
-		message.includes('access token is invalid') ||
-		message.includes('access token has expired') ||
-		message.includes('access token expired') ||
-		message.includes('expired api key') ||
-		message.includes('unauthorized') ||
-		message.includes('not authorized') ||
-		message.includes('authentication failed') ||
-		message.includes('authentication_error') ||
-		message.includes('invalid authentication') ||
-		message.includes('invalid authorization') ||
-		message.includes('authorization failed') ||
-		message.includes('api key disabled') ||
-		message.includes('account deactivated') ||
-		message.includes('provider account is disabled') ||
-		message.includes('unauthorized') ||
-		message.includes('unauthorised') ||
-		message.includes('authentication failed') ||
-		message.includes('authentication_error') ||
-		message.includes('unauthorized') ||
-		message.includes('unauthorised') ||
-		message.includes('authentication failed') ||
-		message.includes('authentication_error') ||
-		message.includes('invalid authentication credentials') ||
-		message.includes('invalid authorization') ||
-		message.includes('authorization failed') ||
-		status === 401 ||
-		code === 'unauthorized' ||
-		code === 'invalid_api_key' ||
-		errorType === 'authentication_error' ||
-		message.includes('unauthorized') ||
-		message.includes('unauthorised') ||
-		message.includes('authentication failed') ||
-		message.includes('authentication_error') ||
-		(status === 401 && (
-			code.includes('invalid_api_key') ||
-			code.includes('key_invalid') ||
-			code.includes('unauthorized') ||
-			errorType.includes('authentication_error')
-		)) ||
-		message.includes('unauthorized') ||
-		message.includes('unauthorised') ||
-		message.includes('authentication failed') ||
-		message.includes('authentication_error') ||
-		message.includes('forbidden') ||
-		message.includes('permission denied') ||
-		code === 'unauthorized' ||
-		code === 'invalid_api_key' ||
-		code === 'key_invalid' ||
-		errorType === 'authentication_error' ||
-		status === 401 ||
-		status === 403 ||
-		status === 407 ||
-		status === 511 ||
-		message.includes('unauthorized') ||
-		message.includes('unauthorised') ||
-		message.includes('authentication failed') ||
-		message.includes('authentication_error') ||
-		message.includes('invalid authentication') ||
-		message.includes('invalid_auth') ||
-		message.includes('invalid authorization') ||
-		message.includes('authorization failed') ||
-		message.includes('invalid bearer token') ||
-		message.includes('bearer token is invalid') ||
-		message.includes('401 unauthorized') ||
-		status === 401 ||
-		errorType === 'authentication_error' ||
-		code === 'invalid_api_key' ||
-		code === 'key_invalid' ||
-		code === 'unauthorized' ||
-		code === 'authentication_error' ||
-		message.includes('unauthorized') ||
-		message.includes('unauthorised') ||
-		message.includes('authentication failed') ||
-		message.includes('authentication_error') ||
-		message.includes('invalid authorization header') ||
-		message.includes('missing api key') ||
-		message.includes('missing access token') ||
-		status === 401 ||
-		code === 'unauthorized' ||
-		code === 'invalid_api_key' ||
-		errorType === 'authentication_error' ||
-		message.includes('expired token') ||
-		message.includes('missing api key') ||
-		message.includes('api key is missing') ||
-		message.includes('malformed api key') ||
-		message.includes('invalid authentication') ||
-		message.includes('invalid authentication credentials') ||
-		message.includes('authentication credentials are invalid') ||
-		message.includes('unauthorized') ||
-		message.includes('unauthorised') ||
-		message.includes('forbidden') ||
-		status === 401 ||
-		status === 403 ||
-		message.includes('invalid authentication credentials') ||
-		message.includes('authentication failed') ||
-		message.includes('authentication_error') ||
-		message.includes('unauthorized') ||
-		message.includes('unauthorised') ||
-		message.includes('forbidden') ||
-		message.includes('unauthorized') ||
-		message.includes('unauthorised') ||
-		message.includes('authentication failed') ||
-		message.includes('authentication_error') ||
-		status === 401 ||
-		code === 'unauthorized' ||
-		errorType === 'authentication_error' ||
-		message.includes('unauthorized') ||
-		message.includes('unauthorised') ||
-		message.includes('authentication failed') ||
-		errorType === 'key_invalid' ||
-		errorType === 'invalid_api_key' ||
-		(status === 401 && (
-			code === 'invalid_api_key' ||
-			code === 'key_invalid' ||
-			code === 'unauthorized' ||
-			message.includes('api key') ||
-			message.includes('access token') ||
-			message.includes('authentication')
-		)) ||
-		message.includes('auth failed') ||
-		message.includes('invalid authentication') ||
-		message.includes('authentication_error') ||
-		message.includes('forbidden') ||
-		message.includes('permission denied') ||
-		message.includes('access denied') ||
-		message.includes('api key disabled') ||
-		message.includes('provider account is disabled') ||
-		message.includes('account deactivated') ||
-		message.includes('project is not authorized') ||
-		message.includes('project has been disabled') ||
-		message.includes('api has not been used in project') ||
-		message.includes('service disabled') ||
-		code === 'unauthorized' ||
-		code === 'invalid_api_key' ||
-		code === 'key_invalid' ||
-		code === 'authentication_error' ||
-		status === 401 ||
-		status === 403 ||
-		message.includes('unauthorized') ||
-		message.includes('unauthorised') ||
-		message.includes('forbidden') ||
-		message.includes('invalid api key') ||
-		message.includes('invalid_api_key') ||
-		message.includes('key invalid') ||
-		message.includes('key_invalid') ||
-		message.includes('key_no_quota') ||
-		message.includes('quota exceeded') ||
-		message.includes('quota exhausted') ||
-		status === 401 ||
-		status === 403 ||
-		status === 402 ||
-		message.includes('unauthorized') ||
-		message.includes('unauthorised') ||
-		message.includes('forbidden') ||
-		message.includes('invalid api key') ||
-		message.includes('invalid_api_key') ||
-		message.includes('incorrect api key') ||
-		message.includes('key invalid') ||
-		message.includes('key_invalid') ||
-		message.includes('api_key_invalid') ||
-		message.includes('not_authorized_invalid_key_type') ||
-		message.includes('api key not found') ||
-		message.includes('api key not valid') ||
-		message.includes('api key expired') ||
-		message.includes('expired api key') ||
-		message.includes('expired token') ||
-		message.includes('quota exceeded') ||
-		message.includes('quota exhausted') ||
-		message.includes('insufficient_quota') ||
-		message.includes('insufficient quota') ||
-		message.includes('key_no_quota') ||
-		status === 401 ||
-		status === 402 ||
-		status === 403 ||
-		message.includes('invalid api key provided') ||
-		message.includes('invalid_api_key') ||
-		message.includes('invalid api key') ||
-		message.includes('api key is invalid') ||
-		message.includes('api key is missing') ||
-		message.includes('missing api key') ||
-		message.includes('invalid authorization header') ||
-		message.includes('authorization header is malformed') ||
-		message.includes('invalid bearer token') ||
-		message.includes('bearer token is invalid') ||
-		message.includes('access token expired') ||
-		message.includes('token expired') ||
-		message.includes('invalid jwt') ||
-		message.includes('jwt expired') ||
-		message.includes('permission denied') ||
-		message.includes('forbidden') ||
-		message.includes('unauthorized') ||
-		message.includes('unauthorised') ||
-		message.includes('invalid api key') ||
-		message.includes('invalid_api_key') ||
-		message.includes('key invalid') ||
-		message.includes('key_invalid') ||
-		message.includes('api key not found') ||
-		message.includes('api key not valid') ||
-		message.includes('api key expired') ||
-		message.includes('expired api key') ||
-		message.includes('expired token') ||
-		message.includes('not_authorized_invalid_key_type') ||
-		message.includes('insufficient_quota') ||
-		message.includes('quota exceeded') ||
-		message.includes('quota exhausted') ||
-		message.includes('key_no_quota') ||
-		status === 401 ||
-		status === 402 ||
-		message.includes('unauthorized access') ||
-		message.includes('invalid authorization') ||
-		message.includes('invalid bearer token') ||
-		message.includes('invalid access token') ||
-		message.includes('access token expired') ||
-		message.includes('token expired') ||
-		message.includes('invalid token') ||
-		message.includes('invalid jwt') ||
-		message.includes('jwt expired') ||
-		message.includes('forbidden') ||
-		message.includes('permission denied') ||
-		message.includes('access denied') ||
-		message.includes('missing api key') ||
-		message.includes('missing api-key') ||
-		message.includes('missing access token') ||
-		message.includes('no api key provided') ||
-		message.includes('no auth credentials found') ||
-		message.includes('invalid x-api-key') ||
-		message.includes('unauthorized') ||
-		message.includes('unauthorised') ||
-		message.includes('forbidden') ||
-		message.includes('invalid api key') ||
-		message.includes('invalid_api_key') ||
-		message.includes('incorrect api key') ||
-		message.includes('key invalid') ||
-		message.includes('key_invalid') ||
-		message.includes('api key not valid') ||
-		message.includes('api key not found') ||
-		message.includes('api key expired') ||
-		message.includes('expired api key') ||
-		message.includes('expired token') ||
-		message.includes('not_authorized_invalid_key_type') ||
-		message.includes('insufficient_quota') ||
-		message.includes('insufficient quota') ||
-		message.includes('quota exceeded') ||
-		message.includes('quota exhausted') ||
-		message.includes('key_no_quota') ||
-		message.includes('billing hard limit') ||
-		message.includes('billing disabled') ||
-		message.includes('billing has been disabled') ||
-		message.includes('payment required') ||
-		message.includes('resource has been exhausted') ||
-		status === 401 ||
-		status === 402 ||
-		status === 403 ||
-		message.includes('invalid authorization') ||
-		message.includes('invalid bearer') ||
-		message.includes('invalid access token') ||
-		message.includes('missing api key') ||
-		message.includes('missing api-key') ||
-		message.includes('missing authorization') ||
-		message.includes('authorization header') ||
-		message.includes('bearer token') ||
-		message.includes('access token') ||
-		status === 401 ||
-		message.includes('authentication error') ||
-		message.includes('invalid authorization') ||
-		message.includes('authorization failed') ||
-		message.includes('invalid bearer token') ||
-		message.includes('invalid access token') ||
-		message.includes('access token expired') ||
-		message.includes('invalid token') ||
-		message.includes('token expired') ||
-		message.includes('401 unauthorized') ||
-		message.includes('status code 401') ||
-		status === 401 ||
-		code === 'unauthorized' ||
-		code === 'invalid_api_key' ||
-		code === 'authentication_error' ||
-		message.includes('api_key_invalid') ||
-		message.includes('not_authorized_invalid_key_type') ||
-		message.includes('api key not found') ||
-		message.includes('api key not valid') ||
-		message.includes('api key expired') ||
-		message.includes('expired api key') ||
-		message.includes('expired token') ||
-		message.includes('invalid api key') ||
-		message.includes('invalid_api_key') ||
-		message.includes('incorrect api key') ||
-		message.includes('payment required') ||
-		message.includes('payment required to access this model') ||
-		message.includes('credits are required') ||
-		message.includes('credits required') ||
-		status === 402 ||
-		status === 402 ||
-		message.includes('unauthorized') ||
-		message.includes('unauthorised') ||
-		message.includes('invalid api key') ||
-		message.includes('invalid_api_key') ||
-		message.includes('key invalid') ||
-		message.includes('key_invalid') ||
-		message.includes('api key not valid') ||
-		message.includes('api key not found') ||
-		message.includes('api key expired') ||
-		message.includes('expired api key') ||
-		message.includes('expired token') ||
-		message.includes('not_authorized_invalid_key_type') ||
-		status === 401 ||
-		message.includes('invalid authorization') ||
-		message.includes('authorization failed') ||
-		message.includes('invalid bearer token') ||
-		message.includes('bearer token is invalid') ||
-		message.includes('access token is invalid') ||
-		message.includes('invalid access token') ||
-		message.includes('invalid oauth token') ||
-		message.includes('token is invalid') ||
-		message.includes('token has expired') ||
-		message.includes('provider_disabled') ||
-		message.includes('provider disabled') ||
-		message.includes('account deactivated') ||
-		status === 401 ||
-		code === 'unauthorized' ||
-		code === 'invalid_api_key' ||
-		code === 'key_invalid' ||
-		message.includes('invalid authorization') ||
-		message.includes('authorization failed') ||
-		message.includes('invalid bearer token') ||
-		message.includes('bearer token is invalid') ||
-		message.includes('bearer token has expired') ||
-		message.includes('access token is invalid') ||
-		message.includes('access token expired') ||
-		message.includes('invalid access token') ||
-		message.includes('invalid oauth token') ||
-		message.includes('401 unauthorized') ||
-		message.includes('status code 401') ||
-		status === 401 ||
-		message.includes('unauthorized') ||
-		message.includes('unauthorised') ||
-		message.includes('forbidden') ||
-		message.includes('permission denied') ||
-		message.includes('access denied') ||
-		status === 401 ||
-		status === 403 ||
-		message.includes('unauthorized') ||
-		message.includes('unauthorised') ||
-		message.includes('forbidden') ||
-		message.includes('invalid api key') ||
-		message.includes('invalid_api_key') ||
-		message.includes('incorrect api key') ||
-		message.includes('key invalid') ||
-		message.includes('key_invalid') ||
-		message.includes('api key disabled') ||
-		message.includes('api key revoked') ||
-		message.includes('api key expired') ||
-		message.includes('expired api key') ||
-		message.includes('invalid token') ||
-		message.includes('expired token') ||
-		message.includes('authentication failed') ||
-		message.includes('auth failed') ||
-		message.includes('insufficient_quota') ||
-		message.includes('insufficient quota') ||
-		message.includes('quota exceeded') ||
-		message.includes('quota exhausted') ||
-		message.includes('key_no_quota') ||
-		message.includes('billing hard limit') ||
-		message.includes('billing disabled') ||
-		message.includes('billing has been disabled') ||
-		message.includes('credit balance is too low') ||
-		message.includes('credits are required') ||
-		message.includes('credits required') ||
-		status === 401 ||
-		status === 402 ||
-		status === 403 ||
-		message.includes('invalid bearer token') ||
-		message.includes('bearer token') ||
-		message.includes('invalid authorization header') ||
-		message.includes('authorization header') ||
-		message.includes('invalid access token') ||
-		message.includes('access token expired') ||
-		message.includes('token expired') ||
-		message.includes('401 unauthorized') ||
-		status === 401 ||
-		code === 'unauthorized' ||
-		message.includes('authorization failed') ||
-		message.includes('invalid authorization') ||
-		message.includes('invalid auth') ||
-		message.includes('bad api key') ||
-		message.includes('invalid access token') ||
-		message.includes('access token expired') ||
-		message.includes('token expired') ||
-		status === 401 ||
-		(code === 'err_bad_request' && status === 401) ||
-		(code === 'err_bad_response' && status === 401) ||
-		message.includes('unauthorized') ||
-		message.includes('unauthorised') ||
-		message.includes('forbidden') ||
-		message.includes('permission denied') ||
-		message.includes('access denied') ||
-		message.includes('invalid api key') ||
-		message.includes('invalid_api_key') ||
-		message.includes('key_invalid') ||
-		message.includes('key invalid') ||
-		message.includes('key_no_quota') ||
-		message.includes('quota exceeded') ||
-		message.includes('quota exhausted') ||
-		status === 401 ||
-		status === 403 ||
-		message.includes('unauthorized') ||
-		message.includes('unauthorised') ||
-		message.includes('forbidden') ||
-		message.includes('invalid api key') ||
-		message.includes('invalid_api_key') ||
-		message.includes('key_invalid') ||
-		message.includes('key invalid') ||
-		message.includes('api key not valid') ||
-		message.includes('api key not found') ||
-		message.includes('incorrect api key') ||
-		message.includes('authentication failed') ||
-		message.includes('auth failed') ||
-		status === 401 ||
-		status === 403 ||
-		message.includes('unauthorized access') ||
-		message.includes('invalid authorization') ||
-		message.includes('authorization failed') ||
-		message.includes('invalid bearer token') ||
-		message.includes('invalid access token') ||
-		message.includes('access token expired') ||
-		message.includes('token expired') ||
-		message.includes('invalid signature') ||
-		message.includes('permission denied') ||
-		message.includes('forbidden') ||
-		message.includes('status code 401') ||
-		message.includes('status code 403') ||
-		message.includes('status 401') ||
-		message.includes('status 403') ||
-		message.includes('key_no_quota') ||
-		message.includes('insufficient_quota') ||
-		message.includes('insufficient quota') ||
-		message.includes('quota exceeded') ||
-		message.includes('quota exhausted') ||
-		message.includes('credit balance is too low') ||
-		message.includes('credits are required') ||
-		message.includes('credits required') ||
-		status === 401 ||
-		status === 403 ||
-		message.includes('unauthorized') ||
-		message.includes('invalid api key') ||
-		message.includes('invalid_api_key') ||
-		message.includes('key_invalid') ||
-		message.includes('api key not valid') ||
-		message.includes('api_key_invalid') ||
-		message.includes('invalid authorization') ||
-		message.includes('authorization failed') ||
-		message.includes('unauthorized access') ||
-		message.includes('access token expired') ||
-		message.includes('invalid access token') ||
-		message.includes('invalid bearer token') ||
-		message.includes('bearer token is invalid') ||
-		message.includes('insufficient_quota') ||
-		message.includes('billing hard limit') ||
-		message.includes('billing disabled') ||
-		message.includes('billing has been disabled') ||
-		message.includes('resource has been exhausted') ||
-		message.includes('quota exceeded') ||
-		message.includes('quota exhausted') ||
-		message.includes('key_no_quota') ||
-		(status === 401 && (message.includes('unauthorized') || code === 'err_bad_request')) ||
-		status === 402 ||
-		status === 403 ||
-		(code === 'err_bad_response' && status >= 500) ||
-		message.includes('authentication error') ||
-		message.includes('api key disabled') ||
-		message.includes('provider account is disabled') ||
-		message.includes('account deactivated') ||
-		message.includes('invalid api key provided') ||
-		message.includes('invalid_api_key') ||
-		message.includes('invalid api key') ||
-		message.includes('unauthorized') ||
-		message.includes('forbidden') ||
-		(status === 401 && !message.includes('rate limit')) ||
-		(status === 403 && (
-			message.includes('api key') ||
-			message.includes('auth') ||
-			message.includes('token') ||
-			message.includes('credential') ||
-			message.includes('forbidden')
-		)) ||
-		message.includes('unauthorized') ||
-		message.includes('unauthorised') ||
-		message.includes('authentication failed') ||
-		message.includes('auth failed') ||
-		message.includes('invalid authentication') ||
-		message.includes('api key not valid') ||
-		message.includes('api key expired') ||
-		message.includes('api_key_invalid') ||
-		message.includes('key invalid') ||
-		message.includes('key_invalid') ||
-		status === 401 ||
-		status === 403 ||
-		code === 'invalid_api_key' ||
-		code === 'key_invalid' ||
-		code === 'unauthorized' ||
-		message.includes('incorrect api key') ||
-		message.includes('api_key_invalid') ||
-		message.includes('key invalid') ||
-		message.includes('key_invalid') ||
-		message.includes('unauthorized') ||
-		message.includes('unauthorised') ||
-		message.includes('401') ||
-		status === 401 ||
-		message.includes('key_no_quota') ||
-		message.includes('quota exceeded') ||
-		message.includes('quota exhausted') ||
-		message.includes('billing hard limit') ||
-		message.includes('billing disabled') ||
-		message.includes('billing has been disabled') ||
-		status === 402 ||
-		message.includes('billing hard limit') ||
-		message.includes('billing disabled') ||
-		message.includes('billing has been disabled') ||
-		message.includes('credits are required') ||
-		message.includes('credits required') ||
-		message.includes('can only afford') ||
-		message.includes('provider_disabled') ||
-		message.includes('access terminated') ||
-		status === 401 ||
-		status === 402 ||
-		message.includes('status 401') ||
-		message.includes('status 402') ||
-		message.includes('request failed with status code 401') ||
-		message.includes('request failed with status code 402') ||
-		message.includes('request failed with status code 402') ||		message.includes('expired access token') ||
-		message.includes('invalid authentication') ||
-		message.includes('authentication failed') ||
-		message.includes('auth failed') ||
-		message.includes('unauthorized') ||
-		message.includes('unauthorized:') ||
-		message.includes('unauthorized request') ||
-		message.includes('invalid credentials') ||
-		message.includes('key_invalid') ||
-		message.includes('key_no_quota') ||
-		message.includes('quota exceeded') ||
-		message.includes('quota exhausted') ||
-		message.includes('billing hard limit') ||
-		message.includes('billing disabled') ||
-		message.includes('payment required') ||
-		message.includes('insufficient credits') ||
-		message.includes('credits required') ||
-		message.includes('request failed with status code 401') ||
-		message.includes('request failed with status code 402') ||
-		status === 401 ||
-		status === 402 ||
-		message.includes('authentication_error') ||
-		message.includes('key invalid') ||
-		message.includes('key_invalid') ||
-		message.includes('key no quota') ||
-		message.includes('key_no_quota') ||
-		status === 401 ||
-		message.includes('status 401') ||
-		message.includes('request failed with status code 401') ||
-		message.includes('key_no_quota') ||
-		message.includes('quota exceeded') ||
-		message.includes('quota exhausted') ||
-		message.includes('billing hard limit') ||
-		message.includes('billing disabled') ||
-		message.includes('billing has been disabled') ||
-		message.includes('invalid api key provided') ||
-		message.includes('invalid or missing api key') ||
-		message.includes('invalid credentials') ||
-		message.includes('invalid_api_key') ||
-		message.includes('payment required') ||
-		message.includes('provider payment required') ||
-		message.includes('quota exceeded') ||
-		message.includes('quota exhausted') ||
-		status === 401 ||
-		status === 402 ||
-		message.includes('quota exceeded for this provider') ||
-		message.includes('provider quota exceeded') ||
-		message.includes('quota exceeded for this organization') ||
-		message.includes('exceeded your current quota') ||
-		message.includes('insufficient credits') ||
-		message.includes('insufficient credit') ||
-		message.includes('credit balance is too low') ||
-		message.includes('payment method required') ||
-		message.includes('account not active') ||
-		message.includes('organization must be verified') ||
-		message.includes('provider account is disabled') ||
-		status === 402 ||
-		message.includes('request failed with status code 402') ||
-		message.includes('payment method required') ||
-		message.includes('account not active') ||
-		message.includes('account deactivated') ||
-		message.includes('provider account is disabled') ||
-		message.includes('api key disabled') ||
-		message.includes('billing disabled') ||
-		message.includes('billing has been disabled') ||
-		message.includes('status 402') ||
-		message.includes('request failed with status code 402') ||
-		status === 402 ||
-		message.includes('invalid bearer [redacted]') ||
-		message.includes('bearer [redacted] is invalid') ||
-		message.includes('payment required') ||
-		message.includes('provider payment required') ||
-		message.includes('payment method required') ||
-		message.includes('billing hard limit') ||
-		message.includes('billing disabled') ||
-		message.includes('billing has been disabled') ||
-		message.includes('quota exceeded') ||
-		message.includes('quota exhausted') ||
-		message.includes('key_no_quota') ||
-		message.includes('insufficient credits') ||
-		message.includes('insufficient credit') ||
-		message.includes('credit balance is too low') ||
-		message.includes('account not active') ||
-		message.includes('provider account is disabled') ||
-		message.includes('organization must be verified') ||
-		status === 402 ||
-		message.includes('status 402') ||
-		message.includes('bearer [redacted] has expired') ||
-		message.includes('invalid authorization header') ||
-		message.includes('authorization header is malformed') ||
-		message.includes('missing api key') ||		message.includes('invalid credentials') ||
-		message.includes('invalid access token') ||
-		message.includes('invalid token') ||
-		message.includes('incorrect api key') ||
-		message.includes('invalid key') ||
-		message.includes('key invalid') ||
-		message.includes('key_invalid') ||
-		message.includes('unauthorized request') ||
-		message.includes('request failed with status code 401') ||
-		code === 'invalid_api_key' ||
-		code === 'key_invalid' ||
-		message.includes('missing authentication') ||
-		message.includes('no api key provided') ||
-		message.includes('incorrect api key') ||
-		message.includes('does not allow user keys') ||
-		message.includes('permissioned key') ||
-		message.includes('requests from referer') ||
-		message.includes('http referrer blocked') ||
-		message.includes('has been suspended') ||
-		message.includes('key invalid') ||
-		message.includes('key_invalid') ||
-		message.includes('invalid token') ||
-		message.includes('access token is invalid') ||
-		message.includes('invalid access token') ||
-		message.includes('invalid bearer token') ||
-		message.includes('bearer token is invalid') ||
-		message.includes('bad api key') ||
-		message.includes('malformed api key') ||
-		message.includes('malformed authentication') ||
-		message.includes('request failed with status code 401') ||
-		message.includes('status 401') ||
-		status === 401 ||
-		code === 'unauthorized' ||
-		code === 'invalid_api_key' ||
-		code === 'key_invalid' ||
-		message.includes('invalid key') ||
-		message.includes('invalid token') ||
-		message.includes('invalid access token') ||
-		message.includes('unauthorized') ||
-		message.includes('unauthenticated') ||
-		message.includes('authentication failed') ||
-		message.includes('authentication_error') ||
-		message.includes('invalid authorization') ||
-		message.includes('authorization failed') ||
-		message.includes('unauthorized') ||
-		message.includes('unauthenticated') ||
-		message.includes('authentication failed') ||
-		message.includes('authentication_error') ||
-		message.includes('invalid authorization') ||
-		message.includes('authorization failed') ||
-		message.includes('forbidden') ||
-		message.includes('access denied') ||
-		message.includes('permission denied') ||
-		code === 'unauthorized' ||
-		code === 'invalid_api_key' ||
-		code === 'key_invalid' ||
-		message.includes('unauthorized') ||
-		message.includes('unauthenticated') ||
-		message.includes('authentication failed') ||
-		message.includes('authentication_error') ||
-		message.includes('invalid credential') ||
-		message.includes('invalid credentials') ||
-		message.includes('bad api key') ||
-		message.includes('bad api-key') ||
-		message.includes('bad token') ||
-		status === 401 ||
-		message.includes('status 401') ||
-		(code === 'err_bad_request' && status === 401) ||
-		(code === 'err_bad_request' && message.includes('unauthorized')) ||
-		message.includes('unauthorized') ||
-		message.includes('unauthenticated') ||
-		message.includes('authentication failed') ||
-		message.includes('authentication_error') ||
-		message.includes('authentication error') ||
-		message.includes('unauthorized') ||
-		message.includes('unauthenticated') ||
-		message.includes('authentication failed') ||
-		message.includes('authentication_error') ||
-		message.includes('invalid authorization') ||
-		message.includes('authorization failed') ||
-		status === 401 ||
-		message.includes('status 401') ||
-		message.includes('unauthorized') ||
-		message.includes('not authorized') ||
-		message.includes('authentication failed') ||
-		message.includes('authentication_error') ||
-		message.includes('auth error') ||
-		status === 401 ||
-		message.includes('status 401') ||
-		message.includes('unauthorized') ||
-		message.includes('unauthorised') ||
-		message.includes('authentication failed') ||
-		message.includes('auth failed') ||
-		message.includes('invalid credentials') ||
-		message.includes('bad api key') ||
-		message.includes('expired api key') ||
-		status === 401 ||
-		status === 403 ||
-		code === 'unauthorized' ||
-		code === 'forbidden' ||
-		message.includes('unauthorized') ||
-		message.includes('unauthenticated') ||
-		message.includes('authentication failed') ||
-		message.includes('authentication_error') ||
-		message.includes('invalid credential') ||
-		message.includes('invalid credentials') ||
-		message.includes('bad api key') ||
-		status === 401 ||
-		message.includes('status 401') ||
-		message.includes('unauthorized') ||
-		message.includes('unauthenticated') ||
-		message.includes('authentication failed') ||
-		message.includes('authentication_error') ||
-		message.includes('invalid authorization') ||
-		message.includes('authorization failed') ||
-		message.includes('invalid bearer token') ||
-		message.includes('bad api key') ||
-		(status === 401 && !message.includes('rate limit')) ||
-		(status === 403 && (message.includes('api key') || message.includes('token') || message.includes('auth') || message.includes('unauthorized')) ) ||
-		message.includes('unauthorized') ||
-		message.includes('unauthenticated') ||
-		message.includes('authentication failed') ||
-		message.includes('authentication error') ||
-		message.includes('bearer token') ||
-		message.includes('invalid bearer') ||
-		message.includes('malformed authorization header') ||
-		message.includes('missing authorization header') ||
-		message.includes('unauthorized') ||
-		message.includes('unauthenticated') ||
-		message.includes('authentication failed') ||
-		message.includes('invalid authorization') ||
-		message.includes('authentication_error') ||
-		message.includes('authentication error') ||
-		message.includes('invalid credentials') ||
-		message.includes('request failed with status code 401') ||
-		message.includes('status code 401') ||
-		code === 'key_invalid' ||
-		(status === 401 && !message.includes('rate limit')) ||
-		message.includes('key_no_quota') ||
-		message.includes('authentication failed') ||
-		message.includes('quota exceeded') ||
-		message.includes('quota exhausted') ||
-		message.includes('exceeded your current quota') ||
-		message.includes('billing hard limit') ||
-		message.includes('billing disabled') ||
-		message.includes('billing has been disabled') ||
-		message.includes('billing not active') ||
-		message.includes('account not active') ||
-		message.includes('payment required') ||
-		message.includes('provider payment required') ||
-		message.includes('project has exceeded quota') ||
-		message.includes('generative language api has not been used') ||
-		message.includes('api has not been used in project') ||
-		message.includes('is disabled') ||
-		message.includes('service disabled') ||
-		message.includes('forbidden') ||
-		status === 401 ||
-		status === 402 ||
-		status === 403 ||
-		status === 401 ||
-		message.includes('status 401') ||
-		message.includes('request failed with status code 401') ||
-		message.includes(
-			'generative language api has not been used in project'
-		) ||
-		message.includes('it is disabled. enable it by visiting') ||
-		message.includes('service_disabled') ||
-		(status === 401 && !message.includes('rate limit'))
-	);
+function includesAnyText(haystack: string, needles: string[]): boolean {
+	return needles.some((needle) => haystack.includes(needle));
 }
 
-// --- Model Access ---
+function collectWrappedProviderSummary(error: any): string {
+	return String(
+		error?.lastProviderErrorSummary ||
+			error?.lastProviderError ||
+			error?.errorDetails?.lastProviderErrorSummary ||
+			error?.errorDetails?.lastProviderError ||
+			error?.errorDetails?.providerErrorSummary ||
+			error?.errorDetails?.providerError ||
+			error?.errorDetails?.cause ||
+			error?.response?.data?.error?.message ||
+			error?.response?.data?.message ||
+			error?.error?.message ||
+			error?.cause?.message ||
+			error?.cause ||
+			error?.stack ||
+			''
+	).toLowerCase();
+}
 
+export function isInvalidProviderCredentialError(error: any): boolean {
+	const message = String(error?.message || error || '').toLowerCase();
+	const status = Number((error as any)?.status || (error as any)?.statusCode || (error as any)?.response?.status || 0);
+	const code = String((error as any)?.code || (error as any)?.error?.code || (error as any)?.response?.data?.error?.code || '').toLowerCase();
+	const errorType = String((error as any)?.type || (error as any)?.error?.type || (error as any)?.response?.data?.error?.type || '').toLowerCase();
+	const providerStatus = String((error as any)?.error?.status || (error as any)?.response?.data?.error?.status || '').toLowerCase();
+	const wrappedProviderSummary = collectWrappedProviderSummary(error);
+	const lastProviderError = String(
+		(error as any)?.lastProviderError ||
+		(error as any)?.errorDetails?.lastProviderError ||
+		(error as any)?.errorDetails?.lastProviderErrorSummary ||
+		(error as any)?.lastError ||
+		''
+	).toLowerCase();
+	const combinedMessage = [message, wrappedProviderSummary, lastProviderError].filter(Boolean).join('\n');
+	if (!combinedMessage && status === 0 && !code && !errorType && !providerStatus) return false;
+
+	const authTerms = [
+		'incorrect api key provided',
+		'invalid api key',
+		'invalid_api_key',
+		'invalid api-key',
+		'invalid authentication',
+		'invalid authentication credentials',
+		'authentication failed',
+		'authentication error',
+		'authentication_error',
+		'unauthorized',
+		'unauthorised',
+		'unauthenticated',
+		'not authorized',
+		'not authorised',
+		'permission denied',
+		'forbidden',
+		'api key not found',
+		'api key not valid',
+		'api key is invalid',
+		'the api key is invalid',
+		'key_invalid',
+		'key invalid',
+		'invalid key',
+		'invalid credentials',
+		'invalid token',
+		'invalid bearer token',
+		'bad api key',
+		'incorrect api key',
+		'missing api key',
+		'missing authentication',
+		'missing credentials',
+		'access denied',
+		'access forbidden',
+		'authorization failed',
+		'authorization error',
+		'the provided api key is invalid',
+		'api key provided is invalid',
+		'api key has expired',
+		'expired api key',
+		'invalid credentials',
+		'invalid credential',
+		'invalid token',
+		'invalid access token',
+		'access token is invalid',
+		'invalid bearer token',
+		'invalid bearer [redacted]',
+		'malformed authorization header',
+		'authorization header',
+		"you didn't provide an api key",
+		'you did not provide an api key',
+		'no api key provided',
+		'invalid or missing api key',
+		'api key provided',
+		'you can find your api key at',
+	];
+	const authCodes = new Set([
+		'invalid_api_key', 'invalid key', 'invalid_key', 'key_invalid', 'invalidapikey', 'invalidtoken', 'invalid_token',
+		'unauthorized', 'forbidden', 'permission_denied', 'auth_error', 'auth_failed', 'invalid_auth',
+		'invalid_authentication', 'invalid_credential', 'invalid_credentials', 'authenticationerror',
+		'authentication_error', 'authentication_failed', 'unauthenticated', 'invalid_request_error',
+		'incorrect_api_key', 'api_key_invalid', 'api_key_not_found', 'api_key_not_valid', 'bad_api_key',
+		'bad_api_token', 'invalid_api_token', 'invalid_auth_token', 'invalid_bearer_token',
+		'invalid_signature', 'signature_invalid', 'access_denied', 'accessdenied', 'organization_deactivated', 'account_deactivated',
+	]);
+	const authErrorTypes = new Set(['invalid_api_key', 'authentication_error', 'authenticationerror', 'authenticationfailed', 'invalid_request_error']);
+	const providerStatuses = new Set(['permission_denied', 'unauthenticated', 'unauthorized', 'forbidden']);
+	const wrappedProviderFailureContext =
+		Boolean((error as any)?.lastProviderId) ||
+		Boolean((error as any)?.errorDetails?.lastProviderId) ||
+		Boolean((error as any)?.errorDetails?.lastProviderErrorSummary) ||
+		Boolean((error as any)?.errorDetails?.lastProviderError) ||
+		Boolean((error as any)?.lastProviderErrorSummary) ||
+		Boolean((error as any)?.lastProviderError) ||
+		includesAnyText(message, [
+			'failed to process request after',
+			'failed to process request:',
+			'provider attempt(s)',
+			'provider attempts',
+			'all failed',
+			'last provider:',
+			'last provider error',
+			'last provider error summary',
+			'lastprovidererror',
+			'lastprovidererrorsummary',
+			'last error:',
+			'cause:',
+			'api call failed:',
+			'gemini api call failed:',
+			'openai api call failed:',
+			'request failed with status code 401',
+			'status code 401',
+		]);
+
+	return (
+		status === 401 ||
+		status === 403 ||
+		authCodes.has(code) ||
+		authErrorTypes.has(errorType) ||
+		providerStatuses.has(providerStatus) ||
+		includesAnyText(message, authTerms) ||
+		includesAnyText(wrappedProviderSummary, authTerms) ||
+		(message.includes('api key provided') && (message.includes('incorrect') || message.includes('invalid'))) ||
+		(wrappedProviderFailureContext && includesAnyText(`${message} | ${wrappedProviderSummary}`, [
+			'api key',
+			'access token',
+			'bearer token',
+			'unauthorized',
+			'authentication',
+			'invalid_request_error',
+		])) ||
+		containsOpenAiApiKeyHelpLink(message)
+	);
+}
 export function isModelAccessError(error: any): boolean {
 	const message = String(error?.message || error || '').toLowerCase();
 	if (isProviderCapabilityMismatchError(error)) {
@@ -3582,11 +2018,94 @@ export function isProviderAuthConfigurationError(error: any): boolean {
 	const status = Number((error as any)?.status || (error as any)?.statusCode || (error as any)?.response?.status || 0);
 	const code = String((error as any)?.code || (error as any)?.error?.code || '').toLowerCase();
 	const errorType = String((error as any)?.type || (error as any)?.error?.type || '').toLowerCase();
-	if (!message && status === 0 && !code && !errorType) return false;
+	const wrappedProviderSummary = String(
+		(error as any)?.lastProviderErrorSummary ||
+		(error as any)?.lastProviderError ||
+		(error as any)?.errorDetails?.lastProviderErrorSummary ||
+		(error as any)?.errorDetails?.lastProviderError ||
+		(error as any)?.cause?.message ||
+		''
+	).toLowerCase();
+	const aggregatedProviderFailureWrapper =
+		message.includes('failed to process request after') ||
+		message.includes('failed to process request:') ||
+		message.includes('provider attempt(s)') ||
+		message.includes('provider attempts') ||
+		message.includes('all failed') ||
+		message.includes('last provider:') ||
+		message.includes('cause:') ||
+		message.includes('last error:') ||
+		message.includes('last provider error summary') ||
+		message.includes('lastprovidererrorsummary') ||
+		message.includes('last provider error') ||
+		message.includes('lastprovidererror') ||
+		message.includes('all skipped by rate limit') ||
+		wrappedProviderSummary.includes('you exceeded your current quota') ||
+		wrappedProviderSummary.includes('exceeded your current quota') ||
+		wrappedProviderSummary.includes('insufficient_quota') ||
+		wrappedProviderSummary.includes('quota exceeded') ||
+		wrappedProviderSummary.includes('quota exhausted') ||
+		wrappedProviderSummary.includes('resource has been exhausted') ||
+		wrappedProviderSummary.includes('resource exhausted') ||
+		wrappedProviderSummary.includes('resource_exhausted') ||
+		wrappedProviderSummary.includes('billing details') ||
+		wrappedProviderSummary.includes('payment required') ||
+		wrappedProviderSummary.includes('invalid api key') ||
+		wrappedProviderSummary.includes('invalid_api_key') ||
+		wrappedProviderSummary.includes('unauthorized') ||
+		wrappedProviderSummary.includes('authentication failed') ||
+		message.includes('temporarily unavailable') ||
+		message.includes('try again shortly') ||
+		message.includes('rate-limited/cooling down') ||
+		message.includes('rate limit scheduled') ||
+		message.includes('temporarily unavailable') ||
+		Boolean((error as any)?.lastProviderId) ||
+		Boolean((error as any)?.lastProviderError) ||
+		Boolean((error as any)?.lastProviderErrorSummary) ||
+		Boolean((error as any)?.errorDetails?.lastProviderId) ||
+		Boolean((error as any)?.errorDetails?.lastProviderError) ||
+		Boolean((error as any)?.errorDetails?.lastProviderErrorSummary);		message.includes('unsupported parameter') ||
+		message.includes('not supported with this model') ||
+		message.includes('invalid_request_error') ||
+		message.includes('resource has been exhausted') ||
+		message.includes('quota exceeded') ||
+		message.includes('quota exhausted') ||
+		message.includes('unauthorized') ||
+		message.includes('invalid_api_key') ||
+		message.includes('key_invalid') ||
+		message.includes('401') ||
+		message.includes('402');
+		Boolean((error as any)?.errorDetails?.lastProviderId) ||
+		Boolean((error as any)?.errorDetails?.attemptedProviders);
+	const wrappedAuthOrQuotaSignal =
+		wrappedProviderSummary.includes('invalid_api_key') ||
+		wrappedProviderSummary.includes('incorrect api key provided') ||
+		wrappedProviderSummary.includes('api key not found') ||
+		wrappedProviderSummary.includes('api key not valid') ||
+		wrappedProviderSummary.includes('api key expired') ||
+		wrappedProviderSummary.includes('unauthorized') ||
+		wrappedProviderSummary.includes('authentication error') ||
+		wrappedProviderSummary.includes('authentication failed') ||
+		wrappedProviderSummary.includes('invalid credentials') ||
+		wrappedProviderSummary.includes('invalid credential') ||
+		wrappedProviderSummary.includes('permission denied') ||
+		wrappedProviderSummary.includes('forbidden') ||
+		wrappedProviderSummary.includes('payment required') ||
+		wrappedProviderSummary.includes('insufficient_quota') ||
+		wrappedProviderSummary.includes('billing_hard_limit_reached') ||
+		wrappedProviderSummary.includes('key_no_quota') ||
+		wrappedProviderSummary.includes('quota exceeded') ||
+		wrappedProviderSummary.includes('resource has been exhausted') ||
+		wrappedProviderSummary.includes('resource exhausted') ||
+		wrappedProviderSummary.includes('resource_exhausted') ||
+		wrappedProviderSummary.includes('check your plan and billing details') ||
+		wrappedProviderSummary.includes('billing details');
+	if (!message && status === 0 && !code && !errorType && !wrappedProviderSummary) return false;
 	return (
 		status === 401 ||
 		status === 402 ||
 		status === 403 ||
+		(aggregatedProviderFailureWrapper && wrappedAuthOrQuotaSignal) ||
 		code === 'invalid_api_key' ||
 		code === 'invalid key' ||
 		code === 'invalid_key' ||
@@ -4071,7 +2590,60 @@ export function isToolUnsupportedError(error: any): boolean {
 		message.includes('generatecontent unsupported') ||
 		message.includes('model does not support generatecontent') ||
 		message.includes('does not support sendmessage');
+	const wrappedProviderSummary = String(
+		(error as any)?.lastProviderErrorSummary ||
+		(error as any)?.lastProviderError ||
+		(error as any)?.errorDetails?.lastProviderErrorSummary ||
+		(error as any)?.errorDetails?.lastProviderError ||
+		(error as any)?.cause?.message ||
+		''
+	).toLowerCase();
+	const aggregatedProviderTimeoutWrapper =
+		(message.includes('failed to process request after ') ||
+			message.includes('failed to process request:')) &&
+		(message.includes('provider attempt(s)') ||
+			message.includes('provider attempts') ||
+			message.includes('all failed') ||
+			message.includes('last provider:') ||
+			message.includes('cause:') ||
+			message.includes('last error:') ||
+			message.includes('last provider error') ||
+			message.includes('last provider error summary') ||
+			message.includes('lastprovidererrorsummary') ||
+			message.includes('lastprovidererror') ||
+			message.includes('timeout of <duration> exceeded') ||
+			message.includes('timed out') ||
+			message.includes('timeout exceeded') ||
+			message.includes('request timed out') ||
+			message.includes('operation timed out') ||
+			message.includes('all failed') ||
+			message.includes('cause:') ||
+			message.includes('api call failed: timeout') ||
+			wrappedProviderSummary.includes('timeout of <duration> exceeded') ||
+			wrappedProviderSummary.includes('timed out') ||
+			wrappedProviderSummary.includes('timeout exceeded') ||
+			wrappedProviderSummary.includes('request timed out') ||
+			wrappedProviderSummary.includes('operation timed out') ||
+			wrappedProviderSummary.includes('api call failed: timeout') ||
+			wrappedProviderSummary.includes('request timed out') ||
+			wrappedProviderSummary.includes('operation timed out') ||
+			String((error as any)?.errorDetails?.failureOrigin || '').toLowerCase() === 'upstream_provider' ||
+			message.includes('last error:')) &&
+		(
+			message.includes('cause: api call failed: timeout') ||
+			message.includes('cause: api call failed: timed out') ||
+			wrappedProviderSummary.includes('api call failed: timeout') ||
+			wrappedProviderSummary.includes('api call failed: timed out') ||
+			message.includes('cause: timeout of ') ||
+			message.includes('cause: request timed out') ||
+			message.includes('cause: timed out') ||
+			message.includes('last error: api call failed: timeout') ||
+			message.includes('last error: api call failed: timed out') ||
+			wrappedProviderSummary.includes('timeout of ') ||
+			wrappedProviderSummary.includes('timed out') ||
+			wrappedProviderSummary.includes('timeout exceeded'));
 	const providerRetryChurn =
+		aggregatedProviderTimeoutWrapper ||
 		message.includes('rate limit/timeout: switching provider') ||
 		message.includes('timeout: switching provider') ||
 		message.includes('switching provider') ||
@@ -4080,9 +2652,29 @@ export function isToolUnsupportedError(error: any): boolean {
 		message.includes('provider attempts') ||
 		message.includes('last provider:') ||
 		message.includes('cause: api call failed: timeout') ||
+		message.includes('cause: api call failed: timed out') ||
+		message.includes('cause: timeout of <duration> exceeded') ||
+		wrappedProviderSummary.includes('api call failed: timeout') ||
+		wrappedProviderSummary.includes('api call failed: timed out') ||
+		wrappedProviderSummary.includes('timeout of <duration> exceeded') ||
+		wrappedProviderSummary.includes('request timed out') ||
+		wrappedProviderSummary.includes('rate limit/timeout: switching provider') ||
+		wrappedProviderSummary.includes('switching provider') ||
+		Boolean((error as any)?.errorDetails?.lastProviderId) ||
+		Number((error as any)?.errorDetails?.skippedByProviderRateLimit || 0) > 0 ||
+		message.includes('cause: request timed out') ||
+		message.includes('last provider error summary') ||
+		message.includes('failed to process request after') ||
+		message.includes('provider attempt(s)') ||
+		message.includes('provider attempts') ||
+		message.includes('last provider:') ||
+		message.includes('last provider error:') ||
+		message.includes('lastprovidererrorsummary') ||
 		message.includes('last provider error summary') ||
 		message.includes('api call failed: timeout') ||
 		message.includes('api call failed: timed out') ||
+		message.includes('timeout of <duration> exceeded') ||
+		message.includes('timeout exceeded') ||
 		message.includes('unsupported parameter') ||
 		message.includes('is not supported with this model') ||
 		message.includes('not supported with this model') ||

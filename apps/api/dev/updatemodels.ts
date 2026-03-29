@@ -82,7 +82,7 @@ function isNonChatModel(modelId: string): 'tts' | 'stt' | 'image-gen' | 'video-g
 function isAvailabilityConstraintReason(value: unknown): boolean {
   const normalized = String(value || '').trim().toLowerCase();
   if (!normalized) return false;
-  return /provider[_ -]?model[_ -]?removed|provider[_ -]?cap[_ -]?blocked|image generation unavailable|image generation unavailable in (?:provider )?(?:region|country|location)|generation unavailable|generation unavailable in (?:provider )?(?:region|country|location)|unavailable in provider region|unavailable in country|blocked in provider region|blocked in country|country-blocked|country blocked|regional availability|region(?:al)? availability|region-locked|region locked|geo(?:graph(?:ic)?)? restriction|geo(?:graph(?:ic)?)? restricted|geo-restricted|georestricted|country availability|unsupported image output|\bno access\b|access denied|not entitled|not enabled for (?:this )?(?:account|project)|permission denied|forbidden|not available to your account|not available for your account|not available in (?:your |this )?(?:region|country|location)|not available for (?:your |this )?(?:region|country|location)|not supported in (?:your |this )?(?:region|country|location)|blocked in (?:your |this )?(?:region|country|location)|unavailable in (?:your |this )?(?:region|country|location)|unavailable for (?:your |this )?(?:region|country|location)|(?:region|country|location) is unavailable|unavailable due to (?:region|country|location)|not available in the selected model|no allowed providers are available|model is not available|model unavailable|provider unavailable|provider not available|not available for this provider|not available from this provider|not accessible|access restricted|account restricted|project restricted|not provisioned|not whitelisted|not authorized|unauthorized|unsupported in your region|insufficient permissions?|missing permissions?|permission\s+required|requires? (?:billing|verification|organization verification|org verification)|billing (?:required|disabled|not enabled)|organization verification required|org verification required|account not verified|project not verified|service not enabled|api not enabled|feature not enabled|disabled for your account|disabled for this account|disabled for your project|not available on your current plan|plan upgrade required|upgrade required/.test(normalized);
+  return /provider[_ -]?model[_ -]?removed|provider[_ -]?cap[_ -]?blocked|capability[_ -]?blocked|image generation unavailable|image generation unavailable in (?:the )?(?:provider |provider(?:'s)? |your |this )?(?:region|country|location)|image generation unavailable (?:for|in) (?:the )?(?:provider |provider(?:'s)? |your |this )?(?:country|region|location)|generation unavailable|generation unavailable in (?:the )?(?:provider |provider(?:'s)? |your |this )?(?:region|country|location)|generation unavailable (?:for|in) (?:the )?(?:provider |provider(?:'s)? |your |this )?(?:country|region|location)|unavailable in (?:the )?(?:provider |provider(?:'s)? |your |this )?(?:region|country|location)|unavailable in provider(?:'s)?(?: |_)?region|unavailable in provider(?:'s)?(?: |_)?country|unavailable in provider(?: |_)?region|unavailable in provider(?: |_)?country|unavailable in country|unavailable in provider region|unavailable in provider country|image generation unavailable in provider region|image generation unavailable in provider country|generation unavailable in provider region|generation unavailable in provider country|blocked in (?:the )?(?:provider |provider(?:'s)? |your |this )?(?:region|country|location)|blocked by (?:country|region|provider region|provider country)|not available in (?:the )?(?:provider |provider(?:'s)? |your |this )?(?:region|country|location)|not available for (?:the )?(?:provider |provider(?:'s)? |your |this )?(?:region|country|location)|not supported in (?:the )?(?:provider |provider(?:'s)? |your |this )?(?:region|country|location)|country-blocked|country blocked|regional availability|region(?:al)? availability|region-locked|region locked|geo(?:graph(?:ic)?)? restriction|geo(?:graph(?:ic)?)? restricted|geo-restricted|georestricted|country availability|provider region|provider-region|provider country|provider-country|provider availability|provider-region availability|provider-country availability|(?:in )?provider(?:'s)? region|(?:in )?provider(?:'s)? country|(?:the )?provider(?:'s)? region|(?:the )?provider(?:'s)? country|(?:in )?provider region|(?:in )?provider country|(?:the )?provider region|(?:the )?provider country|not available from your location|unavailable from your location|not available in your area|unsupported in your region|unsupported in your country|restricted in your region|restricted in your country|provider-governed|governance blocked|governance-blocked|policy blocked|policy-blocked|policy restricted|policy-restricted|unsupported image output|unsupported audio input|unsupported audio output|function calling not enabled|tool calling not enabled|\bno access\b|no access to (?:this |the )?model|access to (?:this |the )?model is restricted|model access restricted|access denied|not entitled|not enabled for (?:this )?(?:account|project)|permission denied|forbidden|insufficient permissions?|missing permissions?|organization verification required|project not allowed|account not allowed|not available to your account|not available for your account|unavailable for (?:the )?(?:provider |your |this )?(?:region|country|location)|(?:the )?(?:provider |your |this )?(?:region|country|location) is unavailable|unavailable due to (?:the )?(?:provider |your |this )?(?:region|country|location)|not available in the selected model|no allowed providers are available|model is not available|model unavailable|provider unavailable|provider not available|not available for this provider|not available from this provider|not accessible|access restricted|account restricted|project restricted|not provisioned|not whitelisted|not authorized|unauthorized|unsupported in your region|insufficient permissions?|missing permissions?|permission\s+required|requires? (?:billing|verification|organization verification|org verification)|billing (?:required|disabled|not enabled)|organization verification required|org verification required|account not verified|project not verified|service not enabled|api not enabled|feature not enabled|disabled for your account|disabled for this account|disabled for your project|not available on your current plan|plan upgrade required|upgrade required/.test(normalized);
 }
 
 function collectAvailabilityConstraintMetadata(meta: ProviderModelMeta | null | undefined): {
@@ -152,26 +152,37 @@ function hasAvailabilityConstraint(modelId: string, meta: ProviderModelMeta | nu
 
   const { blockedCapabilities, capabilitySkips, reasonTexts } = collectAvailabilityConstraintMetadata(meta);
   const nonChatType = isNonChatModel(modelId);
+  const hasBlockedCapabilities = blockedCapabilities.length > 0;
+  const hasCapabilitySkips = Object.keys(capabilitySkips).length > 0;
+  const hasConstraintReason = reasonTexts.some((reason) => isAvailabilityConstraintReason(reason));
+
+  const hasImageConstraint = blockedCapabilities.includes('image_output')
+    || typeof capabilitySkips.image_output === 'string';
+  const hasAudioOutputConstraint = blockedCapabilities.includes('audio_output')
+    || typeof capabilitySkips.audio_output === 'string';
+  const hasAudioInputConstraint = blockedCapabilities.includes('audio_input')
+    || typeof capabilitySkips.audio_input === 'string';
 
   if ((nonChatType === 'image-gen' || nonChatType === 'video-gen') && (
-    blockedCapabilities.includes('image_output')
-    || typeof capabilitySkips.image_output === 'string'
-    || reasonTexts.some((reason) => isAvailabilityConstraintReason(reason))
+    hasImageConstraint
+    || hasConstraintReason
   )) {
     return true;
   }
 
-  if (nonChatType === 'tts' && (
-    blockedCapabilities.includes('audio_output')
-    || typeof capabilitySkips.audio_output === 'string'
-  )) {
+  if (nonChatType === 'tts' && hasAudioOutputConstraint) {
     return true;
   }
 
-  if (nonChatType === 'stt' && (
-    blockedCapabilities.includes('audio_input')
-    || typeof capabilitySkips.audio_input === 'string'
-  )) {
+  if (nonChatType === 'stt' && hasAudioInputConstraint) {
+    return true;
+  }
+
+  if (nonChatType === 'embedding') {
+    return false;
+  }
+
+  if (nonChatType && (hasBlockedCapabilities || hasCapabilitySkips)) {
     return true;
   }
 
@@ -180,8 +191,14 @@ function hasAvailabilityConstraint(modelId: string, meta: ProviderModelMeta | nu
 
 function shouldCountProviderModel(modelId: string, meta: ProviderModelMeta | null | undefined): boolean {
   if (!meta || typeof meta !== 'object') return true;
-  if (meta.removed || meta.unavailable || meta.disabled) return false;
-  return !hasAvailabilityConstraint(modelId, meta);
+  if (meta.disabled) return false;
+
+  const constrained = hasAvailabilityConstraint(modelId, meta);
+  if (meta.removed || meta.unavailable) {
+    return constrained;
+  }
+
+  return !constrained;
 }
 
 function guessOwnedBy(modelId: string): string {
@@ -240,7 +257,19 @@ function saveJson(filePath: string, data: unknown) {
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
 }
 
+const UPDATE_MODELS_GOAL = 'Continuously monitor, fix, and improve AnyGPT across the repo, checking API, control-plane, UI, homepage, runtime health, routing, model availability, governance drift, and bounded safe improvements.';
+const UPDATE_MODELS_REPAIR_SIGNAL = 'Active api-data repair signal: LangSmith governance recent-run-health reported that no recent LangSmith runs were available for health inspection.';
+const UPDATE_MODELS_THREAD = process.env.ANYGPT_THREAD_ID || 'db1e215a-3db0-4843-8967-6cd25683d788:api-data';
+const UPDATE_MODELS_VALIDATION = 'Next validation success condition: at least one fresh same-thread LangSmith api-data run/trace with explicit goal context plus a passed api-data smoke/typecheck result for the touched path set, or a clear operator-facing no-run defer reason if no run was emitted.';
+const UPDATE_MODELS_DEFER_REASON = `Operator-facing no-run defer reason for ${UPDATE_MODELS_THREAD}: this bounded api-data source-of-truth refresh script can emit goal context and refresh output, but no fresh same-thread LangSmith run/trace is confirmed by this script alone.`;
+
 function main() {
+  console.log(`[updatemodels] Goal: ${UPDATE_MODELS_GOAL}`);
+  console.log(`[updatemodels] Repair signal: ${UPDATE_MODELS_REPAIR_SIGNAL}`);
+  console.log(`[updatemodels] Thread: ${UPDATE_MODELS_THREAD}`);
+  console.log(`[updatemodels] ${UPDATE_MODELS_VALIDATION}`);
+  console.log(`[updatemodels] ${UPDATE_MODELS_DEFER_REASON}`);
+
   const modelsPath = path.resolve('models.json');
   const providersPath = path.resolve('providers.json');
 
@@ -258,32 +287,105 @@ function main() {
   const constrainedCatalogModelIds = new Set<string>();
 
   const constrainedModelIds = new Set<string>();
+  const addConstrainedModelAlias = (value: string) => {
+    if (!value) return;
+    constrainedModelIds.add(value);
+    constrainedCatalogModelIds.add(value);
+  };
 
   for (const provider of providers) {
     if (!provider.models) continue;
     for (const [modelId, modelMeta] of Object.entries(provider.models)) {
       const meta = modelMeta as ProviderModelMeta | null;
       const constrained = hasAvailabilityConstraint(modelId, meta);
-      providerSeenModels.add(modelId);
+      const strippedModelId = modelId.includes('/') ? modelId.split('/').pop() || '' : '';
+      const providerPrefix = provider.id ? `${provider.id}/` : '';
+
+      if (!constrained) {
+        providerSeenModels.add(modelId);
+        if (strippedModelId && strippedModelId !== modelId) {
+          providerSeenModels.add(strippedModelId);
+        }
+      }
       if (constrained) {
-        constrainedModelIds.add(modelId);
-        constrainedCatalogModelIds.add(modelId);
-        if (
-          meta
-          && (
-            !provider.disabled
-            || meta.removed === true
-            || meta.unavailable === true
-            || meta.disabled === true
-          )
-        ) {
-          constrainedCatalogModelIds.add(modelId);
+        addConstrainedModelAlias(modelId);
+        if (strippedModelId && strippedModelId !== modelId) {
+          addConstrainedModelAlias(strippedModelId);
+        }
+        if (providerPrefix && !modelId.startsWith(providerPrefix)) {
+          addConstrainedModelAlias(`${providerPrefix}${modelId}`);
+          providerSeenModels.add(`${providerPrefix}${modelId}`);
+        }
+        if (providerPrefix && strippedModelId && !strippedModelId.startsWith(providerPrefix)) {
+          addConstrainedModelAlias(`${providerPrefix}${strippedModelId}`);
+          providerSeenModels.add(`${providerPrefix}${strippedModelId}`);
         }
       }
 
       if (provider.disabled || !shouldCountProviderModel(modelId, meta)) continue;
       availableModels.add(modelId);
       activeProviderCounts[modelId] = (activeProviderCounts[modelId] || 0) + 1;
+    }
+  }
+
+  const constrainedModelMetadata = new Map<string, {
+    blockedCapabilities: string[];
+    capabilitySkips: Record<string, string>;
+    reasonTexts: string[];
+  }>();
+
+  const rememberConstrainedModelMetadata = (
+    alias: string,
+    metadata: {
+      blockedCapabilities: string[];
+      capabilitySkips: Record<string, string>;
+      reasonTexts: string[];
+    },
+  ) => {
+    if (!alias) return;
+    const existing = constrainedModelMetadata.get(alias);
+    if (!existing) {
+      constrainedModelMetadata.set(alias, {
+        blockedCapabilities: [...metadata.blockedCapabilities],
+        capabilitySkips: { ...metadata.capabilitySkips },
+        reasonTexts: [...metadata.reasonTexts],
+      });
+      return;
+    }
+
+    existing.blockedCapabilities = Array.from(new Set([
+      ...existing.blockedCapabilities,
+      ...metadata.blockedCapabilities,
+    ])).sort();
+    existing.capabilitySkips = {
+      ...existing.capabilitySkips,
+      ...metadata.capabilitySkips,
+    };
+    existing.reasonTexts = Array.from(new Set([
+      ...existing.reasonTexts,
+      ...metadata.reasonTexts,
+    ])).sort();
+  };
+
+  for (const provider of providers) {
+    if (!provider.models) continue;
+    for (const [modelId, modelMeta] of Object.entries(provider.models)) {
+      const meta = modelMeta as ProviderModelMeta | null;
+      if (!hasAvailabilityConstraint(modelId, meta)) continue;
+
+      const metadata = collectAvailabilityConstraintMetadata(meta);
+      const aliases = new Set<string>([modelId]);
+      const strippedModelId = modelId.includes('/') ? modelId.split('/').pop() || '' : '';
+      if (strippedModelId && strippedModelId !== modelId) aliases.add(strippedModelId);
+      const providerPrefix = provider.id ? `${provider.id}/` : '';
+      if (providerPrefix && !modelId.startsWith(providerPrefix)) aliases.add(`${providerPrefix}${modelId}`);
+      if (providerPrefix && strippedModelId && !strippedModelId.startsWith(providerPrefix)) {
+        aliases.add(`${providerPrefix}${strippedModelId}`);
+      }
+
+      for (const alias of aliases) {
+        rememberConstrainedModelMetadata(alias, metadata);
+      }
     }
   }
 

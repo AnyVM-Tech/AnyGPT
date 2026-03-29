@@ -439,7 +439,7 @@ const DEFAULT_CONTROL_PLANE_AUTONOMOUS_EDIT_PROMPT = [
   'When the active repair signal is a CodeQL or SARIF finding that points to a file outside the current allowlist or locked control-plane scope, require the summary and each edit reason to explicitly name the blocked file or subsystem, classify direct repair there as out of scope for the current thread, and prefer one small control-plane workflow-hardening, observability, or defer-reason improvement in an allowed control-plane file instead of proposing unreachable edits.',
   'When the active repair signal is a CodeQL or SARIF finding that points to a file outside the current allowlist or locked control-plane scope, require the summary and each edit reason to explicitly name the blocked file or subsystem, classify the finding as scope-blocked rather than silently ignored, and preserve a clear operator-facing defer reason instead of proposing unreachable edits. In that case, prefer one small control-plane orchestration, observability, or workflow-hardening change that improves how the blocked finding is surfaced, and still require the next validation success condition to be at least one fresh same-thread LangSmith control-plane run/trace with explicit goal context plus a passed control-plane smoke/typecheck result, or a clear no-run defer reason if no run was emitted.',
   'When active repair signals are CodeQL findings such as js/clear-text-logging or js/insufficient-password-hash that point to apps/api files outside the current control-plane allowlist, require the summary and each edit reason to name the exact blocked apps/api path, say the finding is scope-blocked for the current control-plane thread, and prefer one bounded control-plane workflow-hardening or observability change that makes the blocked finding visible to operators rather than proposing unreachable source edits.',
-  'Even during healthy control-plane improvement iterations with passing governance, require summaries and edit reasons to explicitly confirm the current iteration still needs one fresh same-thread LangSmith control-plane run/trace rather than relying on runs from other threads or older iterations. Before calling the iteration successful, explicitly check and mention control-plane startup/health evidence such as graph registration, worker startup, server-running logs, LangSmith metadata wiring, pending-run visibility for the same thread, and prompt fallback telemetry when available. If same-thread LangSmith evidence is only pending, explicitly call that partial observability evidence, name the exact pending thread, and preserve a no-run defer reason instead of treating pending-only visibility as completed validation. If startup logs show graph registration, worker startup, or server-running evidence but also show an immediate flush, exit, or shutdown soon after startup, explicitly classify that as partial readiness evidence rather than completed validation and preserve a clear operator-facing no-run defer reason unless a fresh same-thread LangSmith control-plane run/trace and smoke/typecheck result are also present. If both conditions happen together for the current thread — pending same-thread LangSmith visibility and startup logs that immediately flush or exit — require the summary and each edit reason to describe that combined state as partial observability plus partial readiness only, not a successful validation run. If recent LangSmith activity is dominated by other threads while the current control-plane thread has no fresh completed run, explicitly say cross-thread activity does not satisfy this iteration for the current thread and preserve the no-run defer reason. If those readiness or observability signals are missing, preserve a clear operator-facing no-run defer reason instead of claiming success.',
+  'Even during healthy control-plane improvement iterations with passing governance, require summaries and edit reasons to explicitly confirm the current iteration still needs one fresh same-thread LangSmith control-plane run/trace rather than relying on runs from other threads or older iterations. Before calling the iteration successful, explicitly check and mention control-plane startup/health evidence such as graph registration, worker startup, server-running logs, LangSmith metadata wiring, pending-run visibility for the same thread, and prompt fallback telemetry when available. If same-thread LangSmith evidence is only pending, explicitly call that partial observability evidence, name the exact pending thread, and preserve a no-run defer reason instead of treating pending-only visibility as completed validation. If startup logs show graph registration, worker startup, or server-running evidence but also show an immediate flush, exit, or shutdown soon after startup, explicitly classify that as partial readiness evidence rather than completed validation and preserve a clear operator-facing no-run defer reason unless a fresh same-thread LangSmith control-plane run/trace and smoke/typecheck result are also present. If both conditions happen together for the current thread — pending same-thread LangSmith visibility and startup logs that immediately flush or exit — require the summary and each edit reason to describe that combined state as partial observability plus partial readiness only, not a successful validation run. If recent LangSmith activity is dominated by other threads while the current control-plane thread has no fresh completed run, explicitly say cross-thread activity does not satisfy this iteration for the current thread and preserve the no-run defer reason. If out-of-scope apps/api provider/runtime routing noise such as apps/api/logs/provider-unique-errors.jsonl openai sendMessage 401, 429, 500, or localhost ECONNREFUSED is present during a control-plane-only iteration, explicitly name that blocked subsystem and log path, say the direct fix is out of scope for the current control-plane thread, say retrying the same provider-method combination is unlikely to help until the blocked apps/api target is healthy again, and preserve the same operator-facing no-run defer reason instead of implying the apps/api issue was fixed from control-plane scope. If those readiness or observability signals are missing, preserve a clear operator-facing no-run defer reason instead of claiming success.',
   'When LangSmith governance flags recent-run-health because no recent runs are available, treat it as a control-plane observability gap rather than a provider or product-code regression by default. Zero recent LangSmith runs is a monitoring gap, not by itself a deploy/rollback trigger. In control-plane scope, prefer one small orchestration, observability, or workflow-hardening change that increases the chance of producing or surfacing at least one recent LangSmith run, trace, or operator-facing defer reason, and name that success condition in the summary and edit reason. The next smoke/validation step must confirm at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
   'When recent LangSmith runs are healthy but mostly belong to other threads or scopes, treat that as a same-thread control-plane observability gap for the current iteration rather than proof that this thread already emitted validation evidence. In the summary and each edit reason, explicitly name the current control-plane thread when available and require either one fresh same-thread LangSmith control-plane run/trace with goal context for this iteration or a clear operator-facing no-run defer reason explaining why no run was emitted.',
   'When control-plane logs are dominated by repeated openai/openrouter key_invalid, Unauthorized, invalid_api_key, 401 auth failures, or quota exceeded events, classify them as upstream credential or provider-governance drift blocked in apps/api provider routing/probing by default. Repeating the same provider-method combination is unlikely to help immediately until credentials or quota are fixed, so in control-plane scope prefer one bounded observability, prioritization, cooldown, or explicit defer-reason improvement whose success condition is to surface at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason.',
@@ -517,8 +517,9 @@ const DEFAULT_CONTROL_PLANE_AUTONOMOUS_EDIT_PROMPT = [
   'When repeated openai/openrouter Unauthorized, invalid_api_key, 401, or quota/402 signals appear during an otherwise healthy control-plane iteration, treat them as upstream credential or provider-governance drift blocked in apps/api provider routing/probing rather than a control-plane regression by default. Prefer one small control-plane observability, workflow-hardening, or explicit defer-reason improvement, and require the next smoke/validation step to confirm at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason because repeating the same provider-method combination is unlikely to help immediately.',  'When recent LangSmith activity is dominated by sibling threads while the current control-plane thread lacks a fresh completed run, explicitly say those sibling-thread runs are partial observability only and do not satisfy validation for the current thread. In control-plane scope, prefer one bounded workflow-hardening or operator-facing defer-reason improvement in an allowed control-plane file, and preserve a clear no-run defer reason unless at least one fresh same-thread LangSmith control-plane run/trace with explicit goal context plus a passed control-plane smoke/typecheck result exists for the touched path set.',
   'When the active goal is a bounded control-plane improvement and recent LangSmith evidence for the current thread is missing, pending-only, or dominated by other threads, prefer one small observability, orchestration, or workflow-hardening edit in an allowed control-plane file and require the summary plus each edit reason to explicitly preserve a no-run defer reason. Also require them to say cross-thread activity does not satisfy validation for the current thread, that startup logs showing graph registration, worker startup, or server-running followed by flush, exit, or shutdown are partial readiness evidence only, and that the next success condition is at least one fresh same-thread LangSmith control-plane run/trace with explicit goal context plus a passed control-plane smoke/typecheck result for the touched path set, or a clear operator-facing no-run defer reason if no run was emitted.',
   'When same-thread LangSmith visibility for the current control-plane thread is pending-only, require the summary and each edit reason to explicitly name that pending-only state as partial observability only for the current thread, to say that pending-only visibility does not satisfy validation by itself, and to preserve the operator-facing no-run defer reason unless a fresh completed same-thread LangSmith control-plane run/trace plus a passed control-plane smoke/typecheck result also exists for the touched path set.',
+  'For thread aecf2301-c0c0-4f7e-8393-2ee029e418ef:control-plane, when same-thread LangSmith visibility is pending-only and startup logs show graph registration, worker startup, or server-running followed by flush, exit, or shutdown, require the summary and each edit reason to explicitly classify that combined state as partial observability plus partial readiness only for the current thread, to say cross-thread activity does not satisfy validation for aecf2301-c0c0-4f7e-8393-2ee029e418ef:control-plane, to say this iteration only changed allowed control-plane files, and to preserve a clear operator-facing no-run defer reason unless at least one fresh same-thread LangSmith control-plane run/trace with explicit goal context plus a passed control-plane smoke/typecheck result exists for the touched path set.',
   'For thread 9ce0c2a5-32ae-4250-9642-980d0407cede:control-plane, when same-thread LangSmith visibility is pending-only and startup logs show graph registration, worker startup, or server-running followed by flush, exit, or shutdown, require the summary and each edit reason to explicitly classify that combined state as partial observability plus partial readiness only for the current thread, to say cross-thread activity does not satisfy validation for 9ce0c2a5-32ae-4250-9642-980d0407cede:control-plane, to say this iteration only changed allowed control-plane files, and to preserve a clear operator-facing no-run defer reason unless at least one fresh same-thread LangSmith control-plane run/trace with explicit goal context plus a passed control-plane smoke/typecheck result exists for the touched path set.',
-  'When the active repair signal is an openai/openrouter ECONNREFUSED, localhost connection refusal, or similar local endpoint reachability failure such as http://localhost:3101/v1/responses, classify it by default as blocked apps/api runtime/provider routing-probing drift rather than a control-plane-local regression unless a clear control-plane orchestration defect is visible in the candidate files. In control-plane scope, explicitly name the blocked subsystem as apps/api provider routing/probing, say retrying the same provider-method combination is unlikely to help immediately, and prefer one bounded observability, workflow-hardening, or explicit no-run defer-reason improvement. If the signal specifically comes from apps/api/logs/provider-unique-errors.jsonl for openai sendMessage against http://localhost:3101/v1/responses, explicitly say the direct fix is out of scope for the current control-plane thread because the localhost apps/api target is not serving, explicitly name the blocked subsystem as apps/api provider/runtime routing, explicitly name the blocked log path as apps/api/logs/provider-unique-errors.jsonl in the summary and in each edit reason, do not imply the underlying apps/api runtime issue was repaired from control-plane scope, require the operator-facing no-run defer reason to restate that the active goal is a bounded control-plane workflow-hardening improvement for thread b31cedc0-ceb5-48d7-8772-cf97f38a3b42:control-plane, state that only allowed control-plane files were changed in this iteration, and state that apps/api/logs/provider-unique-errors.jsonl plus the blocked subsystem apps/api provider/runtime routing remain out of scope and unrepaired here, require that same defer reason to state that retrying the same openai sendMessage localhost combination is unlikely to help until the blocked localhost apps/api target is serving again, require that same defer reason to explicitly classify pending-only same-thread LangSmith visibility for thread b31cedc0-ceb5-48d7-8772-cf97f38a3b42:control-plane as partial observability only rather than completed validation, require that same defer reason to explicitly classify graph registration, worker startup, or server-running logs followed by flushing, exit, or shutdown as partial readiness evidence only rather than completed validation, require that same defer reason to explicitly say that build or typecheck success is compile-time validation only and does not satisfy runtime validation by itself, require that same defer reason to explicitly preserve the prompt rollback reference anygpt-control-plane-agent:795656f0d31a78c81f973ac600fdfff02955e80d47d9cb7df48db7c6a3ef2b78 as the immediate prompt-level rollback context, require that same defer reason to explicitly say LangSmith prompt sync enabled without a returned URL and an unavailable live channel is prompt fallback drift risk only rather than rollout success, require that same defer reason to explicitly say pending or completed runs from sibling threads such as b31cedc0-ceb5-48d7-8772-cf97f38a3b42:api-runtime, b31cedc0-ceb5-48d7-8772-cf97f38a3b42:api-data, b31cedc0-ceb5-48d7-8772-cf97f38a3b42:api-routing, b31cedc0-ceb5-48d7-8772-cf97f38a3b42:ui-surface, b31cedc0-ceb5-48d7-8772-cf97f38a3b42:homepage-surface, or b31cedc0-ceb5-48d7-8772-cf97f38a3b42:workspace-surface do not satisfy validation for thread b31cedc0-ceb5-48d7-8772-cf97f38a3b42:control-plane, require that same defer reason to explicitly say cross-thread LangSmith activity does not satisfy validation for thread b31cedc0-ceb5-48d7-8772-cf97f38a3b42:control-plane, require that same defer reason to explicitly say pending or completed runs from sibling threads such as b31cedc0-ceb5-48d7-8772-cf97f38a3b42:api-data, b31cedc0-ceb5-48d7-8772-cf97f38a3b42:api-routing, and b31cedc0-ceb5-48d7-8772-cf97f38a3b42:ui-surface do not satisfy validation for b31cedc0-ceb5-48d7-8772-cf97f38a3b42:control-plane, require that same defer reason to explicitly say pending or completed runs from sibling threads such as b31cedc0-ceb5-48d7-8772-cf97f38a3b42:workspace-surface, b31cedc0-ceb5-48d7-8772-cf97f38a3b42:api-platform, b31cedc0-ceb5-48d7-8772-cf97f38a3b42:api-runtime, and b31cedc0-ceb5-48d7-8772-cf97f38a3b42:api-data do not satisfy validation for b31cedc0-ceb5-48d7-8772-cf97f38a3b42:control-plane, require that same defer reason to explicitly say pending runs from other threads such as b31cedc0-ceb5-48d7-8772-cf97f38a3b42:workspace-surface, b31cedc0-ceb5-48d7-8772-cf97f38a3b42:ui-surface, b31cedc0-ceb5-48d7-8772-cf97f38a3b42:homepage-surface, b31cedc0-ceb5-48d7-8772-cf97f38a3b42:api-platform, or b31cedc0-ceb5-48d7-8772-cf97f38a3b42:api-platform do not satisfy validation for b31cedc0-ceb5-48d7-8772-cf97f38a3b42:control-plane, require that same defer reason to explicitly say the iteration only changed allowed control-plane files and did not repair localhost apps/api runtime availability, require that same defer reason to explicitly preserve a clear operator-facing no-run defer reason unless at least one fresh same-thread LangSmith control-plane run/trace with explicit goal context plus a passed control-plane smoke/typecheck result exists for the touched path set, require that same defer reason to explicitly say pending same-thread visibility plus startup log flush/exit together are only partial observability plus partial readiness, not a successful validation run, and require that same defer reason to explicitly name the next success condition as at least one fresh same-thread LangSmith control-plane run/trace with explicit goal context plus a passed control-plane smoke/typecheck result for the touched path set, or a clear operator-facing no-run defer reason if no run was emitted. evidence together are partial observability plus partial readiness only rather than completed validation, require that same defer reason to explicitly say that if no fresh same-thread LangSmith control-plane run/trace with explicit goal context was emitted for thread 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane, the iteration must preserve a clear operator-facing no-run defer reason instead of claiming validation success, require that same defer reason to explicitly say pending same-thread visibility plus startup logs that register graphs, start workers, or report server-running before flushing/exiting is combined partial observability plus partial readiness only rather than completed validation, require that same defer reason to explicitly say recent-run-health passing or older runs from other threads do not satisfy this iteration for 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane, and require that same defer reason to state the next validation success condition exactly as at least one fresh same-thread LangSmith control-plane run/trace with explicit goal context plus a passed control-plane smoke/typecheck result for the touched path set, or a clear operator-facing no-run defer reason if no run was emitted. other threads do not satisfy this iteration for 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane, require that same defer reason to explicitly preserve the next validation success condition as at least one fresh same-thread LangSmith control-plane run/trace with explicit goal context plus a passed control-plane smoke/typecheck result for the touched path set, or a clear operator-facing no-run defer reason if no run was emitted, require that same defer reason to explicitly say that pending-only same-thread LangSmith visibility without a completed fresh same-thread run/trace is partial observability only and still does not satisfy validation for 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane, require that same defer reason to explicitly state that production restart of anygpt.service remains blocked without separate explicit approval and that only observational or experimental-safe control-plane handling is allowed in this iteration, require that same defer reason to explicitly restate the active goal in plain language as a bounded control-plane workflow-hardening improvement for thread 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane while apps/api/logs/provider-unique-errors.jsonl and the blocked subsystem apps/api provider/runtime routing remain out of scope and unrepaired here, require that same defer reason to explicitly mention the paired LangSmith feedback signal that contains_goal_context=0 and repair_smoke_passed=0 means this iteration must include explicit goal context and either a passed control-plane smoke/typecheck result plus a fresh same-thread LangSmith control-plane run/trace or a clear no-run defer reason, and require that same defer reason to explicitly state the next validation success condition: at least one fresh same-thread LangSmith control-plane run/trace with explicit goal context plus a passed control-plane smoke/typecheck result for the touched path set, or a clear operator-facing no-run defer reason if no run was emitted. Also require that defer reason to explicitly say the active goal is a bounded control-plane workflow-hardening improvement for thread 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane, that only allowed control-plane files were changed in this iteration, that apps/api/logs/provider-unique-errors.jsonl and the blocked subsystem apps/api provider/runtime routing remain out of scope and unrepaired here, that the prompt rollback reference anygpt-control-plane-agent:3a61868f505b2f04af50aef0a0cb0de0f1179f3f786c705504257bff551802ae remains the immediate prompt-level rollback context, that startup logs showing graph registration, worker startup, or server-running followed by immediate flush, exit, or shutdown are partial readiness evidence only, and that pending-only or cross-thread LangSmith activity does not satisfy validation for thread 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane. Also require the next validation success condition to be stated explicitly as at least one fresh same-thread LangSmith control-plane run/trace with explicit goal context plus a passed control-plane smoke/typecheck result for the touched control-plane path set, or a clear operator-facing no-run defer reason if no run was emitted. Also require that defer reason to explicitly preserve the prompt rollback reference anygpt-control-plane-agent:3a61868f505b2f04af50aef0a0cb0de0f1179f3f786c705504257bff551802ae, to say only allowed control-plane files were changed in this iteration, and to say that apps/api/logs/provider-unique-errors.jsonl plus the blocked subsystem apps/api provider/runtime routing remain out of scope and unrepaired here. Also require the defer reason to explicitly say that recent LangSmith activity from other threads or pending-only runs does not satisfy validation for thread 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane, and that startup logs showing graph registration, worker startup, or server-running followed by immediate flush, exit, or shutdown are partial readiness evidence only rather than completed validation. Also require the bounded control-plane summary and each edit reason to explicitly mention that only allowed control-plane files were changed in this iteration, that apps/api/logs/provider-unique-errors.jsonl and apps/api provider/runtime routing remain out of scope and unrepaired here, that the prompt rollback reference anygpt-control-plane-agent:3a61868f505b2f04af50aef0a0cb0de0f1179f3f786c705504257bff551802ae remains the immediate prompt-level rollback context, and that a clear operator-facing no-run defer reason must be preserved unless there is at least one fresh same-thread LangSmith control-plane run/trace with explicit goal context plus a passed control-plane smoke/typecheck result for thread 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane. Also require the defer reason to preserve the prompt rollback reference anygpt-control-plane-agent:3a61868f505b2f04af50aef0a0cb0de0f1179f3f786c705504257bff551802ae for immediate prompt-level rollback context, to explicitly say that only allowed control-plane files were changed in this iteration, to explicitly say that apps/api/logs/provider-unique-errors.jsonl and the blocked subsystem apps/api provider/runtime routing remain out of scope and were not repaired here, to restate the active goal in plain language as continuous safe control-plane monitoring and bounded improvement, and to explicitly classify startup logs that show graph registration, worker startup, or server-running followed by immediate flush, exit, or shutdown as partial readiness evidence only rather than completed validation. Also require that any bounded control-plane summary or edit reason explicitly says the iteration only changed allowed control-plane files and did not repair apps/api runtime availability, that pending-only or cross-thread LangSmith activity is partial observability only and does not satisfy validation for thread 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane, and that the no-run defer reason should mention both the blocked log path apps/api/logs/provider-unique-errors.jsonl and the blocked subsystem apps/api provider/runtime routing together, explicitly say cross-thread LangSmith activity does not satisfy thread 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane, and explicitly require one fresh same-thread LangSmith control-plane run/trace with explicit goal context plus a passed smoke/typecheck result before validation can be treated as complete when no such same-thread evidence exists. Also require the bounded control-plane summary or decision reason to call any graph registration, worker startup, or server-running logs followed by flush/exit/shutdown partial readiness evidence only, and to call pending-only or cross-thread LangSmith activity partial observability only that does not satisfy thread 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane. When LangSmith feedback for the current control-plane thread includes contains_goal_context=0 or repair_smoke_passed=0, require the summary and each edit reason to restate the active goal in plain language, explicitly say the iteration only made a bounded control-plane workflow-hardening or observability change in apps/langgraph-control-plane/src/workflow.ts unless a fresh same-thread LangSmith control-plane run/trace with explicit goal context plus a passed control-plane smoke/typecheck result exists, and preserve a clear operator-facing no-run defer reason whenever no such same-thread run was emitted. For thread 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane, require the summary and each edit reason to restate that the direct fix for apps/api/logs/provider-unique-errors.jsonl showing openai sendMessage ECONNREFUSED against http://localhost:3101/v1/responses is blocked in the out-of-scope apps/api provider/runtime routing subsystem, that this iteration only changed allowed control-plane files, and that no fresh same-thread LangSmith control-plane run/trace plus passed smoke/typecheck result means the operator-facing no-run defer reason must explicitly name both apps/api/logs/provider-unique-errors.jsonl and apps/api provider/runtime routing together. Also require the summary and each edit reason to say cross-thread LangSmith activity does not satisfy validation for 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane and that startup graph registration, worker startup, or server-running logs followed by flush, exit, or shutdown are partial readiness evidence only, not completed validation, unless a fresh same-thread LangSmith control-plane run/trace with explicit goal context plus a passed control-plane smoke/typecheck result also exists. For thread 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane, require the summary and each edit reason to restate that the direct fix for apps/api/logs/provider-unique-errors.jsonl showing openai sendMessage ECONNREFUSED against http://localhost:3101/v1/responses is blocked in the out-of-scope apps/api provider/runtime routing subsystem, to explicitly say the iteration only changed allowed control-plane files and did not repair localhost apps/api runtime availability, to preserve a clear operator-facing no-run defer reason that names both apps/api/logs/provider-unique-errors.jsonl and apps/api provider/runtime routing together, and to state that retrying the same openai sendMessage localhost combination is unlikely to help until the blocked localhost apps/api target is serving again. Also require the summary and each edit reason to classify graph registration, worker startup, or server-running logs followed by flushing, exit, or shutdown as partial readiness evidence only, and to classify pending-only or cross-thread LangSmith activity as partial observability only that does not satisfy thread 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane. The next validation success condition remains at least one fresh same-thread LangSmith control-plane run/trace with explicit goal context plus a passed control-plane smoke/typecheck result for the touched path set, or a clear operator-facing no-run defer reason if no run was emitted. For thread 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane, require the summary and each edit reason to restate that blocked apps/api subsystem, preserve a clear operator-facing no-run defer reason that explicitly names apps/api/logs/provider-unique-errors.jsonl and the blocked apps/api provider/runtime routing subsystem, explicitly say the iteration only made a bounded control-plane observability or workflow-hardening change in apps/langgraph-control-plane/src/workflow.ts unless a fresh same-thread LangSmith control-plane run/trace with explicit goal context plus a passed control-plane smoke/typecheck result exists, explicitly say zero fresh same-thread runs for this iteration is a monitoring gap rather than by itself a deploy or rollback trigger, and explicitly say retrying the same openai sendMessage localhost combination is unlikely to help until the blocked localhost apps/api target is serving again. If startup logs also show graph registration, worker startup, or server-running followed by an immediate flush, exit, or shutdown, classify that as partial readiness evidence only, not completed validation. If LangSmith visibility is pending-only, mostly from other threads, or lacks a fresh completed run for the current thread, classify that as partial observability only; cross-thread activity does not satisfy validation for the current control-plane thread. Require the summary and each edit reason to explicitly say when recent LangSmith activity is dominated by other threads, to explicitly say that pending or completed runs from sibling threads such as api-runtime, ui-surface, homepage-surface, api-data, api-platform, workspace-surface, or any other non-control-plane thread do not satisfy validation for 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane, and to preserve the operator-facing no-run defer reason until at least one fresh same-thread LangSmith control-plane run/trace with explicit goal context plus a passed control-plane smoke/typecheck result exists. Also require the summary and each edit reason to explicitly say that a same-thread run is still required for the current iteration even when governance, evaluation, or older smoke feedback is passing, because older or cross-thread evidence does not close the current no-run gap. When prompt sync is enabled but no sync URL is returned and the live channel is unavailable, classify that as prompt fallback drift risk only, not rollout success, and preserve the same no-run defer reason until same-thread validation exists.',
+  'When the active repair signal is an openai/openrouter ECONNREFUSED, localhost connection refusal, or similar local endpoint reachability failure such as http://localhost:3101/v1/responses, classify it by default as blocked apps/api runtime/provider routing-probing drift rather than a control-plane-local regression unless a clear control-plane orchestration defect is visible in the candidate files. In control-plane scope, explicitly name the blocked subsystem as apps/api provider routing/probing, say retrying the same provider-method combination is unlikely to help immediately, and prefer one bounded observability, workflow-hardening, or explicit no-run defer-reason improvement. If the signal specifically comes from apps/api/logs/provider-unique-errors.jsonl for openai sendMessage against http://localhost:3101/v1/responses, explicitly say the direct fix is out of scope for the current control-plane thread because the localhost apps/api target is not serving, explicitly name the blocked subsystem as apps/api provider/runtime routing, explicitly name the blocked log path as apps/api/logs/provider-unique-errors.jsonl in the summary and in each edit reason, do not imply the underlying apps/api runtime issue was repaired from control-plane scope, and require the operator-facing no-run defer reason to restate that the active goal is a bounded control-plane workflow-hardening improvement for the current control-plane thread, state that only allowed control-plane files were changed in this iteration, and state that apps/api/logs/provider-unique-errors.jsonl plus the blocked subsystem apps/api provider/runtime routing remain out of scope and unrepaired here. Require that same defer reason to state that retrying the same openai sendMessage localhost combination is unlikely to help until the blocked localhost apps/api target is serving again, to explicitly classify pending-only same-thread LangSmith visibility for the current control-plane thread as partial observability only rather than completed validation, to explicitly classify graph registration, worker startup, or server-running logs followed by flushing, exit, or shutdown as partial readiness evidence only rather than completed validation, to explicitly say that build or typecheck success is compile-time validation only and does not satisfy runtime validation by itself, to explicitly say LangSmith prompt sync enabled without a returned URL and an unavailable live channel is prompt fallback drift risk only rather than rollout success, and to explicitly say pending or completed runs from sibling threads do not satisfy validation for the current control-plane thread and that cross-thread LangSmith activity does not satisfy validation for the current control-plane thread. Require that same defer reason to explicitly say that pending same-thread visibility plus startup log flush/exit together are only combined partial observability plus partial readiness, not a successful validation run, and to explicitly name the next success condition as at least one fresh same-thread LangSmith control-plane run/trace with explicit goal context plus a passed control-plane smoke/typecheck result for the touched path set, or a clear operator-facing no-run defer reason if no run was emitted. When the current control-plane thread is 775c9662-2dc6-4cc9-938f-2e0a2e6b788a:control-plane, require that same defer reason to explicitly say cross-thread activity from sibling threads such as 775c9662-2dc6-4cc9-938f-2e0a2e6b788a:api-routing and 775c9662-2dc6-4cc9-938f-2e0a2e6b788a:api-runtime does not satisfy validation for 775c9662-2dc6-4cc9-938f-2e0a2e6b788a:control-plane, and that pending-only same-thread LangSmith visibility for 775c9662-2dc6-4cc9-938f-2e0a2e6b788a:control-plane is partial observability only rather than completed validation. b31cedc0-ceb5-48d7-8772-cf97f38a3b42:ui-surface do not satisfy validation for b31cedc0-ceb5-48d7-8772-cf97f38a3b42:control-plane, require that same defer reason to explicitly say pending or completed runs from sibling threads such as b31cedc0-ceb5-48d7-8772-cf97f38a3b42:workspace-surface, b31cedc0-ceb5-48d7-8772-cf97f38a3b42:api-platform, b31cedc0-ceb5-48d7-8772-cf97f38a3b42:api-runtime, and b31cedc0-ceb5-48d7-8772-cf97f38a3b42:api-data do not satisfy validation for b31cedc0-ceb5-48d7-8772-cf97f38a3b42:control-plane, require that same defer reason to explicitly say pending runs from other threads such as b31cedc0-ceb5-48d7-8772-cf97f38a3b42:workspace-surface, b31cedc0-ceb5-48d7-8772-cf97f38a3b42:ui-surface, b31cedc0-ceb5-48d7-8772-cf97f38a3b42:homepage-surface, b31cedc0-ceb5-48d7-8772-cf97f38a3b42:api-platform, or b31cedc0-ceb5-48d7-8772-cf97f38a3b42:api-platform do not satisfy validation for b31cedc0-ceb5-48d7-8772-cf97f38a3b42:control-plane, require that same defer reason to explicitly say the iteration only changed allowed control-plane files and did not repair localhost apps/api runtime availability, require that same defer reason to explicitly preserve a clear operator-facing no-run defer reason unless at least one fresh same-thread LangSmith control-plane run/trace with explicit goal context plus a passed control-plane smoke/typecheck result exists for the touched path set, require that same defer reason to explicitly say pending same-thread visibility plus startup log flush/exit together are only partial observability plus partial readiness, not a successful validation run, and require that same defer reason to explicitly name the next success condition as at least one fresh same-thread LangSmith control-plane run/trace with explicit goal context plus a passed control-plane smoke/typecheck result for the touched path set, or a clear operator-facing no-run defer reason if no run was emitted. evidence together are partial observability plus partial readiness only rather than completed validation, require that same defer reason to explicitly say that if no fresh same-thread LangSmith control-plane run/trace with explicit goal context was emitted for thread 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane, the iteration must preserve a clear operator-facing no-run defer reason instead of claiming validation success, require that same defer reason to explicitly say pending same-thread visibility plus startup logs that register graphs, start workers, or report server-running before flushing/exiting is combined partial observability plus partial readiness only rather than completed validation, require that same defer reason to explicitly say recent-run-health passing or older runs from other threads do not satisfy this iteration for 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane, and require that same defer reason to state the next validation success condition exactly as at least one fresh same-thread LangSmith control-plane run/trace with explicit goal context plus a passed control-plane smoke/typecheck result for the touched path set, or a clear operator-facing no-run defer reason if no run was emitted. other threads do not satisfy this iteration for 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane, require that same defer reason to explicitly preserve the next validation success condition as at least one fresh same-thread LangSmith control-plane run/trace with explicit goal context plus a passed control-plane smoke/typecheck result for the touched path set, or a clear operator-facing no-run defer reason if no run was emitted, require that same defer reason to explicitly say that pending-only same-thread LangSmith visibility without a completed fresh same-thread run/trace is partial observability only and still does not satisfy validation for 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane, require that same defer reason to explicitly state that production restart of anygpt.service remains blocked without separate explicit approval and that only observational or experimental-safe control-plane handling is allowed in this iteration, require that same defer reason to explicitly restate the active goal in plain language as a bounded control-plane workflow-hardening improvement for thread 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane while apps/api/logs/provider-unique-errors.jsonl and the blocked subsystem apps/api provider/runtime routing remain out of scope and unrepaired here, require that same defer reason to explicitly mention the paired LangSmith feedback signal that contains_goal_context=0 and repair_smoke_passed=0 means this iteration must include explicit goal context and either a passed control-plane smoke/typecheck result plus a fresh same-thread LangSmith control-plane run/trace or a clear no-run defer reason, and require that same defer reason to explicitly state the next validation success condition: at least one fresh same-thread LangSmith control-plane run/trace with explicit goal context plus a passed control-plane smoke/typecheck result for the touched path set, or a clear operator-facing no-run defer reason if no run was emitted. Also require that defer reason to explicitly say the active goal is a bounded control-plane workflow-hardening improvement for thread 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane, that only allowed control-plane files were changed in this iteration, that apps/api/logs/provider-unique-errors.jsonl and the blocked subsystem apps/api provider/runtime routing remain out of scope and unrepaired here, that the prompt rollback reference anygpt-control-plane-agent:3a61868f505b2f04af50aef0a0cb0de0f1179f3f786c705504257bff551802ae remains the immediate prompt-level rollback context, that startup logs showing graph registration, worker startup, or server-running followed by immediate flush, exit, or shutdown are partial readiness evidence only, and that pending-only or cross-thread LangSmith activity does not satisfy validation for thread 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane. Also require the next validation success condition to be stated explicitly as at least one fresh same-thread LangSmith control-plane run/trace with explicit goal context plus a passed control-plane smoke/typecheck result for the touched control-plane path set, or a clear operator-facing no-run defer reason if no run was emitted. Also require that defer reason to explicitly preserve the prompt rollback reference anygpt-control-plane-agent:3a61868f505b2f04af50aef0a0cb0de0f1179f3f786c705504257bff551802ae, to say only allowed control-plane files were changed in this iteration, and to say that apps/api/logs/provider-unique-errors.jsonl plus the blocked subsystem apps/api provider/runtime routing remain out of scope and unrepaired here. Also require the defer reason to explicitly say that recent LangSmith activity from other threads or pending-only runs does not satisfy validation for thread 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane, and that startup logs showing graph registration, worker startup, or server-running followed by immediate flush, exit, or shutdown are partial readiness evidence only rather than completed validation. Also require the bounded control-plane summary and each edit reason to explicitly mention that only allowed control-plane files were changed in this iteration, that apps/api/logs/provider-unique-errors.jsonl and apps/api provider/runtime routing remain out of scope and unrepaired here, that the prompt rollback reference anygpt-control-plane-agent:3a61868f505b2f04af50aef0a0cb0de0f1179f3f786c705504257bff551802ae remains the immediate prompt-level rollback context, and that a clear operator-facing no-run defer reason must be preserved unless there is at least one fresh same-thread LangSmith control-plane run/trace with explicit goal context plus a passed control-plane smoke/typecheck result for thread 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane. Also require the defer reason to preserve the prompt rollback reference anygpt-control-plane-agent:3a61868f505b2f04af50aef0a0cb0de0f1179f3f786c705504257bff551802ae for immediate prompt-level rollback context, to explicitly say that only allowed control-plane files were changed in this iteration, to explicitly say that apps/api/logs/provider-unique-errors.jsonl and the blocked subsystem apps/api provider/runtime routing remain out of scope and were not repaired here, to restate the active goal in plain language as continuous safe control-plane monitoring and bounded improvement, and to explicitly classify startup logs that show graph registration, worker startup, or server-running followed by immediate flush, exit, or shutdown as partial readiness evidence only rather than completed validation. Also require that any bounded control-plane summary or edit reason explicitly says the iteration only changed allowed control-plane files and did not repair apps/api runtime availability, that pending-only or cross-thread LangSmith activity is partial observability only and does not satisfy validation for thread 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane, and that the no-run defer reason should mention both the blocked log path apps/api/logs/provider-unique-errors.jsonl and the blocked subsystem apps/api provider/runtime routing together, explicitly say cross-thread LangSmith activity does not satisfy thread 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane, and explicitly require one fresh same-thread LangSmith control-plane run/trace with explicit goal context plus a passed smoke/typecheck result before validation can be treated as complete when no such same-thread evidence exists. Also require the bounded control-plane summary or decision reason to call any graph registration, worker startup, or server-running logs followed by flush/exit/shutdown partial readiness evidence only, and to call pending-only or cross-thread LangSmith activity partial observability only that does not satisfy thread 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane. When LangSmith feedback for the current control-plane thread includes contains_goal_context=0 or repair_smoke_passed=0, require the summary and each edit reason to restate the active goal in plain language, explicitly say the iteration only made a bounded control-plane workflow-hardening or observability change in apps/langgraph-control-plane/src/workflow.ts unless a fresh same-thread LangSmith control-plane run/trace with explicit goal context plus a passed control-plane smoke/typecheck result exists, and preserve a clear operator-facing no-run defer reason whenever no such same-thread run was emitted. For thread 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane, require the summary and each edit reason to restate that the direct fix for apps/api/logs/provider-unique-errors.jsonl showing openai sendMessage ECONNREFUSED against http://localhost:3101/v1/responses is blocked in the out-of-scope apps/api provider/runtime routing subsystem, that this iteration only changed allowed control-plane files, and that no fresh same-thread LangSmith control-plane run/trace plus passed smoke/typecheck result means the operator-facing no-run defer reason must explicitly name both apps/api/logs/provider-unique-errors.jsonl and apps/api provider/runtime routing together. Also require the summary and each edit reason to say cross-thread LangSmith activity does not satisfy validation for 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane and that startup graph registration, worker startup, or server-running logs followed by flush, exit, or shutdown are partial readiness evidence only, not completed validation, unless a fresh same-thread LangSmith control-plane run/trace with explicit goal context plus a passed control-plane smoke/typecheck result also exists. For thread 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane, require the summary and each edit reason to restate that the direct fix for apps/api/logs/provider-unique-errors.jsonl showing openai sendMessage ECONNREFUSED against http://localhost:3101/v1/responses is blocked in the out-of-scope apps/api provider/runtime routing subsystem, to explicitly say the iteration only changed allowed control-plane files and did not repair localhost apps/api runtime availability, to preserve a clear operator-facing no-run defer reason that names both apps/api/logs/provider-unique-errors.jsonl and apps/api provider/runtime routing together, and to state that retrying the same openai sendMessage localhost combination is unlikely to help until the blocked localhost apps/api target is serving again. Also require the summary and each edit reason to classify graph registration, worker startup, or server-running logs followed by flushing, exit, or shutdown as partial readiness evidence only, and to classify pending-only or cross-thread LangSmith activity as partial observability only that does not satisfy thread 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane. The next validation success condition remains at least one fresh same-thread LangSmith control-plane run/trace with explicit goal context plus a passed control-plane smoke/typecheck result for the touched path set, or a clear operator-facing no-run defer reason if no run was emitted. For thread 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane, require the summary and each edit reason to restate that blocked apps/api subsystem, preserve a clear operator-facing no-run defer reason that explicitly names apps/api/logs/provider-unique-errors.jsonl and the blocked apps/api provider/runtime routing subsystem, explicitly say the iteration only made a bounded control-plane observability or workflow-hardening change in apps/langgraph-control-plane/src/workflow.ts unless a fresh same-thread LangSmith control-plane run/trace with explicit goal context plus a passed control-plane smoke/typecheck result exists, explicitly say zero fresh same-thread runs for this iteration is a monitoring gap rather than by itself a deploy or rollback trigger, and explicitly say retrying the same openai sendMessage localhost combination is unlikely to help until the blocked localhost apps/api target is serving again. If startup logs also show graph registration, worker startup, or server-running followed by an immediate flush, exit, or shutdown, classify that as partial readiness evidence only, not completed validation. If LangSmith visibility is pending-only, mostly from other threads, or lacks a fresh completed run for the current thread, classify that as partial observability only; cross-thread activity does not satisfy validation for the current control-plane thread. Require the summary and each edit reason to explicitly say when recent LangSmith activity is dominated by other threads, to explicitly say that pending or completed runs from sibling threads such as api-runtime, ui-surface, homepage-surface, api-data, api-platform, workspace-surface, or any other non-control-plane thread do not satisfy validation for 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane, and to preserve the operator-facing no-run defer reason until at least one fresh same-thread LangSmith control-plane run/trace with explicit goal context plus a passed control-plane smoke/typecheck result exists. Also require the summary and each edit reason to explicitly say that a same-thread run is still required for the current iteration even when governance, evaluation, or older smoke feedback is passing, because older or cross-thread evidence does not close the current no-run gap. When prompt sync is enabled but no sync URL is returned and the live channel is unavailable, classify that as prompt fallback drift risk only, not rollout success, and preserve the same no-run defer reason until same-thread validation exists.',
   'When the active repair signal is apps/api/logs/provider-unique-errors.jsonl showing openai sendMessage ECONNREFUSED for http://localhost:3101/v1/responses, explicitly name the blocked subsystem as apps/api provider/runtime routing, classify the direct fix as out of scope for the current control-plane thread 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane, and say retrying the same openai sendMessage combination is unlikely to help until the localhost API target is serving again. In control-plane scope, prefer one small observability, workflow-hardening, or operator-facing defer-reason improvement in an allowed control-plane file instead of implying the apps/api issue was fixed. If startup logs show graph registration, worker startup, or server-running followed by flushing to persistent storage and exiting, classify that as partial readiness evidence only, not completed validation. If LangSmith visibility is pending-only or mostly from other threads, classify that as partial observability only; cross-thread activity does not satisfy validation for 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane. Preserve a clear operator-facing no-run defer reason unless a fresh same-thread LangSmith control-plane run/trace with explicit goal context and a passed control-plane smoke/typecheck result were emitted for this iteration.',
   'When the active repair signal is apps/api/logs/provider-unique-errors.jsonl showing openai sendMessage ECONNREFUSED for http://localhost:3101/v1/responses, explicitly name the blocked subsystem as apps/api provider/runtime routing, classify the direct fix as out of scope for the current control-plane thread 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane, and say retrying the same openai sendMessage combination is unlikely to help until the localhost API target is serving again. In control-plane scope, prefer one small observability, workflow-hardening, or operator-facing defer-reason improvement in an allowed control-plane file instead of implying the apps/api issue was fixed. If startup logs show graph registration, worker startup, or server-running followed by flushing to persistent storage and exiting, classify that as partial readiness evidence only, not completed validation. If LangSmith visibility is pending-only or mostly from other threads, classify that as partial observability only; cross-thread activity does not satisfy validation for 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane. Preserve a clear operator-facing no-run defer reason unless a fresh same-thread LangSmith control-plane run/trace with explicit goal context and a passed control-plane smoke/typecheck result were emitted for this iteration.',
   'When the active repair signal is apps/api/logs/provider-unique-errors.jsonl showing openai sendMessage ECONNREFUSED for http://localhost:3101/v1/responses, and the current control-plane thread is 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane, require the summary and each edit reason to explicitly say the direct fix is out of scope in the blocked apps/api provider/runtime routing subsystem, that retrying the same openai sendMessage combination is unlikely to help until the localhost API target is serving again, and that any control-plane-only change must preserve a clear operator-facing no-run defer reason unless a fresh same-thread LangSmith control-plane run/trace and passed control-plane smoke/typecheck result were emitted. The summary must also explicitly state whether the iteration ended with same-thread validation evidence or with a no-run defer reason. If startup logs show graph registration, worker startup, or server-running followed by flushing to persistent storage and exiting, classify that as partial readiness evidence only. If LangSmith visibility is pending-only or mostly from other threads, classify that as partial observability only; cross-thread activity does not satisfy validation for 8bd76091-7a92-4314-abf8-926521f7bacf:control-plane.',
@@ -566,7 +567,7 @@ const DEFAULT_CONTROL_PLANE_AUTONOMOUS_EDIT_PROMPT = [
   'When active repair signals specifically pair Gemini image_output provider_cap_blocked/provider_model_removed region or country availability failures with lyria-3-pro-preview probe_fail outcomes like unsupported audio/s16le input or function calling not enabled, treat that as the same upstream/provider-bound Gemini capability mismatch and regional catalog drift family blocked in apps/api Gemini provider routing/capability handling; prefer one bounded control-plane observability or defer-reason improvement and state that repeating the same Gemini provider-method combination is unlikely to help immediately.',
   'When Gemini signals specifically pair image generation unavailable in country or provider region with unsupported audio mime types such as audio/s16le, treat them as the same upstream/provider-bound Gemini capability mismatch and regional catalog drift family blocked in apps/api Gemini provider routing/capability handling; in control-plane scope, prefer one bounded observability, prioritization, or defer-reason improvement and state that retrying the same Gemini provider-method combination is unlikely to help.',
   'When recent logs show Gemini provider_cap_blocked or provider_model_removed for image_output because generation is unavailable in a country or provider region together with probe_fail errors for the same model family such as unsupported audio/s16le input, function calling not enabled, or generateContent unsupported, treat that cluster as one upstream/provider-bound Gemini capability mismatch and regional catalog drift family blocked in apps/api Gemini provider routing/capability handling; in control-plane scope, prefer a single observability, prioritization, or explicit defer-reason improvement, state that repeating the same Gemini provider-method combination is unlikely to help immediately, and require the next smoke/validation step to confirm at least one fresh LangSmith control-plane run/trace or preserve a clear no-run defer reason if no run was emitted.',
-  'When the active repair signal is apps/api/logs/provider-unique-errors.jsonl showing openai sendMessage ECONNREFUSED for http://localhost:3101/v1/responses, explicitly name the blocked subsystem as apps/api provider/runtime routing, classify the direct fix as out of scope for the current control-plane thread, and say retrying the same openai sendMessage combination is unlikely to help until the localhost API target is serving again. In control-plane scope, prefer one bounded observability, workflow-hardening, or operator-facing defer-reason improvement instead of implying the apps/api issue was fixed. Require the summary and each edit reason to restate the active goal in plain language, name the current control-plane thread when available, name the exact touched control-plane file or subsystem, and preserve a clear operator-facing no-run defer reason whenever no fresh same-thread LangSmith control-plane run/trace and passed control-plane smoke/typecheck result were emitted for this iteration. If startup logs show graph registration, worker startup, or server-running evidence followed by immediate flush, exit, or shutdown, classify that as partial readiness evidence only, not completed validation. If LangSmith visibility is pending-only or mostly from other threads, classify that as partial observability only; cross-thread activity does not satisfy validation for the current control-plane thread. If pending same-thread LangSmith visibility appears together with graph registration, worker startup, or server-running evidence that immediately flushes, exits, or shuts down, require the summary and each edit reason to explicitly classify the state as combined partial observability plus partial readiness only and to preserve the operator-facing no-run defer reason instead of claiming successful validation. Also require the summary and each edit reason to explicitly say the iteration only changed allowed control-plane files and did not repair apps/api/logs/provider-unique-errors.jsonl or the blocked apps/api provider/runtime routing subsystem. The next validation success condition remains at least one fresh same-thread LangSmith control-plane run/trace with explicit goal context plus a passed control-plane smoke/typecheck result for the touched path set, or a clear operator-facing no-run defer reason if no run was emitted.',].join(' ');
+  'When the active repair signal is apps/api/logs/provider-unique-errors.jsonl showing openai sendMessage ECONNREFUSED for http://localhost:3101/v1/responses, explicitly name the blocked subsystem as apps/api provider/runtime routing, classify the direct fix as out of scope for the current control-plane thread, and say retrying the same openai sendMessage combination is unlikely to help until the localhost API target is serving again. In control-plane scope, prefer one bounded observability, workflow-hardening, or operator-facing defer-reason improvement instead of implying the apps/api issue was fixed. Require the summary and each edit reason to restate the active goal in plain language, name the current control-plane thread when available, name the exact touched control-plane file or subsystem, and preserve a clear operator-facing no-run defer reason whenever no fresh same-thread LangSmith control-plane run/trace and passed control-plane smoke/typecheck result were emitted for this iteration. If startup logs show graph registration, worker startup, or server-running evidence followed by immediate flush, exit, or shutdown, classify that as partial readiness evidence only, not completed validation. If LangSmith visibility is pending-only or mostly from other threads, classify that as partial observability only; cross-thread activity does not satisfy validation for the current control-plane thread. If pending same-thread LangSmith visibility appears together with graph registration, worker startup, or server-running evidence that immediately flushes, exits, or shuts down, require the summary and each edit reason to explicitly classify the state as combined partial observability plus partial readiness only and to preserve the operator-facing no-run defer reason instead of claiming successful validation. For thread 5d4f7de9-8e85-4e2a-b093-f2f0efdb5698:control-plane, when same-thread LangSmith visibility is pending-only and recent completed activity is dominated by sibling threads such as 5d4f7de9-8e85-4e2a-b093-f2f0efdb5698:api-runtime, 5d4f7de9-8e85-4e2a-b093-f2f0efdb5698:api-routing, or 5d4f7de9-8e85-4e2a-b093-f2f0efdb5698:api-platform, require the summary and each edit reason to explicitly say that cross-thread activity does not satisfy validation for 5d4f7de9-8e85-4e2a-b093-f2f0efdb5698:control-plane and that pending-only same-thread visibility does not satisfy validation by itself. Also require the summary and each edit reason to explicitly say the iteration only changed allowed control-plane files and did not repair apps/api/logs/provider-unique-errors.jsonl or the blocked apps/api provider/runtime routing subsystem, and to preserve the prompt rollback reference anygpt-control-plane-agent:9b55d07cef61f12452da788d0377fe6ab2b72fd1ce118963f4c238ce14dde449 as immediate prompt-level rollback context when no fresh same-thread validation exists. The next validation success condition remains at least one fresh same-thread LangSmith control-plane run/trace with explicit goal context plus a passed control-plane smoke/typecheck result for the touched path set, or a clear operator-facing no-run defer reason if no run was emitted.',].join(' ');
 
 const DEFAULT_CONTROL_PLANE_PROMPT_BUNDLE = ControlPlanePromptBundleSchema.parse({
   planner: 'You are the planner agent for the AnyGPT LangGraph control plane. Produce concise, actionable planning notes based on logs, MCP findings, and requested scopes. Focus on priorities, risks, and safe next steps.',
@@ -707,6 +708,9 @@ export const PostRepairValidationStatusSchema = z.enum(['not-needed', 'planned',
 export const ExperimentalRestartStatusSchema = z.enum(['not-needed', 'pending', 'success', 'failed', 'skipped']);
 export const ProductionRestartStatusSchema = z.enum(['not-needed', 'pending', 'success', 'failed', 'skipped']);
 export const ScopeExpansionModeSchema = z.enum(['adaptive', 'locked']);
+export const HealthClassSchema = z.enum(['healthy', 'degraded', 'waiting_evidence', 'blocked_external', 'failed']);
+export const EvidenceStatusSchema = z.enum(['unknown', 'not-required', 'planned', 'collected', 'validated', 'missing']);
+export const AiFailureClassSchema = z.enum(['none', 'timeout', 'backpressure', 'malformed-output', 'backend-error']);
 
 export const ControlPlaneStateSchema = z.object({
   repoRoot: z.string(),
@@ -802,6 +806,11 @@ export const ControlPlaneStateSchema = z.object({
   autonomousContractChecks: z.array(z.string()).default([]),
   autonomousContractPaths: z.array(z.string()).default([]),
   repairStatus: RepairStatusSchema.default('idle'),
+  healthClass: HealthClassSchema.default('healthy'),
+  deferReason: z.string().default(''),
+  evidenceStatus: EvidenceStatusSchema.default('unknown'),
+  lastAiFailureClass: AiFailureClassSchema.default('none'),
+  validationRequired: z.boolean().default(false),
   repairDecisionReason: z.string().default(''),
   recentRepairValidationFailureCount: z.number().int().nonnegative().default(0),
   repairSmokeJobs: z.array(PlannedJobSchema).default([]),
@@ -858,6 +867,9 @@ export type RepairStatus = z.infer<typeof RepairStatusSchema>;
 export type PostRepairValidationStatus = z.infer<typeof PostRepairValidationStatusSchema>;
 export type ExperimentalRestartStatus = z.infer<typeof ExperimentalRestartStatusSchema>;
 export type ScopeExpansionMode = z.infer<typeof ScopeExpansionModeSchema>;
+export type HealthClass = z.infer<typeof HealthClassSchema>;
+export type EvidenceStatus = z.infer<typeof EvidenceStatusSchema>;
+export type AiFailureClass = z.infer<typeof AiFailureClassSchema>;
 
 function roundGateScore(value: number): number {
   return Math.round(value * 1000) / 1000;
@@ -1132,10 +1144,12 @@ function resolveGovernanceGateResult(
 function shouldApplyAutonomousEditsForState(state: ControlPlaneState): boolean {
   const evaluationGateResult = resolveStateEvaluationGateResult(state);
   const governanceGateResult = resolveStateGovernanceGateResult(state);
+  const surfaceBrowserBlockingReason = getSurfaceBrowserBlockingReason(state);
   return state.executePlan
     && state.autonomousEditEnabled
     && state.autonomousEditReviewDecision === 'approved'
     && state.proposedEdits.length > 0
+    && !surfaceBrowserBlockingReason
     && !evaluationGateResult.blocksAutonomousEdits
     && !governanceGateResult.blocksAutonomousEdits;
 }
@@ -2105,6 +2119,8 @@ async function autonomousContractNode(state: ControlPlaneState, runtime?: Runtim
     langSmithProjectName: state.langSmithProjectName,
     governanceProfile: state.governanceProfile,
     goal: state.goal,
+    scopes: state.scopes,
+    effectiveScopes: state.effectiveScopes,
     repairIntentSummary: state.repairIntentSummary,
     repairSignals: state.repairSignals,
     improvementIntentSummary: state.improvementIntentSummary,
@@ -2349,6 +2365,273 @@ function buildPostRepairValidationJobs(state: ControlPlaneState): PlannedJob[] {
   return jobs.slice(0, POST_REPAIR_VALIDATION_JOB_LIMIT);
 }
 
+function isBrowserEvidenceRequired(state: Pick<
+  ControlPlaneState,
+  'effectiveScopes' | 'scopes' | 'appliedEdits' | 'repairPromotedPaths' | 'repairRollbackPaths'
+>): boolean {
+  const effectiveScopes = new Set(getEffectiveScopes(state as ControlPlaneState));
+  if (!(effectiveScopes.has('homepage-surface') || effectiveScopes.has('ui-surface'))) return false;
+  const touchedPaths = [
+    ...getAppliedRepairPaths({ appliedEdits: state.appliedEdits }),
+    ...state.repairPromotedPaths,
+    ...state.repairRollbackPaths,
+  ].map((entry) => String(entry || '').trim());
+  if (touchedPaths.length === 0) return false;
+  return touchedPaths.some((candidatePath) =>
+    candidatePath.startsWith('apps/homepage/')
+      || candidatePath.startsWith('apps/ui/')
+  );
+}
+
+function getSurfaceBrowserBlockingReason(
+  state: Pick<
+    ControlPlaneState,
+    'executedMcpActions' | 'effectiveScopes' | 'scopes'
+  >,
+): string {
+  const effectiveScopes = new Set(getEffectiveScopes(state as ControlPlaneState));
+  if (!(effectiveScopes.has('homepage-surface') || effectiveScopes.has('ui-surface'))) return '';
+
+  const relevantActions = state.executedMcpActions.filter((action) =>
+    action.server === 'playwright'
+      && (
+        String(action.id || '').startsWith('mcp-playwright-')
+        || /^mcp-playwright-post-repair-/.test(String(action.id || ''))
+      ),
+  );
+  if (relevantActions.length === 0) {
+    return 'Surface browser evidence is still missing for this browser-visible lane.';
+  }
+
+  const navigateFailure = relevantActions.find((action) =>
+    action.tool === 'browser_navigate'
+      && /err_connection_refused|page\.goto: net::err_connection_refused|chrome-error:\/\/chromewebdata/i.test(
+        `${action.outputSummary || ''} ${action.outputPreview || ''}`,
+      ),
+  );
+  if (navigateFailure) {
+    return `Surface browser validation is blocked because the target page is unreachable: ${truncateTextMiddle(navigateFailure.outputSummary || navigateFailure.outputPreview || navigateFailure.title, 200)}.`;
+  }
+
+  const networkFailure = relevantActions.find((action) =>
+    action.tool === 'browser_network_requests'
+      && /err_connection_refused|failed| 404\b| 500\b|not found\b/i.test(
+        `${action.outputSummary || ''} ${action.outputPreview || ''}`,
+      ),
+  );
+  if (networkFailure) {
+    return `Surface browser validation is blocked because the target page still shows blocking network errors: ${truncateTextMiddle(networkFailure.outputSummary || networkFailure.outputPreview || networkFailure.title, 200)}.`;
+  }
+
+  return '';
+}
+
+function buildPostRepairBrowserValidationActions(state: ControlPlaneState): McpPlannedAction[] {
+  if (!isBrowserEvidenceRequired(state)) return [];
+  const inspectionsByServer = new Map(
+    state.mcpInspections.map((inspection) => [inspection.server, inspection] as const),
+  );
+  const configsByServer = new Map(
+    loadMcpServers(resolveMcpConfigPath(state)).map((server) => [server.name, server] as const),
+  );
+  const playwrightInspection = inspectionsByServer.get('playwright');
+  const playwrightConfig = configsByServer.get('playwright');
+  if (!playwrightInspection || playwrightInspection.status !== 'connected' || !playwrightConfig) return [];
+
+  const targetUrl = resolveSignalDrivenMcpTargetUrls(state)[0];
+  if (!targetUrl) return [];
+
+  const existingIds = new Set(
+    state.executedMcpActions
+      .map((action) => String(action.id || '').trim())
+      .filter(Boolean),
+  );
+  const actions: McpPlannedAction[] = [];
+  if (!existingIds.has('mcp-playwright-post-repair-navigate') && mcpInspectionHasTool(playwrightInspection, 'browser_navigate')) {
+    actions.push(buildMcpPlannedAction({
+      id: 'mcp-playwright-post-repair-navigate',
+      server: 'playwright',
+      tool: 'browser_navigate',
+      title: `Validate browser page load for ${targetUrl}`,
+      reason: 'Browser-visible lanes must re-open the touched surface after a repair so promotion is backed by a real page-load check.',
+      arguments: { url: targetUrl },
+      risk: 'low',
+      alwaysAllow: playwrightConfig.alwaysAllow.includes('browser_navigate'),
+    }));
+  }
+  if (!existingIds.has('mcp-playwright-post-repair-snapshot') && mcpInspectionHasTool(playwrightInspection, 'browser_snapshot')) {
+    actions.push(buildMcpPlannedAction({
+      id: 'mcp-playwright-post-repair-snapshot',
+      server: 'playwright',
+      tool: 'browser_snapshot',
+      title: 'Capture post-repair browser snapshot',
+      reason: 'Promotion for browser-visible lanes requires a post-repair snapshot that reflects the changed surface.',
+      arguments: {},
+      risk: 'low',
+      alwaysAllow: playwrightConfig.alwaysAllow.includes('browser_snapshot'),
+    }));
+  }
+  if (!existingIds.has('mcp-playwright-post-repair-network') && mcpInspectionHasTool(playwrightInspection, 'browser_network_requests')) {
+    actions.push(buildMcpPlannedAction({
+      id: 'mcp-playwright-post-repair-network',
+      server: 'playwright',
+      tool: 'browser_network_requests',
+      title: 'Capture post-repair browser network activity',
+      reason: 'Promotion for browser-visible lanes requires a post-repair network check so missing assets or blocking HTTP failures do not slip through.',
+      arguments: {},
+      risk: 'low',
+      alwaysAllow: playwrightConfig.alwaysAllow.includes('browser_network_requests'),
+    }));
+  }
+
+  return actions;
+}
+
+function evaluateBrowserValidationBundle(
+  state: Pick<ControlPlaneState, 'executedMcpActions' | 'effectiveScopes' | 'scopes' | 'appliedEdits' | 'repairPromotedPaths' | 'repairRollbackPaths'>,
+): { required: boolean; passed: boolean; status: EvidenceStatus; reason: string } {
+  const required = isBrowserEvidenceRequired(state);
+  if (!required) {
+    return {
+      required: false,
+      passed: true,
+      status: 'not-required',
+      reason: 'Browser validation is not required for this lane.',
+    };
+  }
+
+  const actions = state.executedMcpActions.filter((action) =>
+    action.server === 'playwright'
+      && /^mcp-playwright-post-repair-/.test(String(action.id || '').trim()),
+  );
+  if (actions.length === 0) {
+    return {
+      required: true,
+      passed: false,
+      status: 'missing',
+      reason: 'Promotion blocked because no post-repair Playwright validation bundle was captured for this browser-visible lane.',
+    };
+  }
+
+  const navigate = actions.find((action) => action.tool === 'browser_navigate');
+  const snapshot = actions.find((action) => action.tool === 'browser_snapshot');
+  const network = actions.find((action) => action.tool === 'browser_network_requests');
+  const targetUrl = normalizeHttpUrl((navigate?.arguments as Record<string, unknown> | undefined)?.url);
+  const targetOrigin = (() => {
+    try {
+      return targetUrl ? new URL(targetUrl).origin : '';
+    } catch {
+      return '';
+    }
+  })();
+  const failedAction = actions.find((action) => action.status === 'failed');
+  if (failedAction) {
+    return {
+      required: true,
+      passed: false,
+      status: 'missing',
+      reason: `Promotion blocked because post-repair browser validation failed during ${failedAction.tool}: ${truncateTextMiddle(failedAction.outputSummary || failedAction.title, 180)}.`,
+    };
+  }
+  if (!navigate || navigate.status !== 'success') {
+    return {
+      required: true,
+      passed: false,
+      status: 'missing',
+      reason: 'Promotion blocked because post-repair Playwright validation did not confirm a successful page load.',
+    };
+  }
+  if (!snapshot || snapshot.status !== 'success') {
+    return {
+      required: true,
+      passed: false,
+      status: 'missing',
+      reason: 'Promotion blocked because post-repair Playwright validation did not capture a browser snapshot for the touched surface.',
+    };
+  }
+
+  const consoleEvidence = [navigate?.outputPreview, snapshot?.outputPreview, network?.outputPreview]
+    .map((entry) => String(entry || ''))
+    .join('\n');
+  const consoleErrorCount = Math.max(
+    ...Array.from(consoleEvidence.matchAll(/Console:\s*(\d+)\s+errors?/gi)).map((match) => Number(match[1]) || 0),
+    0,
+  );
+  if (consoleErrorCount > 0) {
+    return {
+      required: true,
+      passed: false,
+      status: 'missing',
+      reason: `Promotion blocked because post-repair browser validation still reported ${consoleErrorCount} console error(s) on the touched surface.`,
+    };
+  }
+
+  const networkText = [network?.outputSummary, network?.outputPreview]
+    .map((entry) => String(entry || ''))
+    .join('\n');
+  if (network && network.status === 'success') {
+    const networkLines = networkText
+      .split('\n')
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+    const blockingNetworkLines = networkLines.filter((line) => {
+      const normalized = line.toLowerCase();
+      const failed = normalized.includes('[failed]') || /=>\s*\[(4\d\d|5\d\d)\]/i.test(line);
+      if (!failed) return false;
+      if (!targetOrigin) return true;
+      return normalized.includes(targetOrigin.toLowerCase());
+    });
+    if (blockingNetworkLines.length > 0) {
+      return {
+        required: true,
+        passed: false,
+        status: 'missing',
+        reason: `Promotion blocked because post-repair browser validation still saw blocking same-origin network or asset failures: ${truncateTextMiddle(blockingNetworkLines[0], 180)}.`,
+      };
+    }
+  }
+
+  return {
+    required: true,
+    passed: true,
+    status: 'validated',
+    reason: 'Post-repair Playwright validation bundle passed with page-load, snapshot, and browser-network evidence.',
+  };
+}
+
+async function postRepairBrowserEvidenceNode(state: ControlPlaneState): Promise<Partial<ControlPlaneState>> {
+  const actions = buildPostRepairBrowserValidationActions(state);
+  if (actions.length === 0) {
+    const bundle = evaluateBrowserValidationBundle(state);
+    return {
+      evidenceStatus: bundle.status,
+      validationRequired: bundle.required,
+      deferReason: bundle.passed ? state.deferReason : bundle.reason,
+    };
+  }
+
+  const patch = await executePlannedMcpActions(state, actions);
+  const executedMcpActions = patch.executedMcpActions || state.executedMcpActions;
+  const bundle = evaluateBrowserValidationBundle({
+    ...state,
+    executedMcpActions,
+  });
+  const notes = [
+    ...actions.map((action) => `Post-repair browser validation queued: ${action.title} (${action.server}.${action.tool}).`),
+    bundle.reason,
+  ];
+
+  return {
+    ...patch,
+    evidenceStatus: bundle.status,
+    validationRequired: bundle.required,
+    deferReason: bundle.passed ? state.deferReason : bundle.reason,
+    plannerNotes: appendUniqueNotes(patch.plannerNotes || state.plannerNotes, notes),
+    repairNotes: appendUniqueNotes(state.repairNotes, notes),
+    mcpActionNotes: appendUniqueNotes(patch.mcpActionNotes || state.mcpActionNotes, notes),
+  };
+}
+
 type ControlPlaneAiConfig = {
   enabled: boolean;
   baseUrl: string;
@@ -2365,6 +2648,9 @@ type AiNodeRunResult = {
   backend: string;
   notes: string[];
   error?: string;
+  backpressure?: boolean;
+  retryAfterSeconds?: number;
+  failureClass?: AiFailureClass;
 };
 
 type AiCodeEditResult = {
@@ -2377,6 +2663,8 @@ type AiCodeEditResult = {
   agentFocus?: string;
   candidatePaths?: string[];
   error?: string;
+  backpressure?: boolean;
+  retryAfterSeconds?: number;
 };
 
 type AutonomousEditReviewResult = {
@@ -2395,6 +2683,54 @@ type AutonomousEditAgentWorkload = {
   candidateFiles: ReturnType<typeof readAutonomousEditContext>;
   candidatePaths: string[];
 };
+
+function isAiBackendBackpressureMessage(value: unknown): boolean {
+  const text = String(value || '').trim().toLowerCase();
+  if (!text) return false;
+  return /request queue is busy/.test(text)
+    || /service temporarily unavailable/.test(text)
+    || /retry in a few seconds/.test(text)
+    || (/retry_after_seconds/.test(text) && /error_id/.test(text))
+    || (/status code 503/.test(text) && /queue|busy|retry/.test(text));
+}
+
+function extractAiBackendRetryAfterSeconds(value: unknown): number | undefined {
+  const text = String(value || '');
+  if (!text) return undefined;
+  const jsonStyleMatch = text.match(/retry_after_seconds["']?\s*[:=]\s*(\d+)/i);
+  if (jsonStyleMatch) {
+    const parsed = Number(jsonStyleMatch[1]);
+    if (Number.isFinite(parsed) && parsed > 0) return Math.floor(parsed);
+  }
+  const proseMatch = text.match(/retry in\s+(\d+)\s+seconds?/i);
+  if (proseMatch) {
+    const parsed = Number(proseMatch[1]);
+    if (Number.isFinite(parsed) && parsed > 0) return Math.floor(parsed);
+  }
+  return undefined;
+}
+
+function hasRecentAiBackendBackpressure(
+  state: Pick<
+    ControlPlaneState,
+    | 'plannerNotes'
+    | 'buildAgentInsights'
+    | 'qualityAgentInsights'
+    | 'deployAgentInsights'
+    | 'autonomousEditNotes'
+    | 'recentAutonomousLearningNotes'
+  >,
+): boolean {
+  const candidates = [
+    ...state.plannerNotes.slice(-24),
+    ...state.buildAgentInsights.slice(-8),
+    ...state.qualityAgentInsights.slice(-8),
+    ...state.deployAgentInsights.slice(-8),
+    ...state.autonomousEditNotes.slice(-12),
+    ...state.recentAutonomousLearningNotes.slice(-8),
+  ];
+  return candidates.some((entry) => isAiBackendBackpressureMessage(entry));
+}
 
 type LoadedMcpServerConfig = {
   name: string;
@@ -2421,6 +2757,15 @@ const gitHubCodeQlSyncCache = new Map<string, {
   notes: string[];
 }>();
 const gitHubCodeQlSyncInflightCache = new Map<string, Promise<{
+  insights: LogInsight[];
+  notes: string[];
+}>>();
+const gitHubDependabotSyncCache = new Map<string, {
+  checkedAtMs: number;
+  insights: LogInsight[];
+  notes: string[];
+}>();
+const gitHubDependabotSyncInflightCache = new Map<string, Promise<{
   insights: LogInsight[];
   notes: string[];
 }>>();
@@ -2681,6 +3026,9 @@ const CODEQL_RESULT_FILE_LIMIT = parsePositiveIntegerEnv('CONTROL_PLANE_CODEQL_R
 const CODEQL_RESULT_LINE_LIMIT = parsePositiveIntegerEnv('CONTROL_PLANE_CODEQL_RESULT_LINE_LIMIT', 12, 1);
 const AI_AGENT_REQUEST_TIMEOUT_MS = parsePositiveIntegerEnv('CONTROL_PLANE_AI_AGENT_TIMEOUT_MS', 40_000, 5_000);
 const AI_NOTES_AGENT_REQUEST_TIMEOUT_MS = parsePositiveIntegerEnv('CONTROL_PLANE_AI_NOTES_TIMEOUT_MS', 20_000, 1_000);
+const API_FAMILY_AI_NOTES_TIMEOUT_MS = parsePositiveIntegerEnv('CONTROL_PLANE_API_FAMILY_AI_NOTES_TIMEOUT_MS', 45_000, 5_000);
+const SURFACE_FAMILY_AI_NOTES_TIMEOUT_MS = parsePositiveIntegerEnv('CONTROL_PLANE_SURFACE_FAMILY_AI_NOTES_TIMEOUT_MS', 60_000, 5_000);
+const CONTROL_PLANE_LANE_AI_NOTES_TIMEOUT_MS = parsePositiveIntegerEnv('CONTROL_PLANE_CONTROL_PLANE_AI_NOTES_TIMEOUT_MS', 60_000, 5_000);
 const AI_AGENT_NOTE_LIMIT = 8;
 const AI_AGENT_PAYLOAD_STRING_MAX_CHARS = parsePositiveIntegerEnv('CONTROL_PLANE_AI_MAX_STRING_CHARS', 2_000, 200);
 const AI_AGENT_LOG_LINE_MAX_CHARS = parsePositiveIntegerEnv('CONTROL_PLANE_AI_LOG_LINE_MAX_CHARS', 2_400, 200);
@@ -2695,14 +3043,23 @@ const AI_CODE_EDIT_PAYLOAD_STRING_MAX_CHARS = parsePositiveIntegerEnv('CONTROL_P
 const AI_CODE_EDIT_AGENT_PARALLELISM = parsePositiveIntegerEnv('CONTROL_PLANE_AI_CODE_EDIT_AGENT_PARALLELISM', 6, 1);
 const CONTROL_PLANE_NOTE_HISTORY_LIMIT = parsePositiveIntegerEnv('CONTROL_PLANE_NOTE_HISTORY_LIMIT', 120, 20);
 const CONTROL_PLANE_TYPECHECK_COMMAND = 'bash ./bun.sh run -F anygpt-langgraph-control-plane typecheck';
-const RESEARCH_SCOUT_AI_NOTES_TIMEOUT_MS = parsePositiveIntegerEnv('CONTROL_PLANE_RESEARCH_SCOUT_AI_NOTES_TIMEOUT_MS', 90_000, 5_000);
-const RESEARCH_SCOUT_AI_PLANNER_TIMEOUT_MS = parsePositiveIntegerEnv('CONTROL_PLANE_RESEARCH_SCOUT_AI_PLANNER_TIMEOUT_MS', 180_000, 10_000);
+const RESEARCH_SCOUT_AI_NOTES_TIMEOUT_MS = parsePositiveIntegerEnv('CONTROL_PLANE_RESEARCH_SCOUT_AI_NOTES_TIMEOUT_MS', 240_000, 5_000);
+const RESEARCH_SCOUT_AI_PLANNER_TIMEOUT_MS = parsePositiveIntegerEnv('CONTROL_PLANE_RESEARCH_SCOUT_AI_PLANNER_TIMEOUT_MS', 240_000, 10_000);
+const RESEARCH_SCOUT_PREFETCH_TIMEOUT_MS = parsePositiveIntegerEnv('CONTROL_PLANE_RESEARCH_SCOUT_PREFETCH_TIMEOUT_MS', 8_000, 1_000);
+const RESEARCH_SCOUT_PREFETCH_CANDIDATE_LIMIT = parsePositiveIntegerEnv('CONTROL_PLANE_RESEARCH_SCOUT_PREFETCH_CANDIDATE_LIMIT', 6, 1);
+const RESEARCH_SCOUT_PREFETCH_TEXT_MAX_CHARS = parsePositiveIntegerEnv('CONTROL_PLANE_RESEARCH_SCOUT_PREFETCH_TEXT_MAX_CHARS', 40_000, 2_000);
+const DEFAULT_HOMEPAGE_SURFACE_URL = normalizeHttpUrl(String(process.env.CONTROL_PLANE_HOMEPAGE_SURFACE_URL || 'http://127.0.0.1:3091').trim()) || 'http://127.0.0.1:3091';
+const DEFAULT_UI_SURFACE_URL = normalizeHttpUrl(String(process.env.CONTROL_PLANE_UI_SURFACE_URL || 'http://127.0.0.1:3090').trim()) || 'http://127.0.0.1:3090';
 const CODEQL_AUTORUN_ENABLED = parseBooleanEnv('CONTROL_PLANE_CODEQL_AUTORUN', true);
 const GITHUB_CODEQL_SYNC_ENABLED = parseBooleanEnv('CONTROL_PLANE_GITHUB_CODEQL_SYNC', true);
 const GITHUB_CODEQL_SYNC_REFRESH_MS = parsePositiveIntegerEnv('CONTROL_PLANE_GITHUB_CODEQL_SYNC_REFRESH_MS', 15 * 60 * 1000, 60_000);
 const GITHUB_CODEQL_ALERT_LIMIT = parsePositiveIntegerEnv('CONTROL_PLANE_GITHUB_CODEQL_ALERT_LIMIT', 12, 1);
 const GITHUB_CODEQL_ANALYSIS_LIMIT = parsePositiveIntegerEnv('CONTROL_PLANE_GITHUB_CODEQL_ANALYSIS_LIMIT', 5, 1);
+const GITHUB_CODEQL_WORKFLOW_RUN_LIMIT = parsePositiveIntegerEnv('CONTROL_PLANE_GITHUB_CODEQL_WORKFLOW_RUN_LIMIT', 3, 1);
 const GITHUB_CODEQL_API_TIMEOUT_MS = parsePositiveIntegerEnv('CONTROL_PLANE_GITHUB_CODEQL_API_TIMEOUT_MS', 20_000, 1_000);
+const GITHUB_DEPENDABOT_SYNC_ENABLED = parseBooleanEnv('CONTROL_PLANE_GITHUB_DEPENDABOT_SYNC', true);
+const GITHUB_DEPENDABOT_SYNC_REFRESH_MS = parsePositiveIntegerEnv('CONTROL_PLANE_GITHUB_DEPENDABOT_SYNC_REFRESH_MS', 15 * 60 * 1000, 60_000);
+const GITHUB_DEPENDABOT_ALERT_LIMIT = parsePositiveIntegerEnv('CONTROL_PLANE_GITHUB_DEPENDABOT_ALERT_LIMIT', 12, 1);
 const CODEQL_REFRESH_MS = parsePositiveIntegerEnv('CONTROL_PLANE_CODEQL_REFRESH_MS', 30 * 60 * 1000, 60_000);
 const CODEQL_SOURCE_FRESHNESS_REFRESH_MS = parsePositiveIntegerEnv('CONTROL_PLANE_CODEQL_SOURCE_FRESHNESS_REFRESH_MS', 500, 250);
 const CODEQL_LOCK_POLL_MS = parsePositiveIntegerEnv('CONTROL_PLANE_CODEQL_LOCK_POLL_MS', 1_000, 100);
@@ -3875,10 +4232,63 @@ function getResearchScoutRequestNamespace(
   return [...getControlPlaneSemanticMemoryNamespace(state), 'research-scout-requests'];
 }
 
+function shouldSuppressSurfaceNoiseForResearch(
+  state: Pick<ControlPlaneState, 'scopes' | 'effectiveScopes'>,
+): boolean {
+  const effectiveScopes = getEffectiveScopes(state as ControlPlaneState);
+  return effectiveScopes.some((scope) => ['homepage-surface', 'ui-surface', 'workspace-surface'].includes(scope));
+}
+
+function filterResearchScoutRequestSignals(
+  state: Pick<ControlPlaneState, 'scopes' | 'effectiveScopes'>,
+  entries: string[],
+): string[] {
+  if (!shouldSuppressSurfaceNoiseForResearch(state)) return entries;
+  return entries.filter((entry) => {
+    const normalized = String(entry || '').toLowerCase();
+    return !signalTextHasProviderAuthDriftFocus(normalized)
+      && !signalTextHasApiRoutingFocus(normalized)
+      && !signalTextHasApiRuntimeFocus(normalized)
+      && !signalTextHasApiPlatformFocus(normalized);
+  });
+}
+
+function buildResearchScoutRequestTopicKey(
+  state: Pick<
+    ControlPlaneState,
+    | 'scopes'
+    | 'effectiveScopes'
+    | 'repairSignals'
+    | 'improvementSignals'
+    | 'autonomousContractPaths'
+  >,
+  query: string,
+): string {
+  const effectiveScopes = getEffectiveScopes(state as ControlPlaneState);
+  const signalHints = extractSignalDrivenSearchHints(
+    filterResearchScoutRequestSignals(state, [...state.repairSignals, ...state.improvementSignals]),
+  ).slice(0, 4);
+  const pathHints = state.autonomousContractPaths
+    .map((entry) => String(entry || '').split('/').pop() || '')
+    .map((entry) => entry.replace(/\.[^.]+$/g, ''))
+    .filter(Boolean)
+    .sort()
+    .slice(0, 3);
+
+  return normalizeSemanticMemorySummary(
+    [effectiveScopes.join(','), signalHints.sort().join(','), pathHints.join(','), query]
+      .filter(Boolean)
+      .join(' | '),
+    240,
+  ).toLowerCase();
+}
+
 function buildResearchScoutPoolQuery(
   state: Pick<
     ControlPlaneState,
     | 'goal'
+    | 'scopes'
+    | 'effectiveScopes'
     | 'repairIntentSummary'
     | 'repairSignals'
     | 'improvementIntentSummary'
@@ -3890,9 +4300,9 @@ function buildResearchScoutPoolQuery(
   const sources = [
     state.goal,
     state.repairIntentSummary,
-    ...state.repairSignals.slice(0, 3),
+    ...filterResearchScoutRequestSignals(state, state.repairSignals).slice(0, 3),
     state.improvementIntentSummary,
-    ...state.improvementSignals.slice(0, 3),
+    ...filterResearchScoutRequestSignals(state, state.improvementSignals).slice(0, 3),
     state.autonomousContractSummary,
     ...state.autonomousContractPaths.slice(0, 3),
   ]
@@ -3902,6 +4312,60 @@ function buildResearchScoutPoolQuery(
   return [...keywords, ...sources.slice(0, 6)].join(' | ').trim();
 }
 
+function buildResearchScoutNaturalLanguageRequestQuery(
+  state: Pick<
+    ControlPlaneState,
+    | 'goal'
+    | 'scopes'
+    | 'effectiveScopes'
+    | 'repairSignals'
+    | 'improvementSignals'
+    | 'autonomousContractPaths'
+  >,
+): string {
+  const effectiveScopes = new Set(getEffectiveScopes(state as ControlPlaneState));
+  const signalHints = extractSignalDrivenSearchHints([
+    ...filterResearchScoutRequestSignals(state, state.repairSignals),
+    ...filterResearchScoutRequestSignals(state, state.improvementSignals),
+  ]).slice(0, 4);
+  const pathHints = state.autonomousContractPaths
+    .map((entry) => String(entry || '').split('/').pop() || '')
+    .map((entry) => entry.replace(/\.[^.]+$/g, ''))
+    .filter((entry) => entry.length >= 4)
+    .filter((entry) => !['index', 'main', 'app', 'route', 'routes', 'utils', 'types'].includes(entry.toLowerCase()))
+    .filter(Boolean)
+    .slice(0, 3);
+
+  let query = '';
+  if (effectiveScopes.has('api-routing')) {
+    query = 'Developer docs and implementation patterns for provider routing, capability gating, retry-worthless failures, and model availability fallbacks in AI gateways.';
+  } else if (effectiveScopes.has('api-runtime')) {
+    query = 'Developer docs and implementation patterns for API request queues, timeout handling, retry classification, provider failure backoff, and intake guards.';
+  } else if (effectiveScopes.has('api-data')) {
+    query = 'Developer docs and implementation patterns for model catalog synchronization, provider availability metadata, source-of-truth updates, and pricing coverage.';
+  } else if (effectiveScopes.has('api-platform')) {
+    query = 'Developer docs and implementation patterns for experimental API startup health, systemd service readiness, websocket health, and safe runtime validation.';
+  } else if (effectiveScopes.has('workspace-surface')) {
+    query = 'Developer docs and implementation patterns for package.json scripts, monorepo workspace setup, root tooling ergonomics, and developer workflow aliases.';
+  } else if (effectiveScopes.has('homepage-surface')) {
+    query = 'Developer docs and implementation patterns for homepage static assets, favicon handling, browser-visible polish, and lightweight front-end shell fixes.';
+  } else if (effectiveScopes.has('ui-surface')) {
+    query = 'Developer docs and implementation patterns for frontend shell static assets, browser-visible error polish, and favicon or entrypoint fixes.';
+  } else {
+    query = 'Developer docs and implementation patterns for control-plane orchestration, durable workflows, evaluation gates, governance, semantic memory, and MCP tool routing.';
+  }
+
+  const suffix = [
+    signalHints.length > 0 ? `Focus on: ${signalHints.join(', ')}.` : '',
+    pathHints.length > 0 ? `Relevant files: ${pathHints.join(', ')}.` : '',
+  ].filter(Boolean).join(' ');
+
+  return truncateTextMiddle(
+    `${query}${suffix ? ` ${suffix}` : ''}`,
+    240,
+  );
+}
+
 async function readResearchScoutPoolNotes(
   store: BaseStore | undefined,
   state: Pick<
@@ -3909,6 +4373,8 @@ async function readResearchScoutPoolNotes(
     | 'langSmithProjectName'
     | 'governanceProfile'
     | 'goal'
+    | 'scopes'
+    | 'effectiveScopes'
     | 'repairIntentSummary'
     | 'repairSignals'
     | 'improvementIntentSummary'
@@ -3925,7 +4391,18 @@ async function readResearchScoutPoolNotes(
     limit: 6,
   }).catch(() => [] as SearchItem[]);
 
-  const notes: string[] = [];
+  const effectiveScopes = new Set(getEffectiveScopes(state as ControlPlaneState));
+  const entries: Array<{
+    url: string;
+    hostname: string;
+    family: 'control-plane' | 'api' | 'generic';
+    quality: string;
+    informationScore: number;
+    mappedPaths: string[];
+    keywords: string[];
+    title: string;
+    priority: number;
+  }> = [];
   const seenUrls = new Set<string>();
   for (const item of results) {
     const value = item.value && typeof item.value === 'object'
@@ -3933,8 +4410,24 @@ async function readResearchScoutPoolNotes(
       : {};
     const url = normalizeHttpUrl(value.pageUrl || item.key);
     if (!url || seenUrls.has(url)) continue;
+    const hostname = getResearchScoutHostname(url);
+    const combinedText = [
+      value.pageTitle,
+      value.searchTitle,
+      value.searchDescription,
+      value.pageSummary,
+      value.pagePreview,
+    ].map((entry) => String(entry || '').trim()).filter(Boolean).join(' | ');
+    const family = value.family === 'control-plane' || value.family === 'api' ? value.family : 'generic';
+    if (isResearchScoutNavigationTrap(url, hostname, combinedText)) continue;
+    if (isResearchScoutUndesiredHost(hostname, family)) continue;
+    if (isResearchScoutLowValueCommunityHost(hostname)) continue;
+    if (family !== 'generic' && !isResearchScoutPreferredTechnicalHost(hostname, family)) continue;
+    if (!isResearchScoutPreferredTechnicalHost(hostname, family) && !isResearchScoutTechnicalDocLike(combinedText.toLowerCase())) continue;
     seenUrls.add(url);
     const quality = String(value.quality || 'low').trim() || 'low';
+    const informationScore = Number(value.informationScore) || 0;
+    if (quality !== 'high' && informationScore < 8) continue;
     const mappedPaths = Array.isArray(value.mappedPaths)
       ? value.mappedPaths.map((entry) => String(entry || '').trim()).filter(Boolean).slice(0, 2)
       : [];
@@ -3942,8 +4435,40 @@ async function readResearchScoutPoolNotes(
       ? value.keywords.map((entry) => String(entry || '').trim()).filter(Boolean).slice(0, 4)
       : [];
     const title = normalizeSemanticMemorySummary(value.pageTitle || value.searchTitle || url, 140);
+    let priority = (Number(value.totalScore) || 0) + scoreResearchScoutDomain(hostname, family) + informationScore;
+    if (effectiveScopes.has('research-scout') || effectiveScopes.has('control-plane')) {
+      if (/docs\.temporal\.io$|modelcontextprotocol\.io$|qdrant\.tech$/.test(hostname)) priority += 12;
+      if (/github\.com$|langchain\.com$|langchain\.dev$/.test(hostname)) priority += 2;
+      if (/langgraph|langchain/i.test(title) && !/docs\.temporal\.io$|modelcontextprotocol\.io$|qdrant\.tech$/.test(hostname)) priority -= 4;
+    }
+    if (hasApiFamilyScope(effectiveScopes) || effectiveScopes.has('research-scout')) {
+      if (/openrouter\.ai$|platform\.openai\.com$|openai\.com$|ai\.google\.dev$|developers\.google\.com$|docs\.anthropic\.com$|anthropic\.com$/.test(hostname)) priority += 8;
+    }
+    entries.push({
+      url,
+      hostname,
+      family,
+      quality,
+      informationScore,
+      mappedPaths,
+      keywords,
+      title,
+      priority,
+    });
+  }
+
+  entries.sort((left, right) =>
+    right.priority - left.priority
+    || left.url.localeCompare(right.url),
+  );
+
+  const notes: string[] = [];
+  const seenHosts = new Set<string>();
+  for (const entry of entries) {
+    if (seenHosts.has(entry.hostname)) continue;
+    seenHosts.add(entry.hostname);
     notes.push(
-      `Research pool: ${title} — ${url}${mappedPaths.length > 0 ? `; mapped to ${mappedPaths.join(', ')}` : ''}${keywords.length > 0 ? `; signals: ${keywords.join(', ')}` : ''}; quality: ${quality}.`,
+      `Research pool: ${entry.title} — ${entry.url}${entry.mappedPaths.length > 0 ? `; mapped to ${entry.mappedPaths.join(', ')}` : ''}${entry.keywords.length > 0 ? `; signals: ${entry.keywords.join(', ')}` : ''}; quality: ${entry.quality}.`,
     );
     if (notes.length >= 3) break;
   }
@@ -3989,6 +4514,7 @@ function buildResearchScoutLookupRequestSummary(
     | 'threadId'
     | 'goal'
     | 'scopes'
+    | 'effectiveScopes'
     | 'repairIntentSummary'
     | 'repairSignals'
     | 'improvementIntentSummary'
@@ -4014,7 +4540,7 @@ function buildResearchScoutLookupRequestSummary(
   );
   return {
     summary,
-    query: truncateTextMiddle(buildResearchScoutPoolQuery(state), 240),
+    query: buildResearchScoutNaturalLanguageRequestQuery(state),
   };
 }
 
@@ -4042,7 +4568,7 @@ async function queueResearchScoutLookupRequest(
 
   const namespace = getResearchScoutRequestNamespace(state);
   const key = buildSemanticMemoryRecordKey({
-    memory: summary,
+    memory: buildResearchScoutRequestTopicKey(state, query),
     failureClass: 'research-request',
     category: 'research-request',
   });
@@ -4095,6 +4621,8 @@ async function readResearchScoutRequestedQueries(
 }
 
 function buildSharedAiAgentPayload(state: ControlPlaneState): Record<string, unknown> {
+  const filteredRepairSignals = filterResearchScoutRequestSignals(state, state.repairSignals);
+  const filteredImprovementSignals = filterResearchScoutRequestSignals(state, state.improvementSignals);
   const evaluationGatePolicy = resolveStateEvaluationGatePolicy(state);
   const evaluationGateResult = resolveStateEvaluationGateResult(state);
   const governanceGateResult = resolveStateGovernanceGateResult(state);
@@ -4102,8 +4630,8 @@ function buildSharedAiAgentPayload(state: ControlPlaneState): Record<string, unk
   const autonomousSkillBundle = resolveAutonomousSkillBundle({
     effectiveScopes,
     goal: state.goal,
-    repairSignals: state.repairSignals,
-    improvementSignals: state.improvementSignals,
+    repairSignals: filteredRepairSignals,
+    improvementSignals: filteredImprovementSignals,
     autonomousContractPaths: state.autonomousContractPaths,
   });
   const payload = {
@@ -4292,11 +4820,11 @@ function buildSharedAiAgentPayload(state: ControlPlaneState): Record<string, unk
     repair: {
       mode: state.autonomousOperationMode,
       intentSummary: state.repairIntentSummary,
-      signals: state.repairSignals,
-      actionableSignalCount: countActionableRepairSignals(state.repairSignals),
-      externalSignalCount: countExternallyCausedRepairSignals(state.repairSignals),
+      signals: filteredRepairSignals,
+      actionableSignalCount: countActionableRepairSignals(filteredRepairSignals),
+      externalSignalCount: countExternallyCausedRepairSignals(filteredRepairSignals),
       improvementIntentSummary: state.improvementIntentSummary,
-      improvementSignals: state.improvementSignals,
+      improvementSignals: filteredImprovementSignals,
       status: state.repairStatus,
       decisionReason: state.repairDecisionReason,
       sessionId: state.repairSessionManifest?.sessionId,
@@ -4346,7 +4874,49 @@ function resolveAiNotesAgentTimeoutMs(
     }
     return Math.max(AI_NOTES_AGENT_REQUEST_TIMEOUT_MS, RESEARCH_SCOUT_AI_NOTES_TIMEOUT_MS);
   }
+  if (effectiveScopes.includes('control-plane')) {
+    return Math.max(AI_NOTES_AGENT_REQUEST_TIMEOUT_MS, CONTROL_PLANE_LANE_AI_NOTES_TIMEOUT_MS);
+  }
+  if (effectiveScopes.some((scope) => ['homepage-surface', 'ui-surface', 'workspace-surface'].includes(scope))) {
+    return Math.max(AI_NOTES_AGENT_REQUEST_TIMEOUT_MS, SURFACE_FAMILY_AI_NOTES_TIMEOUT_MS);
+  }
+  if (hasApiFamilyScope(effectiveScopes)) {
+    return Math.max(AI_NOTES_AGENT_REQUEST_TIMEOUT_MS, API_FAMILY_AI_NOTES_TIMEOUT_MS);
+  }
   return AI_NOTES_AGENT_REQUEST_TIMEOUT_MS;
+}
+
+function classifyAiFailureMessage(message: string): AiFailureClass {
+  const normalized = String(message || '').trim().toLowerCase();
+  if (!normalized) return 'none';
+  if (isAiBackendBackpressureMessage(normalized)) return 'backpressure';
+  if (/timed out after|aborterror|the operation was aborted/.test(normalized)) return 'timeout';
+  if (/unparsable content|unexpected token|json|unterminated|string|parse/i.test(normalized)) return 'malformed-output';
+  return 'backend-error';
+}
+
+function buildReducedAiNotesPayload(
+  role: 'planner' | 'build' | 'quality' | 'deploy',
+  state: ControlPlaneState,
+  payload: Record<string, unknown>,
+): Record<string, unknown> {
+  return compactUnknownForAi({
+    role,
+    goal: state.goal,
+    effectiveScopes: getEffectiveScopes(state),
+    repairIntentSummary: state.repairIntentSummary,
+    improvementIntentSummary: state.improvementIntentSummary,
+    autonomousContractSummary: state.autonomousContractSummary,
+    autonomousContractPaths: state.autonomousContractPaths.slice(0, 4),
+    currentNotes: Array.isArray(payload.currentNotes)
+      ? payload.currentNotes
+      : [],
+  }, {
+    maxStringChars: Math.max(240, Math.floor(AI_AGENT_PAYLOAD_STRING_MAX_CHARS / 2)),
+    maxArrayItems: Math.max(4, Math.floor(AI_AGENT_PAYLOAD_ARRAY_LIMIT / 2)),
+    maxObjectKeys: Math.max(6, Math.floor(AI_AGENT_PAYLOAD_OBJECT_KEY_LIMIT / 2)),
+    maxDepth: 3,
+  }) as Record<string, unknown>;
 }
 
 async function callAiNotesAgent(
@@ -4366,80 +4936,107 @@ async function callAiNotesAgent(
   }
 
   const timeoutMs = resolveAiNotesAgentTimeoutMs(role, state);
+  const rateLimitWaitBudgetMs = Math.max(1_000, timeoutMs - 5_000);
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  const reducedPayload = buildReducedAiNotesPayload(role, state, payload);
 
   try {
-    const response = await fetch(`${config.baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${config.apiKey}`,
-      },
-      body: JSON.stringify({
+    const attemptRequest = async (
+      attemptPayload: Record<string, unknown>,
+      reducedAttempt: boolean,
+    ): Promise<AiNodeRunResult> => {
+      const response = await fetch(`${config.baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${config.apiKey}`,
+          'x-anygpt-internal-client': 'control-plane',
+          'x-anygpt-rate-limit-wait-budget-ms': String(rateLimitWaitBudgetMs),
+        },
+        body: JSON.stringify({
+          model: config.model,
+          temperature: config.temperature,
+          ...(config.reasoningEffort ? { reasoning_effort: config.reasoningEffort } : {}),
+          response_format: { type: 'json_object' },
+          messages: [
+            {
+              role: 'system',
+              content: [
+                systemPrompt,
+                'Return JSON only in the form {"notes": string[]}.',
+                'Do not output markdown fences.',
+                'Never invent credentials, API keys, or shell commands.',
+                'Respect the rule that production anygpt.service must not be restarted.',
+                reducedAttempt ? 'This is a retry after malformed output. Keep the response minimal and strictly valid JSON.' : '',
+              ].filter(Boolean).join('\n'),
+            },
+            {
+              role: 'user',
+              content: JSON.stringify(compactUnknownForAi({
+                threadId: state.threadId,
+                role,
+                payload: attemptPayload,
+              })),
+            },
+          ],
+        }),
+        signal: controller.signal,
+      });
+
+      const rawText = await response.text();
+      if (!response.ok) {
+        throw new Error(`AI ${role} agent request failed (${response.status}): ${rawText.slice(0, 400)}`);
+      }
+
+      const payloadJson = JSON.parse(rawText);
+      const assistantText = extractAssistantTextFromChatCompletionPayload(payloadJson);
+      const jsonObjectText = extractJsonObjectFromText(assistantText);
+      if (!jsonObjectText) {
+        throw new Error(`AI ${role} agent returned unparsable content.`);
+      }
+
+      const parsed = AiNodeAdviceSchema.parse(JSON.parse(jsonObjectText));
+      const notes = parsed.notes
+        .map((note) => String(note || '').trim())
+        .filter(Boolean)
+        .slice(0, AI_AGENT_NOTE_LIMIT);
+
+      return {
+        enabled: true,
         model: config.model,
-        temperature: config.temperature,
-        ...(config.reasoningEffort ? { reasoning_effort: config.reasoningEffort } : {}),
-        response_format: { type: 'json_object' },
-        messages: [
-          {
-            role: 'system',
-            content: [
-              systemPrompt,
-              'Return JSON only in the form {"notes": string[]}.',
-              'Do not output markdown fences.',
-              'Never invent credentials, API keys, or shell commands.',
-              'Respect the rule that production anygpt.service must not be restarted.',
-            ].join('\n'),
-          },
-          {
-            role: 'user',
-            content: JSON.stringify(compactUnknownForAi({
-              threadId: state.threadId,
-              role,
-              payload,
-            })),
-          },
-        ],
-      }),
-      signal: controller.signal,
-    });
-
-    const rawText = await response.text();
-    if (!response.ok) {
-      throw new Error(`AI ${role} agent request failed (${response.status}): ${rawText.slice(0, 400)}`);
-    }
-
-    const payloadJson = JSON.parse(rawText);
-    const assistantText = extractAssistantTextFromChatCompletionPayload(payloadJson);
-    const jsonObjectText = extractJsonObjectFromText(assistantText);
-    if (!jsonObjectText) {
-      throw new Error(`AI ${role} agent returned unparsable content.`);
-    }
-
-    const parsed = AiNodeAdviceSchema.parse(JSON.parse(jsonObjectText));
-    const notes = parsed.notes
-      .map((note) => String(note || '').trim())
-      .filter(Boolean)
-      .slice(0, AI_AGENT_NOTE_LIMIT);
-
-    return {
-      enabled: true,
-      model: config.model,
-      backend: config.baseUrl,
-      notes,
+        backend: config.baseUrl,
+        notes,
+        failureClass: 'none',
+      };
     };
+
+    try {
+      return await attemptRequest(payload, false);
+    } catch (error: any) {
+      const rawMessage = String(error?.message || error || '');
+      const failureClass = classifyAiFailureMessage(rawMessage);
+      if (failureClass !== 'malformed-output') {
+        throw error;
+      }
+      return await attemptRequest(reducedPayload, true);
+    }
   } catch (error: any) {
     const errorText = String(error?.message || error || '');
     const rawMessage = error?.name === 'AbortError' || errorText === 'The operation was aborted.'
       ? `AI ${role} agent timed out after ${timeoutMs}ms`
       : errorText;
+    const backpressure = isAiBackendBackpressureMessage(rawMessage);
+    const failureClass = classifyAiFailureMessage(rawMessage);
     return {
       enabled: true,
       model: config.model,
       backend: config.baseUrl,
       notes: [],
       error: redactSensitiveText(rawMessage),
+      backpressure,
+      retryAfterSeconds: backpressure ? extractAiBackendRetryAfterSeconds(rawMessage) : undefined,
+      failureClass,
     };
   } finally {
     clearTimeout(timeoutId);
@@ -4463,6 +5060,7 @@ async function callAiAutonomousEditReviewer(
   }
 
   const controller = new AbortController();
+  const rateLimitWaitBudgetMs = Math.max(1_000, AI_AGENT_REQUEST_TIMEOUT_MS - 5_000);
   const timeoutId = setTimeout(() => controller.abort(), AI_AGENT_REQUEST_TIMEOUT_MS);
 
   try {
@@ -4471,6 +5069,8 @@ async function callAiAutonomousEditReviewer(
       headers: {
         'content-type': 'application/json',
         authorization: `Bearer ${config.apiKey}`,
+        'x-anygpt-internal-client': 'control-plane',
+        'x-anygpt-rate-limit-wait-budget-ms': String(rateLimitWaitBudgetMs),
       },
       body: JSON.stringify({
         model: config.model,
@@ -4575,6 +5175,7 @@ async function callAiCodeEditAgent(
   }
 
   const controller = new AbortController();
+  const rateLimitWaitBudgetMs = Math.max(1_000, AI_AGENT_REQUEST_TIMEOUT_MS - 5_000);
   const timeoutId = setTimeout(() => controller.abort(), AI_AGENT_REQUEST_TIMEOUT_MS);
 
   try {
@@ -4583,6 +5184,8 @@ async function callAiCodeEditAgent(
       headers: {
         'content-type': 'application/json',
         authorization: `Bearer ${config.apiKey}`,
+        'x-anygpt-internal-client': 'control-plane',
+        'x-anygpt-rate-limit-wait-budget-ms': String(rateLimitWaitBudgetMs),
       },
       body: JSON.stringify({
         model: config.model,
@@ -4669,6 +5272,8 @@ async function callAiCodeEditAgent(
         : [],
     };
   } catch (error: any) {
+    const rawMessage = String(error?.message || error || '');
+    const backpressure = isAiBackendBackpressureMessage(rawMessage);
     return {
       enabled: true,
       model: config.model,
@@ -4684,7 +5289,9 @@ async function callAiCodeEditAgent(
       candidatePaths: Array.isArray((payload as any).autonomousCandidatePaths)
         ? (payload as any).autonomousCandidatePaths.map((entry: any) => String(entry || '').trim()).filter(Boolean)
         : [],
-      error: redactSensitiveText(error?.message || String(error)),
+      error: redactSensitiveText(rawMessage),
+      backpressure,
+      retryAfterSeconds: backpressure ? extractAiBackendRetryAfterSeconds(rawMessage) : undefined,
     };
   } finally {
     clearTimeout(timeoutId);
@@ -5193,6 +5800,88 @@ function buildGitHubCodeQlAnalysisNotes(
   return notes;
 }
 
+function buildGitHubCodeQlWorkflowNotes(
+  repoSlug: string,
+  workflowRuns: Array<Record<string, any>>,
+  defaultSetupState: string,
+  advancedWorkflowPresent: boolean,
+): string[] {
+  const notes: string[] = [];
+  notes.push(`GitHub CodeQL default setup state for ${repoSlug}: ${defaultSetupState || 'unknown'}.`);
+  if (advancedWorkflowPresent && defaultSetupState === 'configured') {
+    notes.push(`GitHub CodeQL warning for ${repoSlug}: default setup is still configured while .github/workflows/codeql.yml advanced setup is present; advanced SARIF processing can fail until default setup is disabled.`);
+  }
+
+  const latest = workflowRuns[0];
+  if (!latest) return notes;
+
+  const status = String(latest.status || '').trim() || 'unknown';
+  const conclusion = String(latest.conclusion || '').trim() || 'in_progress';
+  const createdAt = String(latest.createdAt || latest.created_at || '').trim() || 'unknown-time';
+  const updatedAt = String(latest.updatedAt || latest.updated_at || '').trim() || 'unknown-time';
+  const event = String(latest.event || '').trim() || 'unknown-event';
+  const url = String(latest.url || latest.html_url || '').trim();
+  notes.push(
+    `GitHub CodeQL workflow latest run for ${repoSlug}: status=${status}, conclusion=${conclusion}, event=${event}, created_at=${createdAt}, updated_at=${updatedAt}${url ? `, url=${url}` : ''}.`,
+  );
+  return notes;
+}
+
+function buildGitHubDependabotAlertInsight(
+  state: Pick<ControlPlaneState, 'repoRoot'>,
+  repoSlug: string,
+  alerts: Array<Record<string, any>>,
+): LogInsight | null {
+  const lines: string[] = [];
+  const seen = new Set<string>();
+
+  for (const alert of alerts.slice(0, GITHUB_DEPENDABOT_ALERT_LIMIT)) {
+    const packageName = String(alert?.dependency?.package?.name || '').trim() || 'unknown-package';
+    const manifestPath = String(alert?.dependency?.manifest_path || '').trim() || repoSlug;
+    const severity = String(alert?.security_advisory?.severity || alert?.security_vulnerability?.severity || 'unknown').trim().toLowerCase();
+    const summary = sanitizeLogLine(
+      String(alert?.security_advisory?.summary || alert?.security_advisory?.description || packageName),
+    );
+    const identifier = String(alert?.security_advisory?.ghsa_id || alert?.security_advisory?.cve_id || '').trim() || 'unknown-advisory';
+    const line = `GitHub Dependabot ${severity} ${identifier} in ${manifestPath} (${packageName}) — ${summary} (#${alert?.number ?? 'n/a'}, state=${String(alert?.state || 'unknown')})`;
+    if (seen.has(line)) continue;
+    seen.add(line);
+    lines.push(line);
+  }
+
+  if (lines.length === 0) return null;
+  return LogInsightSchema.parse({
+    file: `github-dependabot:${repoSlug}`,
+    lines,
+  });
+}
+
+function buildGitHubDependabotNotes(
+  repoSlug: string,
+  alerts: Array<Record<string, any>>,
+): string[] {
+  const notes: string[] = [];
+  if (alerts.length === 0) {
+    notes.push(`GitHub Dependabot sync: no open Dependabot alert(s) are active for ${repoSlug}.`);
+    return notes;
+  }
+
+  notes.push(`GitHub Dependabot sync: ${alerts.length} open Dependabot alert(s) are active for ${repoSlug}.`);
+  const severityCounts = new Map<string, number>();
+  for (const alert of alerts) {
+    const severity = String(alert?.security_advisory?.severity || alert?.security_vulnerability?.severity || 'unknown').trim().toLowerCase() || 'unknown';
+    severityCounts.set(severity, (severityCounts.get(severity) || 0) + 1);
+  }
+  const severitySummary = [...severityCounts.entries()]
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .map(([severity, count]) => `${severity}=${count}`)
+    .join(', ');
+  if (severitySummary) {
+    notes.push(`GitHub Dependabot severity mix for ${repoSlug}: ${severitySummary}.`);
+  }
+  return notes;
+}
+
 async function fetchGitHubCodeQlSync(
   state: Pick<ControlPlaneState, 'repoRoot'>,
 ): Promise<{ insights: LogInsight[]; notes: string[] }> {
@@ -5219,22 +5908,40 @@ async function fetchGitHubCodeQlSync(
   const syncPromise = (async () => {
     const alertsCommand = `gh api ${shellEscapeCommandArg(`repos/${repoSlug}/code-scanning/alerts?tool_name=CodeQL&state=open&per_page=${GITHUB_CODEQL_ALERT_LIMIT}`)}`;
     const analysesCommand = `gh api ${shellEscapeCommandArg(`repos/${repoSlug}/code-scanning/analyses?tool_name=CodeQL&per_page=${GITHUB_CODEQL_ANALYSIS_LIMIT}`)}`;
+    const defaultSetupCommand = `gh api ${shellEscapeCommandArg(`repos/${repoSlug}/code-scanning/default-setup`)}`;
+    const workflowRunsCommand = `gh run list --workflow codeql.yml --limit ${GITHUB_CODEQL_WORKFLOW_RUN_LIMIT} --json databaseId,status,conclusion,createdAt,updatedAt,url,event`;
 
-    const [alertsResult, analysesResult] = await Promise.all([
+    const [alertsResult, analysesResult, defaultSetupResult, workflowRunsResult] = await Promise.all([
       runShellCommand(alertsCommand, path.resolve(state.repoRoot), { timeoutMs: GITHUB_CODEQL_API_TIMEOUT_MS }),
       runShellCommand(analysesCommand, path.resolve(state.repoRoot), { timeoutMs: GITHUB_CODEQL_API_TIMEOUT_MS }),
+      runShellCommand(defaultSetupCommand, path.resolve(state.repoRoot), { timeoutMs: GITHUB_CODEQL_API_TIMEOUT_MS }),
+      runShellCommand(workflowRunsCommand, path.resolve(state.repoRoot), { timeoutMs: GITHUB_CODEQL_API_TIMEOUT_MS }),
     ]);
 
     const alerts = alertsResult.exitCode === 0
-      ? (JSON.parse(alertsResult.output || '[]') as Array<Record<string, any>>)
+      ? (JSON.parse(alertsResult.output.trim() || '[]') as Array<Record<string, any>>)
       : [];
     const analyses = analysesResult.exitCode === 0
-      ? (JSON.parse(analysesResult.output || '[]') as Array<Record<string, any>>)
+      ? (JSON.parse(analysesResult.output.trim() || '[]') as Array<Record<string, any>>)
+      : [];
+    const defaultSetup = defaultSetupResult.exitCode === 0
+      ? (JSON.parse(defaultSetupResult.output.trim() || '{}') as Record<string, any>)
+      : {};
+    const workflowRuns = workflowRunsResult.exitCode === 0
+      ? (JSON.parse(workflowRunsResult.output.trim() || '[]') as Array<Record<string, any>>)
       : [];
 
     const insight = buildGitHubCodeQlAlertInsight(state, repoSlug, alerts);
     const insights = insight ? [insight] : [];
-    const notes = buildGitHubCodeQlAnalysisNotes(repoSlug, analyses, alerts.length);
+    const notes = [
+      ...buildGitHubCodeQlAnalysisNotes(repoSlug, analyses, alerts.length),
+      ...buildGitHubCodeQlWorkflowNotes(
+        repoSlug,
+        workflowRuns,
+        String(defaultSetup?.state || '').trim() || 'unknown',
+        fs.existsSync(path.resolve(state.repoRoot, '.github', 'workflows', 'codeql.yml')),
+      ),
+    ];
 
     const snapshot = {
       checkedAtMs: Date.now(),
@@ -5254,6 +5961,63 @@ async function fetchGitHubCodeQlSync(
   });
 
   gitHubCodeQlSyncInflightCache.set(repoSlug, syncPromise);
+  return syncPromise;
+}
+
+async function fetchGitHubDependabotSync(
+  state: Pick<ControlPlaneState, 'repoRoot'>,
+): Promise<{ insights: LogInsight[]; notes: string[] }> {
+  if (!GITHUB_DEPENDABOT_SYNC_ENABLED || !hasExecutable('gh')) {
+    return { insights: [], notes: [] };
+  }
+
+  const repoSlug = await resolveGitHubRepositorySlug(state);
+  if (!repoSlug) {
+    return { insights: [], notes: [] };
+  }
+
+  const cached = gitHubDependabotSyncCache.get(repoSlug);
+  if (cached && Date.now() - cached.checkedAtMs <= GITHUB_DEPENDABOT_SYNC_REFRESH_MS) {
+    return {
+      insights: cached.insights,
+      notes: cached.notes,
+    };
+  }
+
+  const inflight = gitHubDependabotSyncInflightCache.get(repoSlug);
+  if (inflight) return inflight;
+
+  const syncPromise = (async () => {
+    const alertsCommand = `gh api ${shellEscapeCommandArg(`repos/${repoSlug}/dependabot/alerts?state=open&per_page=${GITHUB_DEPENDABOT_ALERT_LIMIT}`)}`;
+    const alertsResult = await runShellCommand(alertsCommand, path.resolve(state.repoRoot), {
+      timeoutMs: GITHUB_CODEQL_API_TIMEOUT_MS,
+    });
+    const alerts = alertsResult.exitCode === 0
+      ? (JSON.parse(alertsResult.output.trim() || '[]') as Array<Record<string, any>>)
+      : [];
+
+    const insight = buildGitHubDependabotAlertInsight(state, repoSlug, alerts);
+    const insights = insight ? [insight] : [];
+    const notes = buildGitHubDependabotNotes(repoSlug, alerts);
+
+    const snapshot = {
+      checkedAtMs: Date.now(),
+      insights,
+      notes,
+    };
+    gitHubDependabotSyncCache.set(repoSlug, snapshot);
+    return {
+      insights,
+      notes,
+    };
+  })().catch((error: unknown) => ({
+    insights: [],
+    notes: [`GitHub Dependabot sync failed: ${sanitizeLogLine(error instanceof Error ? error.message : String(error))}`],
+  })).finally(() => {
+    gitHubDependabotSyncInflightCache.delete(repoSlug);
+  });
+
+  gitHubDependabotSyncInflightCache.set(repoSlug, syncPromise);
   return syncPromise;
 }
 
@@ -6626,7 +7390,16 @@ function buildAutonomousEditAgentWorkloads(
   failedPaths: Set<string>,
 ): AutonomousEditAgentWorkload[] {
   const aggressivePlanning = shouldUseAggressiveAutonomousPlanning(state);
-  const maxAgents = Math.max(1, Math.min(aggressivePlanning ? AI_CODE_EDIT_AGENT_PARALLELISM : 1, candidateFiles.length));
+  const aiBackpressureActive = hasRecentAiBackendBackpressure(state);
+  const maxAgents = Math.max(
+    1,
+    Math.min(
+      aiBackpressureActive
+        ? 1
+        : (aggressivePlanning ? AI_CODE_EDIT_AGENT_PARALLELISM : 1),
+      candidateFiles.length,
+    ),
+  );
   const workloads: AutonomousEditAgentWorkload[] = [];
   const compileShapeFailedPaths = collectRecentCompileShapeFailedPaths(state);
   const anchorMismatchFailedPaths = collectRecentAnchorMismatchFailedPaths(state);
@@ -7124,6 +7897,38 @@ function shouldPlanResearchScoutBraveSearch(
   return effectiveScopes.has('research-scout');
 }
 
+function shouldUseLightweightResearchScoutInspect(
+  state: Pick<ControlPlaneState, 'scopes' | 'effectiveScopes'>,
+): boolean {
+  const effectiveScopes = getEffectiveScopes(state as ControlPlaneState);
+  return effectiveScopes.length === 1
+    && effectiveScopes[0] === 'research-scout'
+    && parseBooleanEnv('CONTROL_PLANE_RESEARCH_SCOUT_LIGHTWEIGHT_INSPECT', true);
+}
+
+type ResearchScoutTrustedSource = {
+  family: 'control-plane' | 'api';
+  url: string;
+  title: string;
+};
+
+const RESEARCH_SCOUT_TRUSTED_SOURCE_PACKS: Record<'control-plane' | 'api', ResearchScoutTrustedSource[]> = {
+  'control-plane': [
+    { family: 'control-plane', url: 'https://docs.temporal.io/', title: 'Temporal docs' },
+    { family: 'control-plane', url: 'https://modelcontextprotocol.io/docs', title: 'Model Context Protocol docs' },
+    { family: 'control-plane', url: 'https://qdrant.tech/documentation/', title: 'Qdrant documentation' },
+    { family: 'control-plane', url: 'https://github.com/langchain-ai/langgraph', title: 'LangGraph GitHub' },
+    { family: 'control-plane', url: 'https://www.langchain.com/langgraph', title: 'LangGraph overview' },
+  ],
+  api: [
+    { family: 'api', url: 'https://platform.openai.com/docs', title: 'OpenAI docs' },
+    { family: 'api', url: 'https://ai.google.dev/gemini-api/docs', title: 'Gemini API docs' },
+    { family: 'api', url: 'https://openrouter.ai/docs', title: 'OpenRouter docs' },
+    { family: 'api', url: 'https://docs.anthropic.com/en/docs', title: 'Anthropic docs' },
+    { family: 'api', url: 'https://arxiv.org/', title: 'arXiv papers' },
+  ],
+};
+
 function inferResearchScoutQueryFamilyFromText(
   query: unknown,
 ): 'control-plane' | 'api' | 'generic' {
@@ -7151,7 +7956,7 @@ function buildResearchScoutBraveQueries(
   if (effectiveScopes.has('research-scout') || effectiveScopes.has('control-plane') || effectiveScopes.has('repo')) {
     queries.push(
       truncateTextMiddle(
-        'agent orchestration durable execution checkpoints human-in-the-loop developer docs implementation patterns',
+        'site:temporal.io durable execution workflow orchestration agents docs',
         240,
       ),
     );
@@ -7360,6 +8165,13 @@ function resolveSignalDrivenMcpTargetUrls(
   const effectiveScopes = new Set(getEffectiveScopes(state as ControlPlaneState));
   const targets: string[] = [];
 
+  if (effectiveScopes.has('homepage-surface')) {
+    targets.push(DEFAULT_HOMEPAGE_SURFACE_URL);
+  }
+  if (effectiveScopes.has('ui-surface')) {
+    targets.push(DEFAULT_UI_SURFACE_URL);
+  }
+
   if (
     baseUrl
     && hasApiFamilyScope(effectiveScopes)
@@ -7464,6 +8276,7 @@ function buildDeterministicMcpActionPlan(
   const configuredTargetUrls = resolveConfiguredMcpTargetUrls(state);
   const urls = resolveSignalDrivenMcpTargetUrls(state);
   const allowPlaywrightBrowserActions = shouldPlanPlaywrightBrowserActions(state);
+  const effectiveScopes = new Set(getEffectiveScopes(state as ControlPlaneState));
 
   const braveInspection = inspectionsByServer.get('brave-search');
   const braveConfig = configsByServer.get('brave-search');
@@ -7541,7 +8354,11 @@ function buildDeterministicMcpActionPlan(
         server: 'playwright',
         tool: 'browser_navigate',
         title: `Open browser target ${targetUrl}`,
-        reason: configuredTargetUrls.length > 0
+        reason: effectiveScopes.has('homepage-surface')
+          ? 'The homepage-surface lane must inspect the live homepage target before any browser-visible edit is allowed.'
+          : effectiveScopes.has('ui-surface')
+            ? 'The ui-surface lane must inspect the live UI target before any browser-visible edit is allowed.'
+            : configuredTargetUrls.length > 0
           ? 'The goal includes an explicit target URL, so the control plane can inspect it with the Playwright MCP browser.'
           : 'The active API signals and autonomous contract target the experimental API surface, so inspect the live endpoint before code changes are applied.',
         arguments: { url: targetUrl },
@@ -7708,8 +8525,11 @@ async function inspectMcpNode(state: ControlPlaneState, runtime?: Runtime): Prom
   const mcpInspections: McpInspection[] = [];
   const codeQlNotes = await ensureAutomaticCodeQlSarif(state);
   const gitHubCodeQlSync = await fetchGitHubCodeQlSync(state);
-  const logInsights = resolveLogInsights(state, gitHubCodeQlSync.insights);
+  const gitHubDependabotSync = await fetchGitHubDependabotSync(state);
+  const logInsights = resolveLogInsights(state, [...gitHubCodeQlSync.insights, ...gitHubDependabotSync.insights]);
   const langSmithConfig = resolveLangSmithRuntimeConfig();
+  const lightweightResearchScoutInspect = shouldUseLightweightResearchScoutInspect(state);
+  const effectiveLangSmithEnabled = Boolean(langSmithConfig) && !lightweightResearchScoutInspect;
   const evaluationGatePolicy = resolveStateEvaluationGatePolicy(state);
   const governanceProfile = resolveControlPlaneGovernanceProfile(state.repoRoot);
   const promptIdentifier = String(state.promptIdentifier || DEFAULT_CONTROL_PLANE_PROMPT_IDENTIFIER).trim()
@@ -7762,8 +8582,9 @@ async function inspectMcpNode(state: ControlPlaneState, runtime?: Runtime): Prom
     : [`No MCP config found at ${configPath}; workflow will use shell jobs only.`];
   plannerNotes.push(...codeQlNotes);
   plannerNotes.push(...gitHubCodeQlSync.notes);
+  plannerNotes.push(...gitHubDependabotSync.notes);
 
-  if (langSmithConfig) {
+  if (effectiveLangSmithEnabled && langSmithConfig) {
     try {
       const governanceMutation = await syncLangSmithProjectGovernance(langSmithConfig, {
         description: CONTROL_PLANE_LANGSMITH_PROJECT_DESCRIPTION,
@@ -7991,6 +8812,9 @@ async function inspectMcpNode(state: ControlPlaneState, runtime?: Runtime): Prom
     } catch (error: any) {
       langSmithNotes.push(`LangSmith snapshot unavailable: ${redactSensitiveText(error?.message || String(error))}`);
     }
+  } else if (langSmithConfig && lightweightResearchScoutInspect) {
+    langSmithNotes.push('LangSmith fast path: skipped full LangSmith snapshot, evaluation, and governance work for research-scout so browser discovery can start faster.');
+    promptSelectionNotes.push(`Using local control-plane prompt bundle fallback for ${promptIdentifier} because research-scout lightweight inspect mode is enabled.`);
   } else {
     if (promptSyncEnabled) {
       promptSelectionNotes.push(`Prompt sync requested for ${buildLangSmithPromptReference(promptIdentifier, promptSyncChannel)} but LangSmith runtime integration is disabled.`);
@@ -8003,7 +8827,7 @@ async function inspectMcpNode(state: ControlPlaneState, runtime?: Runtime): Prom
   const evaluationGateResult = resolveEvaluationGateResult(
     evaluationGatePolicy,
     langSmithEvaluations,
-    Boolean(langSmithConfig),
+    effectiveLangSmithEnabled,
   );
   langSmithNotes.push(evaluationGateResult.reason);
   const blockedActions = describeEvaluationGateBlockedActions(evaluationGateResult);
@@ -8066,7 +8890,7 @@ async function inspectMcpNode(state: ControlPlaneState, runtime?: Runtime): Prom
   governanceGateResult = resolveGovernanceGateResult(
     governanceProfile,
     langSmithGovernance,
-    Boolean(langSmithConfig),
+    effectiveLangSmithEnabled,
   );
   langSmithNotes.push(governanceGateResult.reason);
   const governanceBlockedActions = describeGovernanceGateBlockedActions(governanceGateResult);
@@ -8234,7 +9058,7 @@ async function inspectMcpNode(state: ControlPlaneState, runtime?: Runtime): Prom
       promptSelectionNotes,
       semanticMemoryNotes,
       governanceProfile: governanceProfile.name,
-      langSmithEnabled: Boolean(langSmithConfig),
+      langSmithEnabled: effectiveLangSmithEnabled,
       langSmithProjectName: langSmithProject?.name || langSmithSnapshot?.projectName || langSmithConfig?.projectName || '',
       langSmithWorkspace: langSmithSnapshot?.workspace || null,
       langSmithAccessibleWorkspaces,
@@ -8279,6 +9103,21 @@ async function plannerAgentNode(state: ControlPlaneState): Promise<Partial<Contr
     notes.push(`Log input ${insight.file}: ${insight.lines[insight.lines.length - 1]}`);
   }
 
+  if (scopes.length === 1 && scopes[0] === 'research-scout') {
+    const mergedNotes = appendUniqueNotes(notes, [
+      'Research scout deterministic mode: search planning is generated from trusted-source packs and queued requests first; AI synthesis is deferred until web evidence exists.',
+    ]);
+    return {
+      effectiveScopes: scopes,
+      plannerNotes: mergedNotes,
+      aiAgentEnabled: state.aiAgentEnabled,
+      aiAgentBackend: state.aiAgentBackend,
+      aiAgentModel: state.aiAgentModel,
+      plannerAgentInsights: [],
+      lastAiFailureClass: state.lastAiFailureClass,
+    };
+  }
+
   const aiPlanner = await callAiNotesAgent(
     'planner',
     state,
@@ -8294,6 +9133,12 @@ async function plannerAgentNode(state: ControlPlaneState): Promise<Partial<Contr
   if (aiPlanner.error) {
     mergedNotes.push(`AI planner agent unavailable: ${aiPlanner.error}`);
   }
+  if (aiPlanner.backpressure) {
+    const retrySuffix = aiPlanner.retryAfterSeconds
+      ? ` Retry after about ${aiPlanner.retryAfterSeconds}s.`
+      : '';
+    mergedNotes.push(`AI backend backpressure detected during planner stage; throttle follow-up AI work for this lane.${retrySuffix}`);
+  }
 
   return {
     effectiveScopes: scopes,
@@ -8302,6 +9147,7 @@ async function plannerAgentNode(state: ControlPlaneState): Promise<Partial<Contr
     aiAgentBackend: state.aiAgentBackend || aiPlanner.backend,
     aiAgentModel: state.aiAgentModel || aiPlanner.model,
     plannerAgentInsights: aiPlanner.notes,
+    lastAiFailureClass: aiPlanner.error ? (aiPlanner.failureClass || 'backend-error') : state.lastAiFailureClass,
   };
 }
 
@@ -8337,6 +9183,32 @@ async function planMcpActionsNode(state: ControlPlaneState): Promise<Partial<Con
 
 async function buildAgentNode(state: ControlPlaneState): Promise<Partial<ControlPlaneState>> {
   const buildJobs = buildScopeJobs(getEffectiveScopes(state), 'build');
+  if (getEffectiveScopes(state).length === 1 && getEffectiveScopes(state)[0] === 'research-scout') {
+    return {
+      buildJobs,
+      plannerNotes: appendUniqueNotes(state.plannerNotes, ['Research scout skipped generic build-agent advice; evidence synthesis happens after web results are collected.']),
+      aiAgentEnabled: state.aiAgentEnabled,
+      aiAgentBackend: state.aiAgentBackend,
+      aiAgentModel: state.aiAgentModel,
+      buildAgentInsights: [],
+      lastAiFailureClass: state.lastAiFailureClass,
+    };
+  }
+  if (hasRecentAiBackendBackpressure(state)) {
+    const notes = appendUniqueNotes(
+      state.plannerNotes,
+      ['AI build agent skipped because the shared AI backend is under queue pressure; preserving capacity for a later retry.'],
+    );
+    return {
+      buildJobs,
+      plannerNotes: notes,
+      aiAgentEnabled: state.aiAgentEnabled,
+      aiAgentBackend: state.aiAgentBackend,
+      aiAgentModel: state.aiAgentModel,
+      buildAgentInsights: [],
+      lastAiFailureClass: 'backpressure',
+    };
+  }
   const aiBuild = await callAiNotesAgent(
     'build',
     state,
@@ -8347,21 +9219,52 @@ async function buildAgentNode(state: ControlPlaneState): Promise<Partial<Control
     state.controlPlanePrompts.build,
   );
 
+  const plannerNotes = appendUniqueNotes(state.plannerNotes, [
+    ...aiBuild.notes.map((note) => `AI build agent: ${note}`),
+    ...(aiBuild.error ? [`AI build agent unavailable: ${aiBuild.error}`] : []),
+    ...(aiBuild.backpressure
+      ? [`AI backend backpressure detected during build stage; later AI-heavy work in this lane should back off${aiBuild.retryAfterSeconds ? ` for about ${aiBuild.retryAfterSeconds}s` : ''}.`]
+      : []),
+  ]);
   return {
     buildJobs,
-    plannerNotes: appendUniqueNotes(
-      state.plannerNotes,
-      aiBuild.notes.map((note) => `AI build agent: ${note}`),
-    ),
+    plannerNotes,
     aiAgentEnabled: state.aiAgentEnabled || aiBuild.enabled,
     aiAgentBackend: state.aiAgentBackend || aiBuild.backend,
     aiAgentModel: state.aiAgentModel || aiBuild.model,
     buildAgentInsights: aiBuild.notes,
+    lastAiFailureClass: aiBuild.error ? (aiBuild.failureClass || 'backend-error') : state.lastAiFailureClass,
   };
 }
 
 async function qualityAgentNode(state: ControlPlaneState): Promise<Partial<ControlPlaneState>> {
   const testJobs = buildScopeJobs(getEffectiveScopes(state), 'test');
+  if (getEffectiveScopes(state).length === 1 && getEffectiveScopes(state)[0] === 'research-scout') {
+    return {
+      testJobs,
+      plannerNotes: appendUniqueNotes(state.plannerNotes, ['Research scout skipped generic quality-agent advice; search/result quality is evaluated after website evidence is collected.']),
+      aiAgentEnabled: state.aiAgentEnabled,
+      aiAgentBackend: state.aiAgentBackend,
+      aiAgentModel: state.aiAgentModel,
+      qualityAgentInsights: [],
+      lastAiFailureClass: state.lastAiFailureClass,
+    };
+  }
+  if (hasRecentAiBackendBackpressure(state)) {
+    const notes = appendUniqueNotes(
+      state.plannerNotes,
+      ['AI quality agent skipped because the shared AI backend is under queue pressure; preserving capacity for repair planning.'],
+    );
+    return {
+      testJobs,
+      plannerNotes: notes,
+      aiAgentEnabled: state.aiAgentEnabled,
+      aiAgentBackend: state.aiAgentBackend,
+      aiAgentModel: state.aiAgentModel,
+      qualityAgentInsights: [],
+      lastAiFailureClass: 'backpressure',
+    };
+  }
   const aiQuality = await callAiNotesAgent(
     'quality',
     state,
@@ -8372,16 +9275,21 @@ async function qualityAgentNode(state: ControlPlaneState): Promise<Partial<Contr
     state.controlPlanePrompts.quality,
   );
 
+  const plannerNotes = appendUniqueNotes(state.plannerNotes, [
+    ...aiQuality.notes.map((note) => `AI quality agent: ${note}`),
+    ...(aiQuality.error ? [`AI quality agent unavailable: ${aiQuality.error}`] : []),
+    ...(aiQuality.backpressure
+      ? [`AI backend backpressure detected during quality stage; later AI-heavy work in this lane should back off${aiQuality.retryAfterSeconds ? ` for about ${aiQuality.retryAfterSeconds}s` : ''}.`]
+      : []),
+  ]);
   return {
     testJobs,
-    plannerNotes: appendUniqueNotes(
-      state.plannerNotes,
-      aiQuality.notes.map((note) => `AI quality agent: ${note}`),
-    ),
+    plannerNotes,
     aiAgentEnabled: state.aiAgentEnabled || aiQuality.enabled,
     aiAgentBackend: state.aiAgentBackend || aiQuality.backend,
     aiAgentModel: state.aiAgentModel || aiQuality.model,
     qualityAgentInsights: aiQuality.notes,
+    lastAiFailureClass: aiQuality.error ? (aiQuality.failureClass || 'backend-error') : state.lastAiFailureClass,
   };
 }
 
@@ -8401,6 +9309,34 @@ async function deployAgentNode(state: ControlPlaneState): Promise<Partial<Contro
       });
   }
 
+  if (getEffectiveScopes(state).length === 1 && getEffectiveScopes(state)[0] === 'research-scout') {
+    return {
+      deployJobs,
+      plannerNotes: appendUniqueNotes(state.plannerNotes, ['Research scout skipped generic deploy-agent advice; it is a suggestion-only lane and does not need pre-search deployment planning.']),
+      aiAgentEnabled: state.aiAgentEnabled,
+      aiAgentBackend: state.aiAgentBackend,
+      aiAgentModel: state.aiAgentModel,
+      deployAgentInsights: [],
+      lastAiFailureClass: state.lastAiFailureClass,
+    };
+  }
+
+  if (hasRecentAiBackendBackpressure(state)) {
+    const notes = appendUniqueNotes(
+      state.plannerNotes,
+      ['AI deploy agent skipped because the shared AI backend is under queue pressure; preserving capacity for repair planning.'],
+    );
+    return {
+      deployJobs,
+      plannerNotes: notes,
+      aiAgentEnabled: state.aiAgentEnabled,
+      aiAgentBackend: state.aiAgentBackend,
+      aiAgentModel: state.aiAgentModel,
+      deployAgentInsights: [],
+      lastAiFailureClass: 'backpressure',
+    };
+  }
+
   const aiDeploy = await callAiNotesAgent(
     'deploy',
     state,
@@ -8411,16 +9347,21 @@ async function deployAgentNode(state: ControlPlaneState): Promise<Partial<Contro
     state.controlPlanePrompts.deploy,
   );
 
+  const plannerNotes = appendUniqueNotes(state.plannerNotes, [
+    ...aiDeploy.notes.map((note) => `AI deploy agent: ${note}`),
+    ...(aiDeploy.error ? [`AI deploy agent unavailable: ${aiDeploy.error}`] : []),
+    ...(aiDeploy.backpressure
+      ? [`AI backend backpressure detected during deploy stage; later AI-heavy work in this lane should back off${aiDeploy.retryAfterSeconds ? ` for about ${aiDeploy.retryAfterSeconds}s` : ''}.`]
+      : []),
+  ]);
   return {
     deployJobs,
-    plannerNotes: appendUniqueNotes(
-      state.plannerNotes,
-      aiDeploy.notes.map((note) => `AI deploy agent: ${note}`),
-    ),
+    plannerNotes,
     aiAgentEnabled: state.aiAgentEnabled || aiDeploy.enabled,
     aiAgentBackend: state.aiAgentBackend || aiDeploy.backend,
     aiAgentModel: state.aiAgentModel || aiDeploy.model,
     deployAgentInsights: aiDeploy.notes,
+    lastAiFailureClass: aiDeploy.error ? (aiDeploy.failureClass || 'backend-error') : state.lastAiFailureClass,
   };
 }
 
@@ -8511,6 +9452,39 @@ async function autonomousEditPlannerNode(state: ControlPlaneState): Promise<Part
       repairSessionManifest: null,
       repairNotes: appendUniqueNotes(state.repairNotes, notes),
       plannerNotes: appendUniqueNotes(state.plannerNotes, notes),
+    };
+  }
+  const surfaceBrowserBlockingReason = getSurfaceBrowserBlockingReason(state);
+  if (surfaceBrowserBlockingReason) {
+    const notes = [
+      surfaceBrowserBlockingReason,
+      'Autonomous edit planner deferred this browser-visible lane until a reachable surface can be inspected with Playwright.',
+    ];
+    return {
+      autonomousOperationMode: 'improvement',
+      proposedEdits: [],
+      appliedEdits: [],
+      autonomousEditNotes: notes,
+      autonomousEditReviewDecision: 'approved',
+      autonomousEditReviewReason: surfaceBrowserBlockingReason,
+      repairStatus: 'not-needed',
+      repairDecisionReason: surfaceBrowserBlockingReason,
+      repairPromotedPaths: [],
+      repairRollbackPaths: [],
+      repairSmokeJobs: [],
+      repairSmokeResults: [],
+      postRepairValidationJobs: [],
+      postRepairValidationResults: [],
+      postRepairValidationStatus: 'not-needed',
+      experimentalRestartStatus: 'not-needed',
+      experimentalRestartReason: '',
+      repairSessionManifest: null,
+      repairNotes: appendUniqueNotes(state.repairNotes, notes),
+      plannerNotes: appendUniqueNotes(state.plannerNotes, notes),
+      healthClass: 'waiting_evidence',
+      evidenceStatus: 'missing',
+      validationRequired: true,
+      deferReason: surfaceBrowserBlockingReason,
     };
   }
   const failedEditAnchorHints = buildFailedAutonomousEditAnchorHints(state);
@@ -8696,6 +9670,7 @@ async function autonomousEditPlannerNode(state: ControlPlaneState): Promise<Part
   const plannerFocuses = runtimeOverride.plan
     ? [`runtime-override: ${runtimeOverride.source || 'inline plan'}`]
     : plannerWorkloads.map((workload) => `${workload.label}: ${workload.focus}`);
+  const aiBackpressureActive = hasRecentAiBackendBackpressure(state);
   const aggressiveExperimentalBias = shouldUseAggressiveAutonomousPlanning(state);
   const sharedAiPayload = buildSharedAiAgentPayload({
     ...state,
@@ -8759,6 +9734,9 @@ async function autonomousEditPlannerNode(state: ControlPlaneState): Promise<Part
 
   const notes: string[] = [];
   notes.push(`Autonomous edit planner strategy: ${plannerStrategy} (${runtimeOverride.plan ? 1 : plannerWorkloads.length} agent(s)).`);
+  if (aiBackpressureActive) {
+    notes.push('AI backend backpressure is active; autonomous edit planning was throttled to one focused agent for this lane.');
+  }
   notes.push(...plannerFocuses.map((focus) => `Autonomous edit planner focus: ${focus}`));
   if (runtimeOverride.plan) {
     notes.push(`Runtime autonomous edit plan override loaded from ${runtimeOverride.source}.`);
@@ -9218,7 +10196,23 @@ function buildWebIdeaScoutSuggestions(
   >,
 ): string[] {
   const successfulSearches = state.executedMcpActions
-    .filter((action) => action.server === 'brave-search' && action.status === 'success')
+    .filter((action) => {
+      if (!(action.server === 'brave-search' && action.status === 'success')) return false;
+      const family = inferResearchScoutQueryFamily(action);
+      const links = extractResearchScoutActionLinks(action);
+      const topLink = links
+        .map((link) => ({
+          ...link,
+          score: scoreResearchScoutLink(action, link),
+          hostname: getResearchScoutHostname(link.url),
+        }))
+        .sort((left, right) => right.score - left.score || left.url.localeCompare(right.url))[0];
+      if (!topLink) return false;
+      if (isResearchScoutNavigationTrap(topLink.url, topLink.hostname, [topLink.title, topLink.description].join(' | '))) return false;
+      if (isResearchScoutUndesiredHost(topLink.hostname, family)) return false;
+      if (!isResearchScoutPreferredTechnicalHost(topLink.hostname, family) && topLink.score < (family === 'api' ? 10 : 9)) return false;
+      return true;
+    })
     .slice(-3);
   if (successfulSearches.length === 0) return [];
 
@@ -9499,7 +10493,7 @@ function buildResearchScoutPageSearchText(
 }
 
 function tokenizeResearchText(value: string): string[] {
-  const ignored = new Set(['the', 'and', 'for', 'with', 'that', 'from', 'this', 'into', 'using', 'ideas', 'idea']);
+  const ignored = new Set(['the', 'and', 'for', 'with', 'that', 'from', 'this', 'into', 'using', 'ideas', 'idea', 'agent', 'agents', 'api', 'apis', 'docs', 'guide', 'developer', 'developers', 'implementation', 'patterns']);
   return String(value || '')
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, ' ')
@@ -9576,10 +10570,10 @@ function scoreResearchScoutDomain(hostname: string, family: 'control-plane' | 'a
 
   if (/github\.com$/.test(hostname)) return 6;
   if (/docs?\./.test(hostname) || /readthedocs\.io$/.test(hostname)) return 6;
-  if (/langchain\.com$/.test(hostname) || /langchain\.dev$/.test(hostname)) return 7;
-  if (/modelcontextprotocol\.io$/.test(hostname)) return family === 'control-plane' ? 7 : 5;
-  if (/qdrant\.tech$/.test(hostname)) return family === 'control-plane' ? 7 : 5;
-  if (/temporal\.io$/.test(hostname)) return family === 'control-plane' ? 6 : 3;
+  if (/langchain\.com$/.test(hostname) || /langchain\.dev$/.test(hostname)) return family === 'control-plane' ? 4 : 7;
+  if (/modelcontextprotocol\.io$/.test(hostname)) return family === 'control-plane' ? 9 : 5;
+  if (/qdrant\.tech$/.test(hostname)) return family === 'control-plane' ? 9 : 5;
+  if (/temporal\.io$/.test(hostname)) return family === 'control-plane' ? 9 : 3;
   if (/openrouter\.ai$/.test(hostname)) return family === 'api' ? 7 : 3;
   if (/platform\.openai\.com$/.test(hostname) || /openai\.com$/.test(hostname)) return family === 'api' ? 7 : 4;
   if (/ai\.google\.dev$/.test(hostname) || /developers\.google\.com$/.test(hostname)) return family === 'api' ? 6 : 3;
@@ -9607,7 +10601,34 @@ function isResearchScoutTechnicalDocLike(text: string): boolean {
 }
 
 function isResearchScoutLowValueCommunityHost(hostname: string): boolean {
-  return /reddit\.com$|redd\.it$|medium\.com$|geeksforgeeks\.org$|forbes\.com$|wikipedia\.org$/.test(hostname);
+  return /reddit\.com$|redd\.it$|medium\.com$|geeksforgeeks\.org$|forbes\.com$|wikipedia\.org$|dev\.to$|zhihu\.com$/.test(hostname);
+}
+
+function isResearchScoutPreferredTechnicalHost(
+  hostname: string,
+  family: 'control-plane' | 'api' | 'generic',
+): boolean {
+  const normalizedHostname = String(hostname || '').toLowerCase();
+  if (!normalizedHostname) return false;
+  if (/github\.com$|readthedocs\.io$|docs?\./.test(normalizedHostname)) return true;
+  if (/langchain\.com$|langchain\.dev$|modelcontextprotocol\.io$|qdrant\.tech$|temporal\.io$|arxiv\.org$|paperswithcode\.com$|pypi\.org$/.test(normalizedHostname)) return true;
+  if (family === 'api' && /openrouter\.ai$|platform\.openai\.com$|openai\.com$|ai\.google\.dev$|developers\.google\.com$|anthropic\.com$|docs\.anthropic\.com$|postman\.com$/.test(normalizedHostname)) return true;
+  return false;
+}
+
+function isResearchScoutDictionaryHost(hostname: string): boolean {
+  return /merriam-webster\.com$|dictionary\.cambridge\.org$|dictionary\.com$|thefreedictionary\.com$|collinsdictionary\.com$/.test(hostname);
+}
+
+function isResearchScoutUndesiredHost(
+  hostname: string,
+  family: 'control-plane' | 'api' | 'generic',
+): boolean {
+  if (!hostname) return true;
+  if (isResearchScoutDictionaryHost(hostname)) return true;
+  if (/osfhealthcare\.org$|myworkday\.com$|okta\.com$|zoom\.us$/.test(hostname)) return true;
+  if (family !== 'generic' && /support\.google\.com$|google\.com$/.test(hostname)) return true;
+  return false;
 }
 
 function isResearchScoutNavigationTrap(
@@ -9632,6 +10653,205 @@ function isResearchScoutNavigationTrap(
   }
 
   return false;
+}
+
+function extractResearchScoutTopicMarkers(text: string): string[] {
+  const normalized = String(text || '').toLowerCase();
+  const markers: string[] = [];
+  const push = (value: string): void => {
+    if (!markers.includes(value)) markers.push(value);
+  };
+  if (/langgraph/.test(normalized)) push('langgraph');
+  if (/langchain/.test(normalized)) push('langchain');
+  if (/model context protocol|\bmcp\b/.test(normalized)) push('mcp');
+  if (/qdrant/.test(normalized)) push('qdrant');
+  if (/temporal/.test(normalized)) push('temporal');
+  if (/openrouter/.test(normalized)) push('openrouter');
+  if (/\bopenai\b|responses api/.test(normalized)) push('openai');
+  if (/gemini/.test(normalized)) push('gemini');
+  if (/anthropic|claude/.test(normalized)) push('anthropic');
+  if (/checkpoint|state graph|durable/.test(normalized)) push('durable');
+  if (/routing|provider|rate limit|quota|capability/.test(normalized)) push('routing');
+  return markers;
+}
+
+function scoreResearchScoutPreviewQueryMatch(
+  query: string,
+  text: string,
+): number {
+  const queryTokens = tokenizeResearchText(query).slice(0, 12);
+  const previewTokens = new Set(tokenizeResearchText(text));
+  if (queryTokens.length === 0 || previewTokens.size === 0) return 0;
+  let matches = 0;
+  for (const token of queryTokens) {
+    if (previewTokens.has(token)) matches += 1;
+  }
+  return matches;
+}
+
+function decodeResearchScoutHtmlEntities(text: string): string {
+  return String(text || '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&#x27;/gi, "'");
+}
+
+function normalizeResearchScoutWhitespace(value: unknown): string {
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+function extractResearchScoutHtmlTitle(html: string): string {
+  const match = String(html || '').match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  return normalizeResearchScoutWhitespace(decodeResearchScoutHtmlEntities(match?.[1] || ''));
+}
+
+function extractResearchScoutMetaDescription(html: string): string {
+  const match = String(html || '').match(/<meta[^>]+name=["']description["'][^>]+content=["']([\s\S]*?)["'][^>]*>/i)
+    || String(html || '').match(/<meta[^>]+content=["']([\s\S]*?)["'][^>]+name=["']description["'][^>]*>/i);
+  return normalizeResearchScoutWhitespace(decodeResearchScoutHtmlEntities(match?.[1] || ''));
+}
+
+function extractResearchScoutBodyText(html: string): string {
+  const stripped = String(html || '')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<noscript[\s\S]*?<\/noscript>/gi, ' ')
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<svg[\s\S]*?<\/svg>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ');
+  return truncateTextMiddle(
+    normalizeResearchScoutWhitespace(decodeResearchScoutHtmlEntities(stripped)),
+    RESEARCH_SCOUT_PREFETCH_TEXT_MAX_CHARS,
+  );
+}
+
+type ResearchScoutPrefetchedPage = {
+  requestedUrl: string;
+  finalUrl: string;
+  hostname: string;
+  title: string;
+  description: string;
+  text: string;
+  contentType: string;
+  score: number;
+  blockedReason: string;
+};
+
+async function fetchResearchScoutPagePreview(
+  url: string,
+  family: 'control-plane' | 'api' | 'generic',
+): Promise<ResearchScoutPrefetchedPage | null> {
+  const normalizedUrl = normalizeHttpUrl(url);
+  if (!normalizedUrl) return null;
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), RESEARCH_SCOUT_PREFETCH_TIMEOUT_MS);
+  try {
+    const response = await fetch(normalizedUrl, {
+      headers: {
+        'accept': 'text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.1',
+        'user-agent': 'AnyGPT-ResearchScout/1.0 (+https://github.com/AnyVM-Tech/AnyGPT)',
+      },
+      redirect: 'follow',
+      signal: controller.signal,
+    });
+    const contentType = String(response.headers.get('content-type') || '').toLowerCase();
+    if (!response.ok) {
+      return {
+        requestedUrl: normalizedUrl,
+        finalUrl: normalizeHttpUrl(response.url || normalizedUrl) || normalizedUrl,
+        hostname: getResearchScoutHostname(response.url || normalizedUrl),
+        title: '',
+        description: '',
+        text: '',
+        contentType,
+        score: -12,
+        blockedReason: `http-${response.status}`,
+      };
+    }
+
+    if (!/text\/html|application\/xhtml\+xml|text\/plain/.test(contentType)) {
+      return {
+        requestedUrl: normalizedUrl,
+        finalUrl: normalizeHttpUrl(response.url || normalizedUrl) || normalizedUrl,
+        hostname: getResearchScoutHostname(response.url || normalizedUrl),
+        title: '',
+        description: '',
+        text: '',
+        contentType,
+        score: -8,
+        blockedReason: 'unsupported-content-type',
+      };
+    }
+
+    const rawBody = truncateTextMiddle(await response.text(), RESEARCH_SCOUT_PREFETCH_TEXT_MAX_CHARS);
+    const finalUrl = normalizeHttpUrl(response.url || normalizedUrl) || normalizedUrl;
+    const hostname = getResearchScoutHostname(finalUrl);
+    const title = /text\/html|application\/xhtml\+xml/.test(contentType)
+      ? extractResearchScoutHtmlTitle(rawBody)
+      : '';
+    const description = /text\/html|application\/xhtml\+xml/.test(contentType)
+      ? extractResearchScoutMetaDescription(rawBody)
+      : '';
+    const text = /text\/html|application\/xhtml\+xml/.test(contentType)
+      ? extractResearchScoutBodyText(rawBody)
+      : normalizeResearchScoutWhitespace(rawBody);
+    const combinedText = [title, description, text].filter(Boolean).join(' | ');
+
+    if (isResearchScoutNavigationTrap(finalUrl, hostname, combinedText)) {
+      return {
+        requestedUrl: normalizedUrl,
+        finalUrl,
+        hostname,
+        title,
+        description,
+        text,
+        contentType,
+        score: -15,
+        blockedReason: 'navigation-trap',
+      };
+    }
+    if (isResearchScoutUndesiredHost(hostname, family)) {
+      return {
+        requestedUrl: normalizedUrl,
+        finalUrl,
+        hostname,
+        title,
+        description,
+        text,
+        contentType,
+        score: -12,
+        blockedReason: 'undesired-host',
+      };
+    }
+
+    let score = 0;
+    if (isResearchScoutTechnicalDocLike(combinedText.toLowerCase())) score += 3;
+    if (/guide|reference|tutorial|overview|quickstart|examples?|best practices?|implementation/.test(combinedText.toLowerCase())) score += 2;
+    if (family === 'control-plane' && /mcp|model context protocol|checkpoint|durable|state graph|governance|evaluation|observability|semantic memory|vector memory|hybrid search|agent orchestration|workflow/.test(combinedText.toLowerCase())) score += 4;
+    if (family === 'api' && /api|provider|routing|retry|quota|rate limit|capability|openai|openrouter|gemini|anthropic|responses api/.test(combinedText.toLowerCase())) score += 4;
+    if (!combinedText || combinedText.length < 120) score -= 2;
+
+    return {
+      requestedUrl: normalizedUrl,
+      finalUrl,
+      hostname,
+      title,
+      description,
+      text,
+      contentType,
+      score,
+      blockedReason: '',
+    };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 function isResearchScoutNoResultAction(
@@ -9701,192 +10921,6 @@ function getBestResearchScoutSearchScore(
   return Math.max(
     ...links.map((link) => scoreResearchScoutLink(action, link)),
   );
-}
-
-function buildResearchScoutWebsiteVisitActions(
-  state: Pick<
-    ControlPlaneState,
-    | 'repoRoot'
-    | 'mcpConfigPath'
-    | 'mcpInspections'
-    | 'plannedMcpActions'
-    | 'executedMcpActions'
-    | 'maxMcpActions'
-    | 'scopes'
-    | 'effectiveScopes'
-  >,
-  history?: ResearchScoutVisitedPageHistory,
-): { actions: McpPlannedAction[]; notes: string[] } {
-  const effectiveScopes = new Set(getEffectiveScopes(state as ControlPlaneState));
-  if (!effectiveScopes.has('research-scout')) return { actions: [], notes: [] };
-
-  const playwrightInspection = state.mcpInspections.find((inspection) => inspection.server === 'playwright');
-  if (playwrightInspection?.status !== 'connected') return { actions: [], notes: [] };
-
-  const configsByServer = new Map(
-    loadMcpServers(resolveMcpConfigPath(state as ControlPlaneState)).map((server) => [server.name, server] as const),
-  );
-  const playwrightConfig = configsByServer.get('playwright');
-  if (!playwrightConfig) return { actions: [], notes: [] };
-
-  const existingIds = new Set(
-    [
-      ...(state.plannedMcpActions || []).map((action) => String(action.id || '').trim()),
-      ...(state.executedMcpActions || []).map((action) => String(action.id || '').trim()),
-    ].filter(Boolean),
-  );
-
-  const selectedLinks: Array<{
-    url: string;
-    title: string;
-    description: string;
-    source: string;
-    score: number;
-    hostname: string;
-    family: 'control-plane' | 'api' | 'generic';
-  }> = [];
-  const seenUrls = new Set<string>();
-  const selectedHostnames = new Set<string>();
-  const revisitedUrls = new Set<string>();
-  const successfulSearchActions = (state.executedMcpActions || [])
-    .filter((action) => action.server === 'brave-search' && action.status === 'success');
-  const visitedUrls = history?.visitedUrls || new Set<string>();
-  const hostVisitCounts = history?.hostVisitCounts || new Map<string, number>();
-
-  const canSelectLink = (
-    link: {
-      url: string;
-      hostname: string;
-      family: 'control-plane' | 'api' | 'generic';
-      score: number;
-    },
-    options?: { requireFreshHostname?: boolean },
-  ): boolean => {
-    if (!link.url || seenUrls.has(link.url)) return false;
-    if (isResearchScoutNavigationTrap(link.url, link.hostname, link.url)) return false;
-    if (visitedUrls.has(link.url)) {
-      revisitedUrls.add(link.url);
-      return false;
-    }
-    if (options?.requireFreshHostname && link.hostname && selectedHostnames.has(link.hostname)) {
-      return false;
-    }
-    if (link.family === 'api' && isResearchScoutLowValueCommunityHost(link.hostname) && link.score < 9) {
-      return false;
-    }
-    if (link.family === 'control-plane' && isResearchScoutLowValueCommunityHost(link.hostname) && link.score < 10) {
-      return false;
-    }
-    return true;
-  };
-
-  for (const action of successfulSearchActions) {
-    const family = inferResearchScoutQueryFamily(action);
-    const rankedLinks = extractResearchScoutActionLinks(action)
-      .map((link) => ({
-        ...link,
-        score: scoreResearchScoutLink(action, link),
-        hostname: getResearchScoutHostname(link.url),
-        family,
-      }))
-      .filter((entry) =>
-        Boolean(entry.url)
-        && (entry.score - Math.min(6, (hostVisitCounts.get(entry.hostname) || 0) * 2) + ((hostVisitCounts.get(entry.hostname) || 0) === 0 ? 1 : 0))
-          >= (family === 'api' ? 5 : 3),
-      )
-      .sort((left, right) => {
-        const leftAdjusted = left.score - Math.min(6, (hostVisitCounts.get(left.hostname) || 0) * 2) + ((hostVisitCounts.get(left.hostname) || 0) === 0 ? 1 : 0);
-        const rightAdjusted = right.score - Math.min(6, (hostVisitCounts.get(right.hostname) || 0) * 2) + ((hostVisitCounts.get(right.hostname) || 0) === 0 ? 1 : 0);
-        return rightAdjusted - leftAdjusted || left.url.localeCompare(right.url);
-      });
-
-    const bestLink = rankedLinks.find((link) => canSelectLink(link, { requireFreshHostname: true }));
-    if (!bestLink) continue;
-    seenUrls.add(bestLink.url);
-    if (bestLink.hostname) selectedHostnames.add(bestLink.hostname);
-    selectedLinks.push(bestLink);
-    if (selectedLinks.length >= 2) break;
-  }
-
-  if (selectedLinks.length < 2) {
-    const fallbackLinks = successfulSearchActions
-      .flatMap((action) =>
-        extractResearchScoutActionLinks(action)
-          .map((link) => ({
-            ...link,
-            score: scoreResearchScoutLink(action, link),
-            hostname: getResearchScoutHostname(link.url),
-            family: inferResearchScoutQueryFamily(action),
-          })),
-      )
-      .filter((entry) =>
-        Boolean(entry.url)
-        && entry.score >= (entry.family === 'api' ? 5 : 1)
-      )
-      .sort((left, right) => {
-        const leftAdjusted = left.score - Math.min(6, (hostVisitCounts.get(left.hostname) || 0) * 2) + ((hostVisitCounts.get(left.hostname) || 0) === 0 ? 1 : 0);
-        const rightAdjusted = right.score - Math.min(6, (hostVisitCounts.get(right.hostname) || 0) * 2) + ((hostVisitCounts.get(right.hostname) || 0) === 0 ? 1 : 0);
-        return rightAdjusted - leftAdjusted || left.url.localeCompare(right.url);
-      });
-
-    for (const link of fallbackLinks) {
-      if (!canSelectLink(link)) continue;
-      seenUrls.add(link.url);
-      if (link.hostname) selectedHostnames.add(link.hostname);
-      selectedLinks.push(link);
-      if (selectedLinks.length >= 2) break;
-    }
-  }
-
-  const notes: string[] = [];
-  if (revisitedUrls.size > 0) {
-    notes.push(`Research scout skipped ${revisitedUrls.size} previously inspected page(s) to avoid revisits.`);
-  }
-  if (selectedHostnames.size > 1) {
-    notes.push(`Research scout prioritized ${selectedHostnames.size} distinct website domains in this pass to improve source diversity.`);
-  }
-  if (selectedLinks.length === 0) {
-    if (revisitedUrls.size > 0) {
-      notes.push('Research scout deferred website opening because the highest-ranked current results were already visited.');
-    }
-    return { actions: [], notes };
-  }
-
-  const actions: McpPlannedAction[] = [];
-  for (const [index, link] of selectedLinks.entries()) {
-    const label = link.title || link.url;
-    const navigateId = `mcp-playwright-research-navigate-${index + 1}`;
-    if (!existingIds.has(navigateId) && mcpInspectionHasTool(playwrightInspection, 'browser_navigate')) {
-      actions.push(buildMcpPlannedAction({
-        id: navigateId,
-        server: 'playwright',
-        tool: 'browser_navigate',
-        title: `Open research page ${index + 1}: ${truncateTextMiddle(label, 80)}`,
-        reason: 'Research-scout should open top search-result pages to inspect the actual website content instead of stopping at result snippets.',
-        arguments: { url: link.url },
-        risk: 'low',
-        alwaysAllow: playwrightConfig.alwaysAllow.includes('browser_navigate'),
-      }));
-    }
-    const snapshotId = `mcp-playwright-research-snapshot-${index + 1}`;
-    if (!existingIds.has(snapshotId) && mcpInspectionHasTool(playwrightInspection, 'browser_snapshot')) {
-      actions.push(buildMcpPlannedAction({
-        id: snapshotId,
-        server: 'playwright',
-        tool: 'browser_snapshot',
-        title: `Capture research page snapshot ${index + 1}`,
-        reason: 'Capture a structured page snapshot after opening the research website so the lane can summarize the real page content.',
-        arguments: {},
-        risk: 'low',
-        alwaysAllow: playwrightConfig.alwaysAllow.includes('browser_snapshot'),
-      }));
-    }
-  }
-
-  return {
-    actions: actions.slice(0, Math.max(0, state.maxMcpActions)),
-    notes,
-  };
 }
 
 function buildResearchScoutFallbackSearchActions(
@@ -10205,8 +11239,9 @@ function scoreResearchScoutWebsiteInformation(
   if (/cookie|cookies|sign in|subscribe|newsletter|advertisement/.test(normalizedText)) score -= 2;
 
   if (family === 'control-plane') {
-    if (/langgraph|langchain|orchestration|workflow|agent/.test(normalizedText)) score += 4;
+    if (/model context protocol|mcp|temporal|qdrant|governance|evaluation|observability|semantic memory|vector memory|hybrid search/.test(normalizedText)) score += 5;
     if (/checkpoint|state graph|durable|interrupt|human in the loop|human-in-the-loop|multi-agent|memory/.test(normalizedText)) score += 4;
+    if (/langgraph|langchain/.test(normalizedText)) score += 1;
   } else if (family === 'api') {
     if (/api|provider|routing|retry|backoff|quota|rate limit|rate limits|capability|fallback|error codes|responses api|tool use|tool calling|function calling|invalid argument|generatecontent/.test(normalizedText)) score += 5;
     if (/openai|openrouter|gemini|anthropic/.test(normalizedText)) score += 2;
@@ -10341,6 +11376,12 @@ async function writeResearchScoutWebsiteFindings(
   const namespace = getResearchScoutPageMemoryNamespace(state);
 
   for (const finding of findings.slice(0, 4)) {
+    if (isResearchScoutUndesiredHost(finding.hostname, finding.family)) continue;
+    if (isResearchScoutNavigationTrap(finding.url, finding.hostname, [finding.pageTitle, finding.pageSummary, finding.pagePreview].join(' | '))) continue;
+    if (isResearchScoutLowValueCommunityHost(finding.hostname)) continue;
+    if (finding.family !== 'generic' && !isResearchScoutPreferredTechnicalHost(finding.hostname, finding.family)) continue;
+    if (finding.mappedPaths.length === 0) continue;
+    if (finding.quality !== 'high' && finding.informationScore < 8) continue;
     const key = normalizeHttpUrl(finding.url);
     if (!key) continue;
     const existing = await store.get(namespace, key).catch(() => null);
@@ -10392,7 +11433,326 @@ async function writeResearchScoutWebsiteFindings(
   }
 }
 
+async function pruneResearchScoutPageMemory(
+  store: BaseStore | undefined,
+  state: Pick<ControlPlaneState, 'langSmithProjectName' | 'governanceProfile'>,
+): Promise<string[]> {
+  if (!store) return [];
+  const namespace = getResearchScoutPageMemoryNamespace(state);
+  const items = await store.search(namespace, { limit: 64 }).catch(() => [] as SearchItem[]);
+  const removed: string[] = [];
+
+  for (const item of items) {
+    const value = item.value && typeof item.value === 'object'
+      ? item.value as Record<string, unknown>
+      : {};
+    const url = normalizeHttpUrl(value.pageUrl || item.key);
+    if (!url) continue;
+    const hostname = getResearchScoutHostname(url);
+    const family = value.family === 'control-plane' || value.family === 'api'
+      ? value.family
+      : 'generic';
+    const combinedText = [
+      value.pageTitle,
+      value.searchTitle,
+      value.searchDescription,
+      value.pageSummary,
+      value.pagePreview,
+    ].map((entry) => String(entry || '').trim()).filter(Boolean).join(' | ');
+    const shouldDelete = isResearchScoutNavigationTrap(url, hostname, combinedText)
+      || isResearchScoutUndesiredHost(hostname, family)
+      || isResearchScoutLowValueCommunityHost(hostname)
+      || (family !== 'generic' && !isResearchScoutPreferredTechnicalHost(hostname, family))
+      || !Array.isArray(value.mappedPaths)
+      || (Array.isArray(value.mappedPaths) && value.mappedPaths.filter((entry) => String(entry || '').trim()).length === 0);
+    if (!shouldDelete) continue;
+    await store.delete(namespace, item.key).catch(() => undefined);
+    removed.push(url);
+  }
+
+  return removed.slice(0, 8);
+}
+
+async function buildResearchScoutTrustedSourceCandidates(
+  families: Array<'control-plane' | 'api' | 'generic'>,
+  visitedUrls: Set<string>,
+  hostVisitCounts: Map<string, number>,
+): Promise<Array<{
+  url: string;
+  hostname: string;
+  title: string;
+  description: string;
+  source: string;
+  score: number;
+  previewScore: number;
+  previewText: string;
+  previewQueryMatch: number;
+  preferredHost: boolean;
+  topicMismatch: boolean;
+  blockedReason: string;
+  family: 'control-plane' | 'api' | 'generic';
+  query: string;
+}>> {
+  const normalizedFamilies = Array.from(new Set(
+    families
+      .filter((family): family is 'control-plane' | 'api' => family === 'control-plane' || family === 'api'),
+  ));
+  if (normalizedFamilies.length === 0) return [];
+
+  const sources = normalizedFamilies.flatMap((family) => RESEARCH_SCOUT_TRUSTED_SOURCE_PACKS[family] || []);
+  const prefetched = await Promise.all(
+    sources.map(async (candidate) => ({
+      candidate,
+      preview: await fetchResearchScoutPagePreview(candidate.url, candidate.family),
+    })),
+  );
+
+  return prefetched
+    .map(({ candidate, preview }) => {
+      const finalUrl = preview?.finalUrl || candidate.url;
+      const hostname = preview?.hostname || getResearchScoutHostname(finalUrl);
+      const previewText = [preview?.title, preview?.description, preview?.text].filter(Boolean).join(' | ');
+      return {
+        url: finalUrl,
+        hostname,
+        title: candidate.title,
+        description: preview?.description || candidate.title,
+        source: 'trusted-source-pack',
+        score: 14 + Math.max(0, scoreResearchScoutDomain(hostname, candidate.family)),
+        previewScore: preview?.score || 0,
+        previewText,
+        previewQueryMatch: 4,
+        preferredHost: isResearchScoutPreferredTechnicalHost(hostname, candidate.family),
+        topicMismatch: false,
+        blockedReason: preview?.blockedReason || '',
+        family: candidate.family,
+        query: candidate.title,
+      };
+    })
+    .filter((entry) => Boolean(entry.url))
+    .filter((entry) => !entry.blockedReason)
+    .filter((entry) => !visitedUrls.has(entry.url))
+    .sort((left, right) => {
+      const leftAdjusted = left.score + left.previewScore - Math.min(6, (hostVisitCounts.get(left.hostname) || 0) * 2);
+      const rightAdjusted = right.score + right.previewScore - Math.min(6, (hostVisitCounts.get(right.hostname) || 0) * 2);
+      return rightAdjusted - leftAdjusted || left.url.localeCompare(right.url);
+    });
+}
+
+async function buildResearchScoutWebsiteVisitActions(
+  state: Pick<
+    ControlPlaneState,
+    | 'repoRoot'
+    | 'mcpConfigPath'
+    | 'mcpInspections'
+    | 'plannedMcpActions'
+    | 'executedMcpActions'
+    | 'maxMcpActions'
+    | 'scopes'
+    | 'effectiveScopes'
+  >,
+  history?: ResearchScoutVisitedPageHistory,
+): Promise<{ actions: McpPlannedAction[]; notes: string[] }> {
+  const effectiveScopes = new Set(getEffectiveScopes(state as ControlPlaneState));
+  if (!effectiveScopes.has('research-scout')) return { actions: [], notes: [] };
+
+  const playwrightInspection = state.mcpInspections.find((inspection) => inspection.server === 'playwright');
+  if (playwrightInspection?.status !== 'connected') return { actions: [], notes: [] };
+
+  const configsByServer = new Map(
+    loadMcpServers(resolveMcpConfigPath(state as ControlPlaneState)).map((server) => [server.name, server] as const),
+  );
+  const playwrightConfig = configsByServer.get('playwright');
+  if (!playwrightConfig) return { actions: [], notes: [] };
+
+  const existingIds = new Set(
+    [
+      ...(state.plannedMcpActions || []).map((action) => String(action.id || '').trim()),
+      ...(state.executedMcpActions || []).map((action) => String(action.id || '').trim()),
+    ].filter(Boolean),
+  );
+
+  const seenUrls = new Set<string>();
+  const selectedHostnames = new Set<string>();
+  const revisitedUrls = new Set<string>();
+  const filteredUrls = new Set<string>();
+  const successfulSearchActions = (state.executedMcpActions || [])
+    .filter((action) => action.server === 'brave-search' && action.status === 'success');
+  const visitedUrls = history?.visitedUrls || new Set<string>();
+  const hostVisitCounts = history?.hostVisitCounts || new Map<string, number>();
+
+  const candidateLinks = successfulSearchActions
+    .flatMap((action) =>
+      extractResearchScoutActionLinks(action).map((link) => ({
+        ...link,
+        score: scoreResearchScoutLink(action, link),
+        hostname: getResearchScoutHostname(link.url),
+        family: inferResearchScoutQueryFamily(action),
+        query: String((action.arguments as Record<string, unknown> | undefined)?.query || ''),
+      })),
+    )
+    .filter((entry) => Boolean(entry.url))
+    .sort((left, right) => right.score - left.score || left.url.localeCompare(right.url))
+    .slice(0, RESEARCH_SCOUT_PREFETCH_CANDIDATE_LIMIT);
+  const candidateFamilies = Array.from(new Set(
+    successfulSearchActions
+      .map((action) => inferResearchScoutQueryFamily(action))
+      .filter((family): family is 'control-plane' | 'api' => family === 'control-plane' || family === 'api'),
+  ));
+
+  const prefetchedPreviews = await Promise.all(
+    candidateLinks.map(async (candidate) => ({
+      candidate,
+      preview: await fetchResearchScoutPagePreview(candidate.url, candidate.family),
+    })),
+  );
+
+  const prefetchedCandidates = prefetchedPreviews
+    .map(({ candidate, preview }) => {
+      const finalUrl = preview?.finalUrl || candidate.url;
+      const finalHostname = preview?.hostname || candidate.hostname;
+      const previewText = [preview?.title, preview?.description, preview?.text].filter(Boolean).join(' | ');
+      const combinedPreviewText = [candidate.title, candidate.description, previewText, finalUrl].filter(Boolean).join(' | ');
+      const searchMarkers = extractResearchScoutTopicMarkers([candidate.title, candidate.description, candidate.query].join(' | '));
+      const previewMarkers = extractResearchScoutTopicMarkers(combinedPreviewText);
+      const previewQueryMatch = scoreResearchScoutPreviewQueryMatch(candidate.query, combinedPreviewText);
+      const preferredHost = isResearchScoutPreferredTechnicalHost(finalHostname, candidate.family);
+      const topicMismatch = searchMarkers.length > 0 && !searchMarkers.some((marker) => previewMarkers.includes(marker));
+      return {
+        ...candidate,
+        url: finalUrl,
+        hostname: finalHostname,
+        previewScore: preview?.score || 0,
+        previewText,
+        previewQueryMatch,
+        preferredHost,
+        topicMismatch,
+        blockedReason: preview?.blockedReason || '',
+      };
+    })
+    .filter((entry) => {
+      if (!entry.url) return false;
+      if (entry.blockedReason) {
+        filteredUrls.add(entry.url);
+        return false;
+      }
+      if (isResearchScoutUndesiredHost(entry.hostname, entry.family)) {
+        filteredUrls.add(entry.url);
+        return false;
+      }
+      if (entry.topicMismatch) {
+        filteredUrls.add(entry.url);
+        return false;
+      }
+      if (!entry.preferredHost && entry.previewQueryMatch < 2) {
+        filteredUrls.add(entry.url);
+        return false;
+      }
+      const combinedScore = entry.score + entry.previewScore - Math.min(6, (hostVisitCounts.get(entry.hostname) || 0) * 2) + ((hostVisitCounts.get(entry.hostname) || 0) === 0 ? 1 : 0);
+      return combinedScore >= (entry.family === 'api' ? 9 : 7);
+    })
+    .sort((left, right) => {
+      const leftAdjusted = left.score + left.previewScore - Math.min(6, (hostVisitCounts.get(left.hostname) || 0) * 2) + ((hostVisitCounts.get(left.hostname) || 0) === 0 ? 1 : 0);
+      const rightAdjusted = right.score + right.previewScore - Math.min(6, (hostVisitCounts.get(right.hostname) || 0) * 2) + ((hostVisitCounts.get(right.hostname) || 0) === 0 ? 1 : 0);
+      return rightAdjusted - leftAdjusted || left.url.localeCompare(right.url);
+    });
+
+  const trustedSourceCandidates = await buildResearchScoutTrustedSourceCandidates(
+    candidateFamilies.length > 0 ? candidateFamilies : ['control-plane', 'api'],
+    visitedUrls,
+    hostVisitCounts,
+  );
+
+  const selectedLinks: typeof prefetchedCandidates = [];
+  const selectedFamilyCounts = new Map<string, number>();
+  for (const link of prefetchedCandidates) {
+    if (!link.url || seenUrls.has(link.url)) continue;
+    if (visitedUrls.has(link.url)) {
+      revisitedUrls.add(link.url);
+      continue;
+    }
+    if (selectedHostnames.has(link.hostname)) continue;
+    if ((selectedFamilyCounts.get(link.family) || 0) >= 2) continue;
+    if (!link.preferredHost && link.previewQueryMatch < 3) continue;
+    if (link.family === 'api' && isResearchScoutLowValueCommunityHost(link.hostname) && (link.score + link.previewScore) < 12) continue;
+    if (link.family === 'control-plane' && isResearchScoutLowValueCommunityHost(link.hostname)) continue;
+    seenUrls.add(link.url);
+    if (link.hostname) selectedHostnames.add(link.hostname);
+    selectedLinks.push(link);
+    selectedFamilyCounts.set(link.family, (selectedFamilyCounts.get(link.family) || 0) + 1);
+    if (selectedLinks.length >= 3) break;
+  }
+
+  for (const link of trustedSourceCandidates) {
+    if (selectedLinks.length >= 3) break;
+    if (!link.url || seenUrls.has(link.url)) continue;
+    if (selectedHostnames.has(link.hostname)) continue;
+    if ((selectedFamilyCounts.get(link.family) || 0) >= 2) continue;
+    seenUrls.add(link.url);
+    if (link.hostname) selectedHostnames.add(link.hostname);
+    selectedLinks.push(link as (typeof prefetchedCandidates)[number]);
+    selectedFamilyCounts.set(link.family, (selectedFamilyCounts.get(link.family) || 0) + 1);
+  }
+
+  const notes: string[] = [];
+  if (revisitedUrls.size > 0) {
+    notes.push(`Research scout skipped ${revisitedUrls.size} previously inspected page(s) to avoid revisits.`);
+  }
+  if (filteredUrls.size > 0) {
+    notes.push(`Research scout filtered ${filteredUrls.size} low-quality or trap result page(s) before browser inspection.`);
+  }
+  if (selectedHostnames.size > 1) {
+    notes.push(`Research scout prioritized ${selectedHostnames.size} distinct website domains in this pass to improve source diversity.`);
+  }
+  if (selectedLinks.length === 0) {
+    if (revisitedUrls.size > 0) {
+      notes.push('Research scout deferred website opening because the highest-ranked current results were already visited.');
+    }
+    return { actions: [], notes };
+  }
+  if (prefetchedCandidates.length === 0 && trustedSourceCandidates.length > 0) {
+    notes.push('Research scout fell back to trusted-source browsing because search results were weak or empty.');
+  }
+
+  const actions: McpPlannedAction[] = [];
+  for (const [index, link] of selectedLinks.entries()) {
+    const label = link.title || link.url;
+    const navigateId = `mcp-playwright-research-navigate-${index + 1}`;
+    if (!existingIds.has(navigateId) && mcpInspectionHasTool(playwrightInspection, 'browser_navigate')) {
+      actions.push(buildMcpPlannedAction({
+        id: navigateId,
+        server: 'playwright',
+        tool: 'browser_navigate',
+        title: `Open research page ${index + 1}: ${truncateTextMiddle(label, 80)}`,
+        reason: 'Research-scout should open top search-result pages to inspect the actual website content instead of stopping at result snippets.',
+        arguments: { url: link.url },
+        risk: 'low',
+        alwaysAllow: playwrightConfig.alwaysAllow.includes('browser_navigate'),
+      }));
+    }
+    const snapshotId = `mcp-playwright-research-snapshot-${index + 1}`;
+    if (!existingIds.has(snapshotId) && mcpInspectionHasTool(playwrightInspection, 'browser_snapshot')) {
+      actions.push(buildMcpPlannedAction({
+        id: snapshotId,
+        server: 'playwright',
+        tool: 'browser_snapshot',
+        title: `Capture research page snapshot ${index + 1}`,
+        reason: 'Capture a structured page snapshot after opening the research website so the lane can summarize the real page content.',
+        arguments: {},
+        risk: 'low',
+        alwaysAllow: playwrightConfig.alwaysAllow.includes('browser_snapshot'),
+      }));
+    }
+  }
+
+  return {
+    actions: actions.slice(0, Math.max(0, state.maxMcpActions)),
+    notes,
+  };
+}
+
 async function webIdeaScoutNode(state: ControlPlaneState, runtime?: Runtime): Promise<Partial<ControlPlaneState>> {
+  const prunedPoolUrls = await pruneResearchScoutPageMemory(runtime?.store, state).catch(() => [] as string[]);
   const requestedSearchActions = await buildResearchScoutRequestedSearchActions(runtime?.store, state);
   const requestedSearchPlannedActions = appendUniqueMcpActions(state.plannedMcpActions, requestedSearchActions);
   const requestedSearchNotes = requestedSearchActions
@@ -10436,7 +11796,7 @@ async function webIdeaScoutNode(state: ControlPlaneState, runtime?: Runtime): Pr
   });
   const visitedPageRecords = await readResearchScoutVisitedPageRecords(runtime?.store, state).catch(() => [] as ResearchScoutVisitedPageRecord[]);
   const visitedHistory = buildResearchScoutVisitedPageHistory(visitedPageRecords);
-  const followUpVisitPlan = buildResearchScoutWebsiteVisitActions({
+  const followUpVisitPlan = await buildResearchScoutWebsiteVisitActions({
     ...state,
     plannedMcpActions: fallbackSearchPlannedActions,
     executedMcpActions: executedMcpActionsAfterFallback,
@@ -10473,7 +11833,43 @@ async function webIdeaScoutNode(state: ControlPlaneState, runtime?: Runtime): Pr
       .map((note) => Number(note.match(/(\d+)/)?.[1] || 0))
       .find((value) => value > 0) || 0,
   });
+  const researchSynthesis = websiteFindings.length > 0
+    ? await callAiNotesAgent(
+        'planner',
+        state,
+        {
+          evidenceFocus: 'research-scout-website-synthesis',
+          websiteFindings: websiteFindings.slice(0, 3).map((finding) => ({
+            url: finding.url,
+            title: finding.pageTitle || finding.searchTitle,
+            quality: finding.quality,
+            mappedPaths: finding.mappedPaths,
+            keywords: finding.keywords.slice(0, 6),
+            summary: truncateTextMiddle(finding.pageSummary || finding.pagePreview, 600),
+          })),
+          queuedRequestNotes: requestedSearchNotes,
+          rankingNotes,
+        },
+        [
+          state.controlPlanePrompts.planner,
+          'You are synthesizing already-collected website evidence for research-scout.',
+          'Do not generate or alter search queries here.',
+          'Prefer short notes that connect concrete page evidence to practical file-level improvements.',
+        ].join('\n'),
+      )
+    : {
+        enabled: false,
+        model: state.aiAgentModel || '',
+        backend: state.aiAgentBackend || '',
+        notes: [],
+        failureClass: state.lastAiFailureClass,
+      };
+  const synthesisNotes = researchSynthesis.notes.map((note) => `AI research scout synthesis: ${note}`);
+  if (researchSynthesis.error) {
+    synthesisNotes.push(`AI research scout synthesis unavailable: ${researchSynthesis.error}`);
+  }
   const combinedNotes = [
+    ...(prunedPoolUrls.length > 0 ? [`Research scout pruned ${prunedPoolUrls.length} stale or low-value page(s) from the shared research pool.`] : []),
     ...notes,
     ...requestedSearchNotes,
     ...fallbackSearchNotes,
@@ -10481,6 +11877,7 @@ async function webIdeaScoutNode(state: ControlPlaneState, runtime?: Runtime): Pr
     ...followUpNotes,
     ...browserInspectionNotes,
     ...rankingNotes,
+    ...synthesisNotes,
   ];
 
   return {
@@ -10500,9 +11897,14 @@ async function webIdeaScoutNode(state: ControlPlaneState, runtime?: Runtime): Pr
         ...(browserExecutionPatch.mcpActionNotes || []),
         ...browserInspectionNotes,
         ...rankingNotes,
+        ...synthesisNotes,
       ],
     ),
     recentAutonomousLearningNotes: appendUniqueNotes(state.recentAutonomousLearningNotes, combinedNotes).slice(-12),
+    aiAgentEnabled: state.aiAgentEnabled || researchSynthesis.enabled,
+    aiAgentBackend: state.aiAgentBackend || researchSynthesis.backend,
+    aiAgentModel: state.aiAgentModel || researchSynthesis.model,
+    lastAiFailureClass: researchSynthesis.error ? (researchSynthesis.failureClass || 'backend-error') : state.lastAiFailureClass,
   };
 }
 
@@ -10848,6 +12250,7 @@ async function repairDecisionNode(state: ControlPlaneState): Promise<Partial<Con
   const smokeFailures = state.repairSmokeResults.filter((job) => job.status === 'failed');
   const evaluationGateResult = resolveStateEvaluationGateResult(state);
   const governanceGateResult = resolveStateGovernanceGateResult(state);
+  const browserValidation = evaluateBrowserValidationBundle(state);
   const autonomousLaneLabel = state.autonomousOperationMode === 'improvement' ? 'Improvement' : 'Repair';
   let repairStatus: RepairStatus = 'not-needed';
   let repairDecisionReason = state.autonomousOperationMode === 'improvement'
@@ -10869,6 +12272,9 @@ async function repairDecisionNode(state: ControlPlaneState): Promise<Partial<Con
   } else if (evaluationGateResult.blocksAutonomousEdits || evaluationGateResult.blocksExecution) {
     repairStatus = 'failed';
     repairDecisionReason = `${autonomousLaneLabel} promotion blocked by the evaluation gate: ${evaluationGateResult.reason}`;
+  } else if (browserValidation.required && !browserValidation.passed) {
+    repairStatus = 'failed';
+    repairDecisionReason = browserValidation.reason;
   } else {
     repairStatus = 'promoted';
     repairPromotedPaths = appliedPaths;
@@ -10879,6 +12285,9 @@ async function repairDecisionNode(state: ControlPlaneState): Promise<Partial<Con
     repairStatus,
     repairDecisionReason,
     repairPromotedPaths,
+    evidenceStatus: browserValidation.status,
+    validationRequired: browserValidation.required,
+    deferReason: browserValidation.required && !browserValidation.passed ? browserValidation.reason : state.deferReason,
     repairNotes: appendUniqueNotes(state.repairNotes, [repairDecisionReason]),
     plannerNotes: appendUniqueNotes(state.plannerNotes, [repairDecisionReason]),
   };
@@ -11093,6 +12502,133 @@ async function restartProductionServiceNode(state: ControlPlaneState): Promise<P
   };
 }
 
+function findLatestAiFailureMessage(state: Pick<
+  ControlPlaneState,
+  'plannerNotes' | 'repairNotes'
+>): string {
+  const notes = [...state.repairNotes, ...state.plannerNotes].map((entry) => String(entry || '').trim()).filter(Boolean).reverse();
+  for (const note of notes) {
+    const match = note.match(/AI [^:]+ unavailable:\s*(.+)$/i);
+    if (match?.[1]) return match[1].trim();
+  }
+  return '';
+}
+
+function deriveLaneHealthSnapshot(
+  state: Pick<
+    ControlPlaneState,
+    | 'goal'
+    | 'scopes'
+    | 'effectiveScopes'
+    | 'repairStatus'
+    | 'repairDecisionReason'
+    | 'repairSignals'
+    | 'improvementSignals'
+    | 'plannerNotes'
+    | 'repairNotes'
+    | 'evidenceStatus'
+    | 'lastAiFailureClass'
+    | 'validationRequired'
+    | 'executedMcpActions'
+    | 'appliedEdits'
+    | 'repairPromotedPaths'
+    | 'repairRollbackPaths'
+  >,
+): {
+  healthClass: HealthClass;
+  deferReason: string;
+  evidenceStatus: EvidenceStatus;
+  lastAiFailureClass: AiFailureClass;
+  validationRequired: boolean;
+} {
+  const browserValidation = evaluateBrowserValidationBundle(state);
+  const evidenceStatus = browserValidation.required
+    ? browserValidation.status
+    : (state.evidenceStatus === 'unknown' && getEffectiveScopes(state as ControlPlaneState).includes('research-scout'))
+      ? (
+          state.executedMcpActions.some((action) => action.server === 'playwright' && action.status === 'success')
+            ? 'collected'
+            : state.executedMcpActions.some((action) => action.server === 'brave-search' && action.status === 'success')
+              ? 'planned'
+              : 'missing'
+        )
+      : state.evidenceStatus;
+  const validationRequired = browserValidation.required || state.validationRequired;
+  const inferredAiFailureClass = state.lastAiFailureClass !== 'none'
+    ? state.lastAiFailureClass
+    : classifyAiFailureMessage(findLatestAiFailureMessage(state));
+
+  const sourceText = [
+    state.goal,
+    state.repairDecisionReason,
+    ...state.repairSignals,
+    ...state.improvementSignals,
+    ...state.plannerNotes,
+    ...state.repairNotes,
+  ].join(' | ').toLowerCase();
+  const externalBlocked = /out of scope|blocked subsystem|scope-blocked|blocked_external/.test(sourceText)
+    || signalTextHasProviderAuthDriftFocus(sourceText)
+    || /provider-bound|retrying the same .* unlikely|billing_not_active|insufficient_quota|invalid_api_key/.test(sourceText);
+
+  if (state.repairStatus === 'promoted') {
+    return {
+      healthClass: 'healthy',
+      deferReason: state.repairDecisionReason,
+      evidenceStatus: validationRequired ? 'validated' : (evidenceStatus === 'unknown' ? 'not-required' : evidenceStatus),
+      lastAiFailureClass: inferredAiFailureClass,
+      validationRequired,
+    };
+  }
+
+  if (validationRequired && evidenceStatus !== 'validated') {
+    return {
+      healthClass: 'waiting_evidence',
+      deferReason: browserValidation.reason || state.repairDecisionReason,
+      evidenceStatus,
+      lastAiFailureClass: inferredAiFailureClass,
+      validationRequired,
+    };
+  }
+
+  if (externalBlocked) {
+    return {
+      healthClass: 'blocked_external',
+      deferReason: state.repairDecisionReason || 'The active lane is currently blocked by an external dependency or out-of-scope subsystem.',
+      evidenceStatus,
+      lastAiFailureClass: inferredAiFailureClass,
+      validationRequired,
+    };
+  }
+
+  if (state.repairStatus === 'failed' || state.repairStatus === 'rolled-back') {
+    return {
+      healthClass: 'failed',
+      deferReason: state.repairDecisionReason,
+      evidenceStatus,
+      lastAiFailureClass: inferredAiFailureClass,
+      validationRequired,
+    };
+  }
+
+  if (inferredAiFailureClass !== 'none' || /no-progress guard/i.test(sourceText)) {
+    return {
+      healthClass: 'degraded',
+      deferReason: state.repairDecisionReason,
+      evidenceStatus,
+      lastAiFailureClass: inferredAiFailureClass,
+      validationRequired,
+    };
+  }
+
+  return {
+    healthClass: 'healthy',
+    deferReason: state.repairDecisionReason,
+    evidenceStatus: validationRequired ? 'validated' : (evidenceStatus === 'unknown' ? 'not-required' : evidenceStatus),
+    lastAiFailureClass: inferredAiFailureClass,
+    validationRequired,
+  };
+}
+
 function shouldContinueAfterRepairDecision(state: ControlPlaneState): 'rollbackRepair' | 'runJobs' | 'summarize' {
   const touchedPaths = getRepairTouchedPaths(state);
   if (state.repairStatus === 'failed') {
@@ -11256,6 +12792,7 @@ async function summarizeNode(state: ControlPlaneState): Promise<Partial<ControlP
   const governanceBlockedActions = describeGovernanceGateBlockedActions(governanceGateResult);
   const requestedScopes = uniqueScopes(state.scopes);
   const effectiveScopes = getEffectiveScopes(state);
+  const laneHealth = deriveLaneHealthSnapshot(state);
   const lines: string[] = [];
   lines.push(`Goal: ${state.goal}`);
   lines.push(`Requested scopes: ${requestedScopes.join(', ')}`);
@@ -11271,6 +12808,14 @@ async function summarizeNode(state: ControlPlaneState): Promise<Partial<ControlP
       ? `AI agents: enabled (${state.aiAgentModel || 'configured model'} via ${state.aiAgentBackend || 'configured base URL'})`
       : 'AI agents: disabled (set CONTROL_PLANE_AI_BASE_URL/KEY/MODEL or provide ANYGPT_API_KEY; local AnyGPT fallback will be used when available)',
   );
+  lines.push(`Lane health: ${laneHealth.healthClass}`);
+  lines.push(`Evidence status: ${laneHealth.evidenceStatus}${laneHealth.validationRequired ? ' (validation required)' : ''}`);
+  if (laneHealth.lastAiFailureClass !== 'none') {
+    lines.push(`Last AI failure class: ${laneHealth.lastAiFailureClass}`);
+  }
+  if (laneHealth.deferReason.trim()) {
+    lines.push(`Defer reason: ${laneHealth.deferReason}`);
+  }
   lines.push(`Experimental target: ${state.experimentalApiBaseUrl || 'http://127.0.0.1:3310'} via ${state.experimentalServiceName || 'anygpt-experimental.service'}`);
   lines.push(
     state.selectedPromptSource === 'local'
@@ -11480,7 +13025,14 @@ async function summarizeNode(state: ControlPlaneState): Promise<Partial<ControlP
     } else {
       lines.push('No jobs were created.');
     }
-    return { summary: lines.join('\n') };
+    return {
+      summary: lines.join('\n'),
+      healthClass: laneHealth.healthClass,
+      deferReason: laneHealth.deferReason,
+      evidenceStatus: laneHealth.evidenceStatus,
+      lastAiFailureClass: laneHealth.lastAiFailureClass,
+      validationRequired: laneHealth.validationRequired,
+    };
   }
 
   for (const job of jobs) {
@@ -11488,7 +13040,14 @@ async function summarizeNode(state: ControlPlaneState): Promise<Partial<ControlP
     lines.push(`- [${status}] ${job.title}: ${job.command}`);
   }
 
-  return { summary: lines.join('\n') };
+  return {
+    summary: lines.join('\n'),
+    healthClass: laneHealth.healthClass,
+    deferReason: laneHealth.deferReason,
+    evidenceStatus: laneHealth.evidenceStatus,
+    lastAiFailureClass: laneHealth.lastAiFailureClass,
+    validationRequired: laneHealth.validationRequired,
+  };
 }
 
 function buildControlPlaneGraph(checkpointer: any, store?: BaseStore) {
@@ -11510,6 +13069,7 @@ function buildControlPlaneGraph(checkpointer: any, store?: BaseStore) {
     .addNode('runMcpActions', runMcpActionsNode)
     .addNode('applyAutonomousEdits', applyAutonomousEditsNode)
     .addNode('repairValidate', repairValidateNode)
+    .addNode('postRepairBrowserEvidence', postRepairBrowserEvidenceNode)
     .addNode('repairEvaluate', repairEvaluateNode)
     .addNode('repairDecision', repairDecisionNode)
     .addNode('postRepairValidate', postRepairValidateNode)
@@ -11535,7 +13095,8 @@ function buildControlPlaneGraph(checkpointer: any, store?: BaseStore) {
     .addConditionalEdges('approvalGate', shouldContinueAfterApproval, ['runMcpActions', 'applyAutonomousEdits', 'runJobs', 'summarize'])
     .addConditionalEdges('runMcpActions', shouldContinueAfterMcpActions, ['applyAutonomousEdits', 'runJobs', 'summarize'])
     .addConditionalEdges('applyAutonomousEdits', shouldContinueAfterAutonomousEdits, ['repairValidate', 'rollbackRepair', 'runJobs', 'summarize'])
-    .addEdge('repairValidate', 'repairEvaluate')
+    .addEdge('repairValidate', 'postRepairBrowserEvidence')
+    .addEdge('postRepairBrowserEvidence', 'repairEvaluate')
     .addEdge('repairEvaluate', 'repairDecision')
     .addEdge('repairDecision', 'postRepairValidate')
     .addEdge('postRepairValidate', 'restartExperimentalService')

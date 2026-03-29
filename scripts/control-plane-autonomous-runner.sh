@@ -26,10 +26,23 @@ DEFAULT_AGENT_PARALLELISM='6'
 DEFAULT_MULTI_RUNNER='true'
 DEFAULT_LOG_TAIL_LINES='80'
 DEFAULT_CODEQL_AUTORUN='false'
+DEFAULT_SHARED_AI_MODEL='gpt-5.4'
+DEFAULT_MULTI_RUNNER_BACKGROUND_ACTIVE_CAP='7'
+DEFAULT_MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_MAX='7'
+DEFAULT_MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_BUSY_PERCENT='85'
+DEFAULT_MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_COOLDOWN_PERCENT='65'
+DEFAULT_MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_WARMUP_MS='0'
+DEFAULT_MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_WARMUP_MAX='7'
+DEFAULT_MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_BACKPRESSURE_MAX='7'
+DEFAULT_MULTI_RUNNER_AI_BACKPRESSURE_COOLDOWN_MS='10000'
 DEFAULT_RESEARCH_SCOUT_AI_MODEL='gpt-5.4'
 DEFAULT_RESEARCH_SCOUT_AI_REASONING_EFFORT='xhigh'
-DEFAULT_RESEARCH_SCOUT_AI_NOTES_TIMEOUT_MS='90000'
-DEFAULT_RESEARCH_SCOUT_AI_PLANNER_TIMEOUT_MS='180000'
+DEFAULT_RESEARCH_SCOUT_AI_NOTES_TIMEOUT_MS='240000'
+DEFAULT_RESEARCH_SCOUT_AI_PLANNER_TIMEOUT_MS='240000'
+DEFAULT_API_ROUTING_AI_MODEL='gpt-5.4'
+DEFAULT_API_ROUTING_AI_REASONING_EFFORT='xhigh'
+DEFAULT_CONTROL_PLANE_AI_MODEL='gpt-5.4'
+DEFAULT_CONTROL_PLANE_AI_REASONING_EFFORT='xhigh'
 
 print_usage() {
   echo "Usage: bash ./scripts/control-plane-autonomous-runner.sh <start|stop|status|restart>" >&2
@@ -475,10 +488,23 @@ write_env_file() {
   local auto_restart_experimental="${10}"
   local auto_restart_production="${11}"
   local codeql_autorun="${12}"
-  local research_scout_ai_model="${13}"
-  local research_scout_ai_reasoning_effort="${14}"
-  local research_scout_ai_notes_timeout_ms="${15}"
-  local research_scout_ai_planner_timeout_ms="${16}"
+  local shared_ai_model="${13}"
+  local research_scout_ai_model="${14}"
+  local research_scout_ai_reasoning_effort="${15}"
+  local research_scout_ai_notes_timeout_ms="${16}"
+  local research_scout_ai_planner_timeout_ms="${17}"
+  local background_active_cap="${18}"
+  local background_active_cap_max="${19}"
+  local background_active_cap_busy_percent="${20}"
+  local background_active_cap_cooldown_percent="${21}"
+  local background_active_cap_warmup_ms="${22}"
+  local background_active_cap_warmup_max="${23}"
+  local background_active_cap_backpressure_max="${24}"
+  local ai_backpressure_cooldown_ms="${25}"
+  local api_routing_ai_model="${26}"
+  local api_routing_ai_reasoning_effort="${27}"
+  local control_plane_ai_model="${28}"
+  local control_plane_ai_reasoning_effort="${29}"
 
   mkdir -p "$CONTROL_DIR"
   {
@@ -499,10 +525,23 @@ write_env_file() {
     write_env_var CONTROL_PLANE_AUTO_RESTART_EXPERIMENTAL "$auto_restart_experimental"
     write_env_var CONTROL_PLANE_AUTO_RESTART_PRODUCTION "$auto_restart_production"
     write_env_var CONTROL_PLANE_CODEQL_AUTORUN "$codeql_autorun"
+    write_env_var CONTROL_PLANE_AI_MODEL "$shared_ai_model"
+    write_env_var CONTROL_PLANE_MULTI_RUNNER_BACKGROUND_ACTIVE_CAP "$background_active_cap"
+    write_env_var CONTROL_PLANE_MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_MAX "$background_active_cap_max"
+    write_env_var CONTROL_PLANE_MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_BUSY_PERCENT "$background_active_cap_busy_percent"
+    write_env_var CONTROL_PLANE_MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_COOLDOWN_PERCENT "$background_active_cap_cooldown_percent"
+    write_env_var CONTROL_PLANE_MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_WARMUP_MS "$background_active_cap_warmup_ms"
+    write_env_var CONTROL_PLANE_MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_WARMUP_MAX "$background_active_cap_warmup_max"
+    write_env_var CONTROL_PLANE_MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_BACKPRESSURE_MAX "$background_active_cap_backpressure_max"
+    write_env_var CONTROL_PLANE_MULTI_RUNNER_AI_BACKPRESSURE_COOLDOWN_MS "$ai_backpressure_cooldown_ms"
     write_env_var CONTROL_PLANE_RESEARCH_SCOUT_AI_MODEL "$research_scout_ai_model"
     write_env_var CONTROL_PLANE_RESEARCH_SCOUT_AI_REASONING_EFFORT "$research_scout_ai_reasoning_effort"
     write_env_var CONTROL_PLANE_RESEARCH_SCOUT_AI_NOTES_TIMEOUT_MS "$research_scout_ai_notes_timeout_ms"
     write_env_var CONTROL_PLANE_RESEARCH_SCOUT_AI_PLANNER_TIMEOUT_MS "$research_scout_ai_planner_timeout_ms"
+    write_env_var CONTROL_PLANE_API_ROUTING_AI_MODEL "$api_routing_ai_model"
+    write_env_var CONTROL_PLANE_API_ROUTING_AI_REASONING_EFFORT "$api_routing_ai_reasoning_effort"
+    write_env_var CONTROL_PLANE_CONTROL_PLANE_AI_MODEL "$control_plane_ai_model"
+    write_env_var CONTROL_PLANE_CONTROL_PLANE_AI_REASONING_EFFORT "$control_plane_ai_reasoning_effort"
   } > "$ENV_FILE"
 }
 
@@ -603,13 +642,26 @@ start_runner() {
   local auto_restart_experimental="${CONTROL_PLANE_AUTONOMOUS_AUTO_RESTART_EXPERIMENTAL:-${CONTROL_PLANE_AUTO_RESTART_EXPERIMENTAL:-false}}"
   local auto_restart_production="${CONTROL_PLANE_AUTONOMOUS_AUTO_RESTART_PRODUCTION:-${CONTROL_PLANE_AUTO_RESTART_PRODUCTION:-false}}"
   local codeql_autorun="${CONTROL_PLANE_AUTONOMOUS_CODEQL_AUTORUN:-${CONTROL_PLANE_CODEQL_AUTORUN:-$DEFAULT_CODEQL_AUTORUN}}"
+  local shared_ai_model="${CONTROL_PLANE_AI_MODEL:-$DEFAULT_SHARED_AI_MODEL}"
+  local background_active_cap="${CONTROL_PLANE_MULTI_RUNNER_BACKGROUND_ACTIVE_CAP:-$DEFAULT_MULTI_RUNNER_BACKGROUND_ACTIVE_CAP}"
+  local background_active_cap_max="${CONTROL_PLANE_MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_MAX:-$DEFAULT_MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_MAX}"
+  local background_active_cap_busy_percent="${CONTROL_PLANE_MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_BUSY_PERCENT:-$DEFAULT_MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_BUSY_PERCENT}"
+  local background_active_cap_cooldown_percent="${CONTROL_PLANE_MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_COOLDOWN_PERCENT:-$DEFAULT_MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_COOLDOWN_PERCENT}"
+  local background_active_cap_warmup_ms="${CONTROL_PLANE_MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_WARMUP_MS:-$DEFAULT_MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_WARMUP_MS}"
+  local background_active_cap_warmup_max="${CONTROL_PLANE_MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_WARMUP_MAX:-$DEFAULT_MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_WARMUP_MAX}"
+  local background_active_cap_backpressure_max="${CONTROL_PLANE_MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_BACKPRESSURE_MAX:-$DEFAULT_MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_BACKPRESSURE_MAX}"
+  local ai_backpressure_cooldown_ms="${CONTROL_PLANE_MULTI_RUNNER_AI_BACKPRESSURE_COOLDOWN_MS:-$DEFAULT_MULTI_RUNNER_AI_BACKPRESSURE_COOLDOWN_MS}"
   local research_scout_ai_model="${CONTROL_PLANE_RESEARCH_SCOUT_AI_MODEL:-$DEFAULT_RESEARCH_SCOUT_AI_MODEL}"
   local research_scout_ai_reasoning_effort="${CONTROL_PLANE_RESEARCH_SCOUT_AI_REASONING_EFFORT:-$DEFAULT_RESEARCH_SCOUT_AI_REASONING_EFFORT}"
   local research_scout_ai_notes_timeout_ms="${CONTROL_PLANE_RESEARCH_SCOUT_AI_NOTES_TIMEOUT_MS:-$DEFAULT_RESEARCH_SCOUT_AI_NOTES_TIMEOUT_MS}"
   local research_scout_ai_planner_timeout_ms="${CONTROL_PLANE_RESEARCH_SCOUT_AI_PLANNER_TIMEOUT_MS:-$DEFAULT_RESEARCH_SCOUT_AI_PLANNER_TIMEOUT_MS}"
+  local api_routing_ai_model="${CONTROL_PLANE_API_ROUTING_AI_MODEL:-$DEFAULT_API_ROUTING_AI_MODEL}"
+  local api_routing_ai_reasoning_effort="${CONTROL_PLANE_API_ROUTING_AI_REASONING_EFFORT:-$DEFAULT_API_ROUTING_AI_REASONING_EFFORT}"
+  local control_plane_ai_model="${CONTROL_PLANE_CONTROL_PLANE_AI_MODEL:-$DEFAULT_CONTROL_PLANE_AI_MODEL}"
+  local control_plane_ai_reasoning_effort="${CONTROL_PLANE_CONTROL_PLANE_AI_REASONING_EFFORT:-$DEFAULT_CONTROL_PLANE_AI_REASONING_EFFORT}"
 
   rotate_runtime_files
-  write_env_file "$goal" "$scopes" "$interval_ms" "$max_edit_actions" "$edit_allowlist" "$edit_denylist" "$agent_parallelism" "$multi_runner" "$log_tail_lines" "$auto_restart_experimental" "$auto_restart_production" "$codeql_autorun" "$research_scout_ai_model" "$research_scout_ai_reasoning_effort" "$research_scout_ai_notes_timeout_ms" "$research_scout_ai_planner_timeout_ms"
+  write_env_file "$goal" "$scopes" "$interval_ms" "$max_edit_actions" "$edit_allowlist" "$edit_denylist" "$agent_parallelism" "$multi_runner" "$log_tail_lines" "$auto_restart_experimental" "$auto_restart_production" "$codeql_autorun" "$shared_ai_model" "$research_scout_ai_model" "$research_scout_ai_reasoning_effort" "$research_scout_ai_notes_timeout_ms" "$research_scout_ai_planner_timeout_ms" "$background_active_cap" "$background_active_cap_max" "$background_active_cap_busy_percent" "$background_active_cap_cooldown_percent" "$background_active_cap_warmup_ms" "$background_active_cap_warmup_max" "$background_active_cap_backpressure_max" "$ai_backpressure_cooldown_ms" "$api_routing_ai_model" "$api_routing_ai_reasoning_effort" "$control_plane_ai_model" "$control_plane_ai_reasoning_effort"
   chmod +x "$EXEC_SCRIPT"
   if user_systemd_available; then
     write_unit_file
