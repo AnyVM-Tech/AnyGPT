@@ -6,6 +6,28 @@ async function loadJson(path) {
   return response.json();
 }
 
+function escapeHtml(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function safeHref(url) {
+  try {
+    const parsed = new URL(String(url || ''));
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+      return escapeHtml(parsed.href);
+    }
+  } catch {
+    // not a valid URL
+  }
+  return '#';
+}
+
 function renderMetrics(summary) {
   const metrics = [
     ['Authorized assets only', summary.authorized_assets_only ? 'Yes' : 'No'],
@@ -32,14 +54,14 @@ function renderAssets(assets) {
       ${assets.map((asset) => `
         <li class="card">
           <div class="card-row">
-            <strong>${asset.name}</strong>
-            <span class="pill pill-${asset.authorization_state}">${asset.authorization_state}</span>
+            <strong>${escapeHtml(asset.name)}</strong>
+            <span class="pill pill-${escapeHtml(asset.authorization_state)}">${escapeHtml(asset.authorization_state)}</span>
           </div>
-          <p>${asset.kind} · ${asset.owner}</p>
-          ${asset.resource_scope ? `<p class="detail"><strong>Scope:</strong> ${asset.resource_scope}</p>` : ''}
-          ${asset.authorization_basis ? `<p class="detail"><strong>Authorization basis:</strong> ${asset.authorization_basis}</p>` : ''}
-          ${asset.authorization_reference ? `<p class="detail"><strong>Authorization proof:</strong> ${asset.authorization_reference}</p>` : ''}
-          <p class="muted">${asset.notes}</p>
+          <p>${escapeHtml(asset.kind)} · ${escapeHtml(asset.owner)}</p>
+          ${asset.resource_scope ? `<p class="detail"><strong>Scope:</strong> ${escapeHtml(asset.resource_scope)}</p>` : ''}
+          ${asset.authorization_basis ? `<p class="detail"><strong>Authorization basis:</strong> ${escapeHtml(asset.authorization_basis)}</p>` : ''}
+          ${asset.authorization_reference ? `<p class="detail"><strong>Authorization proof:</strong> ${escapeHtml(asset.authorization_reference)}</p>` : ''}
+          <p class="muted">${escapeHtml(asset.notes)}</p>
         </li>
       `).join('')}
     </ul>
@@ -52,14 +74,14 @@ function renderApprovedResources(resources) {
       ${resources.map((item) => `
         <li class="card">
           <div class="card-row">
-            <strong>${item.resource.label}</strong>
-            <span class="pill pill-${item.authorization_state}">${item.authorization_state}</span>
+            <strong>${escapeHtml(item.resource.label)}</strong>
+            <span class="pill pill-${escapeHtml(item.authorization_state)}">${escapeHtml(item.authorization_state)}</span>
           </div>
-          <p>${item.asset_name} · ${item.resource.resource_type}</p>
-          <p class="detail"><strong>Target:</strong> ${item.resource.target}</p>
-          <p class="detail"><strong>Owner contact:</strong> ${item.resource.owner_contact || 'n/a'}</p>
-          <p class="detail"><strong>Approval:</strong> ${item.resource.approved_by || 'n/a'} · ${item.resource.approval_reference || 'n/a'}</p>
-          <p class="muted">${item.resource.notes || item.authorization_basis}</p>
+          <p>${escapeHtml(item.asset_name)} · ${escapeHtml(item.resource.resource_type)}</p>
+          <p class="detail"><strong>Target:</strong> ${escapeHtml(item.resource.target)}</p>
+          <p class="detail"><strong>Owner contact:</strong> ${escapeHtml(item.resource.owner_contact) || 'n/a'}</p>
+          <p class="detail"><strong>Approval:</strong> ${escapeHtml(item.resource.approved_by) || 'n/a'} · ${escapeHtml(item.resource.approval_reference) || 'n/a'}</p>
+          <p class="muted">${escapeHtml(item.resource.notes || item.authorization_basis)}</p>
         </li>
       `).join('')}
     </ul>
@@ -72,37 +94,37 @@ function renderFindings(findings) {
       ${findings.map((finding) => `
         <li class="card">
           <div class="card-row">
-            <strong>${finding.title}</strong>
-            <span class="pill pill-${finding.severity}">${finding.severity}</span>
+            <strong>${escapeHtml(finding.title)}</strong>
+            <span class="pill pill-${escapeHtml(finding.severity)}">${escapeHtml(finding.severity)}</span>
           </div>
-          <p>${finding.source} · ${finding.status}${finding.asset ? ` · ${finding.asset.name}` : ''}</p>
-          <p class="muted">${finding.summary}</p>
-          ${finding.report_status ? `<p class="detail"><strong>Report status:</strong> ${finding.report_status}</p>` : ''}
-          ${finding.visibility ? `<p class="detail"><strong>Visibility:</strong> ${finding.visibility}${finding.grace_period_days ? ` · <strong>Grace window:</strong> ${finding.grace_period_days} day(s)` : ''}</p>` : ''}
-          ${finding.evidence_summary ? `<p class="detail"><strong>Evidence:</strong> ${finding.evidence_summary}</p>` : ''}
-          ${finding.remediation_owner ? `<p class="detail"><strong>Owner:</strong> ${finding.remediation_owner}</p>` : ''}
-          ${finding.asset ? `<p class="detail"><strong>Authorization:</strong> ${finding.asset.authorization_state} · <strong>Risk:</strong> ${finding.asset.exposure_risk}</p>` : ''}
-          ${finding.asset?.authorization_basis ? `<p class="detail"><strong>Basis:</strong> ${finding.asset.authorization_basis}</p>` : ''}
-          ${finding.asset?.authorization_reference ? `<p class="detail"><strong>Proof:</strong> ${finding.asset.authorization_reference}</p>` : ''}
-          ${finding.asset?.resource_scope ? `<p class="detail"><strong>Resource scope:</strong> ${finding.asset.resource_scope}</p>` : ''}
+          <p>${escapeHtml(finding.source)} · ${escapeHtml(finding.status)}${finding.asset ? ` · ${escapeHtml(finding.asset.name)}` : ''}</p>
+          <p class="muted">${escapeHtml(finding.summary)}</p>
+          ${finding.report_status ? `<p class="detail"><strong>Report status:</strong> ${escapeHtml(finding.report_status)}</p>` : ''}
+          ${finding.visibility ? `<p class="detail"><strong>Visibility:</strong> ${escapeHtml(finding.visibility)}${finding.grace_period_days ? ` · <strong>Grace window:</strong> ${escapeHtml(finding.grace_period_days)} day(s)` : ''}</p>` : ''}
+          ${finding.evidence_summary ? `<p class="detail"><strong>Evidence:</strong> ${escapeHtml(finding.evidence_summary)}</p>` : ''}
+          ${finding.remediation_owner ? `<p class="detail"><strong>Owner:</strong> ${escapeHtml(finding.remediation_owner)}</p>` : ''}
+          ${finding.asset ? `<p class="detail"><strong>Authorization:</strong> ${escapeHtml(finding.asset.authorization_state)} · <strong>Risk:</strong> ${escapeHtml(finding.asset.exposure_risk)}</p>` : ''}
+          ${finding.asset?.authorization_basis ? `<p class="detail"><strong>Basis:</strong> ${escapeHtml(finding.asset.authorization_basis)}</p>` : ''}
+          ${finding.asset?.authorization_reference ? `<p class="detail"><strong>Proof:</strong> ${escapeHtml(finding.asset.authorization_reference)}</p>` : ''}
+          ${finding.asset?.resource_scope ? `<p class="detail"><strong>Resource scope:</strong> ${escapeHtml(finding.asset.resource_scope)}</p>` : ''}
           <p class="meta">
             ${finding.needs_owner_confirmation ? 'Owner confirmation required' : 'Owner confirmed'}
             ·
             ${finding.needs_disclosure ? 'Disclosure queue' : 'No disclosure packet yet'}
           </p>
-          ${finding.recipient_contacts?.length ? `<p class="detail"><strong>Recipients:</strong> ${finding.recipient_contacts.join(', ')}</p>` : ''}
-          ${finding.escalation_targets?.length ? `<p class="detail"><strong>Escalation:</strong> ${finding.escalation_targets.join(', ')}</p>` : ''}
+          ${finding.recipient_contacts?.length ? `<p class="detail"><strong>Recipients:</strong> ${finding.recipient_contacts.map(escapeHtml).join(', ')}</p>` : ''}
+          ${finding.escalation_targets?.length ? `<p class="detail"><strong>Escalation:</strong> ${finding.escalation_targets.map(escapeHtml).join(', ')}</p>` : ''}
           ${finding.related_intelligence?.length ? `
             <div class="tag-row">
               ${finding.related_intelligence
-                .map((item) => `<span class="tag tag-critical">${item.cve_id}</span>`)
+                .map((item) => `<span class="tag tag-critical">${escapeHtml(item.cve_id)}</span>`)
                 .join('')}
             </div>
           ` : ''}
           ${finding.recommended_methods?.length ? `
             <div class="tag-row">
               ${finding.recommended_methods
-                .map((item) => `<span class="tag">${item.title}</span>`)
+                .map((item) => `<span class="tag">${escapeHtml(item.title)}</span>`)
                 .join('')}
             </div>
           ` : ''}
@@ -118,12 +140,12 @@ function renderSources(sources) {
       ${sources.map((source) => `
         <li class="card">
           <div class="card-row">
-            <strong>${source.title}</strong>
-            <span class="pill pill-generic">${source.category}</span>
+            <strong>${escapeHtml(source.title)}</strong>
+            <span class="pill pill-generic">${escapeHtml(source.category)}</span>
           </div>
-          <p class="muted">${source.requirement}</p>
-          <p>${source.product_response}</p>
-          <a href="${source.url}" target="_blank" rel="noreferrer">Open source</a>
+          <p class="muted">${escapeHtml(source.requirement)}</p>
+          <p>${escapeHtml(source.product_response)}</p>
+          <a href="${safeHref(source.url)}" target="_blank" rel="noreferrer">Open source</a>
         </li>
       `).join('')}
     </ul>
@@ -136,12 +158,12 @@ function renderTestingMethodologies(methods) {
       ${methods.map((method) => `
         <li class="card">
           <div class="card-row">
-            <strong>${method.title}</strong>
-            <span class="pill pill-generic">${method.category}</span>
+            <strong>${escapeHtml(method.title)}</strong>
+            <span class="pill pill-generic">${escapeHtml(method.category)}</span>
           </div>
-          <p class="muted">${method.objective}</p>
-          <p><strong>Safety posture:</strong> ${method.safety_posture}</p>
-          <p><strong>Evidence:</strong> ${method.evidence_outputs.join(', ')}</p>
+          <p class="muted">${escapeHtml(method.objective)}</p>
+          <p><strong>Safety posture:</strong> ${escapeHtml(method.safety_posture)}</p>
+          <p><strong>Evidence:</strong> ${method.evidence_outputs.map(escapeHtml).join(', ')}</p>
         </li>
       `).join('')}
     </ul>
@@ -154,13 +176,13 @@ function renderVulnerabilityIntelligence(items) {
       ${items.map((item) => `
         <li class="card">
           <div class="card-row">
-            <strong>${item.cve_id}</strong>
-            <span class="pill pill-${item.risk_signal === 'known-exploited' ? 'critical' : 'medium'}">${item.source_catalog}</span>
+            <strong>${escapeHtml(item.cve_id)}</strong>
+            <span class="pill pill-${item.risk_signal === 'known-exploited' ? 'critical' : 'medium'}">${escapeHtml(item.source_catalog)}</span>
           </div>
-          <p>${item.title}</p>
-          <p class="muted">${item.vendor} · ${item.product} · ${item.weakness}</p>
-          <p>${item.remediation_focus}</p>
-          <a href="${item.public_reference_url}" target="_blank" rel="noreferrer">Open reference</a>
+          <p>${escapeHtml(item.title)}</p>
+          <p class="muted">${escapeHtml(item.vendor)} · ${escapeHtml(item.product)} · ${escapeHtml(item.weakness)}</p>
+          <p>${escapeHtml(item.remediation_focus)}</p>
+          <a href="${safeHref(item.public_reference_url)}" target="_blank" rel="noreferrer">Open reference</a>
         </li>
       `).join('')}
     </ul>
@@ -171,20 +193,20 @@ function renderProductBrief(productBrief) {
   return `
     <section class="panel product-brief">
       <header>
-        <h2>${productBrief.name}</h2>
-        <p>${productBrief.positioning}</p>
+        <h2>${escapeHtml(productBrief.name)}</h2>
+        <p>${escapeHtml(productBrief.positioning)}</p>
       </header>
       <div class="panel-grid">
         <section>
           <h3>Guardrails</h3>
           <ul class="list">
-            ${productBrief.guardrails.map((item) => `<li class="card"><p>${item}</p></li>`).join('')}
+            ${productBrief.guardrails.map((item) => `<li class="card"><p>${escapeHtml(item)}</p></li>`).join('')}
           </ul>
         </section>
         <section>
           <h3>Next Steps</h3>
           <ul class="list">
-            ${productBrief.next_steps.map((item) => `<li class="card"><p>${item}</p></li>`).join('')}
+            ${productBrief.next_steps.map((item) => `<li class="card"><p>${escapeHtml(item)}</p></li>`).join('')}
           </ul>
         </section>
       </div>
@@ -198,18 +220,18 @@ function renderApprovedScanResults(results) {
       ${results.map((result) => `
         <li class="card">
           <div class="card-row">
-            <strong>${result.resource.label}</strong>
-            <span class="pill pill-generic">${result.reachability}</span>
+            <strong>${escapeHtml(result.resource.label)}</strong>
+            <span class="pill pill-generic">${escapeHtml(result.reachability)}</span>
           </div>
-          <p>${result.asset_name} · ${result.resource.target}</p>
-          <p class="detail"><strong>Checked:</strong> ${result.checked_at}</p>
-          ${result.final_url ? `<p class="detail"><strong>Final URL:</strong> ${result.final_url}</p>` : ''}
-          ${result.http_status ? `<p class="detail"><strong>HTTP status:</strong> ${result.http_status}</p>` : ''}
-          ${result.page_title ? `<p class="detail"><strong>Page title:</strong> ${result.page_title}</p>` : ''}
-          ${result.server_header ? `<p class="detail"><strong>Server:</strong> ${result.server_header}</p>` : ''}
-          ${result.resolved_ips?.length ? `<p class="detail"><strong>Resolved IPs:</strong> ${result.resolved_ips.join(', ')}</p>` : ''}
-          ${result.security_txt ? `<p class="detail"><strong>security.txt:</strong> ${result.security_txt.status}${result.security_txt.contact ? ` · ${result.security_txt.contact}` : ''}</p>` : ''}
-          ${result.notes?.length ? `<p class="muted">${result.notes.join(' | ')}</p>` : ''}
+          <p>${escapeHtml(result.asset_name)} · ${escapeHtml(result.resource.target)}</p>
+          <p class="detail"><strong>Checked:</strong> ${escapeHtml(result.checked_at)}</p>
+          ${result.final_url ? `<p class="detail"><strong>Final URL:</strong> ${escapeHtml(result.final_url)}</p>` : ''}
+          ${result.http_status ? `<p class="detail"><strong>HTTP status:</strong> ${escapeHtml(result.http_status)}</p>` : ''}
+          ${result.page_title ? `<p class="detail"><strong>Page title:</strong> ${escapeHtml(result.page_title)}</p>` : ''}
+          ${result.server_header ? `<p class="detail"><strong>Server:</strong> ${escapeHtml(result.server_header)}</p>` : ''}
+          ${result.resolved_ips?.length ? `<p class="detail"><strong>Resolved IPs:</strong> ${result.resolved_ips.map(escapeHtml).join(', ')}</p>` : ''}
+          ${result.security_txt ? `<p class="detail"><strong>security.txt:</strong> ${escapeHtml(result.security_txt.status)}${result.security_txt.contact ? ` · ${escapeHtml(result.security_txt.contact)}` : ''}</p>` : ''}
+          ${result.notes?.length ? `<p class="muted">${result.notes.map(escapeHtml).join(' | ')}</p>` : ''}
         </li>
       `).join('')}
     </ul>
@@ -235,8 +257,8 @@ function renderRestoreNotice(lane) {
     : null;
 
   const attemptBits = [];
-  if (lastAttempt?.generated_at) attemptBits.push(`Attempted ${lastAttempt.generated_at}`);
-  if (lastAttempt?.status) attemptBits.push(`status ${lastAttempt.status}`);
+  if (lastAttempt?.generated_at) attemptBits.push(`Attempted ${escapeHtml(lastAttempt.generated_at)}`);
+  if (lastAttempt?.status) attemptBits.push(`status ${escapeHtml(lastAttempt.status)}`);
   if (typeof lastAttempt?.transcribed_video_count === 'number') attemptBits.push(`${lastAttempt.transcribed_video_count} transcribed`);
   if (typeof lastAttempt?.ingested_page_count === 'number') attemptBits.push(`${lastAttempt.ingested_page_count} ingested`);
 
@@ -246,8 +268,8 @@ function renderRestoreNotice(lane) {
         <strong>Last Good Snapshot Restored</strong>
         <span class="pill pill-generic">rollback</span>
       </div>
-      ${lane?.restored_at ? `<p class="detail"><strong>Restored at:</strong> ${lane.restored_at}</p>` : ''}
-      <p class="muted">${lane.restored_reason}</p>
+      ${lane?.restored_at ? `<p class="detail"><strong>Restored at:</strong> ${escapeHtml(lane.restored_at)}</p>` : ''}
+      <p class="muted">${escapeHtml(lane.restored_reason)}</p>
       ${attemptBits.length ? `<p class="detail"><strong>Last attempt:</strong> ${attemptBits.join(' · ')}</p>` : ''}
     </div>
   `;
@@ -265,7 +287,7 @@ function renderSuggestedPathsBySource(recommendation) {
   }
 
   return entries.map(([source, paths]) => `
-    <p class="detail"><strong>${source} paths:</strong> ${paths.join(', ')}</p>
+    <p class="detail"><strong>${escapeHtml(source)} paths:</strong> ${paths.map(escapeHtml).join(', ')}</p>
   `).join('');
 }
 
@@ -291,7 +313,7 @@ function renderRankingLegend(lane) {
         <strong>Ranking Legend</strong>
         <span class="pill pill-generic">weights</span>
       </div>
-      <p class="muted">${scoreDescription}</p>
+      <p class="muted">${escapeHtml(scoreDescription)}</p>
       <p class="detail"><strong>Page importance:</strong> ${weightText}</p>
       <p class="detail"><strong>Weighted score:</strong> merged recommendation strength after applying the page importance weights above.</p>
     </div>
@@ -326,16 +348,16 @@ function renderRecommendationCards(recommendations) {
       ${recommendations.map((recommendation) => `
         <li class="card">
           <div class="card-row">
-            <strong>${recommendation.title}</strong>
-            <span class="pill pill-${recommendation.priority || 'generic'}">${recommendation.priority || 'info'}</span>
+            <strong>${escapeHtml(recommendation.title)}</strong>
+            <span class="pill pill-${escapeHtml(recommendation.priority || 'generic')}">${escapeHtml(recommendation.priority || 'info')}</span>
           </div>
-          <p>${recommendation.rationale}</p>
+          <p>${escapeHtml(recommendation.rationale)}</p>
           <p class="detail"><strong>Signals:</strong> ${recommendation.signal_count}</p>
           ${typeof recommendation.weighted_signal_score === 'number' && recommendation.weighted_signal_score > 0 ? `<p class="detail"><strong>Weighted score:</strong> ${recommendation.weighted_signal_score.toFixed(1)}</p>` : ''}
           ${recommendation.source_count ? `<p class="detail"><strong>Sources:</strong> ${recommendation.source_count}</p>` : ''}
-          ${recommendation.suggested_paths?.length ? `<p class="detail"><strong>Suggested paths:</strong> ${recommendation.suggested_paths.join(', ')}</p>` : ''}
+          ${recommendation.suggested_paths?.length ? `<p class="detail"><strong>Suggested paths:</strong> ${recommendation.suggested_paths.map(escapeHtml).join(', ')}</p>` : ''}
           ${renderSuggestedPathsBySource(recommendation)}
-          ${recommendation.supporting_source_types?.length ? `<p class="muted">Backed by ${recommendation.supporting_source_types.join(', ')}.</p>` : ''}
+          ${recommendation.supporting_source_types?.length ? `<p class="muted">Backed by ${recommendation.supporting_source_types.map(escapeHtml).join(', ')}.</p>` : ''}
           ${recommendationSupportCount(recommendation) ? `<p class="muted">Linked items: ${recommendationSupportCount(recommendation)}</p>` : ''}
         </li>
       `).join('')}
@@ -367,7 +389,7 @@ function renderImplementationLane(lane) {
         </article>
       `).join('')}
     </div>
-    ${lane?.generated_at ? `<p class="muted">Generated ${lane.generated_at}</p>` : ''}
+    ${lane?.generated_at ? `<p class="muted">Generated ${escapeHtml(lane.generated_at)}</p>` : ''}
     ${recommendations.length ? renderRecommendationCards(recommendations) : `
       <div class="card">
         <p class="muted">No merged implementation recommendations are available yet. Run <code>bash apps/exposure-studio/run.sh implementation-lane</code>.</p>
@@ -390,7 +412,7 @@ function renderWebsiteLanePages(lane) {
     ${renderRestoreNotice(lane)}
     ${renderRankingLegend(lane)}
     <p class="muted">
-      ${lane?.generated_at ? `Generated ${lane.generated_at} · ` : ''}
+      ${lane?.generated_at ? `Generated ${escapeHtml(lane.generated_at)} · ` : ''}
       ${typeof lane?.target_count === 'number' ? `${lane.target_count} targets` : ''}
       ${typeof lane?.page_count === 'number' ? ` · ${lane.page_count} pages` : ''}
       ${typeof lane?.discovered_page_count === 'number' ? ` · ${lane.discovered_page_count} discovered` : ''}
@@ -399,21 +421,21 @@ function renderWebsiteLanePages(lane) {
       ${pages.slice(0, 12).map((page) => `
         <li class="card">
           <div class="card-row">
-            <strong>${page.title}</strong>
-            <span class="pill pill-${page.fetch_status === 'ok' ? 'owned' : 'high'}">${page.fetch_status}</span>
+            <strong>${escapeHtml(page.title)}</strong>
+            <span class="pill pill-${page.fetch_status === 'ok' ? 'owned' : 'high'}">${escapeHtml(page.fetch_status)}</span>
           </div>
-          <p>${page.category || 'website'}${page.http_status ? ` · HTTP ${page.http_status}` : ''}${page.text_word_count ? ` · ${page.text_word_count} words` : ''}${typeof page.crawl_depth === 'number' ? ` · depth ${page.crawl_depth}` : ''}</p>
+          <p>${escapeHtml(page.category || 'website')}${page.http_status ? ` · HTTP ${escapeHtml(page.http_status)}` : ''}${page.text_word_count ? ` · ${page.text_word_count} words` : ''}${typeof page.crawl_depth === 'number' ? ` · depth ${page.crawl_depth}` : ''}</p>
           ${typeof page.importance_score === 'number' && page.importance_score > 0 ? `<p class="detail"><strong>Importance:</strong> ${page.importance_score.toFixed(1)}</p>` : ''}
-          ${page.discovered_from_page_id ? `<p class="detail"><strong>Discovered from:</strong> ${page.discovered_from_page_id}</p>` : `<p class="detail"><strong>Seed target:</strong> ${page.seed_target_id || page.page_id}</p>`}
-          ${page.implementation_notes?.length ? `<p class="detail"><strong>Implementation notes:</strong> ${page.implementation_notes.join(' | ')}</p>` : ''}
-          ${page.evidence_snippets?.length ? `<p class="muted">${page.evidence_snippets.join(' | ')}</p>` : ''}
-          ${page.error_summary ? `<p class="muted">${page.error_summary}</p>` : ''}
+          ${page.discovered_from_page_id ? `<p class="detail"><strong>Discovered from:</strong> ${escapeHtml(page.discovered_from_page_id)}</p>` : `<p class="detail"><strong>Seed target:</strong> ${escapeHtml(page.seed_target_id || page.page_id)}</p>`}
+          ${page.implementation_notes?.length ? `<p class="detail"><strong>Implementation notes:</strong> ${page.implementation_notes.map(escapeHtml).join(' | ')}</p>` : ''}
+          ${page.evidence_snippets?.length ? `<p class="muted">${page.evidence_snippets.map(escapeHtml).join(' | ')}</p>` : ''}
+          ${page.error_summary ? `<p class="muted">${escapeHtml(page.error_summary)}</p>` : ''}
           ${page.implementation_signals?.length ? `
             <div class="tag-row">
-              ${page.implementation_signals.map((signal) => `<span class="tag">${signal}</span>`).join('')}
+              ${page.implementation_signals.map((signal) => `<span class="tag">${escapeHtml(signal)}</span>`).join('')}
             </div>
           ` : ''}
-          ${page.url ? `<a href="${page.url}" target="_blank" rel="noreferrer">Open page</a>` : ''}
+          ${page.url ? `<a href="${safeHref(page.url)}" target="_blank" rel="noreferrer">Open page</a>` : ''}
         </li>
       `).join('')}
     </ul>
@@ -446,8 +468,8 @@ function renderYouTubeLaneRecommendations(lane) {
   }
 
   const meta = [
-    lane?.generated_at ? `Generated ${lane.generated_at}` : '',
-    lane?.model_name ? `Model ${lane.model_name}` : '',
+    lane?.generated_at ? `Generated ${escapeHtml(lane.generated_at)}` : '',
+    lane?.model_name ? `Model ${escapeHtml(lane.model_name)}` : '',
     typeof lane?.transcribed_video_count === 'number' ? `${lane.transcribed_video_count} transcribed` : '',
   ].filter(Boolean);
 
@@ -474,21 +496,21 @@ function renderYouTubeLaneVideos(lane) {
       ${videos.slice(0, 12).map((video) => `
         <li class="card">
           <div class="card-row">
-            <strong>${video.title}</strong>
-            <span class="pill pill-${video.transcript_status === 'complete' ? 'owned' : 'high'}">${video.transcript_status}</span>
+            <strong>${escapeHtml(video.title)}</strong>
+            <span class="pill pill-${video.transcript_status === 'complete' ? 'owned' : 'high'}">${escapeHtml(video.transcript_status)}</span>
           </div>
-          <p>${video.published_at || 'unknown publish date'}${video.duration_text ? ` · ${video.duration_text}` : ''}${video.transcript_language ? ` · ${video.transcript_language}` : ''}${video.transcript_source ? ` · ${video.transcript_source}` : ''}</p>
+          <p>${escapeHtml(video.published_at || 'unknown publish date')}${video.duration_text ? ` · ${escapeHtml(video.duration_text)}` : ''}${video.transcript_language ? ` · ${escapeHtml(video.transcript_language)}` : ''}${video.transcript_source ? ` · ${escapeHtml(video.transcript_source)}` : ''}</p>
           <p class="detail"><strong>Transcript words:</strong> ${video.transcript_word_count}</p>
           ${renderYoutubeAcquisitionDetail(video) ? `<p class="detail"><strong>Acquisition:</strong> ${renderYoutubeAcquisitionDetail(video)}</p>` : ''}
-          ${video.implementation_notes?.length ? `<p class="detail"><strong>Implementation notes:</strong> ${video.implementation_notes.join(' | ')}</p>` : ''}
-          ${video.evidence_snippets?.length ? `<p class="muted">${video.evidence_snippets.join(' | ')}</p>` : ''}
-          ${video.error_summary ? `<p class="muted">${video.error_summary}</p>` : ''}
+          ${video.implementation_notes?.length ? `<p class="detail"><strong>Implementation notes:</strong> ${video.implementation_notes.map(escapeHtml).join(' | ')}</p>` : ''}
+          ${video.evidence_snippets?.length ? `<p class="muted">${video.evidence_snippets.map(escapeHtml).join(' | ')}</p>` : ''}
+          ${video.error_summary ? `<p class="muted">${escapeHtml(video.error_summary)}</p>` : ''}
           ${video.implementation_signals?.length ? `
             <div class="tag-row">
-              ${video.implementation_signals.map((signal) => `<span class="tag">${signal}</span>`).join('')}
+              ${video.implementation_signals.map((signal) => `<span class="tag">${escapeHtml(signal)}</span>`).join('')}
             </div>
           ` : ''}
-          ${video.video_url ? `<a href="${video.video_url}" target="_blank" rel="noreferrer">Open video</a>` : ''}
+          ${video.video_url ? `<a href="${safeHref(video.video_url)}" target="_blank" rel="noreferrer">Open video</a>` : ''}
         </li>
       `).join('')}
     </ul>
@@ -598,6 +620,6 @@ async function boot() {
 boot().catch((error) => {
   document.body.insertAdjacentHTML(
     'beforeend',
-    `<div class="error-banner">Failed to load SurfaceScope demo data: ${error instanceof Error ? error.message : String(error)}</div>`,
+    `<div class="error-banner">Failed to load SurfaceScope demo data: ${escapeHtml(error instanceof Error ? error.message : String(error))}</div>`,
   );
 });

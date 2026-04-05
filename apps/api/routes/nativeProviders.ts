@@ -298,7 +298,7 @@ function buildNativeResponsesOwnerScope(
 	if (!normalizedApiKey) return undefined;
 	try {
 		return `key:${crypto
-			.createHash('sha256')
+			.createHmac('sha256', 'anygpt-native-owner-scope')
 			.update(normalizedApiKey)
 			.digest('hex')
 			.slice(0, 24)}`;

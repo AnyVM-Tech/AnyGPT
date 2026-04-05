@@ -304,7 +304,13 @@ async fn resolve_resource_ips(resource: &ApprovedResource) -> Vec<String> {
 }
 
 fn extract_html_title(body: &str) -> String {
-    let lower = body.to_lowercase();
+    // Use ASCII-only byte-level lowercasing so byte indices remain valid for non-ASCII input.
+    // `to_lowercase()` can change UTF-8 byte lengths for non-ASCII chars (e.g. Turkish İ),
+    // making indices derived from the lowercased string invalid on the original. Since HTML
+    // tags only contain ASCII characters, lowercasing bytes is both correct and efficient.
+    let lower = String::from_utf8(
+        body.bytes().map(|b| b.to_ascii_lowercase()).collect()
+    ).unwrap_or_default();
     let open = lower.find("<title>");
     let close = lower.find("</title>");
     match (open, close) {
@@ -390,8 +396,9 @@ async fn scan_resource(client: &Client, asset: &Asset, resource: &ApprovedResour
     for url in candidate_urls_for_resource(resource) {
         match client.get(url.clone()).send().await {
             Ok(response) => {
+                let status = response.status();
                 final_url = response.url().to_string();
-                http_status = Some(response.status().as_u16());
+                http_status = Some(status.as_u16());
                 server_header = response
                     .headers()
                     .get(header::SERVER)
@@ -400,7 +407,7 @@ async fn scan_resource(client: &Client, asset: &Asset, resource: &ApprovedResour
                     .to_string();
                 let body = response.text().await.unwrap_or_default();
                 page_title = extract_html_title(&body);
-                reachability = if http_status == Some(200) {
+                reachability = if status.is_success() {
                     "reachable".to_string()
                 } else {
                     "reachable-with-error".to_string()
@@ -408,7 +415,11 @@ async fn scan_resource(client: &Client, asset: &Asset, resource: &ApprovedResour
                 if page_title.is_empty() {
                     notes.push("HTTP response did not include an HTML title tag.".to_string());
                 }
-                break;
+                // Only stop on a successful response; continue to the next candidate
+                // (e.g. http fallback after an https 404) otherwise.
+                if status.is_success() {
+                    break;
+                }
             }
             Err(error) => {
                 notes.push(format!("HTTP probe failed for {url}: {error}"));
