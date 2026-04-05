@@ -56,6 +56,7 @@ async function runSdkCompatibilityTest() {
   const apiKey = process.env.TEST_API_KEY || DEFAULT_TEST_API_KEY;
   const model = 'gpt-3.5-turbo';
   const responsesModel = 'gpt-5.4';
+  const genericNativeAutoModel = 'text-pro-1';
   const rawBaseUrl = resolveRawApiBaseUrl();
   const baseURL = resolveClientBaseUrl();
   const nativeResponsesBaseUrl = `${rawBaseUrl}/native/auto/v1`;
@@ -331,6 +332,18 @@ async function runSdkCompatibilityTest() {
     assert.ok(typeof nativeResponseObject.id === 'string');
     assertNativeProxyResponseId(nativeResponseObject.id);
     console.log('[SDK-TEST] ✅ Native responses.create rewrites response ids to proxy-owned ids.');
+
+    const genericAutoCompletion = await nativeResponsesClient.chat.completions.create({
+      model: genericNativeAutoModel,
+      messages: [{ role: 'user', content: 'Say hello from a generic auto-routed model.' }],
+    });
+
+    assert.equal(genericAutoCompletion.object, 'chat.completion');
+    assert.equal(
+      genericAutoCompletion.choices[0]?.message?.content,
+      'Hello! I am a mock AI provider. How can I help you today?'
+    );
+    console.log('[SDK-TEST] ✅ Native auto chat routing supports generic OpenAI-compatible model ids.');
 
     const nativeFollowupInput = 'Say hello again from native responses.';
     const expectedNativeFollowupText = getExpectedMockResponsesText(nativeFollowupInput);

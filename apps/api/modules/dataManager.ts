@@ -100,6 +100,10 @@ export interface LoadedProviderData {
     apiKey: string | null; // Make consistent with Provider interface
     provider_url: string; // Make required, consistent with Provider interface
     provider_urls?: { [modelId: string]: string };
+    provider?: string;
+    type?: string;
+    native_family?: string;
+    native_protocol?: string;
     streamingCompatible?: boolean;
     models: { [key: string]: ProviderModelData };
     disabled: boolean; // Make required with default false

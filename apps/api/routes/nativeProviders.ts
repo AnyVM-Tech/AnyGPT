@@ -35,7 +35,7 @@ import {
 	withBufferedRequestBody
 } from '../modules/requestIntake.js';
 import { resolveProviderFamily } from '../modules/providerIdentity.js';
-import { redactToken, buildSafeUpstreamErrorMessage } from '../modules/redaction.js';
+import { redactToken } from '../modules/redaction.js';
 import { getRequestQueueForLane } from '../modules/requestQueue.js';
 import { applyResponseHeaders, buildModelsPayload } from './models.js';
 import {
@@ -85,6 +85,13 @@ type NativeFamily =
 
 type NativeFamilyAlias = NativeFamily | 'claude' | 'google' | 'x-ai';
 
+const OPENAI_COMPATIBLE_NATIVE_FAMILIES = new Set<NativeFamily>([
+	'openai',
+	'openrouter',
+	'deepseek',
+	'xai'
+]);
+
 type NativeResponsesHistoryContext = {
 	proxyResponseId: string;
 	ownerScope?: string;
@@ -123,6 +130,46 @@ function providerFamilyToNativeFamily(rawFamily: string): NativeFamily | null {
 	return null;
 }
 
+function normalizeAutoRoutedNativeFamily(
+	family: NativeFamily | null | undefined
+): NativeFamily | null {
+	if (!family) return null;
+	return OPENAI_COMPATIBLE_NATIVE_FAMILIES.has(family) ? 'openai' : family;
+}
+
+function resolveDeclaredNativeFamily(provider: LoadedProviderData): NativeFamily | null {
+	for (const candidate of [
+		provider.native_family,
+		provider.native_protocol,
+		(provider as any)?.nativeFamily,
+		(provider as any)?.nativeProtocol
+	]) {
+		if (typeof candidate !== 'string' || !candidate.trim()) continue;
+		const resolved = canonicalizeNativeFamily(candidate);
+		if (resolved) return resolved;
+	}
+	return null;
+}
+
+function resolveProviderNativeFamily(provider: LoadedProviderData): NativeFamily | null {
+	const declaredFamily = resolveDeclaredNativeFamily(provider);
+	if (declaredFamily) return declaredFamily;
+	return providerFamilyToNativeFamily(
+		resolveProviderFamily({
+			id: provider.id,
+			provider: provider.provider,
+			type: provider.type,
+			provider_url: provider.provider_url
+		})
+	);
+}
+
+function resolveProviderAutoRoutedNativeFamily(
+	provider: LoadedProviderData
+): NativeFamily | null {
+	return normalizeAutoRoutedNativeFamily(resolveProviderNativeFamily(provider));
+}
+
 function inferNativeFamilyFromModelHeuristics(modelId: string): NativeFamily | null {
 	const normalized = String(modelId || '').trim().toLowerCase();
 	if (!normalized) return null;
@@ -130,7 +177,18 @@ function inferNativeFamilyFromModelHeuristics(modelId: string): NativeFamily | n
 		? normalized.split('/').pop() || normalized
 		: normalized;
 
-	if (normalized.startsWith('openai/') || /^gpt([\-._]|$)/.test(noNamespace)) {
+	if (
+		normalized.startsWith('openai/') ||
+		/^gpt([\-._]|$)/.test(noNamespace) ||
+		/^o[1-9]([\-._]|$)/.test(noNamespace) ||
+		/^omni([\-._]|$)/.test(noNamespace) ||
+		/^text-embedding([\-._]|$)/.test(noNamespace) ||
+		/^whisper([\-._]|$)/.test(noNamespace) ||
+		/^tts([\-._]|$)/.test(noNamespace) ||
+		/^dall-e([\-._]|$)/.test(noNamespace) ||
+		/^gpt-image([\-._]|$)/.test(noNamespace) ||
+		/^sora([\-._]|$)/.test(noNamespace)
+	) {
 		return 'openai';
 	}
 	if (
@@ -173,28 +231,90 @@ function inferNativeFamilyFromSubpathHeuristics(subpath: string): NativeFamily |
 	if (!normalized) return null;
 
 	if (
-		normalized === '/responses' ||
-		normalized === '/v1/responses' ||
-		normalized === '/chat/completions' ||
-		normalized === '/v1/chat/completions'
+		/^\/(?:v1\/)?responses(?:\/|$)/i.test(normalized) ||
+		/^\/(?:v1\/)?chat\/completions(?:\/|$)/i.test(normalized) ||
+		/^\/(?:v1\/)?completions(?:\/|$)/i.test(normalized) ||
+		/^\/(?:v1\/)?embeddings(?:\/|$)/i.test(normalized) ||
+		/^\/(?:v1\/)?audio(?:\/|$)/i.test(normalized) ||
+		/^\/(?:v1\/)?images(?:\/|$)/i.test(normalized) ||
+		/^\/(?:v1\/)?videos(?:\/|$)/i.test(normalized) ||
+		/^\/(?:v1\/)?files(?:\/|$)/i.test(normalized) ||
+		/^\/(?:v1\/)?uploads(?:\/|$)/i.test(normalized) ||
+		/^\/(?:v1\/)?vector_stores(?:\/|$)/i.test(normalized) ||
+		/^\/(?:v1\/)?assistants(?:\/|$)/i.test(normalized) ||
+		/^\/(?:v1\/)?threads(?:\/|$)/i.test(normalized) ||
+		/^\/(?:v1\/)?batches(?:\/|$)/i.test(normalized) ||
+		/^\/(?:v1\/)?fine_tuning(?:\/|$)/i.test(normalized) ||
+		/^\/(?:v1\/)?moderations(?:\/|$)/i.test(normalized) ||
+		/^\/(?:v1\/)?realtime(?:\/|$)/i.test(normalized) ||
+		/^\/v1\/models(?:\/|$)/i.test(normalized)
 	) {
 		return 'openai';
 	}
 
-	if (normalized === '/messages' || normalized === '/v1/messages') {
+	if (
+		/^\/(?:v1\/)?messages(?:\/|$)/i.test(normalized) ||
+		/^\/(?:v1\/)?messages\/batches(?:\/|$)/i.test(normalized)
+	) {
 		return 'anthropic';
 	}
 
-	if (normalized.startsWith('/v1beta/models/') || normalized.startsWith('/models/')) {
+	if (
+		normalized.startsWith('/upload/v1beta/files') ||
+		normalized.startsWith('/v1beta/models/') ||
+		normalized === '/v1beta/models' ||
+		normalized.startsWith('/models/') ||
+		normalized === '/models'
+	) {
 		return 'gemini';
 	}
 
 	return null;
 }
 
-function extractRoutingModelId(parsedBody: any, subpath: string): string | null {
+function extractMultipartBoundary(contentType: string): string | null {
+	const match = String(contentType || '').match(/boundary=(?:"([^"]+)"|([^;]+))/i);
+	const boundary = match?.[1] || match?.[2];
+	return typeof boundary === 'string' && boundary.trim() ? boundary.trim() : null;
+}
+
+function extractMultipartFormField(
+	rawBody: Buffer,
+	contentType: string,
+	fieldName: string
+): string | null {
+	if (!rawBody || rawBody.length === 0) return null;
+	if (!String(contentType || '').toLowerCase().includes('multipart/form-data')) {
+		return null;
+	}
+	const boundary = extractMultipartBoundary(contentType);
+	if (!boundary) return null;
+	const rawText = rawBody.toString('latin1');
+	for (const part of rawText.split(`--${boundary}`)) {
+		const [rawHeaders, rawValue] = part.split(/\r?\n\r?\n/, 2);
+		if (!rawHeaders || !rawValue) continue;
+		if (!new RegExp(`name="${fieldName}"`, 'i').test(rawHeaders)) continue;
+		return rawValue.replace(/\r?\n--$/, '').trim() || null;
+	}
+	return null;
+}
+
+function extractRoutingModelId(
+	parsedBody: any,
+	subpath: string,
+	rawBody?: Buffer,
+	contentType?: string
+): string | null {
 	if (typeof parsedBody?.model === 'string' && parsedBody.model.trim()) {
 		return parsedBody.model.trim();
+	}
+
+	const multipartModelId =
+		rawBody && contentType
+			? extractMultipartFormField(rawBody, contentType, 'model')
+			: null;
+	if (multipartModelId) {
+		return multipartModelId;
 	}
 
 	const directMatch = subpath.match(/\/models\/([^/:?]+)(?::[A-Za-z][A-Za-z0-9]*)?/i);
@@ -211,31 +331,40 @@ function extractRoutingModelId(parsedBody: any, subpath: string): string | null 
 
 function inferNativeFamilyFromModelAndProviders(
 	modelId: string,
-	providers: LoadedProviders
+	providers: LoadedProviders,
+	options: {
+		autoRoute?: boolean;
+		familyHint?: NativeFamily | null;
+	} = {}
 ): NativeFamily | null {
 	const normalizedModelId = String(modelId || '').trim();
 	if (!normalizedModelId) return null;
+
+	const normalizedFamilyHint = options.autoRoute
+		? normalizeAutoRoutedNativeFamily(options.familyHint)
+		: options.familyHint || null;
+	const resolveFamily = options.autoRoute
+		? resolveProviderAutoRoutedNativeFamily
+		: resolveProviderNativeFamily;
 
 	const candidates = providers
 		.filter(provider => !provider.disabled)
 		.filter(provider => typeof provider.apiKey === 'string' && provider.apiKey.trim().length > 0)
 		.filter(provider => typeof provider.provider_url === 'string' && provider.provider_url.trim().length > 0)
 		.filter(provider => providerSupportsModel(provider, normalizedModelId))
-		.map(provider => {
-			const family = providerFamilyToNativeFamily(
-				resolveProviderFamily({
-					id: provider.id,
-					provider: (provider as any)?.provider,
-					type: (provider as any)?.type,
-					provider_url: provider.provider_url
-				})
-			);
-			return { provider, family };
-		})
+		.map(provider => ({
+			provider,
+			family: resolveFamily(provider)
+		}))
 		.filter((entry): entry is { provider: LoadedProviderData; family: NativeFamily } =>
 			Boolean(entry.family)
 		)
+		.filter(entry => !normalizedFamilyHint || entry.family === normalizedFamilyHint)
 		.sort((left, right) => {
+			const leftModelMatch = getProviderModelMatchStrength(left.provider, normalizedModelId);
+			const rightModelMatch = getProviderModelMatchStrength(right.provider, normalizedModelId);
+			if (leftModelMatch !== rightModelMatch) return rightModelMatch - leftModelMatch;
+
 			const leftScore =
 				typeof left.provider.provider_score === 'number' && Number.isFinite(left.provider.provider_score)
 					? left.provider.provider_score
@@ -263,19 +392,18 @@ function inferNativeFamilyFromModelAndProviders(
 		return candidates[0].family;
 	}
 
-	return inferNativeFamilyFromModelHeuristics(normalizedModelId);
+	if (normalizedFamilyHint) return normalizedFamilyHint;
+	const inferredFamily = inferNativeFamilyFromModelHeuristics(normalizedModelId);
+	return options.autoRoute
+		? normalizeAutoRoutedNativeFamily(inferredFamily)
+		: inferredFamily;
 }
 
 function isOpenAiResponsesSubpath(subpath: string): boolean {
 	return /\/responses(?:\/|$)/i.test(String(subpath || ''));
 }
 
-const NATIVE_RESPONSES_HISTORY_FAMILIES = new Set<NativeFamily>([
-	'openai',
-	'openrouter',
-	'deepseek',
-	'xai'
-]);
+const NATIVE_RESPONSES_HISTORY_FAMILIES = new Set<NativeFamily>(OPENAI_COMPATIBLE_NATIVE_FAMILIES);
 
 function supportsNativeResponsesHistory(
 	family: NativeFamily | null | undefined
@@ -696,45 +824,58 @@ function extractNativeModelId(
 	return null;
 }
 
+function getProviderModelMatchStrength(
+	provider: LoadedProviderData,
+	modelId: string | null
+): 0 | 1 | 2 {
+	if (!modelId) return 2;
+	const models = provider.models || {};
+	if (modelId in models) return 2;
+	const tail = modelId.includes('/') ? modelId.split('/').pop() || modelId : modelId;
+	if (tail in models) return 1;
+	return 0;
+}
+
 function providerSupportsModel(
 	provider: LoadedProviderData,
 	modelId: string | null
 ): boolean {
-	if (!modelId) return true;
-	const models = provider.models || {};
-	if (modelId in models) return true;
-	const tail = modelId.includes('/') ? modelId.split('/').pop() || modelId : modelId;
-	if (tail in models) return true;
-	return false;
+	return getProviderModelMatchStrength(provider, modelId) > 0;
 }
 
 function isProviderFamilyMatch(
 	provider: LoadedProviderData,
-	family: NativeFamily
+	family: NativeFamily,
+	options: {
+		autoRoute?: boolean;
+	} = {}
 ): boolean {
-	const resolved = resolveProviderFamily({
-			id: provider.id,
-			provider: (provider as any)?.provider,
-			type: (provider as any)?.type,
-			provider_url: provider.provider_url
-		});
-	const mapped = providerFamilyToNativeFamily(resolved);
-	return mapped === family;
+	const resolved = options.autoRoute
+		? resolveProviderAutoRoutedNativeFamily(provider)
+		: resolveProviderNativeFamily(provider);
+	return resolved === family;
 }
 
 function selectBestNativeProvider(
 	providers: LoadedProviders,
 	family: NativeFamily,
-	modelId: string | null
+	modelId: string | null,
+	options: {
+		autoRoute?: boolean;
+	} = {}
 ): LoadedProviderData | null {
 	const candidates = providers
 		.filter(provider => !isNativeProviderCoolingDown(provider.id, modelId))
 		.filter(provider => !provider.disabled)
 		.filter(provider => typeof provider.apiKey === 'string' && provider.apiKey.trim().length > 0)
 		.filter(provider => typeof provider.provider_url === 'string' && provider.provider_url.trim().length > 0)
-		.filter(provider => isProviderFamilyMatch(provider, family))
+		.filter(provider => isProviderFamilyMatch(provider, family, options))
 		.filter(provider => providerSupportsModel(provider, modelId))
 		.sort((left, right) => {
+			const leftModelMatch = getProviderModelMatchStrength(left, modelId);
+			const rightModelMatch = getProviderModelMatchStrength(right, modelId);
+			if (leftModelMatch !== rightModelMatch) return rightModelMatch - leftModelMatch;
+
 			const leftScore =
 				typeof left.provider_score === 'number' && Number.isFinite(left.provider_score)
 					? left.provider_score
@@ -772,15 +913,22 @@ function selectBestNativeProvider(
 function listNativeProviderCandidates(
 	providers: LoadedProviders,
 	family: NativeFamily,
-	modelId: string | null
+	modelId: string | null,
+	options: {
+		autoRoute?: boolean;
+	} = {}
 ): LoadedProviderData[] {
 	return providers
 		.filter(provider => !provider.disabled)
 		.filter(provider => typeof provider.apiKey === 'string' && provider.apiKey.trim().length > 0)
 		.filter(provider => typeof provider.provider_url === 'string' && provider.provider_url.trim().length > 0)
-		.filter(provider => isProviderFamilyMatch(provider, family))
+		.filter(provider => isProviderFamilyMatch(provider, family, options))
 		.filter(provider => providerSupportsModel(provider, modelId))
 		.sort((left, right) => {
+			const leftModelMatch = getProviderModelMatchStrength(left, modelId);
+			const rightModelMatch = getProviderModelMatchStrength(right, modelId);
+			if (leftModelMatch !== rightModelMatch) return rightModelMatch - leftModelMatch;
+
 			const leftScore =
 				typeof left.provider_score === 'number' && Number.isFinite(left.provider_score)
 					? left.provider_score
@@ -1037,6 +1185,23 @@ function copyUpstreamHeaders(upstreamHeaders: Headers, response: Response): void
 	}
 }
 
+function buildSafeUpstreamErrorMessage(
+	statusCode: number,
+	options: { label: string; rateLimitMessage: string }
+): string {
+	if (statusCode === 429) return options.rateLimitMessage;
+	if (statusCode === 401 || statusCode === 403) {
+		return `${options.label} was rejected by the upstream provider.`;
+	}
+	if (statusCode === 404) {
+		return `${options.label} could not be completed because the upstream resource was not found.`;
+	}
+	if (statusCode >= 500) {
+		return `${options.label} failed at the upstream provider. Please retry later.`;
+	}
+	return `${options.label} failed at the upstream provider.`;
+}
+
 function buildNativeUpstreamErrorBody(
 	family: NativeFamily,
 	statusCode: number,
@@ -1204,40 +1369,53 @@ async function handleNativeProviderRequest(
 			request.method === 'GET' && (subpath === '/models' || subpath === '/v1/models');
 		let outboundBodyBuffer = bodyBuffer;
 		let nativeResponsesHistoryContext: NativeResponsesHistoryContext | null = null;
+		let providers: LoadedProviders | null = null;
 
 		let family = canonicalizeNativeFamily(requestedFamilySegment);
 		let modelId: string | null = null;
+		const subpathFamilyHint = autoFamilyRouting
+			? inferNativeFamilyFromSubpathHeuristics(subpath)
+			: null;
 
 		if (autoFamilyRouting) {
 			if (isModelsListRoute) {
 				family = 'openai';
 				response.setHeader('X-AnyGPT-Routed-Family', family);
 			} else {
-				modelId = extractRoutingModelId(parsedBody, subpath);
+				providers = await dataManager.load<LoadedProviders>('providers');
+				modelId = extractRoutingModelId(parsedBody, subpath, bodyBuffer, contentType);
 				if (modelId) {
-					const providersForFamilyResolution =
-						await dataManager.load<LoadedProviders>('providers');
 					family = inferNativeFamilyFromModelAndProviders(
 						modelId,
-						providersForFamilyResolution
+						providers,
+						{
+							autoRoute: true,
+							familyHint: subpathFamilyHint
+						}
 					);
 					if (!family) {
 						response.status(404).json({
-							error: `Auto native routing could not resolve provider family for model '${modelId}'.`,
+							error: `Auto native routing could not resolve a compatible native protocol for model '${modelId}'.`,
 							timestamp
 						});
 						return;
 					}
+				} else if (subpathFamilyHint) {
+					family = normalizeAutoRoutedNativeFamily(subpathFamilyHint);
 				} else {
-					family = inferNativeFamilyFromSubpathHeuristics(subpath);
-					if (!family) {
-						response.status(400).json({
-							error:
-								"Auto native routing requires a model id in request body.model or path '/models/{id}'.",
-							timestamp
-						});
-						return;
-					}
+					response.status(400).json({
+						error:
+							"Auto native routing requires either a routable protocol path or a model id in request body.model, multipart form-data field 'model', or path '/models/{id}'.",
+						timestamp
+					});
+					return;
+				}
+				if (!family) {
+					response.status(404).json({
+						error: 'Auto native routing could not determine a native protocol family.',
+						timestamp
+					});
+					return;
 				}
 				response.setHeader('X-AnyGPT-Routed-Family', family);
 			}
@@ -1252,8 +1430,17 @@ async function handleNativeProviderRequest(
 			modelId = extractNativeModelId(family, subpath, parsedBody);
 		}
 
+		if (!family) {
+			response.status(404).json({
+				error: 'Auto native routing could not determine a native protocol family.',
+				timestamp
+			});
+			return;
+		}
+		const routedFamily: NativeFamily = family;
+
 		if (
-			family === 'openai' &&
+			routedFamily === 'openai' &&
 			request.method === 'GET' &&
 			(subpath === '/models' || subpath === '/v1/models')
 		) {
@@ -1268,7 +1455,7 @@ async function handleNativeProviderRequest(
 		}
 
 		const isNativeResponsesRoute =
-			supportsNativeResponsesHistory(family) && isOpenAiResponsesSubpath(subpath);
+			supportsNativeResponsesHistory(routedFamily) && isOpenAiResponsesSubpath(subpath);
 
 		if (
 			isNativeResponsesRoute &&
@@ -1357,15 +1544,30 @@ async function handleNativeProviderRequest(
 			return;
 		}
 
-		const providers = await dataManager.load<LoadedProviders>('providers');
-		const candidates = listNativeProviderCandidates(providers, family, modelId);
+		providers = providers || await dataManager.load<LoadedProviders>('providers');
+		const providerSelectionOptions = autoFamilyRouting ? { autoRoute: true } : undefined;
+		const candidates = listNativeProviderCandidates(
+			providers,
+			routedFamily,
+			modelId,
+			providerSelectionOptions
+		);
 		const availableCandidates = candidates.filter(
 			provider => !isNativeProviderCoolingDown(provider.id, modelId)
 		);
-		const provider = availableCandidates[0] || selectBestNativeProvider(providers, family, modelId);
+		const provider =
+			availableCandidates[0] ||
+			selectBestNativeProvider(providers, routedFamily, modelId, providerSelectionOptions);
 		if (!provider) {
+			const autoRouteError = autoFamilyRouting
+				? `Auto native routing resolved protocol '${routedFamily}'${
+						subpathFamilyHint ? ` from path '${subpath}'` : ''
+				  }, but no active compatible provider is available${
+						modelId ? ` for model '${modelId}'` : ''
+				  }.`
+				: `No active ${routedFamily}-compatible provider is available${modelId ? ` for model '${modelId}'` : ''}.`;
 			response.status(404).json({
-				error: `No active ${family}-compatible provider is available${modelId ? ` for model '${modelId}'` : ''}.`,
+				error: autoRouteError,
 				timestamp
 			});
 			return;
@@ -1391,12 +1593,12 @@ async function handleNativeProviderRequest(
 			for (const attemptProvider of attemptProviders) {
 				try {
 				let upstreamUrl = buildNativeUpstreamUrl(
-					family,
+					routedFamily,
 					String(attemptProvider.provider_url || '').trim(),
 					subpath,
 					queryString
 				);
-				if (family === 'gemini') {
+				if (routedFamily === 'gemini') {
 					const url = new URL(upstreamUrl);
 					url.searchParams.set('key', String(attemptProvider.apiKey || '').trim());
 					upstreamUrl = url.toString();
@@ -1404,7 +1606,7 @@ async function handleNativeProviderRequest(
 
 				const headers = buildUpstreamHeaders(
 					request,
-					family,
+					routedFamily,
 					attemptProvider,
 					Boolean(stream)
 				);
@@ -1422,7 +1624,7 @@ async function handleNativeProviderRequest(
 					const retryAfterHeader = upstreamRes.headers.get('retry-after');
 					const retryAfterMs = parseRetryAfterMs(retryAfterHeader);
 					const shouldFailOver = shouldTryNextNativeProvider(
-						family,
+						routedFamily,
 						upstreamRes.status,
 						errorText
 					);
@@ -1438,7 +1640,7 @@ async function handleNativeProviderRequest(
 							message: shouldFailOver
 								? 'Native provider passthrough request failed; trying next provider.'
 								: 'Native provider passthrough request failed.',
-							family,
+							family: routedFamily,
 							providerId: attemptProvider.id,
 							modelId,
 							statusCode: upstreamRes.status,
@@ -1452,7 +1654,7 @@ async function handleNativeProviderRequest(
 						statusCode: upstreamRes.status,
 						retryAfter: retryAfterHeader,
 						body: buildNativeUpstreamErrorBody(
-							family,
+							routedFamily,
 							upstreamRes.status,
 							timestamp
 						)
@@ -1503,7 +1705,7 @@ async function handleNativeProviderRequest(
 								parsed?.response && typeof parsed.response === 'object'
 									? parsed.response
 									: parsed;
-							const usage = extractNativeUsage(family, normalizedPayload);
+							const usage = extractNativeUsage(routedFamily, normalizedPayload);
 							if (typeof usage.promptTokens === 'number') promptTokens = usage.promptTokens;
 							if (typeof usage.completionTokens === 'number') completionTokens = usage.completionTokens;
 							if (typeof usage.totalTokens === 'number') totalTokens = usage.totalTokens;
@@ -1629,7 +1831,7 @@ async function handleNativeProviderRequest(
 							},
 							modelId,
 							request,
-							routedFamily: family,
+							routedFamily: routedFamily,
 							providerId: attemptProvider.id,
 							upstreamResponseId: streamUpstreamResponseId
 						});
@@ -1647,7 +1849,7 @@ async function handleNativeProviderRequest(
 				}
 
 				if (parsedResponse && typeof parsedResponse === 'object') {
-					const usage = extractNativeUsage(family, parsedResponse);
+					const usage = extractNativeUsage(routedFamily, parsedResponse);
 					if (typeof usage.totalTokens === 'number' && usage.totalTokens > 0) {
 						await updateUserTokenUsage(usage.totalTokens, userApiKey, {
 							modelId: modelId || undefined,
@@ -1673,7 +1875,7 @@ async function handleNativeProviderRequest(
 							responsePayload: responsePayloadForClient,
 							modelId,
 							request,
-							routedFamily: family,
+							routedFamily: routedFamily,
 							providerId: attemptProvider.id,
 							upstreamResponseId
 						});
@@ -1693,7 +1895,7 @@ async function handleNativeProviderRequest(
 					await logError(
 						{
 							message: 'Native provider passthrough transport failed; trying next provider.',
-							family,
+							family: routedFamily,
 							providerId: attemptProvider.id,
 							modelId,
 							errorMessage: error?.message || String(error)

@@ -37,6 +37,8 @@ export function setupMockProviderConfig(mode: 'openai' | 'anthropic' = 'openai')
   const providerId = mode === 'anthropic' ? 'claude-mock' : 'openai-mock';
   const primaryModelId = mode === 'anthropic' ? 'claude-3-5-sonnet' : 'gpt-3.5-turbo';
   const secondaryModelId = mode === 'anthropic' ? 'claude-3-7-sonnet' : 'gpt-5.4';
+  const genericOpenAiCompatibleProviderId = 'acme-compatible-mock';
+  const genericOpenAiCompatibleModelId = 'text-pro-1';
   const providerUrl = mode === 'anthropic'
     ? `http://localhost:${mockPort}/v1/messages`
     : `http://localhost:${mockPort}/v1/chat/completions`;
@@ -75,6 +77,35 @@ export function setupMockProviderConfig(mode: 'openai' | 'anthropic' = 'openai')
     disabled: false
   };
 
+  const additionalProviders = mode === 'openai'
+    ? [
+        {
+          id: genericOpenAiCompatibleProviderId,
+          apiKey: 'mock-api-key-for-testing',
+          provider_url: providerUrl,
+          native_protocol: 'openai',
+          streamingCompatible: true,
+          models: {
+            [genericOpenAiCompatibleModelId]: {
+              id: genericOpenAiCompatibleModelId,
+              token_generation_speed: 50,
+              response_times: [],
+              errors: 0,
+              consecutive_errors: 0,
+              avg_response_time: null,
+              avg_provider_latency: null,
+              avg_token_speed: null
+            }
+          },
+          avg_response_time: null,
+          avg_provider_latency: null,
+          errors: 0,
+          provider_score: 90,
+          disabled: false
+        }
+      ]
+    : [];
+
   const testUserKey = {
     userId: 'test-user',
     tokenUsage: 0,
@@ -105,6 +136,19 @@ export function setupMockProviderConfig(mode: 'openai' | 'anthropic' = 'openai')
         throughput: 50,
         capabilities: ['text', 'tool_calling'],
       },
+      ...(mode === 'openai'
+        ? [
+            {
+              id: genericOpenAiCompatibleModelId,
+              object: 'model',
+              created,
+              owned_by: genericOpenAiCompatibleProviderId,
+              providers: 1,
+              throughput: 50,
+              capabilities: ['text', 'tool_calling'],
+            },
+          ]
+        : []),
     ],
   };
 
@@ -129,7 +173,7 @@ export function setupMockProviderConfig(mode: 'openai' | 'anthropic' = 'openai')
   }
 
   // Write mock provider configuration
-  fs.writeFileSync(providersFilePath, JSON.stringify([mockProvider], null, 2));
+  fs.writeFileSync(providersFilePath, JSON.stringify([mockProvider, ...additionalProviders], null, 2));
   console.log('[TEST-SETUP] Created mock provider configuration');
 
   fs.writeFileSync(modelsFilePath, JSON.stringify(testModels, null, 2));
