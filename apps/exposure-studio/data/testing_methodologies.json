@@ -1,0 +1,70 @@
+[
+  {
+    "id": "method-security-txt-verification",
+    "title": "security.txt and disclosure-channel verification",
+    "category": "disclosure",
+    "safety_posture": "safe-passive",
+    "objective": "Verify that an owned or authorized web asset publishes a usable disclosure contact and policy path before findings are escalated.",
+    "operator_steps": [
+      "Fetch /.well-known/security.txt from the approved asset.",
+      "Record whether Contact, Expires, and Policy fields are present.",
+      "If the file is missing or stale, create a disclosure-workflow finding rather than probing deeper."
+    ],
+    "evidence_outputs": [
+      "retrieved security.txt body",
+      "timestamped disclosure contact evidence",
+      "policy-link presence or absence"
+    ]
+  },
+  {
+    "id": "method-exposed-admin-surface-review",
+    "title": "authorized admin-surface review",
+    "category": "exposure",
+    "safety_posture": "safe-authz-required",
+    "objective": "Confirm whether a known administrative surface is reachable from the public edge and whether access boundaries are correct.",
+    "operator_steps": [
+      "Use only an owned or explicitly authorized target.",
+      "Confirm whether the administrative surface resolves on the public edge.",
+      "Capture boundary evidence, but stop before any unapproved destructive action."
+    ],
+    "evidence_outputs": [
+      "public-edge reachability evidence",
+      "service/banner metadata",
+      "route ownership confirmation"
+    ]
+  },
+  {
+    "id": "method-kev-priority-review",
+    "title": "KEV and CVE prioritization review",
+    "category": "vulnerability-intel",
+    "safety_posture": "safe-passive",
+    "objective": "Map exposed products to known exploited or high-priority CVEs and route remediation based on authoritative public intelligence.",
+    "operator_steps": [
+      "Normalize the exposed service to vendor/product context.",
+      "Compare the product against KEV and NVD-backed records already ingested by SurfaceScope.",
+      "Flag the finding for remediation priority when a mapped CVE is present."
+    ],
+    "evidence_outputs": [
+      "product-to-CVE mapping",
+      "public reference URLs",
+      "remediation-priority note"
+    ]
+  },
+  {
+    "id": "method-ownership-attestation",
+    "title": "asset ownership attestation",
+    "category": "governance",
+    "safety_posture": "safe-governance",
+    "objective": "Prevent ambiguous or third-party assets from entering the scanner workflow without explicit authorization evidence.",
+    "operator_steps": [
+      "Confirm owner and business unit for the asset.",
+      "Record whether the asset is owned, delegated, or pending authorization.",
+      "Block active testing for assets that remain pending."
+    ],
+    "evidence_outputs": [
+      "owner name",
+      "authorization state",
+      "review timestamp"
+    ]
+  }
+]

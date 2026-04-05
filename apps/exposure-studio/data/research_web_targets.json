@@ -1,0 +1,32 @@
+[
+  {
+    "id": "ai-automators-home",
+    "title": "The AI Automators home",
+    "category": "landing_page",
+    "url": "https://www.theaiautomators.com/"
+  },
+  {
+    "id": "ai-automators-blog",
+    "title": "The AI Automators blog index",
+    "category": "blog_index",
+    "url": "https://www.theaiautomators.com/blog/"
+  },
+  {
+    "id": "ai-automators-automations",
+    "title": "The AI Automators automations archive",
+    "category": "category_archive",
+    "url": "https://www.theaiautomators.com/category/automations/"
+  },
+  {
+    "id": "ai-automators-agent-skills",
+    "title": "Anthropic's Agent Skills article",
+    "category": "article",
+    "url": "https://www.theaiautomators.com/anthropics-agent-skills/"
+  },
+  {
+    "id": "ai-automators-agent-harness",
+    "title": "Anthropic harness article",
+    "category": "article",
+    "url": "https://www.theaiautomators.com/unlock-deep-agents-with-anthropics-agent-harness-in-n8n/"
+  }
+]

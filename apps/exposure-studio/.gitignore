@@ -1,0 +1,12 @@
+/target
+.lane-secrets.env
+backend/.venv/
+backend/__pycache__/
+backend/*.py[cod]
+data/.generated/
+data/.lane-locks/
+data/.lane-snapshots/
+data/.youtube-lane-cache/
+cookies.txt
+*_cookies.txt
+*.cookies.txt

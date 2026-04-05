@@ -1,0 +1,58 @@
+[
+  {
+    "id": "cisa-vulnerability-management",
+    "title": "CISA Vulnerability Management",
+    "category": "governance",
+    "url": "https://www.cisa.gov/vulnerability-management",
+    "requirement": "Treat vulnerability management and coordinated disclosure as measurable risk-reduction work, not just passive indexing.",
+    "product_response": "SurfaceScope keeps ownership, evidence, and remediation workflow attached to every finding."
+  },
+  {
+    "id": "fedramp-vulnerability-scanning",
+    "title": "FedRAMP Vulnerability Scanning",
+    "category": "scanning",
+    "url": "https://www.fedramp.gov/docs/rev5/playbook/csp/continuous-monitoring/vulnerability-scanning/",
+    "requirement": "Preserve authorization state, machine-readable findings, and asset inventory linkage for scans.",
+    "product_response": "The product tracks authorization status per asset and expects structured findings tied to inventory identifiers."
+  },
+  {
+    "id": "rfc-9116-security-txt",
+    "title": "RFC 9116 security.txt",
+    "category": "disclosure",
+    "url": "https://www.rfc-editor.org/rfc/rfc9116",
+    "requirement": "Support discoverable disclosure contacts and policy metadata for coordinated reporting.",
+    "product_response": "The roadmap includes security.txt ingestion and disclosure packet export."
+  },
+  {
+    "id": "owasp-asvs",
+    "title": "OWASP ASVS",
+    "category": "delivery",
+    "url": "https://owasp.org/www-project-application-security-verification-standard/",
+    "requirement": "Use application security verification guidance to turn exposure evidence into developer-facing remediation work.",
+    "product_response": "The dashboard is built around verified findings, evidence retention, and remediation ownership."
+  },
+  {
+    "id": "leakix-terms-permissible-use",
+    "title": "LeakIX Terms and Conditions",
+    "category": "lawful-ops",
+    "url": "https://leakix.net/terms-and-conditions",
+    "requirement": "Restrict platform use to authorized, professional security work and forbid harm, extortion, bulk extraction, and publication without permission.",
+    "product_response": "SurfaceScope stores authorization proof, recipient contacts, and disclosure workflow state on every monitored asset and finding."
+  },
+  {
+    "id": "leakix-about-disclosure-window",
+    "title": "LeakIX About and disclosure window",
+    "category": "disclosure",
+    "url": "https://leakix.net/about",
+    "requirement": "Keep newly discovered issues in a restricted visibility window before wider publication, and define escalation paths for critical cases.",
+    "product_response": "Findings now carry visibility classes, grace-period windows, report status, and escalation targets."
+  },
+  {
+    "id": "leakix-privacy-gdpr",
+    "title": "LeakIX Privacy Policy",
+    "category": "privacy",
+    "url": "https://leakix.net/privacy-policy",
+    "requirement": "Document data-minimization, KYC, retention, and data-subject-rights handling for a public exposure platform.",
+    "product_response": "SurfaceScope models explicit authorization references and is scoped for owned or contractually delegated assets instead of anonymous public indexing."
+  }
+]
