@@ -7,7 +7,9 @@ dotenv.config({ path: path.resolve(process.cwd(), envFile) });
 
 import WebSocket, { RawData } from 'ws';
 
-const API_KEY = process.env.TEST_API_KEY || 'test-key-for-mock-provider';
+import { DEFAULT_TEST_API_KEY } from './testSetup.js';
+
+const API_KEY = process.env.TEST_API_KEY || DEFAULT_TEST_API_KEY;
 const url = process.env.WS_URL || 'ws://localhost:3000/ws';
 
 const ws = new WebSocket(url);

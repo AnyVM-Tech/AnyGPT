@@ -56,6 +56,9 @@ apps/api/keys.json
 apps/api/providers.json
 apps/api/models.json
 apps/api/tiers.json
+apps/api/.test-data/providers.json
+apps/api/.test-data/keys.json
+apps/api/.test-data/models.json
 apps/api/.test-data/*.backup
 apps/api/keys.json.invalid-2026-03-01T19-09-59-257Z.bak
 # Excluded errors (if generated)
