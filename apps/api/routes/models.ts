@@ -25,7 +25,7 @@ function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function applyResponseHeaders(response: Response, headers: Record<string, string> | undefined): void {
+export function applyResponseHeaders(response: Response, headers: Record<string, string> | undefined): void {
     if (!headers) return;
     for (const [name, value] of Object.entries(headers)) {
         response.setHeader(name, value);
@@ -50,7 +50,7 @@ function extractRequestApiKey(request: any): string | null {
     );
 }
 
-async function buildModelsPayload(request: any): Promise<PreparedModelsPayload> {
+export async function buildModelsPayload(request: any): Promise<PreparedModelsPayload> {
     const [modelsSnapshot, providersData] = await Promise.all([
         dataManager.load<ModelsFileStructure>('models'),
         dataManager.load<LoadedProviders>('providers'),
