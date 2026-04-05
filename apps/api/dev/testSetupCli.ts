@@ -9,9 +9,11 @@ const envFile = process.env.NODE_ENV === 'test' ? '.env.test' : '.env';
 dotenv.config({ path: path.join(projectRoot, envFile), override: true });
 
 const action = process.argv[2] || 'setup';
+const modeArg = process.argv[3];
+const mode = modeArg === 'anthropic' ? 'anthropic' : 'openai';
 
 if (action === 'setup') {
-  setupMockProviderConfig();
+  setupMockProviderConfig(mode);
 } else if (action === 'restore') {
   restoreProviderConfig();
 } else {
