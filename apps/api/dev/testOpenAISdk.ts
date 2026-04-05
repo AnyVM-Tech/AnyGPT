@@ -3,15 +3,20 @@ import dotenv from 'dotenv';
 import path from 'path';
 import OpenAI from 'openai';
 
-import { setupMockProviderConfig, restoreProviderConfig } from './testSetup.js';
+import { DEFAULT_TEST_API_KEY, setupMockProviderConfig, restoreProviderConfig } from './testSetup.js';
 
 const envFile = process.env.NODE_ENV === 'test' ? '.env.test' : '.env';
 dotenv.config({ path: path.resolve(process.cwd(), envFile) });
 
-function resolveClientBaseUrl(): string {
+function resolveRawApiBaseUrl(): string {
   const port = process.env.PORT || '3000';
   const rawBaseUrl = process.env.TEST_API_BASE_URL || `http://localhost:${port}`;
   const normalized = rawBaseUrl.replace(/\/$/, '');
+  return normalized.endsWith('/v1') ? normalized.slice(0, -3) : normalized;
+}
+
+function resolveClientBaseUrl(): string {
+  const normalized = resolveRawApiBaseUrl();
   return normalized.endsWith('/v1') ? normalized : `${normalized}/v1`;
 }
 
@@ -38,17 +43,24 @@ function getReasoningSummaryText(item: any): string | undefined {
   return typeof firstSummaryText?.text === 'string' ? firstSummaryText.text : undefined;
 }
 
+function assertNativeProxyResponseId(responseId: string): void {
+  assert.match(responseId, /^resp_[a-f0-9]{32}$/);
+}
+
 async function runSdkCompatibilityTest() {
   const manageSetup = process.env.TEST_SETUP_MODE !== 'external';
   if (manageSetup) {
     setupMockProviderConfig();
   }
 
-  const apiKey = process.env.TEST_API_KEY || 'test-key-for-mock-provider';
+  const apiKey = process.env.TEST_API_KEY || DEFAULT_TEST_API_KEY;
   const model = 'gpt-3.5-turbo';
   const responsesModel = 'gpt-5.4';
+  const rawBaseUrl = resolveRawApiBaseUrl();
   const baseURL = resolveClientBaseUrl();
+  const nativeResponsesBaseUrl = `${rawBaseUrl}/native/auto/v1`;
   const client = new OpenAI({ apiKey, baseURL });
+  const nativeResponsesClient = new OpenAI({ apiKey, baseURL: nativeResponsesBaseUrl });
 
   console.log(`[SDK-TEST] Testing OpenAI Node SDK compatibility against ${baseURL}`);
 
@@ -307,6 +319,78 @@ async function runSdkCompatibilityTest() {
     assert.ok(Array.isArray(completedToolAssistantMessages[0]?.content));
     assert.ok(completedToolAssistantMessages[0].content.some((part: any) => part?.type === 'tool_calls'));
     console.log('[SDK-TEST] ✅ Streaming responses.create tool calls include an assistant message in the completed response.');
+
+    const nativeResponseObject = await nativeResponsesClient.responses.create({
+      model: responsesModel,
+      input: 'Say hello from the responses API.',
+    });
+
+    assert.equal(nativeResponseObject.object, 'response');
+    assert.equal(nativeResponseObject.status, 'completed');
+    assert.equal(nativeResponseObject.output_text, expectedHelloResponseText);
+    assert.ok(typeof nativeResponseObject.id === 'string');
+    assertNativeProxyResponseId(nativeResponseObject.id);
+    console.log('[SDK-TEST] ✅ Native responses.create rewrites response ids to proxy-owned ids.');
+
+    const nativeFollowupInput = 'Say hello again from native responses.';
+    const expectedNativeFollowupText = getExpectedMockResponsesText(nativeFollowupInput);
+    const nativeFollowup = await nativeResponsesClient.responses.create({
+      model: responsesModel,
+      input: nativeFollowupInput,
+      previous_response_id: nativeResponseObject.id,
+    });
+
+    assert.equal(nativeFollowup.object, 'response');
+    assert.equal(nativeFollowup.status, 'completed');
+    assert.ok(typeof nativeFollowup.id === 'string' && nativeFollowup.id !== nativeResponseObject.id);
+    assertNativeProxyResponseId(nativeFollowup.id);
+    assert.equal(nativeFollowup.output_text, expectedNativeFollowupText);
+    console.log('[SDK-TEST] ✅ Native responses.create resolves previous_response_id locally.');
+
+    const nativeResponseStream = await nativeResponsesClient.responses.create({
+      model: responsesModel,
+      input: streamingResponsesInput,
+      stream: true,
+    });
+
+    const nativeStreamResponseIds = new Set<string>();
+    let completedNativeStreamResponse: any;
+    for await (const event of nativeResponseStream as AsyncIterable<any>) {
+      if (typeof event?.response_id === 'string') {
+        nativeStreamResponseIds.add(event.response_id);
+      }
+      if (typeof event?.response?.id === 'string') {
+        nativeStreamResponseIds.add(event.response.id);
+      }
+      if (event?.type === 'response.completed') {
+        completedNativeStreamResponse = event.response;
+      }
+    }
+
+    assert.ok(completedNativeStreamResponse);
+    assert.equal(nativeStreamResponseIds.size, 1);
+    const [nativeStreamResponseId] = Array.from(nativeStreamResponseIds);
+    assert.ok(typeof nativeStreamResponseId === 'string');
+    assertNativeProxyResponseId(nativeStreamResponseId);
+    assert.equal(completedNativeStreamResponse?.id, nativeStreamResponseId);
+    console.log('[SDK-TEST] ✅ Native streaming responses keep a consistent proxy-owned response id.');
+
+    const missingNativeResponse = await fetch(`${rawBaseUrl}/native/auto/v1/responses`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: responsesModel,
+        input: 'This request should fail.',
+        previous_response_id: 'resp_missing_history_id',
+      }),
+    });
+    const missingNativeResponseBody = await missingNativeResponse.json();
+    assert.equal(missingNativeResponse.status, 400);
+    assert.ok(String(missingNativeResponseBody?.error || '').includes("Previous response with id 'resp_missing_history_id' not found."));
+    console.log('[SDK-TEST] ✅ Native responses reject unresolved previous_response_id values.');
   } finally {
     if (manageSetup) {
       restoreProviderConfig();

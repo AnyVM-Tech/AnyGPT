@@ -13,6 +13,10 @@ export type StoredResponsesHistoryEntry = {
   previous_response_id?: string;
   replay_depth?: number;
   compacted?: boolean;
+  owner_scope?: string;
+  provider_family?: string;
+  provider_id?: string;
+  upstream_response_id?: string;
 };
 
 export type ResponsesHistoryMergeResult = {
@@ -107,6 +111,22 @@ function normalizeStoredResponsesHistoryEntry(raw: StoredResponsesHistoryEntry):
         : undefined,
     replay_depth: replayDepth,
     compacted: raw?.compacted === true,
+    owner_scope:
+      typeof raw?.owner_scope === 'string' && raw.owner_scope.trim()
+        ? raw.owner_scope.trim()
+        : undefined,
+    provider_family:
+      typeof raw?.provider_family === 'string' && raw.provider_family.trim()
+        ? raw.provider_family.trim()
+        : undefined,
+    provider_id:
+      typeof raw?.provider_id === 'string' && raw.provider_id.trim()
+        ? raw.provider_id.trim()
+        : undefined,
+    upstream_response_id:
+      typeof raw?.upstream_response_id === 'string' && raw.upstream_response_id.trim()
+        ? raw.upstream_response_id.trim()
+        : undefined,
   };
 }
 

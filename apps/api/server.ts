@@ -52,6 +52,7 @@ import groqRouter from './routes/groq.js';
 import ollamaRouter from './routes/ollama.js';
 import openrouterRouter from './routes/openrouter.js';
 import openapiRouter from './routes/openapi.js';
+import nativeProviderRouter from './routes/nativeProviders.js';
 import { attachWebSocket } from './ws/wsServer.js';
 import { attachRealtimeWebSocket } from './ws/realtime.js';
 
@@ -542,6 +543,9 @@ async function startServer() {
     } else {
         console.log('  𐄂 OpenRouter compatible routes disabled.');
     }
+    app.use('/native', nativeProviderRouter);
+    console.log('  ✓ Native passthrough router enabled: /native/:family/* and /native/auto/* (legacy alias: /native/mutual/*)');
+    console.log('  ✓ Native family aliases now resolve via passthrough router (e.g. /native/openai/v1, /native/anthropic/v1, /native/gemini/v1beta).');
     console.log(''); // Newline for cleaner log output
 
     // --- WebSocket Endpoint ---

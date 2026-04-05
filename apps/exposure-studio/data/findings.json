@@ -1,0 +1,94 @@
+[
+  {
+    "id": "finding-001",
+    "asset_id": "asset-api-02",
+    "title": "Missing disclosure contact metadata",
+    "severity": "medium",
+    "status": "triaging",
+    "source": "security_txt_probe",
+    "evidence_url": null,
+    "needs_disclosure": false,
+    "needs_owner_confirmation": true,
+    "report_status": "drafting-owner-contact",
+    "visibility": "internal-review",
+    "grace_period_days": 30,
+    "summary": "The API surface does not publish a verified disclosure contact path, so inbound coordinated disclosure handling is ambiguous.",
+    "related_intelligence_ids": [
+      "intel-disclosure-channel"
+    ],
+    "recommended_method_ids": [
+      "method-security-txt-verification",
+      "method-ownership-attestation"
+    ],
+    "evidence_summary": "security.txt lookup returned no valid Contact or Policy metadata on the approved API host.",
+    "remediation_owner": "API Reliability",
+    "recipient_contacts": [
+      "security@anygpt.example",
+      "api-reliability@anygpt.example"
+    ],
+    "escalation_targets": [
+      "platform-owner-oncall",
+      "compliance-review"
+    ]
+  },
+  {
+    "id": "finding-002",
+    "asset_id": "asset-edge-01",
+    "title": "Unexpected admin panel exposure on public edge",
+    "severity": "critical",
+    "status": "remediating",
+    "source": "authorized_surface_scan",
+    "evidence_url": null,
+    "needs_disclosure": true,
+    "needs_owner_confirmation": false,
+    "report_status": "notified-owner",
+    "visibility": "trusted-researchers-only",
+    "grace_period_days": 30,
+    "summary": "An authenticated, approved scan found an administrative surface reachable from the public edge that should be boundary-restricted.",
+    "related_intelligence_ids": [
+      "intel-adminer-ssrf"
+    ],
+    "recommended_method_ids": [
+      "method-exposed-admin-surface-review",
+      "method-kev-priority-review"
+    ],
+    "evidence_summary": "Boundary review confirmed the admin route resolves on the public edge when it should be internally segmented.",
+    "remediation_owner": "Platform Engineering",
+    "recipient_contacts": [
+      "security@anygpt.example",
+      "platform-engineering@anygpt.example"
+    ],
+    "escalation_targets": [
+      "hosting-abuse-desk",
+      "regional-cert"
+    ]
+  },
+  {
+    "id": "finding-003",
+    "asset_id": "asset-vendor-03",
+    "title": "Delegated dependency lacks machine-readable finding export",
+    "severity": "low",
+    "status": "new",
+    "source": "vendor_posture_review",
+    "evidence_url": null,
+    "needs_disclosure": false,
+    "needs_owner_confirmation": true,
+    "report_status": "awaiting-authorization-proof",
+    "visibility": "internal-review",
+    "grace_period_days": 14,
+    "summary": "The dependency is in scope under delegated authorization, but the current workflow cannot ingest its findings in structured form.",
+    "related_intelligence_ids": [],
+    "recommended_method_ids": [
+      "method-ownership-attestation"
+    ],
+    "evidence_summary": "The dependency review captured ownership and authorization, but no machine-readable export format was available for ingestion.",
+    "remediation_owner": "Security Operations",
+    "recipient_contacts": [
+      "vendor-security@vendor.example",
+      "security-operations@anygpt.example"
+    ],
+    "escalation_targets": [
+      "procurement-owner"
+    ]
+  }
+]

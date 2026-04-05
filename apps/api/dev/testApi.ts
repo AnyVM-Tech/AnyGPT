@@ -5,7 +5,7 @@ import path from 'path';
 const envFile = process.env.NODE_ENV === 'test' ? '.env.test' : '.env';
 dotenv.config({ path: path.resolve(process.cwd(), envFile) });
 
-import { setupMockProviderConfig, restoreProviderConfig } from './testSetup.js';
+import { DEFAULT_TEST_API_KEY, setupMockProviderConfig, restoreProviderConfig } from './testSetup.js';
 
 // Load environment variables (optional, server should have them)
 
@@ -161,8 +161,8 @@ async function testApiWithMockProvider() {
   const apiUrl = `${baseUrl}/v1/chat/completions`;
   const modelId = 'gpt-3.5-turbo';
   const testPrompt = 'Write a short haiku about APIs.';
-  // Use an existing admin API key that we know is valid
-  const apiKey = process.env.TEST_API_KEY || 'test-key-for-mock-provider';
+  // Use the standard automated test API key unless the environment overrides it.
+  const apiKey = process.env.TEST_API_KEY || DEFAULT_TEST_API_KEY;
 
   console.log(`[TEST] Testing API endpoint: ${apiUrl}`);
   console.log(`[TEST] Using model: ${modelId}`);
