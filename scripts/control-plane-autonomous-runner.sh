@@ -17,11 +17,11 @@ UNIT_NAME="anygpt-control-plane-autonomous-runner.service"
 UNIT_FILE="$USER_SERVICE_DIR/$UNIT_NAME"
 SYSTEM_UNIT_FILE="/etc/systemd/system/$UNIT_NAME"
 
-DEFAULT_GOAL='Continuously monitor, fix, and improve AnyGPT across the repo, checking API, control-plane, UI, homepage, runtime health, routing, model availability, governance drift, and bounded safe improvements.'
-DEFAULT_SCOPES='repo,api,api-experimental,control-plane,repo-surface'
+DEFAULT_GOAL='Continuously monitor, fix, and improve AnyGPT anyscan and the closely related control-plane orchestration that supports it.'
+DEFAULT_SCOPES='anyscan,research-scout'
 DEFAULT_INTERVAL_MS='1000'
 DEFAULT_MAX_EDIT_ACTIONS='6'
-DEFAULT_EDIT_ALLOWLIST='apps/langgraph-control-plane,apps/api,apps/homepage,apps/ui,scripts,README.md,SETUP.md,package.json,turbo.json,pnpm-workspace.yaml,tsconfig.json,bun.sh'
+DEFAULT_EDIT_ALLOWLIST='apps/anyscan,apps/langgraph-control-plane'
 DEFAULT_AGENT_PARALLELISM='6'
 DEFAULT_MULTI_RUNNER='true'
 DEFAULT_LOG_TAIL_LINES='80'
@@ -165,7 +165,7 @@ direct_runner_pid() {
 
 direct_runner_state() {
   local pid
-  pid="$(direct_runner_pid)"
+  pid="$(direct_runner_pid 2>/dev/null || true)"
   if [[ -n "$pid" ]] && is_pid_alive "$pid"; then
     printf 'active\n'
     return 0
@@ -403,8 +403,8 @@ cleanup_stale_runtime_state() {
   normalize_stale_child_status_files
 
   local state pid
-  state="$(service_state)"
-  pid="$(service_main_pid)"
+  state="$(service_state 2>/dev/null || true)"
+  pid="$(service_main_pid 2>/dev/null || true)"
 
   if [[ "$state" == "active" || "$state" == "activating" || "$state" == "deactivating" ]]; then
     if [[ ! -f "$PID_FILE" && -n "$pid" && "$pid" != "0" ]] && is_pid_alive "$pid"; then
@@ -466,7 +466,11 @@ service_main_pid() {
       return 0
     fi
   fi
-  direct_runner_pid
+  pid="$(direct_runner_pid 2>/dev/null || true)"
+  if [[ -n "$pid" ]]; then
+    printf '%s\n' "$pid"
+  fi
+  return 0
 }
 
 write_env_var() {
@@ -623,11 +627,12 @@ terminate_direct_runner_processes() {
 }
 
 start_runner() {
-  local state
-  state="$(service_state)"
+  local state active_pid
+  state="$(service_state 2>/dev/null || true)"
   if [[ "$state" == "active" || "$state" == "activating" ]]; then
-    echo "Runner already active (service_state=$state pid=$(service_main_pid))"
-    exit 0
+    active_pid="$(service_main_pid 2>/dev/null || true)"
+    echo "Runner already active (service_state=$state pid=$active_pid)"
+    return 0
   fi
 
   local goal="${CONTROL_PLANE_AUTONOMOUS_GOAL:-$DEFAULT_GOAL}"
@@ -671,9 +676,10 @@ start_runner() {
     systemctl --user start "$UNIT_NAME"
 
     for _ in $(seq 1 20); do
-      state="$(service_state)"
+      state="$(service_state 2>/dev/null || true)"
       if [[ "$state" == "active" || "$state" == "activating" ]]; then
-        echo "Runner started (service_state=$state pid=$(service_main_pid))"
+        active_pid="$(service_main_pid 2>/dev/null || true)"
+        echo "Runner started (service_state=$state pid=$active_pid)"
         return 0
       fi
       sleep 0.5
@@ -691,9 +697,10 @@ start_runner() {
     systemctl start "$UNIT_NAME"
 
     for _ in $(seq 1 20); do
-      state="$(service_state)"
+      state="$(service_state 2>/dev/null || true)"
       if [[ "$state" == "active" || "$state" == "activating" ]]; then
-        echo "Runner started (service_state=$state pid=$(service_main_pid))"
+        active_pid="$(service_main_pid 2>/dev/null || true)"
+        echo "Runner started (service_state=$state pid=$active_pid)"
         return 0
       fi
       sleep 0.5
@@ -708,9 +715,8 @@ start_runner() {
   printf '%s\n' "$bootstrap_pid" > "$PID_FILE"
 
   for _ in $(seq 1 40); do
-    state="$(service_state)"
-    local active_pid
-    active_pid="$(service_main_pid)"
+    state="$(service_state 2>/dev/null || true)"
+    active_pid="$(service_main_pid 2>/dev/null || true)"
     if [[ "$state" == "active" && -n "$active_pid" ]] && is_pid_alive "$active_pid"; then
       if [[ -f "$STATUS_FILE" ]]; then
         echo "Runner started (service_state=$state pid=$active_pid)"
@@ -734,8 +740,8 @@ start_runner() {
 
 stop_runner() {
   cleanup_stale_runtime_state
-  local state user_state="" system_state=""
-  state="$(service_state)"
+  local state user_state="" system_state="" force_pid=""
+  state="$(service_state 2>/dev/null || true)"
   if user_systemd_available; then
     user_state="$(systemctl --user is-active "$UNIT_NAME" 2>/dev/null || true)"
   fi
@@ -752,7 +758,7 @@ stop_runner() {
   fi
 
   for _ in $(seq 1 20); do
-    state="$(service_state)"
+    state="$(service_state 2>/dev/null || true)"
     if [[ -z "$state" || "$state" == "inactive" || "$state" == "failed" ]]; then
       rm -f "$PID_FILE"
       remove_stale_child_pid_files
@@ -763,13 +769,26 @@ stop_runner() {
     sleep 0.5
   done
 
-  if pid="$(read_pid 2>/dev/null)" && is_pid_alive "$pid"; then
+  force_pid="$(service_main_pid 2>/dev/null || true)"
+  if [[ -z "$force_pid" || "$force_pid" == "0" ]]; then
+    force_pid="$(direct_runner_pid 2>/dev/null || true)"
+  fi
+  if [[ -n "$force_pid" && "$force_pid" != "0" ]] && is_pid_alive "$force_pid"; then
     terminate_direct_runner_processes
     rm -f "$PID_FILE"
     remove_stale_child_pid_files
     normalize_stale_status_file
-    echo "Runner stopped after SIGKILL"
-    exit 0
+    echo "Runner stopped after forced cleanup"
+    return 0
+  fi
+
+  if any_child_pid_files_alive; then
+    terminate_direct_runner_processes
+    rm -f "$PID_FILE"
+    remove_stale_child_pid_files
+    normalize_stale_status_file
+    echo "Runner stopped after child cleanup"
+    return 0
   fi
 
   echo "Runner did not stop cleanly; check systemctl status $UNIT_NAME or $LOG_FILE" >&2
@@ -784,8 +803,8 @@ restart_runner() {
 status_runner() {
   cleanup_stale_runtime_state
   local state pid
-  state="$(service_state)"
-  pid="$(service_main_pid)"
+  state="$(service_state 2>/dev/null || true)"
+  pid="$(service_main_pid 2>/dev/null || true)"
   echo "Service: ${state:-inactive}"
   if [[ -n "$pid" && "$pid" != "0" ]]; then
     echo "MainPID: $pid"

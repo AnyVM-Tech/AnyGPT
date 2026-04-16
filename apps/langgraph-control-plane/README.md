@@ -203,6 +203,9 @@ bun run dev -- --goal="Ship a fix" --scopes=repo,api
 # Execute planned jobs
 bun run dev -- --goal="Validate API changes" --scopes=api --execute
 
+# Research and plan bounded anyscan improvements
+bun run dev -- --goal="Research and plan improvements for anyscan crawling, persistence, and API behavior" --scopes=anyscan,research-scout --execute --mcp-actions
+
 # Execute with first-class MCP browser/search actions enabled
 bun run dev -- --goal="Review https://docs.langchain.com/oss/javascript/langgraph/overview and https://github.com/openclaw/openclaw" \
   --scopes=control-plane,repo-surface \
@@ -223,6 +226,10 @@ The built-in workflow currently understands these scopes:
 - `api`
 - `api-experimental`
 - `control-plane`
+- `anyscan`
+- `research-scout`
+
+When coordinated multi-runner mode is active, requesting `anyscan` also provisions the `research-scout` lane so queued web research can be turned into file-mapped implementation notes for `apps/anyscan`.
 
 Additional scopes can be added by extending the target map in [`src/workflow.ts`](src/workflow.ts).
 
@@ -279,6 +286,7 @@ The AI path is optional and activates only when these environment variables are 
 CONTROL_PLANE_AI_BASE_URL=https://gpt.anyvm.tech/v1
 CONTROL_PLANE_AI_API_KEY=your-anygpt-api-key
 CONTROL_PLANE_AI_MODEL=gpt-5.4
+CONTROL_PLANE_AI_REASONING_EFFORT=xhigh
 CONTROL_PLANE_AI_TEMPERATURE=0.2
 ```
 
@@ -298,6 +306,8 @@ If those are not set, the control plane also tries a local AnyGPT-backed fallbac
 - API key falls back to a valid local key from [`apps/api/keys.json`](../api/keys.json) when a `test-key-for-automated-testing-*` entry is present
 
 That gives the control plane a working AI-agent path against a locally running AnyGPT experimental API without requiring extra manual environment setup.
+
+When the resolved control-plane model is `gpt-5.4` and no reasoning effort is explicitly configured, the control plane now defaults to `xhigh`. Set `CONTROL_PLANE_AI_REASONING_EFFORT` if you want a different reasoning level.
 
 When selecting Gemini-family models through AnyGPT, use bare Gemini model IDs such as `gemini-3.1-pro-preview` for native Gemini routing. Avoid `google/gemini-...` here unless you intentionally want the OpenRouter-style/provider-prefixed path.
 

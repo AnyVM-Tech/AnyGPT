@@ -81,6 +81,8 @@ export const McpInspectionSchema = z.object({
 });
 
 export const McpActionRiskSchema = z.enum(['low', 'medium', 'high']);
+export const ResearchScoutQueryFamilySchema = z.enum(['control-plane', 'api', 'anyscan', 'generic']);
+export const ResearchScoutSourceKindSchema = z.enum(['web', 'docs', 'github', 'youtube', 'papers']);
 
 export const McpPlannedActionSchema = z.object({
   id: z.string(),
@@ -102,6 +104,7 @@ export const McpExecutedActionSchema = McpPlannedActionSchema.extend({
     title: z.string().default(''),
     description: z.string().default(''),
     source: z.string().default(''),
+    sourceKind: ResearchScoutSourceKindSchema.default('web'),
   })).default([]),
 });
 
@@ -810,6 +813,14 @@ export const ControlPlaneStateSchema = z.object({
   deferReason: z.string().default(''),
   evidenceStatus: EvidenceStatusSchema.default('unknown'),
   lastAiFailureClass: AiFailureClassSchema.default('none'),
+  previousRepairStatus: z.string().default(''),
+  previousRepairIntentSummary: z.string().default(''),
+  previousImprovementIntentSummary: z.string().default(''),
+  previousObservationSignature: z.string().default(''),
+  currentObservationSignature: z.string().default(''),
+  previousValidationOnlyOutcome: z.boolean().default(false),
+  anyscanValidationSuppressed: z.boolean().default(false),
+  anyscanValidationSuppressedReason: z.string().default(''),
   validationRequired: z.boolean().default(false),
   repairDecisionReason: z.string().default(''),
   recentRepairValidationFailureCount: z.number().int().nonnegative().default(0),
@@ -838,6 +849,10 @@ export const ControlPlaneStateSchema = z.object({
   plannedMcpActions: z.array(McpPlannedActionSchema).default([]),
   executedMcpActions: z.array(McpExecutedActionSchema).default([]),
   mcpActionNotes: z.array(z.string()).default([]),
+  researchScoutFreshQueuedRequestCount: z.number().int().nonnegative().default(0),
+  researchScoutClaimedQueuedRequestCount: z.number().int().nonnegative().default(0),
+  researchScoutActionableWorkCount: z.number().int().nonnegative().default(0),
+  researchScoutIdleReason: z.string().default(''),
   logInsights: z.array(LogInsightSchema).default([]),
   plannerNotes: z.array(z.string()).default([]),
   buildJobs: z.array(PlannedJobSchema).default([]),
@@ -855,6 +870,8 @@ export type McpTool = z.infer<typeof McpToolSchema>;
 export type McpInspection = z.infer<typeof McpInspectionSchema>;
 export type McpPlannedAction = z.infer<typeof McpPlannedActionSchema>;
 export type McpExecutedAction = z.infer<typeof McpExecutedActionSchema>;
+export type ResearchScoutQueryFamily = z.infer<typeof ResearchScoutQueryFamilySchema>;
+export type ResearchScoutSourceKind = z.infer<typeof ResearchScoutSourceKindSchema>;
 export type ApprovalRequest = z.infer<typeof ApprovalRequestSchema>;
 export type AiNodeAdvice = z.infer<typeof AiNodeAdviceSchema>;
 export type LogInsight = z.infer<typeof LogInsightSchema>;
@@ -1157,7 +1174,99 @@ function shouldApplyAutonomousEditsForState(state: ControlPlaneState): boolean {
 function shouldRunJobsForState(state: ControlPlaneState): boolean {
   const evaluationGateResult = resolveStateEvaluationGateResult(state);
   const governanceGateResult = resolveStateGovernanceGateResult(state);
-  return state.executePlan && !evaluationGateResult.blocksExecution && !governanceGateResult.blocksExecution;
+  const hasExecutableJobs = [...state.buildJobs, ...state.testJobs, ...state.deployJobs]
+    .some((job) => job.kind !== 'note');
+  return state.executePlan
+    && hasExecutableJobs
+    && !evaluationGateResult.blocksExecution
+    && !governanceGateResult.blocksExecution;
+}
+
+function isAnyScanScopeSet(scopes: string[]): boolean {
+  return scopes.some((scope) => String(scope || '').trim().toLowerCase() === 'anyscan');
+}
+
+function resolveAnyScanScopes(state: Partial<ControlPlaneState>): string[] {
+  const effectiveScopes = Array.isArray((state as any)?.effectiveScopes)
+    ? (state as any).effectiveScopes
+    : [];
+  if (effectiveScopes.length > 0) {
+    return effectiveScopes.map((scope: unknown) => String(scope || '').trim()).filter(Boolean);
+  }
+  return Array.isArray((state as any)?.scopes)
+    ? (state as any).scopes.map((scope: unknown) => String(scope || '').trim()).filter(Boolean)
+    : [];
+}
+
+function deriveAnyScanObservationSignature(options: {
+  scopes: string[];
+  logInsights: LogInsight[];
+  governanceGateResult: any;
+  evaluationGateResult: any;
+}): string {
+  return JSON.stringify({
+    scopes: Array.from(new Set(options.scopes.map((scope) => String(scope || '').trim().toLowerCase()).filter(Boolean))).sort(),
+    logInsights: options.logInsights
+      .map((insight) => ({
+        file: String(insight.file || '').trim(),
+        lines: insight.lines.map((line) => String(line || '').trim()).filter(Boolean).slice(-3),
+      }))
+      .filter((insight) => insight.file || insight.lines.length > 0)
+      .slice(0, 8),
+    governance: {
+      status: typeof options.governanceGateResult?.status === 'string' ? options.governanceGateResult.status.trim() : '',
+      target: typeof options.governanceGateResult?.target === 'string' ? options.governanceGateResult.target.trim() : '',
+      blocksExecution: Boolean(options.governanceGateResult?.blocksExecution),
+      blocksAutonomousEdits: Boolean(options.governanceGateResult?.blocksAutonomousEdits),
+      actionableFlagKeys: Array.isArray(options.governanceGateResult?.actionableFlagKeys)
+        ? options.governanceGateResult.actionableFlagKeys
+            .map((entry: unknown) => String(entry || '').trim())
+            .filter(Boolean)
+            .slice(0, 8)
+        : [],
+      failedFlagKeys: Array.isArray(options.governanceGateResult?.failedFlagKeys)
+        ? options.governanceGateResult.failedFlagKeys
+            .map((entry: unknown) => String(entry || '').trim())
+            .filter(Boolean)
+            .slice(0, 8)
+        : [],
+    },
+    evaluation: {
+      status: typeof options.evaluationGateResult?.status === 'string' ? options.evaluationGateResult.status.trim() : '',
+      target: typeof options.evaluationGateResult?.target === 'string' ? options.evaluationGateResult.target.trim() : '',
+      blocksExecution: Boolean(options.evaluationGateResult?.blocksExecution),
+      blocksAutonomousEdits: Boolean(options.evaluationGateResult?.blocksAutonomousEdits),
+      metricKey: typeof options.evaluationGateResult?.metricKey === 'string' ? options.evaluationGateResult.metricKey.trim() : '',
+      scorecardStatus: typeof options.evaluationGateResult?.scorecardStatus === 'string'
+        ? options.evaluationGateResult.scorecardStatus.trim()
+        : '',
+    },
+  });
+}
+
+function resolveAnyScanValidationSuppression(state: Partial<ControlPlaneState>): string {
+  if (!isAnyScanScopeSet(resolveAnyScanScopes(state))) {
+    return '';
+  }
+  if ((state as any)?.previousValidationOnlyOutcome !== true) {
+    return '';
+  }
+  const previousObservationSignature = typeof (state as any)?.previousObservationSignature === 'string'
+    ? (state as any).previousObservationSignature.trim()
+    : '';
+  const currentObservationSignature = typeof (state as any)?.currentObservationSignature === 'string'
+    ? (state as any).currentObservationSignature.trim()
+    : '';
+  if (!previousObservationSignature || !currentObservationSignature || previousObservationSignature !== currentObservationSignature) {
+    return '';
+  }
+  const previousRepairStatus = typeof (state as any)?.previousRepairStatus === 'string'
+    ? (state as any).previousRepairStatus.trim().toLowerCase()
+    : '';
+  if (previousRepairStatus && !['idle', 'not-needed'].includes(previousRepairStatus)) {
+    return '';
+  }
+  return 'Repeated clean anyscan validation with an unchanged observation signature; wait for new repair signals or context before spending more AI planning and validation work.';
 }
 
 function isLangSmithRunFailure(run: z.infer<typeof LangSmithRunSummarySchema>): boolean {
@@ -1345,6 +1454,15 @@ function signalTextHasWorkspaceFocus(sourceText: string, insightFile: string): b
     || /^(?:package\.json|pnpm-workspace\.yaml|tsconfig\.json|SETUP\.md|turbo\.json|bun\.sh|scripts\/)/.test(insightFile);
 }
 
+function signalTextHasAnyScanFocus(sourceText: string, insightFile: string = ''): boolean {
+  return /anyscan|fetcher|robots\.txt|sitemap|asset manifest|source map|asset fingerprint|manifest fingerprint|source fingerprint|fingerprint drift|secret detection|dragonfly|redis stream|redis lock|reqwest|axum|sse|worker lease|scan run|exposure api|exposure worker|crawl/.test(sourceText)
+    || insightFile.startsWith('apps/anyscan/');
+}
+
+function isHighChurnApiProviderLogInsightFile(insightFile: string): boolean {
+  return /^apps\/api\/logs\/(?:provider-unique-errors|api-errors?|probe-errors)\.jsonl$/i.test(insightFile);
+}
+
 function scoreLogInsightLineForScope(
   state: Pick<ControlPlaneState, 'scopes' | 'effectiveScopes'>,
   insightFile: string,
@@ -1369,6 +1487,7 @@ function scoreLogInsightLineForScope(
   const runtimeFocus = signalTextHasApiRuntimeFocus(normalizedText);
   const platformFocus = signalTextHasApiPlatformFocus(normalizedText);
   const workspaceFocus = signalTextHasWorkspaceFocus(normalizedText, insightFile);
+  const anyscanFocus = signalTextHasAnyScanFocus(normalizedText, insightFile);
   const controlPlaneFocus = /langsmith|control-plane|runner status|evaluation gate|governance gate|annotation backlog|prompt fallback|prompt sync|studio-server/.test(normalizedText)
     || insightFile.startsWith('apps/langgraph-control-plane/')
     || insightFile.startsWith('codeql:');
@@ -1428,6 +1547,14 @@ function scoreLogInsightLineForScope(
     if (insightFile.startsWith('apps/ui/')) score += 3;
     if (insightFile.startsWith('apps/homepage/')) score += 1;
     if (insightFile.startsWith('apps/api/logs/') && !surfaceAssetFocus) score -= 5;
+  }
+
+  if (effectiveScopes.has('anyscan')) {
+    if (anyscanFocus) score += 5;
+    if (insightFile.startsWith('apps/anyscan/')) score += 4;
+    if (isHighChurnApiProviderLogInsightFile(insightFile) && !anyscanFocus) score -= 10;
+    else if (insightFile.startsWith('apps/api/logs/') && !anyscanFocus) score -= 5;
+    if ((routingFocus || authDriftFocus || workspaceFocus || surfaceAssetFocus) && !insightFile.startsWith('apps/anyscan/')) score -= 4;
   }
 
   return score;
@@ -1495,6 +1622,7 @@ function scoreAutonomousEditPathFit(
   const surfaceAssetFocus = signalTextHasSurfaceAssetFocus(sourceText);
   const platformFocus = /experimental service|experimental target|entrypoint|startup|openapi\.json|wsserver|websocket|service unit|server\.launcher|health check|platform health/.test(sourceText);
   const workspaceFocus = /workspace-surface|repo-surface|developer-workflow|operator payoff|frontend stack|sync-config|setup\.md|pnpm-workspace|tsconfig|bun\.sh|run-frontend-stack/.test(sourceText);
+  const anyscanFocus = signalTextHasAnyScanFocus(sourceText, normalizedPath);
 
   let score = 0;
   if (effectiveScopes.has('api-routing') && (
@@ -1525,6 +1653,7 @@ function scoreAutonomousEditPathFit(
     || normalizedPath === 'apps/api/anygpt-api.service'
     || normalizedPath === 'apps/api/anygpt-experimental.service'
   )) score += 2;
+  if (effectiveScopes.has('anyscan') && normalizedPath.startsWith('apps/anyscan/')) score += 3;
   if (effectiveScopes.has('homepage-surface') && normalizedPath.startsWith('apps/homepage/')) score += 2;
   if (effectiveScopes.has('ui-surface') && normalizedPath.startsWith('apps/ui/')) score += 2;
   if (effectiveScopes.has('workspace-surface') && (
@@ -1594,6 +1723,15 @@ function scoreAutonomousEditPathFit(
     && surfaceAssetFocus
   ) score += 4;
   if (normalizedPath.startsWith('apps/ui/scripts/') && surfaceAssetFocus) score += 2;
+  if (normalizedPath === 'apps/anyscan/src/fetcher.rs' && anyscanFocus) score += 6;
+  if (normalizedPath === 'apps/anyscan/src/dragonfly_store.rs' && /dragonfly|redis|stream|lease|lock|state|event/.test(sourceText)) score += 6;
+  if (normalizedPath === 'apps/anyscan/src/config.rs' && /config|auth|session|cookie|bind_addr|redis|storage/.test(sourceText)) score += 4;
+  if (normalizedPath === 'apps/anyscan/src/bin/anyscan-api.rs' && /axum|sse|cookie|session|dashboard|findings|api/.test(sourceText)) score += 5;
+  if (normalizedPath === 'apps/anyscan/src/bin/anyscan-worker.rs' && /worker|lease|poll|heartbeat|scan|job/.test(sourceText)) score += 5;
+  if (normalizedPath === 'apps/anyscan/src/detectors.rs' && /secret|detector|finding|token|credential/.test(sourceText)) score += 5;
+  if (normalizedPath === 'apps/anyscan/src/core.rs' && /finding|run summary|target|telemetry|record/.test(sourceText)) score += 3;
+  if (normalizedPath === 'apps/anyscan/Cargo.toml' && /cargo|dependency|axum|reqwest|redis|tokio|tracing/.test(sourceText)) score += 3;
+  if (normalizedPath.startsWith('apps/anyscan/') && anyscanFocus) score += 2;
   if ((normalizedPath === 'package.json' || normalizedPath === 'pnpm-workspace.yaml' || normalizedPath === 'tsconfig.json' || normalizedPath === 'SETUP.md' || normalizedPath === 'scripts/run-frontend-stack.sh' || normalizedPath === 'scripts/with-bun-path.sh') && workspaceFocus) score += 4;
   if (normalizedPath.startsWith('apps/api/providers/gemini.ts') && /gemini/.test(sourceText)) score += 1;
   if (normalizedPath.startsWith('apps/api/providers/')) score -= 1;
@@ -1670,10 +1808,36 @@ function isRepetitiveRepairSignal(signal: string, frequencyCount: number): boole
   return /probe_retry|invalid_response_structure|api key not found|api key not valid|request timed out|rate limit\/timeout: switching provider|resource has been exhausted|request failed with status code <n>/.test(normalized);
 }
 
+function isApiProviderChurnRepairSignal(signal: string): boolean {
+  const normalized = normalizeRepairSignalCategoryText(signal);
+  return /probe_retry|rate limit\/timeout: switching provider|unsupported \(rate limit\/timeout\)|failed to process request(?::| after)? <n> provider\(s\) attempted|provider\(s\) attempted|insufficient_quota|quota exceeded|request timed out|timeout churn|skippedbycooldown|skippedbyproviderratelimit|bad gateway|status code <n>|provider switch worthless|retry worthless/.test(normalized);
+}
+
+function buildApiProviderChurnRepairSignal(signals: string[]): string {
+  const sample = signals.slice(0, 2).join(' | ');
+  const sampleSuffix = sample ? ` Recent evidence: ${sample}` : '';
+  return `API provider churn: repeated timeout, gateway, or cooldown-driven provider switching should trigger a bounded fix in apps/api/providers/handler.ts, apps/api/dev/testModelLiveProbes.ts, or apps/api/modules/openaiProviderSelection.ts to prefer fresh providers, honor cooldowns, and reduce retry breadth.${sampleSuffix}`;
+}
+
+function shouldPromoteApiProviderChurnRepair(
+  effectiveScopeSet: Set<string>,
+  repetitiveSignals: string[],
+  deferredSignals: string[],
+): boolean {
+  if (!(hasApiFamilyScope(effectiveScopeSet) || effectiveScopeSet.has('repo'))) {
+    return false;
+  }
+  const providerChurnSignals = [...repetitiveSignals, ...deferredSignals]
+    .filter((signal, index, collection) => collection.indexOf(signal) === index)
+    .filter((signal) => isApiProviderChurnRepairSignal(signal));
+  return providerChurnSignals.length >= 2;
+}
+
 function deriveRepairIntent(state: ControlPlaneState): { summary: string; signals: string[] } {
   const signals: string[] = [];
   const staleSignals: string[] = [];
   const runnerFailureRetryPattern = /\[langgraph-control-plane\] iteration ended with failure but continuous mode is enabled; sleeping \d+ms before retry/i;
+  const effectiveScopeSet = new Set(getEffectiveScopes(state));
 
   for (const insight of state.logInsights.slice(0, 12)) {
     if (insight.file.includes('live-autonomous-runner.log')) {
@@ -1698,14 +1862,16 @@ function deriveRepairIntent(state: ControlPlaneState): { summary: string; signal
     }
   }
 
-  const pricingCoverageAudit = auditModelPricingCoverage(state.repoRoot);
-  if (pricingCoverageAudit && pricingCoverageAudit.unresolvedCount > 0) {
-    const sampleSuffix = pricingCoverageAudit.sampleModelIds.length > 0
-      ? ` (examples: ${pricingCoverageAudit.sampleModelIds.join(', ')})`
-      : '';
-    signals.push(
-      `Pricing coverage gap: ${API_MODELS_SOURCE_FILE} still contains ${pricingCoverageAudit.unresolvedCount} non-free model(s) with zero placeholder or missing pricing that do not resolve through ${API_PRICING_SOURCE_FILE} or ${API_ROUTER_MODELS_SOURCE_FILE}${sampleSuffix}. Prefer bounded fixes in ${API_PRICING_SOURCE_FILE}, apps/api/dev/fetchPricing.ts, or apps/api/modules/modelUpdater.ts.`,
-    );
+  if (shouldAuditApiPricingCoverage(effectiveScopeSet)) {
+    const pricingCoverageAudit = auditModelPricingCoverage(state.repoRoot);
+    if (pricingCoverageAudit && pricingCoverageAudit.unresolvedCount > 0) {
+      const sampleSuffix = pricingCoverageAudit.sampleModelIds.length > 0
+        ? ` (examples: ${pricingCoverageAudit.sampleModelIds.join(', ')})`
+        : '';
+      signals.push(
+        `Pricing coverage gap: ${API_MODELS_SOURCE_FILE} still contains ${pricingCoverageAudit.unresolvedCount} non-free model(s) with zero placeholder or missing pricing that do not resolve through ${API_PRICING_SOURCE_FILE} or ${API_ROUTER_MODELS_SOURCE_FILE}${sampleSuffix}. Prefer bounded fixes in ${API_PRICING_SOURCE_FILE}, apps/api/dev/fetchPricing.ts, or apps/api/modules/modelUpdater.ts.`,
+      );
+    }
   }
 
   if (
@@ -1788,8 +1954,17 @@ function deriveRepairIntent(state: ControlPlaneState): { summary: string; signal
     return isRepetitiveRepairSignal(signal, frequencyCount);
   });
   const novelSignals = dedupedSignals.filter((signal) => !repetitiveSignals.includes(signal));
-  const actionableSignals = novelSignals.filter((signal) => isActionableRepairSignal(signal));
+  let actionableSignals = novelSignals.filter((signal) => isActionableRepairSignal(signal));
   const deferredSignals = novelSignals.filter((signal) => !actionableSignals.includes(signal));
+  if (shouldPromoteApiProviderChurnRepair(effectiveScopeSet, repetitiveSignals, deferredSignals)) {
+    const providerChurnSignals = [...repetitiveSignals, ...deferredSignals]
+      .filter((signal, index, collection) => collection.indexOf(signal) === index)
+      .filter((signal) => isApiProviderChurnRepairSignal(signal));
+    actionableSignals = Array.from(new Set([
+      buildApiProviderChurnRepairSignal(providerChurnSignals),
+      ...actionableSignals,
+    ])).slice(0, 12);
+  }
   const summary = actionableSignals.length > 0
     ? `Bounded repair focus: ${actionableSignals.slice(0, 3).join(' | ')}`
     : repetitiveSignals.length > 0
@@ -1824,6 +1999,10 @@ function deriveImprovementIntent(state: ControlPlaneState): { summary: string; s
 
   if (hasRepoSurfaceFamilyScope(uniqueScopeSet)) {
     signals.push('Repo-surface coverage is active, so the autonomous loop can focus on root workspace files plus bounded homepage/UI improvements without widening into API or control-plane edits.');
+  }
+
+  if (uniqueScopeSet.has('anyscan')) {
+    signals.push('AnyScan scope is active, so the autonomous loop can research and plan bounded Rust improvements in fetch discovery, Dragonfly/Redis persistence, Axum API behavior, and worker orchestration.');
   }
 
   if (uniqueScopeSet.has('control-plane')) {
@@ -2054,6 +2233,10 @@ function buildDeterministicAutonomousContract(
     summary = scopedSkillContractTemplate.summary;
     checks.push(...scopedSkillContractTemplate.checks);
     preferredPaths = [...scopedSkillContractTemplate.preferredPaths];
+  } else if (effectiveScopes.has('anyscan') && scopedSkillContractTemplate) {
+    summary = scopedSkillContractTemplate.summary;
+    checks.push(...scopedSkillContractTemplate.checks);
+    preferredPaths = [...scopedSkillContractTemplate.preferredPaths];
   } else if (effectiveScopes.has('research-scout') && scopedSkillContractTemplate) {
     summary = scopedSkillContractTemplate.summary;
     checks.push(...scopedSkillContractTemplate.checks);
@@ -2135,6 +2318,7 @@ async function autonomousContractNode(state: ControlPlaneState, runtime?: Runtim
     goal: state.goal,
     scopes: state.scopes,
     effectiveScopes: state.effectiveScopes,
+    scopeExpansionMode: state.scopeExpansionMode,
     repairIntentSummary: state.repairIntentSummary,
     repairSignals: state.repairSignals,
     improvementIntentSummary: state.improvementIntentSummary,
@@ -2386,11 +2570,12 @@ function isBrowserEvidenceRequired(state: Pick<
 function getSurfaceBrowserBlockingReason(
   state: Pick<
     ControlPlaneState,
-    'executedMcpActions' | 'effectiveScopes' | 'scopes'
+    'executedMcpActions' | 'effectiveScopes' | 'scopes' | 'appliedEdits' | 'repairPromotedPaths' | 'repairRollbackPaths'
   >,
 ): string {
   const effectiveScopes = new Set(getEffectiveScopes(state as ControlPlaneState));
   if (!(effectiveScopes.has('homepage-surface') || effectiveScopes.has('ui-surface'))) return '';
+  if (!isBrowserEvidenceRequired(state as ControlPlaneState)) return '';
 
   const relevantActions = state.executedMcpActions.filter((action) =>
     action.server === 'playwright'
@@ -2632,8 +2817,11 @@ async function postRepairBrowserEvidenceNode(state: ControlPlaneState): Promise<
   };
 }
 
+type ControlPlaneAiProvider = 'openai-compatible' | 'openhands-sdk';
+
 type ControlPlaneAiConfig = {
   enabled: boolean;
+  provider: ControlPlaneAiProvider;
   baseUrl: string;
   apiKey: string;
   model: string;
@@ -2641,6 +2829,15 @@ type ControlPlaneAiConfig = {
   reasoningEffort?: string;
   source: string;
 };
+
+type ControlPlaneAiChatMessage = {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+};
+
+const CONTROL_PLANE_WORKFLOW_DIR = path.dirname(fileURLToPath(import.meta.url));
+const CONTROL_PLANE_REPO_ROOT = path.resolve(CONTROL_PLANE_WORKFLOW_DIR, '..', '..', '..');
+const CONTROL_PLANE_OPENHANDS_BRIDGE_PATH = path.resolve(CONTROL_PLANE_WORKFLOW_DIR, '..', 'openhands_bridge.py');
 
 type AiNodeRunResult = {
   enabled: boolean;
@@ -3081,7 +3278,7 @@ const EXPERIMENTAL_RESTART_CLIENT_INSPECTION_TIMEOUT_MS = parsePositiveIntegerEn
 );
 const DEFAULT_EXPERIMENTAL_API_PORT = 3310;
 const CONTROL_PLANE_SIGNAL_FRESHNESS_WINDOW_MS = parsePositiveIntegerEnv('CONTROL_PLANE_SIGNAL_FRESHNESS_WINDOW_MS', 12 * 60 * 60 * 1000, 60_000);
-const AUTONOMOUS_FULL_COVERAGE_SCOPES = ['repo', 'api', 'api-experimental', 'control-plane', 'repo-surface'] as const;
+const AUTONOMOUS_FULL_COVERAGE_SCOPES = ['repo', 'api', 'api-experimental', 'control-plane', 'anyscan', 'repo-surface'] as const;
 const EXPANSIVE_SCOPE_ALIASES = new Set(['all', 'everything', 'adaptive', '*']);
 const API_FAMILY_SCOPES = new Set(['api', 'api-experimental', 'api-routing', 'api-runtime', 'api-data', 'api-platform']);
 const REPO_SURFACE_FAMILY_SCOPES = new Set(['repo-surface', 'workspace-surface', 'homepage-surface', 'ui-surface']);
@@ -3127,6 +3324,10 @@ const SCOPE_COMMANDS: Record<string, { build?: string; test?: string }> = {
     build: 'bash ./bun.sh run -F anygpt-langgraph-control-plane build',
     test: 'bash ./bun.sh run -F anygpt-langgraph-control-plane typecheck',
   },
+  'anyscan': {
+    build: 'cargo check --manifest-path apps/anyscan/Cargo.toml',
+    test: 'cargo test --manifest-path apps/anyscan/Cargo.toml',
+  },
   'research-scout': {},
 };
 
@@ -3143,6 +3344,13 @@ function hasApiFamilyScope(scopes: Iterable<string>): boolean {
 
 function hasRepoSurfaceFamilyScope(scopes: Iterable<string>): boolean {
   return hasScopeFamily(scopes, REPO_SURFACE_FAMILY_SCOPES);
+}
+
+function shouldAuditApiPricingCoverage(scopes: Iterable<string>): boolean {
+  const scopeSet = new Set(
+    Array.from(scopes, (scope) => String(scope || '').trim().toLowerCase()).filter(Boolean),
+  );
+  return scopeSet.has('repo') || scopeSet.has('api-data');
 }
 
 function normalizeKeyName(key: string): string {
@@ -3214,12 +3422,91 @@ function redactSensitiveValue(value: unknown, keyHint: string = ''): unknown {
   return value;
 }
 
-function sanitizeLogLine(line: string): string {
+function sanitizeLogSummaryScalar(value: unknown, keyHint: string = ''): string | number | boolean | null {
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return value;
+  }
+  if (typeof value === 'string') {
+    const sanitized = truncateTextMiddle(redactSensitiveText(value), 240).trim();
+    return sanitized ? sanitized : null;
+  }
+  return null;
+}
+
+function appendSanitizedLogSummaryField(
+  summary: Record<string, string | number | boolean>,
+  key: string,
+  value: unknown,
+  keyHint: string = key,
+): void {
+  const sanitized = sanitizeLogSummaryScalar(value, keyHint);
+  if (sanitized == null || sanitized === '') return;
+  summary[key] = sanitized;
+}
+
+function summarizeStructuredLogPayload(
+  filePath: string,
+  parsed: Record<string, unknown>,
+): Record<string, string | number | boolean> | null {
+  const normalizedPath = String(filePath || '').replace(/\\/g, '/');
+  if (!/(?:^|\/)apps\/api\/logs\/.+\.jsonl$/i.test(normalizedPath)) {
+    return null;
+  }
+
+  const errorDetails = isPlainObjectRecord(parsed.errorDetails)
+    ? parsed.errorDetails
+    : {};
+  const queueSnapshot = isPlainObjectRecord(parsed.queueSnapshot)
+    ? parsed.queueSnapshot
+    : {};
+  const summary: Record<string, string | number | boolean> = {};
+  const append = (key: string, value: unknown, keyHint: string = key): void => {
+    appendSanitizedLogSummaryField(summary, key, value, keyHint);
+  };
+
+  append('timestamp', parsed.timestamp);
+  append('type', parsed.type);
+  append('test', parsed.test);
+  append('provider', parsed.provider);
+  append('operation', parsed.operation);
+  append('modelId', parsed.modelId);
+  append('endpoint', parsed.endpoint);
+  append('requestUrl', parsed.requestUrl);
+  append('route', parsed.route);
+  append('method', parsed.method);
+  append('outcome', parsed.outcome);
+  append('reason', parsed.reason);
+  append('message', parsed.message);
+  append('errorMessage', parsed.errorMessage);
+  append('error', parsed.error);
+  append('code', errorDetails.code ?? parsed.code);
+  append('status', errorDetails.status ?? parsed.status);
+  append('responseStatus', errorDetails.responseStatus);
+  append('responseStatusText', errorDetails.responseStatusText);
+  append('retryAfterMs', errorDetails.retryAfterMs ?? parsed.retryAfterMs);
+  append('latencyMs', parsed.latencyMs);
+  append('pending', queueSnapshot.pending ?? parsed.pending);
+  append('overloadCount', queueSnapshot.overloadCount ?? parsed.overloadCount);
+  append('fingerprint', parsed.fingerprint);
+
+  return Object.keys(summary).length > 0 ? summary : null;
+}
+
+function sanitizeLogLine(line: string, filePath: string = ''): string {
   const trimmed = String(line || '').trim();
   if (!trimmed) return '';
 
   try {
     const parsed = JSON.parse(trimmed);
+    if (isPlainObjectRecord(parsed)) {
+      const summarized = summarizeStructuredLogPayload(filePath, parsed);
+      if (summarized) {
+        return truncateTextMiddle(
+          JSON.stringify(redactSensitiveValue(summarized)),
+          AI_AGENT_LOG_LINE_MAX_CHARS,
+        );
+      }
+    }
     return truncateTextMiddle(
       JSON.stringify(redactSensitiveValue(parsed)),
       AI_AGENT_LOG_LINE_MAX_CHARS,
@@ -3832,56 +4119,214 @@ function buildControlPlaneObservabilityMetadata(
   };
 }
 
+function resolveControlPlaneAiProvider(): ControlPlaneAiProvider {
+  const configured = String(process.env.CONTROL_PLANE_AI_PROVIDER || '').trim().toLowerCase();
+  return configured === 'openhands' || configured === 'openhands-sdk'
+    ? 'openhands-sdk'
+    : 'openai-compatible';
+}
+
+function finalizeControlPlaneAiConfig(
+  config: Omit<ControlPlaneAiConfig, 'provider' | 'source'> & { source: string },
+): ControlPlaneAiConfig {
+  const provider = resolveControlPlaneAiProvider();
+  const providerSource = provider === 'openhands-sdk' ? 'CONTROL_PLANE_AI_PROVIDER=openhands' : '';
+  return {
+    ...config,
+    provider,
+    source: config.source && providerSource
+      ? `${config.source} + ${providerSource}`
+      : config.source || providerSource,
+  };
+}
+
+export function describeControlPlaneAiBackend(
+  config: Pick<ControlPlaneAiConfig, 'provider' | 'baseUrl'>,
+): string {
+  if (config.provider === 'openhands-sdk') {
+    return config.baseUrl ? `openhands-sdk:${config.baseUrl}` : 'openhands-sdk';
+  }
+  return config.baseUrl;
+}
+
+async function callControlPlaneAiAssistant(
+  config: ControlPlaneAiConfig,
+  request: {
+    requestLabel: string;
+    messages: ControlPlaneAiChatMessage[];
+    temperature: number;
+    timeoutMs: number;
+    rateLimitWaitBudgetMs: number;
+    responseFormat?: { type: 'json_object' };
+    signal: AbortSignal;
+  },
+): Promise<string> {
+  if (config.provider === 'openhands-sdk') {
+    return await callOpenHandsSdkAssistant(config, request);
+  }
+
+  const response = await fetch(`${config.baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      authorization: `Bearer ${config.apiKey}`,
+      'x-anygpt-internal-client': 'control-plane',
+      'x-anygpt-rate-limit-wait-budget-ms': String(request.rateLimitWaitBudgetMs),
+    },
+    body: JSON.stringify({
+      model: config.model,
+      temperature: request.temperature,
+      ...(config.reasoningEffort ? { reasoning_effort: config.reasoningEffort } : {}),
+      ...(request.responseFormat ? { response_format: request.responseFormat } : {}),
+      messages: request.messages,
+    }),
+    signal: request.signal,
+  });
+
+  const rawText = await response.text();
+  if (!response.ok) {
+    throw new Error(`${request.requestLabel} failed (${response.status}): ${rawText.slice(0, 400)}`);
+  }
+
+  const payloadJson = JSON.parse(rawText);
+  return extractAssistantTextFromChatCompletionPayload(payloadJson);
+}
+
+async function callOpenHandsSdkAssistant(
+  config: ControlPlaneAiConfig,
+  request: {
+    requestLabel: string;
+    messages: ControlPlaneAiChatMessage[];
+    temperature: number;
+    timeoutMs: number;
+    responseFormat?: { type: 'json_object' };
+    signal: AbortSignal;
+  },
+): Promise<string> {
+  return await new Promise((resolve, reject) => {
+    const child = spawn('python3', [CONTROL_PLANE_OPENHANDS_BRIDGE_PATH], {
+      cwd: CONTROL_PLANE_REPO_ROOT,
+      env: {
+        ...process.env,
+        PYTHONUNBUFFERED: '1',
+      },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+
+    const cleanup = () => {
+      request.signal.removeEventListener('abort', handleAbort);
+    };
+
+    const fail = (message: string) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(new Error(message));
+    };
+
+    const succeed = (value: string) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(value);
+    };
+
+    const handleAbort = () => {
+      try {
+        child.kill('SIGTERM');
+      } catch {}
+      fail('The operation was aborted.');
+    };
+
+    if (request.signal.aborted) {
+      handleAbort();
+      return;
+    }
+
+    request.signal.addEventListener('abort', handleAbort, { once: true });
+
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on('error', (error) => {
+      fail(`${request.requestLabel} failed (OpenHands SDK spawn): ${error instanceof Error ? error.message : String(error)}`);
+    });
+    child.on('close', (code) => {
+      if (settled) return;
+      const stdoutLines = stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+      if (code !== 0) {
+        const detail = (stderr.trim() || stdoutLines.at(-1) || `exit ${typeof code === 'number' ? code : 'unknown'}`).slice(0, 400);
+        fail(`${request.requestLabel} failed (OpenHands SDK): ${detail}`);
+        return;
+      }
+      const rawPayload = stdoutLines.at(-1);
+      if (!rawPayload) {
+        fail(`${request.requestLabel} returned empty OpenHands SDK output.`);
+        return;
+      }
+      try {
+        const parsed = JSON.parse(rawPayload) as Record<string, unknown>;
+        succeed(typeof parsed.content === 'string' ? parsed.content : '');
+      } catch {
+        fail(`${request.requestLabel} returned invalid OpenHands SDK JSON: ${rawPayload.slice(0, 400)}`);
+      }
+    });
+    child.stdin.on('error', (error) => {
+      fail(`${request.requestLabel} failed while sending OpenHands SDK input: ${error instanceof Error ? error.message : String(error)}`);
+    });
+    child.stdin.end(JSON.stringify({
+      model: config.model,
+      apiKey: config.apiKey,
+      baseUrl: config.baseUrl,
+      temperature: request.temperature,
+      reasoning_effort: config.reasoningEffort,
+      response_format_type: request.responseFormat?.type,
+      timeout_ms: request.timeoutMs,
+      messages: request.messages,
+    }));
+  });
+}
+
 export function resolveControlPlaneAiConfig(): ControlPlaneAiConfig {
+  const provider = resolveControlPlaneAiProvider();
   const explicitBaseUrl = normalizeOpenAiCompatibleBaseUrl(String(process.env.CONTROL_PLANE_AI_BASE_URL || '').trim());
   const explicitApiKey = String(process.env.CONTROL_PLANE_AI_API_KEY || '').trim();
   const explicitModel = String(process.env.CONTROL_PLANE_AI_MODEL || '').trim();
+  const selectedModel = explicitModel
+    || String(process.env.ANYGPT_MODEL || process.env.OPENAI_MODEL || 'gpt-5.4').trim()
+    || 'gpt-5.4';
   const configuredReasoningEffort = String(
     process.env.CONTROL_PLANE_AI_REASONING_EFFORT
     || process.env.ANYGPT_REASONING_EFFORT
     || process.env.OPENAI_REASONING_EFFORT
     || '',
   ).trim();
+  const reasoningEffort = configuredReasoningEffort
+    || (selectedModel.toLowerCase().includes('gpt-5.4') ? 'xhigh' : undefined);
 
   const parsedTemperature = Number(process.env.CONTROL_PLANE_AI_TEMPERATURE || '0.2');
   const temperature = Number.isFinite(parsedTemperature) ? parsedTemperature : 0.2;
 
-  if (explicitBaseUrl && explicitApiKey) {
-    return {
-      enabled: true,
-      baseUrl: explicitBaseUrl,
-      apiKey: explicitApiKey,
-      model: explicitModel || String(process.env.ANYGPT_MODEL || process.env.OPENAI_MODEL || 'gpt-5.4').trim() || 'gpt-5.4',
-      temperature,
-      reasoningEffort: configuredReasoningEffort || undefined,
-      source: 'CONTROL_PLANE_AI_BASE_URL/API_KEY (+ optional model override)',
-    };
-  }
-
   const anygptApiKey = String(process.env.ANYGPT_API_KEY || '').trim();
-  const anygptBaseUrl = normalizeOpenAiCompatibleBaseUrl(
+  const anygptConfiguredBaseUrl = normalizeOpenAiCompatibleBaseUrl(
     String(
       process.env.CONTROL_PLANE_ANYGPT_API_BASE_URL
       || process.env.ANYGPT_API_BASE_URL
       || process.env.OPENAI_BASE_URL
-      || 'http://127.0.0.1:3310',
+      || '',
     ).trim(),
   );
-  const anygptModel = explicitModel || String(process.env.ANYGPT_MODEL || process.env.OPENAI_MODEL || 'gpt-5.4').trim();
+  const anygptBaseUrl = anygptConfiguredBaseUrl || 'http://127.0.0.1:3310';
+  const anygptModel = selectedModel;
 
-  if (anygptApiKey && anygptBaseUrl && anygptModel) {
-    return {
-      enabled: true,
-      baseUrl: anygptBaseUrl,
-      apiKey: anygptApiKey,
-      model: anygptModel,
-      temperature,
-      reasoningEffort: configuredReasoningEffort || undefined,
-      source: explicitModel ? 'CONTROL_PLANE_AI_MODEL + ANYGPT_API_* / OPENAI_*' : 'ANYGPT_API_* / OPENAI_*',
-    };
-  }
-
-  const fallbackKeyPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'apps', 'api', 'keys.json');
+  const fallbackKeyPath = path.resolve(CONTROL_PLANE_REPO_ROOT, 'apps', 'api', 'keys.json');
   let fileBackedApiKey = '';
   if (fs.existsSync(fallbackKeyPath)) {
     try {
@@ -3903,27 +4348,77 @@ export function resolveControlPlaneAiConfig(): ControlPlaneAiConfig {
     }
   }
 
+  if (provider === 'openhands-sdk') {
+    const openhandsBaseUrl = explicitBaseUrl || anygptConfiguredBaseUrl || '';
+    const openhandsApiKey = explicitApiKey || anygptApiKey || fileBackedApiKey || '';
+    const openhandsSource = explicitBaseUrl || explicitApiKey
+      ? 'CONTROL_PLANE_AI_BASE_URL/API_KEY (+ optional model override)'
+      : anygptApiKey && anygptConfiguredBaseUrl
+        ? (explicitModel ? 'CONTROL_PLANE_AI_MODEL + ANYGPT_API_* / OPENAI_*' : 'ANYGPT_API_* / OPENAI_*')
+        : anygptApiKey
+          ? (explicitModel ? 'CONTROL_PLANE_AI_MODEL + ANYGPT_API_KEY' : 'ANYGPT_API_KEY')
+          : fileBackedApiKey
+            ? (explicitModel ? 'CONTROL_PLANE_AI_MODEL + apps/api/keys.json fallback' : 'apps/api/keys.json fallback')
+            : explicitModel
+              ? 'CONTROL_PLANE_AI_MODEL'
+              : '';
+
+    return finalizeControlPlaneAiConfig({
+      enabled: Boolean(anygptModel),
+      baseUrl: openhandsBaseUrl,
+      apiKey: openhandsApiKey,
+      model: anygptModel,
+      temperature,
+      reasoningEffort,
+      source: openhandsSource,
+    });
+  }
+
+  if (explicitBaseUrl && explicitApiKey) {
+    return finalizeControlPlaneAiConfig({
+      enabled: true,
+      baseUrl: explicitBaseUrl,
+      apiKey: explicitApiKey,
+      model: selectedModel,
+      temperature,
+      reasoningEffort,
+      source: 'CONTROL_PLANE_AI_BASE_URL/API_KEY (+ optional model override)',
+    });
+  }
+
+  if (anygptApiKey && anygptBaseUrl && anygptModel) {
+    return finalizeControlPlaneAiConfig({
+      enabled: true,
+      baseUrl: anygptBaseUrl,
+      apiKey: anygptApiKey,
+      model: anygptModel,
+      temperature,
+      reasoningEffort,
+      source: explicitModel ? 'CONTROL_PLANE_AI_MODEL + ANYGPT_API_* / OPENAI_*' : 'ANYGPT_API_* / OPENAI_*',
+    });
+  }
+
   if (fileBackedApiKey) {
-    return {
+    return finalizeControlPlaneAiConfig({
       enabled: true,
       baseUrl: anygptBaseUrl,
       apiKey: fileBackedApiKey,
       model: anygptModel,
       temperature,
-      reasoningEffort: configuredReasoningEffort || undefined,
+      reasoningEffort,
       source: explicitModel ? 'CONTROL_PLANE_AI_MODEL + apps/api/keys.json fallback' : 'apps/api/keys.json fallback',
-    };
+    });
   }
 
-  return {
+  return finalizeControlPlaneAiConfig({
     enabled: false,
     baseUrl: anygptBaseUrl,
     apiKey: '',
     model: anygptModel,
     temperature,
-    reasoningEffort: configuredReasoningEffort || undefined,
+    reasoningEffort,
     source: '',
-  };
+  });
 }
 
 function extractAssistantTextFromChatCompletionPayload(payload: any): string {
@@ -4351,6 +4846,8 @@ function buildResearchScoutNaturalLanguageRequestQuery(
     query = 'Developer docs and implementation patterns for homepage static assets, favicon handling, browser-visible polish, and lightweight front-end shell fixes.';
   } else if (effectiveScopes.has('ui-surface')) {
     query = 'Developer docs and implementation patterns for frontend shell static assets, browser-visible error polish, and favicon or entrypoint fixes.';
+  } else if (effectiveScopes.has('anyscan')) {
+    query = 'Developer docs and implementation patterns for Rust exposure scanning services, reqwest fetch pipelines, robots and sitemap discovery, Dragonfly or Redis-backed persistence, Axum API or SSE behavior, and worker lease orchestration.';
   } else {
     query = 'Developer docs and implementation patterns for control-plane orchestration, durable workflows, evaluation gates, governance, semantic memory, and MCP tool routing.';
   }
@@ -4395,7 +4892,8 @@ async function readResearchScoutPoolNotes(
   const entries: Array<{
     url: string;
     hostname: string;
-    family: 'control-plane' | 'api' | 'generic';
+    family: ResearchScoutQueryFamily;
+    sourceKind: ResearchScoutSourceKind;
     quality: string;
     informationScore: number;
     mappedPaths: string[];
@@ -4418,7 +4916,15 @@ async function readResearchScoutPoolNotes(
       value.pageSummary,
       value.pagePreview,
     ].map((entry) => String(entry || '').trim()).filter(Boolean).join(' | ');
-    const family = value.family === 'control-plane' || value.family === 'api' ? value.family : 'generic';
+    const family = value.family === 'control-plane' || value.family === 'api' || value.family === 'anyscan'
+      ? value.family
+      : 'generic';
+    const sourceKind = value.sourceKind === 'docs'
+      || value.sourceKind === 'github'
+      || value.sourceKind === 'youtube'
+      || value.sourceKind === 'papers'
+      ? value.sourceKind
+      : inferResearchScoutSourceKindFromHostname(hostname);
     if (isResearchScoutNavigationTrap(url, hostname, combinedText)) continue;
     if (isResearchScoutUndesiredHost(hostname, family)) continue;
     if (isResearchScoutLowValueCommunityHost(hostname)) continue;
@@ -4436,18 +4942,25 @@ async function readResearchScoutPoolNotes(
       : [];
     const title = normalizeSemanticMemorySummary(value.pageTitle || value.searchTitle || url, 140);
     let priority = (Number(value.totalScore) || 0) + scoreResearchScoutDomain(hostname, family) + informationScore;
+    if (sourceKind === 'docs') priority += 4;
+    if (sourceKind === 'github') priority += 3;
+    if (sourceKind === 'papers') priority += 2;
+    if (sourceKind === 'youtube') priority -= 1;
     if (effectiveScopes.has('research-scout') || effectiveScopes.has('control-plane')) {
       if (/docs\.temporal\.io$|modelcontextprotocol\.io$|qdrant\.tech$/.test(hostname)) priority += 12;
       if (/github\.com$|langchain\.com$|langchain\.dev$/.test(hostname)) priority += 2;
-      if (/langgraph|langchain/i.test(title) && !/docs\.temporal\.io$|modelcontextprotocol\.io$|qdrant\.tech$/.test(hostname)) priority -= 4;
+      if (/langgraph|langchain/i.test(title) && !/docs\.temporal\.io$|modelcontextprotocol\.io$|qdrant\.tech$|github\.com$/.test(hostname)) priority -= 4;
     }
-    if (hasApiFamilyScope(effectiveScopes) || effectiveScopes.has('research-scout')) {
-      if (/openrouter\.ai$|platform\.openai\.com$|openai\.com$|ai\.google\.dev$|developers\.google\.com$|docs\.anthropic\.com$|anthropic\.com$/.test(hostname)) priority += 8;
+    if (effectiveScopes.has('anyscan') || effectiveScopes.has('research-scout')) {
+      if (/docs\.rs$|tokio\.rs$|crates\.io$|redis\.io$|docs\.redis\.com$/.test(hostname)) priority += 8;
+      if (/github\.com$/.test(hostname)) priority += 3;
+      if (sourceKind === 'youtube') priority -= 1;
     }
     entries.push({
       url,
       hostname,
       family,
+      sourceKind,
       quality,
       informationScore,
       mappedPaths,
@@ -4468,7 +4981,7 @@ async function readResearchScoutPoolNotes(
     if (seenHosts.has(entry.hostname)) continue;
     seenHosts.add(entry.hostname);
     notes.push(
-      `Research pool: ${entry.title} — ${entry.url}${entry.mappedPaths.length > 0 ? `; mapped to ${entry.mappedPaths.join(', ')}` : ''}${entry.keywords.length > 0 ? `; signals: ${entry.keywords.join(', ')}` : ''}; quality: ${entry.quality}.`,
+      `Research pool: ${entry.title} — ${entry.url}${entry.mappedPaths.length > 0 ? `; mapped to ${entry.mappedPaths.join(', ')}` : ''}${entry.keywords.length > 0 ? `; signals: ${entry.keywords.join(', ')}` : ''}; source: ${describeResearchScoutSourceKind(entry.sourceKind)}; quality: ${entry.quality}.`,
     );
     if (notes.length >= 3) break;
   }
@@ -4502,7 +5015,7 @@ function shouldQueueResearchScoutLookupRequest(
     state.autonomousContractSummary,
     ...state.autonomousContractPaths,
   ].join(' | ').toLowerCase();
-  if (/provider model|provider[_ -]?cap|routing|retry|quota|capability|rate limit|invalid argument|responses api|tool calling|function calling|openrouter|openai|gemini|anthropic|mcp|checkpoint|durable execution|state graph|semantic memory|vector memory|hybrid search|evaluation|governance|observability/.test(sourceText)) {
+  if (/provider model|provider[_ -]?cap|routing|retry|quota|capability|rate limit|invalid argument|responses api|tool calling|function calling|openrouter|openai|gemini|anthropic|mcp|checkpoint|durable execution|state graph|semantic memory|vector memory|hybrid search|evaluation|governance|observability|anyscan|fetcher|dragonfly|reqwest|axum|robots\.txt|sitemap|crawler|secret detection|worker lease/.test(sourceText)) {
     return true;
   }
   return state.repairSignals.length > 0 || state.improvementSignals.length > 0;
@@ -4522,7 +5035,7 @@ function buildResearchScoutLookupRequestSummary(
     | 'autonomousContractSummary'
     | 'autonomousContractPaths'
   >,
-): { summary: string; query: string } {
+): { summary: string; query: string; family: ResearchScoutQueryFamily; sourcePreferences: ResearchScoutSourceKind[] } {
   const summary = truncateTextMiddle(
     [
       `thread=${state.threadId}`,
@@ -4538,10 +5051,230 @@ function buildResearchScoutLookupRequestSummary(
       .join(' | '),
     420,
   );
+  const family = inferResearchScoutQueryFamilyFromText([
+    state.goal,
+    state.repairIntentSummary,
+    ...state.repairSignals,
+    state.improvementIntentSummary,
+    ...state.improvementSignals,
+    state.autonomousContractSummary,
+    ...state.autonomousContractPaths,
+  ].join(' | '));
   return {
     summary,
+    family,
     query: buildResearchScoutNaturalLanguageRequestQuery(state),
+    sourcePreferences: buildResearchScoutSourcePreferenceOrder(family).slice(0, 4),
   };
+}
+
+function parseResearchScoutRequestedStringList(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.map((entry) => String(entry || '').trim()).filter(Boolean)
+    : [];
+}
+
+function parseResearchScoutRequestedSourcePreferences(
+  value: unknown,
+  family: ResearchScoutQueryFamily,
+): ResearchScoutSourceKind[] {
+  const parsed = Array.isArray(value)
+    ? value
+      .map((entry) => String(entry || '').trim())
+      .filter((entry): entry is ResearchScoutSourceKind => entry === 'web' || entry === 'docs' || entry === 'github' || entry === 'youtube' || entry === 'papers')
+    : [];
+  return parsed.length > 0 ? parsed : buildResearchScoutSourcePreferenceOrder(family).slice(0, 4);
+}
+
+function parseResearchScoutRequestLifecycleState(value: unknown): ResearchScoutRequestLifecycleState {
+  return value === 'claimed' || value === 'processed' ? value : 'queued';
+}
+
+function buildResearchScoutRequestedQuerySearchText(
+  request: Pick<ResearchScoutRequestedQuery, 'summary' | 'query' | 'family' | 'sourcePreferences' | 'requestedByScopes' | 'mappedPaths'>,
+): string {
+  return [
+    request.summary,
+    request.query,
+    `family:${request.family}`,
+    ...request.sourcePreferences,
+    ...request.requestedByScopes,
+    ...request.mappedPaths,
+  ]
+    .map((entry) => String(entry || '').trim())
+    .filter(Boolean)
+    .join('\n');
+}
+
+function hydrateResearchScoutRequestedQuery(item: SearchItem): ResearchScoutRequestedQuery | null {
+  const value = item.value && typeof item.value === 'object'
+    ? item.value as Record<string, unknown>
+    : {};
+  const query = String(value.requestQuery || '').trim();
+  if (!query) return null;
+  const family = value.requestedFamily === 'control-plane' || value.requestedFamily === 'api' || value.requestedFamily === 'anyscan'
+    ? value.requestedFamily
+    : inferResearchScoutQueryFamilyFromText(query);
+  return {
+    key: String(item.key || '').trim() || query,
+    summary: String(value.requestSummary || '').trim(),
+    query,
+    family,
+    sourcePreferences: parseResearchScoutRequestedSourcePreferences(value.sourcePreferences, family),
+    requestedByThreadId: String(value.requestedByThreadId || '').trim(),
+    requestedByScopes: parseResearchScoutRequestedStringList(value.requestedByScopes),
+    mappedPaths: parseResearchScoutRequestedStringList(value.mappedPaths),
+    firstObservedAt: String(value.firstObservedAt || '').trim(),
+    lastObservedAt: String(value.lastObservedAt || '').trim(),
+    observationCount: Math.max(1, Math.floor(Number(value.observationCount) || 1)),
+    lifecycleState: parseResearchScoutRequestLifecycleState(value.lifecycleState),
+    lastClaimedAt: String(value.lastClaimedAt || '').trim(),
+    claimedByThreadId: String(value.claimedByThreadId || '').trim(),
+    lastProcessedAt: String(value.lastProcessedAt || '').trim(),
+    processedByThreadId: String(value.processedByThreadId || '').trim(),
+  };
+}
+
+function getResearchScoutScopedFamilies(
+  state: Pick<ControlPlaneState, 'scopes' | 'effectiveScopes'>,
+): ResearchScoutQueryFamily[] {
+  const effectiveScopes = new Set(getEffectiveScopes(state as ControlPlaneState));
+  const families: ResearchScoutQueryFamily[] = [];
+  const pushFamily = (family: ResearchScoutQueryFamily): void => {
+    if (!families.includes(family)) families.push(family);
+  };
+  if (effectiveScopes.has('anyscan')) pushFamily('anyscan');
+  if (effectiveScopes.has('control-plane')) pushFamily('control-plane');
+  if (hasApiFamilyScope(effectiveScopes)) pushFamily('api');
+  return families;
+}
+
+function shouldFenceResearchScoutRequestsToCurrentThread(
+  state: Pick<ControlPlaneState, 'threadId' | 'scopes' | 'effectiveScopes' | 'scopeExpansionMode'>,
+): boolean {
+  return state.scopeExpansionMode === 'locked'
+    && Boolean(String(state.threadId || '').trim())
+    && getResearchScoutScopedFamilies(state).length > 0;
+}
+
+function doesResearchScoutRequestedQueryMatchScope(
+  state: Pick<ControlPlaneState, 'threadId' | 'scopes' | 'effectiveScopes' | 'scopeExpansionMode'>,
+  request: ResearchScoutRequestedQuery,
+): boolean {
+  const scopedFamilies = getResearchScoutScopedFamilies(state);
+  if (scopedFamilies.length > 0 && request.family !== 'generic' && !scopedFamilies.includes(request.family)) {
+    return false;
+  }
+  if (shouldFenceResearchScoutRequestsToCurrentThread(state)) {
+    const requestedThreadId = String(request.requestedByThreadId || '').trim();
+    if (!requestedThreadId || requestedThreadId !== String(state.threadId || '').trim()) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function isResearchScoutRequestedQueryFresh(
+  request: Pick<ResearchScoutRequestedQuery, 'firstObservedAt' | 'lastObservedAt'>,
+  nowMs: number = Date.now(),
+): boolean {
+  const observedAtMs = Date.parse(request.lastObservedAt || request.firstObservedAt || '');
+  return observedAtMs > 0 && (nowMs - observedAtMs) <= RESEARCH_SCOUT_REQUEST_STALE_AFTER_MS;
+}
+
+function isResearchScoutRequestedQueryClaimActive(
+  request: Pick<ResearchScoutRequestedQuery, 'lifecycleState' | 'lastClaimedAt'>,
+  nowMs: number = Date.now(),
+): boolean {
+  if (request.lifecycleState !== 'claimed') return false;
+  const claimedAtMs = Date.parse(request.lastClaimedAt || '');
+  return claimedAtMs > 0 && (nowMs - claimedAtMs) <= RESEARCH_SCOUT_REQUEST_CLAIM_TTL_MS;
+}
+
+async function pruneResearchScoutRequestQueue(
+  store: BaseStore | undefined,
+  state: Pick<ControlPlaneState, 'langSmithProjectName' | 'governanceProfile'>,
+): Promise<string[]> {
+  if (!store) return [];
+  const namespace = getResearchScoutRequestNamespace(state);
+  const items = await store.search(namespace, {
+    limit: 96,
+  }).catch(() => [] as SearchItem[]);
+  const removed: string[] = [];
+  const nowMs = Date.now();
+
+  for (const item of items) {
+    const request = hydrateResearchScoutRequestedQuery(item);
+    const processedAtMs = request ? Date.parse(request.lastProcessedAt || '') : 0;
+    const shouldDelete = !request
+      || !isResearchScoutRequestedQueryFresh(request, nowMs)
+      || (
+        request.lifecycleState === 'processed'
+        && processedAtMs > 0
+        && (nowMs - processedAtMs) > RESEARCH_SCOUT_REQUEST_PROCESSED_RETENTION_MS
+      );
+    if (!shouldDelete) continue;
+    await store.delete(namespace, item.key).catch(() => undefined);
+    if (request?.query) removed.push(request.query);
+  }
+
+  return removed.slice(0, 8);
+}
+
+async function writeResearchScoutRequestedQueriesLifecycle(
+  store: BaseStore | undefined,
+  state: Pick<ControlPlaneState, 'langSmithProjectName' | 'governanceProfile' | 'threadId'>,
+  requests: ResearchScoutRequestedQuery[],
+  lifecycleState: ResearchScoutRequestLifecycleState,
+): Promise<void> {
+  if (!store || requests.length === 0) return;
+  const namespace = getResearchScoutRequestNamespace(state);
+  const now = new Date().toISOString();
+
+  for (const request of requests) {
+    const nextRequest: ResearchScoutRequestedQuery = {
+      ...request,
+      lifecycleState,
+      lastClaimedAt: lifecycleState === 'claimed' ? now : '',
+      claimedByThreadId: lifecycleState === 'claimed' ? String(state.threadId || '').trim() : '',
+      lastProcessedAt: lifecycleState === 'processed' ? now : request.lastProcessedAt,
+      processedByThreadId: lifecycleState === 'processed' ? String(state.threadId || '').trim() : request.processedByThreadId,
+    };
+    await store.put(namespace, request.key, {
+      requestSummary: nextRequest.summary,
+      requestQuery: nextRequest.query,
+      requestedFamily: nextRequest.family,
+      requestedByThreadId: nextRequest.requestedByThreadId,
+      requestedByScopes: nextRequest.requestedByScopes,
+      mappedPaths: nextRequest.mappedPaths,
+      firstObservedAt: nextRequest.firstObservedAt,
+      lastObservedAt: nextRequest.lastObservedAt,
+      observationCount: nextRequest.observationCount,
+      sourcePreferences: nextRequest.sourcePreferences,
+      lifecycleState: nextRequest.lifecycleState,
+      lastClaimedAt: nextRequest.lastClaimedAt,
+      claimedByThreadId: nextRequest.claimedByThreadId,
+      lastProcessedAt: nextRequest.lastProcessedAt,
+      processedByThreadId: nextRequest.processedByThreadId,
+      searchText: buildResearchScoutRequestedQuerySearchText(nextRequest),
+    }, ['searchText']).catch(() => undefined);
+  }
+}
+
+async function markResearchScoutRequestedQueriesClaimed(
+  store: BaseStore | undefined,
+  state: Pick<ControlPlaneState, 'langSmithProjectName' | 'governanceProfile' | 'threadId'>,
+  requests: ResearchScoutRequestedQuery[],
+): Promise<void> {
+  await writeResearchScoutRequestedQueriesLifecycle(store, state, requests, 'claimed');
+}
+
+async function markResearchScoutRequestedQueriesProcessed(
+  store: BaseStore | undefined,
+  state: Pick<ControlPlaneState, 'langSmithProjectName' | 'governanceProfile' | 'threadId'>,
+  requests: ResearchScoutRequestedQuery[],
+): Promise<void> {
+  await writeResearchScoutRequestedQueriesLifecycle(store, state, requests, 'processed');
 }
 
 async function queueResearchScoutLookupRequest(
@@ -4554,6 +5287,7 @@ async function queueResearchScoutLookupRequest(
     | 'goal'
     | 'scopes'
     | 'effectiveScopes'
+    | 'scopeExpansionMode'
     | 'repairIntentSummary'
     | 'repairSignals'
     | 'improvementIntentSummary'
@@ -4563,7 +5297,7 @@ async function queueResearchScoutLookupRequest(
   >,
 ): Promise<string[]> {
   if (!store || !shouldQueueResearchScoutLookupRequest(state)) return [];
-  const { summary, query } = buildResearchScoutLookupRequestSummary(state);
+  const { summary, query, family, sourcePreferences } = buildResearchScoutLookupRequestSummary(state);
   if (!summary || !query) return [];
 
   const namespace = getResearchScoutRequestNamespace(state);
@@ -4577,15 +5311,18 @@ async function queueResearchScoutLookupRequest(
     ? existing.value as Record<string, unknown>
     : {};
   const lastObservedAtMs = Date.parse(String(existingValue.lastObservedAt || ''));
-  if (lastObservedAtMs && (Date.now() - lastObservedAtMs) < 30 * 60 * 1000) {
+  if (lastObservedAtMs && (Date.now() - lastObservedAtMs) < RESEARCH_SCOUT_REQUEST_REQUEUE_WINDOW_MS) {
     return [];
   }
 
   const now = new Date().toISOString();
-  await store.put(namespace, key, {
-    requestSummary: summary,
-    requestQuery: query,
-    requestedByThreadId: state.threadId,
+  const requestRecord: ResearchScoutRequestedQuery = {
+    key,
+    summary,
+    query,
+    family,
+    sourcePreferences,
+    requestedByThreadId: String(state.threadId || '').trim(),
     requestedByScopes: getEffectiveScopes(state as ControlPlaneState),
     mappedPaths: state.autonomousContractPaths.slice(0, 4),
     firstObservedAt: typeof existingValue.firstObservedAt === 'string' && existingValue.firstObservedAt.trim()
@@ -4593,7 +5330,31 @@ async function queueResearchScoutLookupRequest(
       : now,
     lastObservedAt: now,
     observationCount: Math.max(0, Math.floor(Number(existingValue.observationCount) || 0)) + 1,
-    searchText: [summary, query, ...state.autonomousContractPaths.slice(0, 4)].join('\n'),
+    lifecycleState: 'queued',
+    lastClaimedAt: '',
+    claimedByThreadId: '',
+    lastProcessedAt: '',
+    processedByThreadId: '',
+  };
+
+  await store.put(namespace, key, {
+    requestSummary: requestRecord.summary,
+    requestQuery: requestRecord.query,
+    requestedFamily: requestRecord.family,
+    requestedByThreadId: requestRecord.requestedByThreadId,
+    requestedByScopes: requestRecord.requestedByScopes,
+    requestedScopeExpansionMode: state.scopeExpansionMode,
+    mappedPaths: requestRecord.mappedPaths,
+    firstObservedAt: requestRecord.firstObservedAt,
+    lastObservedAt: requestRecord.lastObservedAt,
+    observationCount: requestRecord.observationCount,
+    sourcePreferences: requestRecord.sourcePreferences,
+    lifecycleState: requestRecord.lifecycleState,
+    lastClaimedAt: requestRecord.lastClaimedAt,
+    claimedByThreadId: requestRecord.claimedByThreadId,
+    lastProcessedAt: requestRecord.lastProcessedAt,
+    processedByThreadId: requestRecord.processedByThreadId,
+    searchText: buildResearchScoutRequestedQuerySearchText(requestRecord),
   }, ['searchText']).catch(() => undefined);
 
   return [
@@ -4603,21 +5364,51 @@ async function queueResearchScoutLookupRequest(
 
 async function readResearchScoutRequestedQueries(
   store: BaseStore | undefined,
-  state: Pick<ControlPlaneState, 'langSmithProjectName' | 'governanceProfile'>,
-): Promise<string[]> {
+  state: Pick<ControlPlaneState, 'langSmithProjectName' | 'governanceProfile' | 'threadId' | 'scopes' | 'effectiveScopes' | 'scopeExpansionMode'>,
+): Promise<ResearchScoutRequestedQuery[]> {
   if (!store) return [];
   const namespace = getResearchScoutRequestNamespace(state);
   const results = await store.search(namespace, {
-    limit: 6,
+    limit: 24,
   }).catch(() => [] as SearchItem[]);
 
-  return uniqueNormalizedStrings(
-    results
-      .map((item) => item.value && typeof item.value === 'object'
-        ? String((item.value as Record<string, unknown>).requestQuery || '').trim()
-        : '')
-      .filter(Boolean),
-  ).slice(0, 4);
+  const nowMs = Date.now();
+  const scopedFamilies = getResearchScoutScopedFamilies(state);
+  const seenQueries = new Set<string>();
+  return results
+    .map((item) => hydrateResearchScoutRequestedQuery(item))
+    .filter((request): request is ResearchScoutRequestedQuery => Boolean(request))
+    .filter((request) => {
+      const queryKey = request.query.toLowerCase();
+      if (seenQueries.has(queryKey)) return false;
+      seenQueries.add(queryKey);
+      return true;
+    })
+    .filter((request) => isResearchScoutRequestedQueryFresh(request, nowMs))
+    .filter((request) => doesResearchScoutRequestedQueryMatchScope(state, request))
+    .filter((request) => {
+      const processedAtMs = Date.parse(request.lastProcessedAt || '');
+      const observedAtMs = Date.parse(request.lastObservedAt || request.firstObservedAt || '');
+      if (request.lifecycleState === 'processed' && processedAtMs > 0 && processedAtMs >= observedAtMs) {
+        return false;
+      }
+      return !isResearchScoutRequestedQueryClaimActive(request, nowMs);
+    })
+    .sort((left, right) => {
+      const sameThreadDelta = Number(right.requestedByThreadId === String(state.threadId || '').trim())
+        - Number(left.requestedByThreadId === String(state.threadId || '').trim());
+      if (sameThreadDelta !== 0) return sameThreadDelta;
+      const familyAffinityDelta = Number(scopedFamilies.includes(right.family))
+        - Number(scopedFamilies.includes(left.family));
+      if (familyAffinityDelta !== 0) return familyAffinityDelta;
+      const observedDelta = Date.parse(right.lastObservedAt || right.firstObservedAt || '')
+        - Date.parse(left.lastObservedAt || left.firstObservedAt || '');
+      if (observedDelta !== 0) return observedDelta;
+      const observationDelta = right.observationCount - left.observationCount;
+      if (observationDelta !== 0) return observationDelta;
+      return left.query.localeCompare(right.query);
+    })
+    .slice(0, 4);
 }
 
 function buildSharedAiAgentPayload(state: ControlPlaneState): Record<string, unknown> {
@@ -4930,7 +5721,7 @@ async function callAiNotesAgent(
     return {
       enabled: false,
       model: config.model,
-      backend: config.baseUrl,
+      backend: describeControlPlaneAiBackend(config),
       notes: [],
     };
   }
@@ -4946,51 +5737,35 @@ async function callAiNotesAgent(
       attemptPayload: Record<string, unknown>,
       reducedAttempt: boolean,
     ): Promise<AiNodeRunResult> => {
-      const response = await fetch(`${config.baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          authorization: `Bearer ${config.apiKey}`,
-          'x-anygpt-internal-client': 'control-plane',
-          'x-anygpt-rate-limit-wait-budget-ms': String(rateLimitWaitBudgetMs),
-        },
-        body: JSON.stringify({
-          model: config.model,
-          temperature: config.temperature,
-          ...(config.reasoningEffort ? { reasoning_effort: config.reasoningEffort } : {}),
-          response_format: { type: 'json_object' },
-          messages: [
-            {
-              role: 'system',
-              content: [
-                systemPrompt,
-                'Return JSON only in the form {"notes": string[]}.',
-                'Do not output markdown fences.',
-                'Never invent credentials, API keys, or shell commands.',
-                'Respect the rule that production anygpt.service must not be restarted.',
-                reducedAttempt ? 'This is a retry after malformed output. Keep the response minimal and strictly valid JSON.' : '',
-              ].filter(Boolean).join('\n'),
-            },
-            {
-              role: 'user',
-              content: JSON.stringify(compactUnknownForAi({
-                threadId: state.threadId,
-                role,
-                payload: attemptPayload,
-              })),
-            },
-          ],
-        }),
+      const assistantText = await callControlPlaneAiAssistant(config, {
+        requestLabel: `AI ${role} agent request`,
+        temperature: config.temperature,
+        timeoutMs,
+        rateLimitWaitBudgetMs,
+        responseFormat: { type: 'json_object' },
+        messages: [
+          {
+            role: 'system',
+            content: [
+              systemPrompt,
+              'Return JSON only in the form {"notes": string[]}.',
+              'Do not output markdown fences.',
+              'Never invent credentials, API keys, or shell commands.',
+              'Respect the rule that production anygpt.service must not be restarted.',
+              reducedAttempt ? 'This is a retry after malformed output. Keep the response minimal and strictly valid JSON.' : '',
+            ].filter(Boolean).join('\n'),
+          },
+          {
+            role: 'user',
+            content: JSON.stringify(compactUnknownForAi({
+              threadId: state.threadId,
+              role,
+              payload: attemptPayload,
+            })),
+          },
+        ],
         signal: controller.signal,
       });
-
-      const rawText = await response.text();
-      if (!response.ok) {
-        throw new Error(`AI ${role} agent request failed (${response.status}): ${rawText.slice(0, 400)}`);
-      }
-
-      const payloadJson = JSON.parse(rawText);
-      const assistantText = extractAssistantTextFromChatCompletionPayload(payloadJson);
       const jsonObjectText = extractJsonObjectFromText(assistantText);
       if (!jsonObjectText) {
         throw new Error(`AI ${role} agent returned unparsable content.`);
@@ -5005,7 +5780,7 @@ async function callAiNotesAgent(
       return {
         enabled: true,
         model: config.model,
-        backend: config.baseUrl,
+        backend: describeControlPlaneAiBackend(config),
         notes,
         failureClass: 'none',
       };
@@ -5031,7 +5806,7 @@ async function callAiNotesAgent(
     return {
       enabled: true,
       model: config.model,
-      backend: config.baseUrl,
+      backend: describeControlPlaneAiBackend(config),
       notes: [],
       error: redactSensitiveText(rawMessage),
       backpressure,
@@ -5055,7 +5830,7 @@ async function callAiAutonomousEditReviewer(
       reason: '',
       confidence: 'low',
       model: config.model,
-      backend: config.baseUrl,
+      backend: describeControlPlaneAiBackend(config),
     };
   }
 
@@ -5064,54 +5839,38 @@ async function callAiAutonomousEditReviewer(
   const timeoutId = setTimeout(() => controller.abort(), AI_AGENT_REQUEST_TIMEOUT_MS);
 
   try {
-    const response = await fetch(`${config.baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${config.apiKey}`,
-        'x-anygpt-internal-client': 'control-plane',
-        'x-anygpt-rate-limit-wait-budget-ms': String(rateLimitWaitBudgetMs),
-      },
-      body: JSON.stringify({
-        model: config.model,
-        temperature: 0,
-        ...(config.reasoningEffort ? { reasoning_effort: config.reasoningEffort } : {}),
-        response_format: { type: 'json_object' },
-        messages: [
-          {
-            role: 'system',
-            content: [
-              'You are a strict autonomous edit reviewer for the AnyGPT control plane.',
-              'Return JSON only in the form {"approved": boolean, "reason": string, "confidence": "low" | "medium" | "high"}.',
-              'Reject speculative edits that do not clearly match the active signals.',
-              'Prefer rejecting edits when the proposed path set is broad, weakly justified, or mixes unrelated subsystems.',
-              'Allow tightly coupled multi-file edits only when the reason clearly depends on both files and the payload shows strong signal/path alignment.',
-              'When signals are externally caused or provider-bound, approve only control-plane or clearly justified classification/queue/resilience edits.',
-              'When an autonomous contract is provided, reject proposals that do not satisfy its summary/checks or that go outside its listed contract paths.',
-              'Do not output markdown fences or prose outside the JSON object.',
-            ].join('\n'),
-          },
-          {
-            role: 'user',
-            content: JSON.stringify(compactUnknownForAi(payload, {
-              maxStringChars: AI_CODE_EDIT_PAYLOAD_STRING_MAX_CHARS,
-              maxArrayItems: AI_AGENT_PAYLOAD_ARRAY_LIMIT,
-              maxObjectKeys: AI_AGENT_PAYLOAD_OBJECT_KEY_LIMIT,
-              maxDepth: 5,
-            })),
-          },
-        ],
-      }),
+    const assistantText = await callControlPlaneAiAssistant(config, {
+      requestLabel: 'AI autonomous edit reviewer request',
+      temperature: 0,
+      timeoutMs: AI_AGENT_REQUEST_TIMEOUT_MS,
+      rateLimitWaitBudgetMs,
+      responseFormat: { type: 'json_object' },
+      messages: [
+        {
+          role: 'system',
+          content: [
+            'You are a strict autonomous edit reviewer for the AnyGPT control plane.',
+            'Return JSON only in the form {"approved": boolean, "reason": string, "confidence": "low" | "medium" | "high"}.',
+            'Reject speculative edits that do not clearly match the active signals.',
+            'Prefer rejecting edits when the proposed path set is broad, weakly justified, or mixes unrelated subsystems.',
+            'Allow tightly coupled multi-file edits only when the reason clearly depends on both files and the payload shows strong signal/path alignment.',
+            'When signals are externally caused or provider-bound, approve only control-plane or clearly justified classification/queue/resilience edits.',
+            'When an autonomous contract is provided, reject proposals that do not satisfy its summary/checks or that go outside its listed contract paths.',
+            'Do not output markdown fences or prose outside the JSON object.',
+          ].join('\n'),
+        },
+        {
+          role: 'user',
+          content: JSON.stringify(compactUnknownForAi(payload, {
+            maxStringChars: AI_CODE_EDIT_PAYLOAD_STRING_MAX_CHARS,
+            maxArrayItems: AI_AGENT_PAYLOAD_ARRAY_LIMIT,
+            maxObjectKeys: AI_AGENT_PAYLOAD_OBJECT_KEY_LIMIT,
+            maxDepth: 5,
+          })),
+        },
+      ],
       signal: controller.signal,
     });
-
-    const rawText = await response.text();
-    if (!response.ok) {
-      throw new Error(`AI autonomous edit reviewer failed (${response.status}): ${rawText.slice(0, 400)}`);
-    }
-
-    const payloadJson = JSON.parse(rawText);
-    const assistantText = extractAssistantTextFromChatCompletionPayload(payloadJson);
     const jsonObjectText = extractJsonObjectFromText(assistantText);
     if (!jsonObjectText) {
       throw new Error('AI autonomous edit reviewer returned unparsable content.');
@@ -5125,7 +5884,7 @@ async function callAiAutonomousEditReviewer(
       reason: String(parsed.reason || '').trim(),
       confidence,
       model: config.model,
-      backend: config.baseUrl,
+      backend: describeControlPlaneAiBackend(config),
     };
   } catch (error: any) {
     return {
@@ -5134,7 +5893,7 @@ async function callAiAutonomousEditReviewer(
       reason: redactSensitiveText(error?.message || String(error)),
       confidence: 'low',
       model: config.model,
-      backend: config.baseUrl,
+      backend: describeControlPlaneAiBackend(config),
       error: redactSensitiveText(error?.message || String(error)),
     };
   } finally {
@@ -5163,7 +5922,7 @@ async function callAiCodeEditAgent(
     return {
       enabled: false,
       model: config.model,
-      backend: config.baseUrl,
+      backend: describeControlPlaneAiBackend(config),
       summary: '',
       edits: [],
       agentLabel,
@@ -5179,72 +5938,56 @@ async function callAiCodeEditAgent(
   const timeoutId = setTimeout(() => controller.abort(), AI_AGENT_REQUEST_TIMEOUT_MS);
 
   try {
-    const response = await fetch(`${config.baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${config.apiKey}`,
-        'x-anygpt-internal-client': 'control-plane',
-        'x-anygpt-rate-limit-wait-budget-ms': String(rateLimitWaitBudgetMs),
-      },
-      body: JSON.stringify({
-        model: config.model,
-        temperature: config.temperature,
-        ...(config.reasoningEffort ? { reasoning_effort: config.reasoningEffort } : {}),
-        response_format: { type: 'json_object' },
-        messages: [
-          {
-            role: 'system',
-            content: [
-              String(state.controlPlanePrompts.autonomousEdit || DEFAULT_CONTROL_PLANE_PROMPT_BUNDLE.autonomousEdit).trim()
-                || DEFAULT_CONTROL_PLANE_PROMPT_BUNDLE.autonomousEdit,
-              `Focused agent label: ${agentLabel}.`,
-              agentFocus ? `Focused agent task: ${agentFocus}` : '',
-              'Return JSON only in the form {"summary": string, "edits": [{"type": "replace" | "write", "path": string, "reason": string, "find"?: string, "replace"?: string, "content"?: string}]}.',
-              requestedOperationMode === 'repair'
-                ? `You are operating in repair mode with ${repairSignalCount} actionable repair signal(s). Prefer a minimal bounded replace edit whenever a safe fix is possible. When the direct repair is ambiguous or the signals are provider-bound, input-bound, or otherwise external, pivot to the smallest resilience, validation, observability, or cleanup improvement in the most relevant candidate path instead of returning an empty plan. Empty edits are only acceptable when no safe bounded change fits the allowlist or available context, and then the summary must explain why.`
-                : `You are operating in improvement mode with ${improvementSignalCount} improvement signal(s). On experimental scope, default to proposing at least one small hot-path throughput, routing, resilience, or observability improvement that can be validated quickly. Return an empty edits array only when the candidate context is too weak or every plausible change would violate path or safety rules, and then the summary must explain why.`,
-              aggressiveExperimentalBias
-                ? 'Aggressive experimental planning is enabled. Because allowlists, path checks, repair smoke validation, and rollback still apply, bias toward proposing one small bounded edit instead of another no-op analysis pass.'
-                : '',
-              'An autonomous contract may be provided in the payload. Treat it as binding: satisfy the contract summary, stay inside the contract paths when they are provided, and explicitly address the listed checks.',
-              'Autonomous skills may be provided with tiered summaries, loaded guidance, and reference paths. Treat loaded skills as project-specific guidance and use their reference paths to choose the smallest matching file.',
-              'Think in two phases: first decide the next concrete contract-aligned change, then emit only that bounded edit plan. Do not re-plan the whole subsystem.',
-              'Prefer the smallest safe replace edit over rewriting entire files.',
-              'If previous failed edits are provided, do not repeat the same stale replace block or reuse the same find string unchanged.',
-              'When a previous replace failed because the target text was not found, refresh the exact current block from the provided candidate file excerpts before proposing another replace edit.',
-              'Use the dedicated failed-edit refresh contexts when present; they contain the current live block for the previously failing file path.',
-              'Only propose replace edits for files that already exist in the provided candidate contexts. Do not invent new replace-target paths.',
-              'When the provided signals mention a file family or subsystem, bias the proposal toward the most relevant candidate file instead of returning a no-op.',
-              'Candidate files include selectionReason, rawCharCount, excerptStrategy, and anchorHints metadata; use those fields to understand why each file was included and how much context you are seeing.',
-              'Only modify explicitly allowed paths and never modify denied paths, secrets, key files, environment files, lockfiles, node_modules, or generated outputs.',
-              'If you return an empty edits array, the summary must name the blocking constraint, missing context, or safety reason.',
-              'Your summary must name the targeted file or subsystem when you do propose an edit.',
-              `Never return more than ${state.maxEditActions} edits.`,
-              'Do not emit markdown fences or prose outside the JSON object.',
-            ].filter(Boolean).join('\n'),
-          },
-          {
-            role: 'user',
-            content: JSON.stringify(compactUnknownForAi(payload, {
-              maxStringChars: Math.max(AI_CODE_EDIT_PAYLOAD_STRING_MAX_CHARS, AI_CODE_EDIT_CANDIDATE_FILE_MAX_CHARS * 2, 3_200),
-              maxArrayItems: Math.max(AI_CODE_EDIT_CANDIDATE_FILE_LIMIT, AI_AGENT_PAYLOAD_ARRAY_LIMIT),
-              maxObjectKeys: Math.max(AI_AGENT_PAYLOAD_OBJECT_KEY_LIMIT, 24),
-              maxDepth: 5,
-            })),
-          },
-        ],
-      }),
+    const assistantText = await callControlPlaneAiAssistant(config, {
+      requestLabel: 'AI code edit agent request',
+      temperature: config.temperature,
+      timeoutMs: AI_AGENT_REQUEST_TIMEOUT_MS,
+      rateLimitWaitBudgetMs,
+      responseFormat: { type: 'json_object' },
+      messages: [
+        {
+          role: 'system',
+          content: [
+            String(state.controlPlanePrompts.autonomousEdit || DEFAULT_CONTROL_PLANE_PROMPT_BUNDLE.autonomousEdit).trim()
+              || DEFAULT_CONTROL_PLANE_PROMPT_BUNDLE.autonomousEdit,
+            `Focused agent label: ${agentLabel}.`,
+            agentFocus ? `Focused agent task: ${agentFocus}` : '',
+            'Return JSON only in the form {"summary": string, "edits": [{"type": "replace" | "write", "path": string, "reason": string, "find"?: string, "replace"?: string, "content"?: string}]}.',
+            requestedOperationMode === 'repair'
+              ? `You are operating in repair mode with ${repairSignalCount} actionable repair signal(s). Prefer a minimal bounded replace edit whenever a safe fix is possible. When the direct repair is ambiguous or the signals are provider-bound, input-bound, or otherwise external, pivot to the smallest resilience, validation, observability, or cleanup improvement in the most relevant candidate path instead of returning an empty plan. Empty edits are only acceptable when no safe bounded change fits the allowlist or available context, and then the summary must explain why.`
+              : `You are operating in improvement mode with ${improvementSignalCount} improvement signal(s). On experimental scope, default to proposing at least one small hot-path throughput, routing, resilience, or observability improvement that can be validated quickly. Return an empty edits array only when the candidate context is too weak or every plausible change would violate path or safety rules, and then the summary must explain why.`,
+            aggressiveExperimentalBias
+              ? 'Aggressive experimental planning is enabled. Because allowlists, path checks, repair smoke validation, and rollback still apply, bias toward proposing one small bounded edit instead of another no-op analysis pass.'
+              : '',
+            'An autonomous contract may be provided in the payload. Treat it as binding: satisfy the contract summary, stay inside the contract paths when they are provided, and explicitly address the listed checks.',
+            'Autonomous skills may be provided with tiered summaries, loaded guidance, and reference paths. Treat loaded skills as project-specific guidance and use their reference paths to choose the smallest matching file.',
+            'Think in two phases: first decide the next concrete contract-aligned change, then emit only that bounded edit plan. Do not re-plan the whole subsystem.',
+            'Prefer the smallest safe replace edit over rewriting entire files.',
+            'If previous failed edits are provided, do not repeat the same stale replace block or reuse the same find string unchanged.',
+            'When a previous replace failed because the target text was not found, refresh the exact current block from the provided candidate file excerpts before proposing another replace edit.',
+            'Use the dedicated failed-edit refresh contexts when present; they contain the current live block for the previously failing file path.',
+            'Only propose replace edits for files that already exist in the provided candidate contexts. Do not invent new replace-target paths.',
+            'When the provided signals mention a file family or subsystem, bias the proposal toward the most relevant candidate file instead of returning a no-op.',
+            'Candidate files include selectionReason, rawCharCount, excerptStrategy, and anchorHints metadata; use those fields to understand why each file was included and how much context you are seeing.',
+            'Only modify explicitly allowed paths and never modify denied paths, secrets, key files, environment files, lockfiles, node_modules, or generated outputs.',
+            'If you return an empty edits array, the summary must name the blocking constraint, missing context, or safety reason.',
+            'Your summary must name the targeted file or subsystem when you do propose an edit.',
+            `Never return more than ${state.maxEditActions} edits.`,
+            'Do not emit markdown fences or prose outside the JSON object.',
+          ].filter(Boolean).join('\n'),
+        },
+        {
+          role: 'user',
+          content: JSON.stringify(compactUnknownForAi(payload, {
+            maxStringChars: Math.max(AI_CODE_EDIT_PAYLOAD_STRING_MAX_CHARS, AI_CODE_EDIT_CANDIDATE_FILE_MAX_CHARS * 2, 3_200),
+            maxArrayItems: Math.max(AI_CODE_EDIT_CANDIDATE_FILE_LIMIT, AI_AGENT_PAYLOAD_ARRAY_LIMIT),
+            maxObjectKeys: Math.max(AI_AGENT_PAYLOAD_OBJECT_KEY_LIMIT, 24),
+            maxDepth: 5,
+          })),
+        },
+      ],
       signal: controller.signal,
     });
-
-    const rawText = await response.text();
-    if (!response.ok) {
-      throw new Error(`AI code edit agent request failed (${response.status}): ${rawText.slice(0, 400)}`);
-    }
-
-    const payloadJson = JSON.parse(rawText);
-    const assistantText = extractAssistantTextFromChatCompletionPayload(payloadJson);
     const jsonObjectText = extractJsonObjectFromText(assistantText);
     if (!jsonObjectText) {
       throw new Error('AI code edit agent returned unparsable content.');
@@ -5262,7 +6005,7 @@ async function callAiCodeEditAgent(
     return {
       enabled: true,
       model: config.model,
-      backend: config.baseUrl,
+      backend: describeControlPlaneAiBackend(config),
       summary: normalizedSummary,
       edits: parsed.edits.slice(0, state.maxEditActions),
       agentLabel,
@@ -5277,7 +6020,7 @@ async function callAiCodeEditAgent(
     return {
       enabled: true,
       model: config.model,
-      backend: config.baseUrl,
+      backend: describeControlPlaneAiBackend(config),
       summary: requestedOperationMode === 'repair' && repairSignalCount > 0
         ? 'AI repair agent request failed before a bounded edit plan was produced.'
         : requestedOperationMode === 'improvement' && improvementSignalCount > 0
@@ -5431,28 +6174,44 @@ function extractMcpResultLinks(result: unknown): Array<{
   title: string;
   description: string;
   source: string;
+  sourceKind: ResearchScoutSourceKind;
 }> {
-  const links = new Map<string, { url: string; title: string; description: string; source: string }>();
+  const links = new Map<string, {
+    url: string;
+    title: string;
+    description: string;
+    source: string;
+    sourceKind: ResearchScoutSourceKind;
+  }>();
   const pushLink = (candidate: {
     url?: unknown;
     title?: unknown;
     description?: unknown;
     source?: unknown;
+    sourceKind?: unknown;
   }): void => {
     const url = normalizeHttpUrl(candidate.url);
     if (!url) return;
     const existing = links.get(url);
+    const normalizedSourceKind: ResearchScoutSourceKind = candidate.sourceKind === 'docs'
+      || candidate.sourceKind === 'github'
+      || candidate.sourceKind === 'youtube'
+      || candidate.sourceKind === 'papers'
+      ? candidate.sourceKind
+      : 'web';
     const next = {
       url,
       title: typeof candidate.title === 'string' ? candidate.title.trim() : '',
       description: typeof candidate.description === 'string' ? candidate.description.trim() : '',
       source: typeof candidate.source === 'string' ? candidate.source.trim() : '',
+      sourceKind: normalizedSourceKind,
     };
     links.set(url, {
       url,
       title: existing?.title || next.title,
       description: existing?.description || next.description,
       source: existing?.source || next.source,
+      sourceKind: existing?.sourceKind || next.sourceKind,
     });
   };
 
@@ -5470,6 +6229,7 @@ function extractMcpResultLinks(result: unknown): Array<{
         title: typedEntry.title,
         description: typedEntry.description,
         source: typedEntry.source,
+        sourceKind: typedEntry.sourceKind,
       });
     }
   }
@@ -6066,7 +6826,7 @@ function readTailLines(filePath: string, maxLines: number = 20): string[] {
     const raw = fs.readFileSync(filePath, 'utf8');
     return raw
       .split(/\r?\n/)
-      .map((line) => sanitizeLogLine(line))
+      .map((line) => sanitizeLogLine(line, filePath))
       .filter(Boolean)
       .slice(-maxLines);
   } catch {
@@ -6759,11 +7519,33 @@ function listRecentLogCandidatePaths(state: ControlPlaneState): string[] {
   return Array.from(new Set([...seededCandidates, ...discoveredCandidates]));
 }
 
+function shouldIncludeLogInsightCandidateForScope(
+  state: Pick<ControlPlaneState, 'repoRoot' | 'scopes' | 'effectiveScopes'>,
+  filePath: string,
+): boolean {
+  const effectiveScopes = new Set(getEffectiveScopes(state as ControlPlaneState));
+  if (effectiveScopes.has('repo')) return true;
+
+  const relativeFilePath = path.relative(state.repoRoot, filePath).replace(/\\/g, '/');
+  if (
+    effectiveScopes.has('anyscan')
+    && !effectiveScopes.has('api-routing')
+    && !effectiveScopes.has('api-runtime')
+    && !effectiveScopes.has('api-data')
+    && isHighChurnApiProviderLogInsightFile(relativeFilePath)
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
 function resolveLogInsights(state: ControlPlaneState, supplementalInsights: LogInsight[] = []): LogInsight[] {
   const codeQlInsights = listRecentCodeQlCandidatePaths(state)
     .map((filePath) => summarizeCodeQlSarif(state, filePath))
     .filter((entry): entry is LogInsight => Boolean(entry));
   const fileLogInsights = listRecentLogCandidatePaths(state)
+    .filter((filePath) => shouldIncludeLogInsightCandidateForScope(state, filePath))
     .map((filePath) => ({ file: path.relative(state.repoRoot, filePath), lines: readTailLines(filePath, DEFAULT_LOG_TAIL_LINE_COUNT) }))
     .filter((entry) => entry.lines.length > 0)
     .map((entry) => LogInsightSchema.parse(entry))
@@ -7907,32 +8689,105 @@ function shouldUseLightweightResearchScoutInspect(
 }
 
 type ResearchScoutTrustedSource = {
-  family: 'control-plane' | 'api';
+  family: Exclude<ResearchScoutQueryFamily, 'generic'>;
+  sourceKind: Exclude<ResearchScoutSourceKind, 'youtube'>;
   url: string;
   title: string;
 };
 
-const RESEARCH_SCOUT_TRUSTED_SOURCE_PACKS: Record<'control-plane' | 'api', ResearchScoutTrustedSource[]> = {
+type ResearchScoutSearchRequest = {
+  family: ResearchScoutQueryFamily;
+  sourceKind: ResearchScoutSourceKind;
+  query: string;
+};
+
+type ResearchScoutRequestLifecycleState = 'queued' | 'claimed' | 'processed';
+
+type ResearchScoutRequestedQuery = {
+  key: string;
+  summary: string;
+  query: string;
+  family: ResearchScoutQueryFamily;
+  sourcePreferences: ResearchScoutSourceKind[];
+  requestedByThreadId: string;
+  requestedByScopes: string[];
+  mappedPaths: string[];
+  firstObservedAt: string;
+  lastObservedAt: string;
+  observationCount: number;
+  lifecycleState: ResearchScoutRequestLifecycleState;
+  lastClaimedAt: string;
+  claimedByThreadId: string;
+  lastProcessedAt: string;
+  processedByThreadId: string;
+};
+
+const RESEARCH_SCOUT_TRUSTED_SOURCE_PACKS: Record<Exclude<ResearchScoutQueryFamily, 'generic'>, ResearchScoutTrustedSource[]> = {
   'control-plane': [
-    { family: 'control-plane', url: 'https://docs.temporal.io/', title: 'Temporal docs' },
-    { family: 'control-plane', url: 'https://modelcontextprotocol.io/docs', title: 'Model Context Protocol docs' },
-    { family: 'control-plane', url: 'https://qdrant.tech/documentation/', title: 'Qdrant documentation' },
-    { family: 'control-plane', url: 'https://github.com/langchain-ai/langgraph', title: 'LangGraph GitHub' },
-    { family: 'control-plane', url: 'https://www.langchain.com/langgraph', title: 'LangGraph overview' },
+    { family: 'control-plane', sourceKind: 'docs', url: 'https://docs.temporal.io/', title: 'Temporal docs' },
+    { family: 'control-plane', sourceKind: 'docs', url: 'https://modelcontextprotocol.io/docs', title: 'Model Context Protocol docs' },
+    { family: 'control-plane', sourceKind: 'docs', url: 'https://qdrant.tech/documentation/', title: 'Qdrant documentation' },
+    { family: 'control-plane', sourceKind: 'github', url: 'https://github.com/langchain-ai/langgraph', title: 'LangGraph GitHub' },
+    { family: 'control-plane', sourceKind: 'web', url: 'https://www.langchain.com/langgraph', title: 'LangGraph overview' },
   ],
   api: [
-    { family: 'api', url: 'https://platform.openai.com/docs', title: 'OpenAI docs' },
-    { family: 'api', url: 'https://ai.google.dev/gemini-api/docs', title: 'Gemini API docs' },
-    { family: 'api', url: 'https://openrouter.ai/docs', title: 'OpenRouter docs' },
-    { family: 'api', url: 'https://docs.anthropic.com/en/docs', title: 'Anthropic docs' },
-    { family: 'api', url: 'https://arxiv.org/', title: 'arXiv papers' },
+    { family: 'api', sourceKind: 'docs', url: 'https://platform.openai.com/docs', title: 'OpenAI docs' },
+    { family: 'api', sourceKind: 'docs', url: 'https://ai.google.dev/gemini-api/docs', title: 'Gemini API docs' },
+    { family: 'api', sourceKind: 'docs', url: 'https://openrouter.ai/docs', title: 'OpenRouter docs' },
+    { family: 'api', sourceKind: 'docs', url: 'https://docs.anthropic.com/en/docs', title: 'Anthropic docs' },
+    { family: 'api', sourceKind: 'papers', url: 'https://arxiv.org/', title: 'arXiv papers' },
+  ],
+  'anyscan': [
+    { family: 'anyscan', sourceKind: 'docs', url: 'https://docs.rs/reqwest/latest/reqwest/', title: 'reqwest crate docs' },
+    { family: 'anyscan', sourceKind: 'docs', url: 'https://docs.rs/axum/latest/axum/', title: 'axum crate docs' },
+    { family: 'anyscan', sourceKind: 'docs', url: 'https://docs.rs/tokio/latest/tokio/', title: 'tokio crate docs' },
+    { family: 'anyscan', sourceKind: 'github', url: 'https://github.com/seanmonstar/reqwest', title: 'reqwest GitHub' },
+    { family: 'anyscan', sourceKind: 'github', url: 'https://github.com/tokio-rs/axum', title: 'axum GitHub' },
   ],
 };
 
+const RESEARCH_SCOUT_REQUEST_REQUEUE_WINDOW_MS = 30 * 60 * 1000;
+const RESEARCH_SCOUT_REQUEST_STALE_AFTER_MS = 6 * 60 * 60 * 1000;
+const RESEARCH_SCOUT_REQUEST_CLAIM_TTL_MS = 15 * 60 * 1000;
+const RESEARCH_SCOUT_REQUEST_PROCESSED_RETENTION_MS = 6 * 60 * 60 * 1000;
+const RESEARCH_SCOUT_ANYSCAN_RUNTIME_WEB_FALLBACK_MIN_SCORE = 6;
+const RESEARCH_SCOUT_ANYSCAN_RUNTIME_WEB_FALLBACK_STRONG_SCORE = 9;
+const RESEARCH_SCOUT_ANYSCAN_RUNTIME_WEB_FALLBACK_MIN_LINKS = 2;
+
+function getResearchScoutRequiredPreWebFallbackSourceKinds(
+  family: ResearchScoutQueryFamily,
+): ResearchScoutSourceKind[] {
+  if (family === 'anyscan') {
+    return ['docs', 'github', 'youtube'];
+  }
+  return [];
+}
+
+function shouldPlanResearchScoutBroadWebInInitialPass(
+  family: ResearchScoutQueryFamily,
+): boolean {
+  return family !== 'anyscan';
+}
+
+function buildResearchScoutSourcePreferenceOrder(
+  family: ResearchScoutQueryFamily,
+): ResearchScoutSourceKind[] {
+  if (family === 'anyscan') {
+    return ['docs', 'github', 'youtube', 'web', 'papers'];
+  }
+  if (family === 'control-plane' || family === 'api') {
+    return ['docs', 'github', 'youtube', 'papers', 'web'];
+  }
+  return ['docs', 'github', 'web', 'youtube', 'papers'];
+}
+
 function inferResearchScoutQueryFamilyFromText(
   query: unknown,
-): 'control-plane' | 'api' | 'generic' {
+): ResearchScoutQueryFamily {
   const normalized = String(query || '').toLowerCase();
+  if (/anyscan|fetcher\.rs|dragonfly|reqwest|axum|robots\.txt|sitemap|crawler|crawl|secret scan|secret detection|scan findings|worker lease|redis streams|sse|tokio/.test(normalized)) {
+    return 'anyscan';
+  }
   if (/mcp|model context protocol|orchestration|durable execution|checkpoint|state graph|state machine|workflow|runner|control plane|governance|evaluation|observability|semantic memory|agent memory|human[- ]in[- ]the[- ]loop|langgraph|langchain|vector memory|hybrid search/.test(normalized)) {
     return 'control-plane';
   }
@@ -7942,6 +8797,169 @@ function inferResearchScoutQueryFamilyFromText(
   return 'generic';
 }
 
+function buildResearchScoutSearchRequestsForFamily(
+  family: ResearchScoutQueryFamily,
+): ResearchScoutSearchRequest[] {
+  if (family === 'anyscan') {
+    return [
+      {
+        family,
+        sourceKind: 'docs',
+        query: truncateTextMiddle(
+          'reqwest axum tokio crate docs crates redis dragonfly rust robots sitemap crawler worker lease sse reference implementation patterns',
+          240,
+        ),
+      },
+      {
+        family,
+        sourceKind: 'github',
+        query: truncateTextMiddle(
+          'reqwest axum tokio redis dragonfly rust robots sitemap crawler worker lease sse examples site:github.com',
+          240,
+        ),
+      },
+      {
+        family,
+        sourceKind: 'youtube',
+        query: truncateTextMiddle(
+          'rust reqwest axum redis dragonfly crawler robots sitemap worker lease sse walkthrough site:youtube.com',
+          240,
+        ),
+      },
+      {
+        family,
+        sourceKind: 'web',
+        query: truncateTextMiddle(
+          'reqwest axum tokio redis dragonfly "robots.txt" sitemap crawler SSE Rust service implementation guide -facepunch -steam -survive -game',
+          240,
+        ),
+      },
+    ];
+  }
+  if (family === 'control-plane') {
+    return [
+      {
+        family,
+        sourceKind: 'docs',
+        query: truncateTextMiddle(
+          'site:modelcontextprotocol.io/docs langgraph orchestration durable workflow semantic memory evaluation observability',
+          240,
+        ),
+      },
+      {
+        family,
+        sourceKind: 'github',
+        query: truncateTextMiddle(
+          'langgraph model context protocol orchestration semantic memory evaluation examples site:github.com',
+          240,
+        ),
+      },
+      {
+        family,
+        sourceKind: 'youtube',
+        query: truncateTextMiddle(
+          'langgraph mcp orchestration agent memory evaluation walkthrough site:youtube.com',
+          240,
+        ),
+      },
+      {
+        family,
+        sourceKind: 'papers',
+        query: truncateTextMiddle(
+          'site:arxiv.org llm agents orchestration memory evaluation durable workflow paper',
+          240,
+        ),
+      },
+      {
+        family,
+        sourceKind: 'web',
+        query: truncateTextMiddle(
+          'site:temporal.io durable execution workflow orchestration agents docs',
+          240,
+        ),
+      },
+    ];
+  }
+  if (family === 'api') {
+    return [
+      {
+        family,
+        sourceKind: 'docs',
+        query: truncateTextMiddle(
+          '"OpenRouter" "OpenAI API" "Gemini API" docs provider routing retry rate limits capability gating implementation patterns',
+          240,
+        ),
+      },
+      {
+        family,
+        sourceKind: 'github',
+        query: truncateTextMiddle(
+          'openai openrouter gemini anthropic provider routing retry rate limits examples site:github.com',
+          240,
+        ),
+      },
+      {
+        family,
+        sourceKind: 'youtube',
+        query: truncateTextMiddle(
+          'openai openrouter gemini provider routing retry rate limits walkthrough site:youtube.com',
+          240,
+        ),
+      },
+      {
+        family,
+        sourceKind: 'papers',
+        query: truncateTextMiddle(
+          'site:arxiv.org large language model gateway routing inference paper',
+          240,
+        ),
+      },
+      {
+        family,
+        sourceKind: 'web',
+        query: truncateTextMiddle(
+          'site:openrouter.ai docs models providers routing rate limits errors',
+          240,
+        ),
+      },
+    ];
+  }
+  return [
+    {
+      family: 'generic',
+      sourceKind: 'docs',
+      query: truncateTextMiddle(
+        'developer docs guide reference implementation patterns reliability workflow',
+        240,
+      ),
+    },
+    {
+      family: 'generic',
+      sourceKind: 'github',
+      query: truncateTextMiddle(
+        'implementation patterns workflow reliability examples site:github.com',
+        240,
+      ),
+    },
+    {
+      family: 'generic',
+      sourceKind: 'youtube',
+      query: truncateTextMiddle(
+        'implementation walkthrough workflow reliability architecture site:youtube.com',
+        240,
+      ),
+    },
+    {
+      family: 'generic',
+      sourceKind: 'web',
+      query: truncateTextMiddle(
+        'developer docs implementation patterns reliability workflow API routing',
+        240,
+      ),
+    },
+  ];
+}
+
 function buildResearchScoutBraveQueries(
   state: Pick<
     ControlPlaneState,
@@ -7949,124 +8967,55 @@ function buildResearchScoutBraveQueries(
     | 'scopes'
     | 'effectiveScopes'
   >,
-): string[] {
+): ResearchScoutSearchRequest[] {
   const effectiveScopes = new Set(getEffectiveScopes(state as ControlPlaneState));
-  const queries: string[] = [];
+  const goalText = String(state.goal || '').toLowerCase();
+  const families: ResearchScoutQueryFamily[] = [];
+  const pushFamily = (family: ResearchScoutQueryFamily): void => {
+    if (!families.includes(family)) families.push(family);
+  };
 
-  if (effectiveScopes.has('research-scout') || effectiveScopes.has('control-plane') || effectiveScopes.has('repo')) {
-    queries.push(
-      truncateTextMiddle(
-        'site:temporal.io durable execution workflow orchestration agents docs',
-        240,
-      ),
-    );
-    queries.push(
-      truncateTextMiddle(
-        'site:modelcontextprotocol.io docs agent tools orchestration workflow mcp',
-        240,
-      ),
-    );
-    queries.push(
-      truncateTextMiddle(
-        'site:qdrant.tech hybrid search metadata filtering embeddings semantic memory agent retrieval',
-        240,
-      ),
-    );
-    queries.push(
-      truncateTextMiddle(
-        'site:arxiv.org llm agents orchestration memory evaluation durable workflow paper',
-        240,
-      ),
-    );
+  if (
+    effectiveScopes.has('anyscan')
+    || /anyscan|fetcher\.rs|dragonfly|axum|reqwest|robots\.txt|sitemap|secret scan|crawler|crawl/.test(goalText)
+  ) {
+    pushFamily('anyscan');
+  }
+  if (effectiveScopes.has('control-plane') || effectiveScopes.has('repo')) {
+    pushFamily('control-plane');
+  }
+  if (hasApiFamilyScope(effectiveScopes) || effectiveScopes.has('repo')) {
+    pushFamily('api');
+  }
+  if (families.length === 0) {
+    pushFamily(inferResearchScoutQueryFamilyFromText(state.goal));
   }
 
-  if (effectiveScopes.has('research-scout') || hasApiFamilyScope(effectiveScopes) || effectiveScopes.has('repo')) {
-    queries.push(
-      truncateTextMiddle(
-        '"OpenRouter" "OpenAI API" "Gemini API" docs provider routing retry rate limits capability gating implementation patterns',
-        240,
-      ),
-    );
-    queries.push(
-      truncateTextMiddle(
-        'site:platform.openai.com/docs responses api rate limits retries error codes',
-        240,
-      ),
-    );
-    queries.push(
-      truncateTextMiddle(
-        'site:ai.google.dev gemini api invalid argument model capability audio mime type generatecontent',
-        240,
-      ),
-    );
-    queries.push(
-      truncateTextMiddle(
-        'site:openrouter.ai docs models providers routing rate limits errors',
-        240,
-      ),
-    );
-    queries.push(
-      truncateTextMiddle(
-        'site:docs.anthropic.com claude api rate limits errors tool use docs',
-        240,
-      ),
-    );
-    queries.push(
-      truncateTextMiddle(
-        'site:arxiv.org large language model gateway routing inference paper',
-        240,
-      ),
-    );
+  const primaryFamily = families[0] || 'generic';
+  const secondaryFamilies = families.slice(1);
+  const prioritizedRequests = [
+    ...buildResearchScoutSearchRequestsForFamily(primaryFamily).filter((request) =>
+      request.sourceKind !== 'web' || shouldPlanResearchScoutBroadWebInInitialPass(request.family)
+    ),
+    ...secondaryFamilies.flatMap((family) =>
+      buildResearchScoutSearchRequestsForFamily(family)
+        .filter((request) => request.sourceKind === 'docs' || request.sourceKind === 'github')),
+  ];
+  const seen = new Set<string>();
+  const deduped: ResearchScoutSearchRequest[] = [];
+  for (const request of prioritizedRequests) {
+    const key = `${request.family}:${request.sourceKind}:${request.query}`;
+    if (!request.query || seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(request);
   }
-
-  return uniqueNormalizedStrings(queries).slice(0, 8);
+  return deduped;
 }
 
 function buildResearchScoutFallbackQueries(
-  family: 'control-plane' | 'api' | 'generic',
-): string[] {
-  if (family === 'control-plane') {
-    return [
-      truncateTextMiddle(
-        'site:modelcontextprotocol.io docs tools agents workflow orchestration',
-        240,
-      ),
-      truncateTextMiddle(
-        'site:qdrant.tech hybrid search metadata filtering vector memory docs',
-        240,
-      ),
-      truncateTextMiddle(
-        '"LangGraph" orchestration framework docs stateful agents workflow guide',
-        240,
-      ),
-    ];
-  }
-  if (family === 'api') {
-    return [
-      truncateTextMiddle(
-        'site:openrouter.ai docs providers models rate limits routing',
-        240,
-      ),
-      truncateTextMiddle(
-        'site:platform.openai.com/docs api rate limits retries error codes',
-        240,
-      ),
-      truncateTextMiddle(
-        'site:ai.google.dev gemini api docs invalid argument rate limits model capability',
-        240,
-      ),
-      truncateTextMiddle(
-        'site:docs.anthropic.com claude api docs rate limits tool use errors',
-        240,
-      ),
-    ];
-  }
-  return [
-    truncateTextMiddle(
-      'developer docs implementation patterns reliability workflow API routing',
-      240,
-    ),
-  ];
+  family: ResearchScoutQueryFamily,
+): ResearchScoutSearchRequest[] {
+  return buildResearchScoutSearchRequestsForFamily(family);
 }
 
 function extractSignalDrivenSearchHints(entries: string[]): string[] {
@@ -8216,6 +9165,95 @@ function shouldPlanPlaywrightBrowserActions(
   return /browser|playwright|favicon|console|network requests|network failures|snapshot|page load|shell render|ui smoke|homepage-visible/.test(sourceText);
 }
 
+function hasResearchScoutDedicatedSearchTool(
+  braveInspection: McpInspection,
+  sourceKind: ResearchScoutSourceKind,
+): boolean {
+  if (sourceKind === 'docs') {
+    return mcpInspectionHasTool(braveInspection, 'brave_docs_search');
+  }
+  if (sourceKind === 'github') {
+    return mcpInspectionHasTool(braveInspection, 'brave_github_search');
+  }
+  if (sourceKind === 'youtube') {
+    return mcpInspectionHasTool(braveInspection, 'brave_youtube_search');
+  }
+  if (sourceKind === 'papers') {
+    return mcpInspectionHasTool(braveInspection, 'brave_papers_search');
+  }
+  return mcpInspectionHasTool(braveInspection, 'searxng_web_search')
+    || mcpInspectionHasTool(braveInspection, 'brave_web_search');
+}
+
+function resolveResearchScoutSearchTool(
+  braveInspection: McpInspection,
+  sourceKind: ResearchScoutSourceKind,
+): string {
+  if (sourceKind === 'docs' && mcpInspectionHasTool(braveInspection, 'brave_docs_search')) {
+    return 'brave_docs_search';
+  }
+  if (sourceKind === 'github' && mcpInspectionHasTool(braveInspection, 'brave_github_search')) {
+    return 'brave_github_search';
+  }
+  if (sourceKind === 'youtube' && mcpInspectionHasTool(braveInspection, 'brave_youtube_search')) {
+    return 'brave_youtube_search';
+  }
+  if (sourceKind === 'papers' && mcpInspectionHasTool(braveInspection, 'brave_papers_search')) {
+    return 'brave_papers_search';
+  }
+  if (mcpInspectionHasTool(braveInspection, 'searxng_web_search')) {
+    return 'searxng_web_search';
+  }
+  return 'brave_web_search';
+}
+
+function describeResearchScoutSourceKind(sourceKind: ResearchScoutSourceKind): string {
+  if (sourceKind === 'docs') return 'docs';
+  if (sourceKind === 'github') return 'GitHub';
+  if (sourceKind === 'youtube') return 'YouTube';
+  if (sourceKind === 'papers') return 'papers';
+  return 'web';
+}
+
+function describeResearchScoutFamily(family: ResearchScoutQueryFamily): string {
+  if (family === 'control-plane') return 'control-plane';
+  if (family === 'api') return 'API';
+  if (family === 'anyscan') return 'anyscan';
+  return 'implementation';
+}
+
+function buildResearchScoutSearchActionTitle(
+  request: ResearchScoutSearchRequest,
+  options?: { fallback?: boolean; queued?: boolean },
+): string {
+  const sourceLabel = describeResearchScoutSourceKind(request.sourceKind);
+  const familyLabel = describeResearchScoutFamily(request.family);
+  if (options?.queued) {
+    return `Research queued ${familyLabel} request with ${sourceLabel} search`;
+  }
+  if (options?.fallback) {
+    return `Research ${familyLabel} fallback with ${sourceLabel} search`;
+  }
+  return `Research ${familyLabel} ideas with ${sourceLabel} search`;
+}
+
+function buildResearchScoutSearchActionReason(
+  request: ResearchScoutSearchRequest,
+  options?: { fallback?: boolean; queued?: boolean },
+): string {
+  const sourceLabel = describeResearchScoutSourceKind(request.sourceKind);
+  if (options?.queued) {
+    return `Another autonomous lane requested ${sourceLabel}-first research evidence, so research-scout is gathering bounded ${sourceLabel} context for the shared pool before broad web browsing.`;
+  }
+  if (options?.fallback) {
+    if (request.family === 'anyscan' && request.sourceKind === 'web') {
+      return 'The docs, GitHub, and YouTube anyscan passes were weak, so research-scout is using a tightly scoped web fallback only after higher-signal sources underperformed.';
+    }
+    return `The first research pass was weak, so research-scout is retrying with a ${sourceLabel}-focused source lane before spending browser budget on lower-signal web pages.`;
+  }
+  return `The research-scout lane searches ${sourceLabel}-first for ${describeResearchScoutFamily(request.family)} work so it hits useful implementation resources before broad web noise.`;
+}
+
 function buildMcpPlannedAction(input: {
   id: string;
   server: string;
@@ -8286,37 +9324,35 @@ function buildDeterministicMcpActionPlan(
     && (
       mcpInspectionHasTool(braveInspection, 'brave_web_search')
       || mcpInspectionHasTool(braveInspection, 'searxng_web_search')
+      || mcpInspectionHasTool(braveInspection, 'brave_docs_search')
+      || mcpInspectionHasTool(braveInspection, 'brave_github_search')
+      || mcpInspectionHasTool(braveInspection, 'brave_youtube_search')
+      || mcpInspectionHasTool(braveInspection, 'brave_papers_search')
     )
     && (shouldPlanBraveSearchForGoal(state.goal) || shouldPlanSignalDrivenBraveSearch(state) || shouldPlanResearchScoutBraveSearch(state))
   ) {
-    const plannedResearchQueries = shouldPlanResearchScoutBraveSearch(state)
+    const plannedResearchRequests = shouldPlanResearchScoutBraveSearch(state)
       ? buildResearchScoutBraveQueries(state)
       : [];
-    if (plannedResearchQueries.length > 0) {
-      const preferredTool = mcpInspectionHasTool(braveInspection, 'searxng_web_search')
-        ? 'searxng_web_search'
-        : 'brave_web_search';
-      for (const [index, query] of plannedResearchQueries.entries()) {
+    if (plannedResearchRequests.length > 0) {
+      for (const [index, request] of plannedResearchRequests.entries()) {
+        const tool = resolveResearchScoutSearchTool(braveInspection, request.sourceKind);
         actions.push(buildMcpPlannedAction({
-          id: `mcp-brave-idea-scout-${index + 1}`,
+          id: `mcp-brave-idea-scout-${request.sourceKind}-${index + 1}`,
           server: 'brave-search',
-          tool: preferredTool,
-          title: inferResearchScoutQueryFamilyFromText(query) === 'control-plane'
-            ? 'Research control-plane improvement ideas with SearXNG'
-            : inferResearchScoutQueryFamilyFromText(query) === 'api'
-              ? 'Research API improvement ideas with SearXNG'
-              : 'Research implementation ideas with SearXNG',
-          reason: 'The research-scout lane searches the web with SearXNG for practical implementation ideas, then maps them back to in-scope files as suggestions for other lanes.',
-          arguments: { query },
+          tool,
+          title: buildResearchScoutSearchActionTitle(request),
+          reason: buildResearchScoutSearchActionReason(request),
+          arguments: { query: request.query },
           risk: 'low',
-          alwaysAllow: braveConfig.alwaysAllow.includes(preferredTool),
+          alwaysAllow: braveConfig.alwaysAllow.includes(tool),
         }));
       }
     } else {
       actions.push(buildMcpPlannedAction({
         id: 'mcp-brave-web-search',
         server: 'brave-search',
-        tool: 'brave_web_search',
+        tool: resolveResearchScoutSearchTool(braveInspection, 'web'),
         title: shouldPlanBraveSearchForGoal(state.goal)
           ? 'Research goal context with Brave Search'
           : 'Research active provider/model uncertainty with Brave Search',
@@ -8327,7 +9363,7 @@ function buildDeterministicMcpActionPlan(
           query: buildSignalDrivenBraveQuery(state),
         },
         risk: 'low',
-        alwaysAllow: braveConfig.alwaysAllow.includes('brave_web_search'),
+        alwaysAllow: braveConfig.alwaysAllow.includes(resolveResearchScoutSearchTool(braveInspection, 'web')),
       }));
     }
   }
@@ -9028,9 +10064,27 @@ async function inspectMcpNode(state: ControlPlaneState, runtime?: Runtime): Prom
     plannerNotes.push(`Loaded ${logInsights.length} log input(s) for planning and fix guidance.`);
   }
 
-    const { scopes: effectiveScopes, reason: scopeExpansionReason } = resolveEffectiveScopes(state);
+  const { scopes: effectiveScopes, reason: scopeExpansionReason } = resolveEffectiveScopes(state);
+  const anyscanObservationSignature = isAnyScanScopeSet(effectiveScopes)
+    ? deriveAnyScanObservationSignature({
+        scopes: effectiveScopes,
+        logInsights,
+        governanceGateResult,
+        evaluationGateResult,
+      })
+    : '';
+  const anyscanValidationSuppressedReason = resolveAnyScanValidationSuppression({
+    ...state,
+    effectiveScopes,
+    currentObservationSignature: anyscanObservationSignature,
+    governanceGateResult,
+    evaluationGateResult,
+  } as Partial<ControlPlaneState>);
+  if (anyscanValidationSuppressedReason) {
+    plannerNotes.push(`AnyScan validation throttle: ${anyscanValidationSuppressedReason}`);
+  }
 
-    return {
+  return {
       effectiveScopes,
       scopeExpansionReason,
       mcpConfigPath: configPath,
@@ -9078,6 +10132,9 @@ async function inspectMcpNode(state: ControlPlaneState, runtime?: Runtime): Prom
       observabilityMetadata,
       evaluationGatePolicy,
       evaluationGateResult,
+      currentObservationSignature: anyscanObservationSignature,
+      anyscanValidationSuppressed: Boolean(anyscanValidationSuppressedReason),
+      anyscanValidationSuppressedReason,
       plannerNotes,
     };
 }
@@ -9106,6 +10163,23 @@ async function plannerAgentNode(state: ControlPlaneState): Promise<Partial<Contr
   if (scopes.length === 1 && scopes[0] === 'research-scout') {
     const mergedNotes = appendUniqueNotes(notes, [
       'Research scout deterministic mode: search planning is generated from trusted-source packs and queued requests first; AI synthesis is deferred until web evidence exists.',
+    ]);
+    return {
+      effectiveScopes: scopes,
+      plannerNotes: mergedNotes,
+      aiAgentEnabled: state.aiAgentEnabled,
+      aiAgentBackend: state.aiAgentBackend,
+      aiAgentModel: state.aiAgentModel,
+      plannerAgentInsights: [],
+      lastAiFailureClass: state.lastAiFailureClass,
+    };
+  }
+
+  const anyscanValidationSuppressedReason = String(state.anyscanValidationSuppressedReason || '').trim();
+  if (anyscanValidationSuppressedReason) {
+    const mergedNotes = appendUniqueNotes(notes, [
+      `AnyScan planner throttle: ${anyscanValidationSuppressedReason}`,
+      'AnyScan planner agent skipped AI replanning because the observation signature is unchanged and the previous iteration produced no code.',
     ]);
     return {
       effectiveScopes: scopes,
@@ -9182,11 +10256,30 @@ async function planMcpActionsNode(state: ControlPlaneState): Promise<Partial<Con
 }
 
 async function buildAgentNode(state: ControlPlaneState): Promise<Partial<ControlPlaneState>> {
-  const buildJobs = buildScopeJobs(getEffectiveScopes(state), 'build');
+  const anyscanValidationSuppressedReason = String(state.anyscanValidationSuppressedReason || '').trim();
+  const buildJobs = anyscanValidationSuppressedReason ? [] : buildScopeJobs(getEffectiveScopes(state), 'build');
   if (getEffectiveScopes(state).length === 1 && getEffectiveScopes(state)[0] === 'research-scout') {
     return {
       buildJobs,
       plannerNotes: appendUniqueNotes(state.plannerNotes, ['Research scout skipped generic build-agent advice; evidence synthesis happens after web results are collected.']),
+      aiAgentEnabled: state.aiAgentEnabled,
+      aiAgentBackend: state.aiAgentBackend,
+      aiAgentModel: state.aiAgentModel,
+      buildAgentInsights: [],
+      lastAiFailureClass: state.lastAiFailureClass,
+    };
+  }
+  if (anyscanValidationSuppressedReason) {
+    const notes = appendUniqueNotes(
+      state.plannerNotes,
+      [
+        `AnyScan build throttle: ${anyscanValidationSuppressedReason}`,
+        'AnyScan build agent skipped AI advice and validation jobs because the observation signature is unchanged and the previous iteration produced no code.',
+      ],
+    );
+    return {
+      buildJobs,
+      plannerNotes: notes,
       aiAgentEnabled: state.aiAgentEnabled,
       aiAgentBackend: state.aiAgentBackend,
       aiAgentModel: state.aiAgentModel,
@@ -9238,11 +10331,30 @@ async function buildAgentNode(state: ControlPlaneState): Promise<Partial<Control
 }
 
 async function qualityAgentNode(state: ControlPlaneState): Promise<Partial<ControlPlaneState>> {
-  const testJobs = buildScopeJobs(getEffectiveScopes(state), 'test');
+  const anyscanValidationSuppressedReason = String(state.anyscanValidationSuppressedReason || '').trim();
+  const testJobs = anyscanValidationSuppressedReason ? [] : buildScopeJobs(getEffectiveScopes(state), 'test');
   if (getEffectiveScopes(state).length === 1 && getEffectiveScopes(state)[0] === 'research-scout') {
     return {
       testJobs,
       plannerNotes: appendUniqueNotes(state.plannerNotes, ['Research scout skipped generic quality-agent advice; search/result quality is evaluated after website evidence is collected.']),
+      aiAgentEnabled: state.aiAgentEnabled,
+      aiAgentBackend: state.aiAgentBackend,
+      aiAgentModel: state.aiAgentModel,
+      qualityAgentInsights: [],
+      lastAiFailureClass: state.lastAiFailureClass,
+    };
+  }
+  if (anyscanValidationSuppressedReason) {
+    const notes = appendUniqueNotes(
+      state.plannerNotes,
+      [
+        `AnyScan quality throttle: ${anyscanValidationSuppressedReason}`,
+        'AnyScan quality agent skipped AI advice and validation jobs because the observation signature is unchanged and the previous iteration produced no code.',
+      ],
+    );
+    return {
+      testJobs,
+      plannerNotes: notes,
       aiAgentEnabled: state.aiAgentEnabled,
       aiAgentBackend: state.aiAgentBackend,
       aiAgentModel: state.aiAgentModel,
@@ -9294,9 +10406,10 @@ async function qualityAgentNode(state: ControlPlaneState): Promise<Partial<Contr
 }
 
 async function deployAgentNode(state: ControlPlaneState): Promise<Partial<ControlPlaneState>> {
+  const anyscanValidationSuppressedReason = String(state.anyscanValidationSuppressedReason || '').trim();
   const deployJobs: PlannedJob[] = [];
 
-  if (state.allowDeploy) {
+  if (!anyscanValidationSuppressedReason && state.allowDeploy) {
     const chosenCommand = state.deployCommand.trim() || getDefaultDeployCommand(state);
     deployJobs.push({
       id: 'deploy',
@@ -9313,6 +10426,25 @@ async function deployAgentNode(state: ControlPlaneState): Promise<Partial<Contro
     return {
       deployJobs,
       plannerNotes: appendUniqueNotes(state.plannerNotes, ['Research scout skipped generic deploy-agent advice; it is a suggestion-only lane and does not need pre-search deployment planning.']),
+      aiAgentEnabled: state.aiAgentEnabled,
+      aiAgentBackend: state.aiAgentBackend,
+      aiAgentModel: state.aiAgentModel,
+      deployAgentInsights: [],
+      lastAiFailureClass: state.lastAiFailureClass,
+    };
+  }
+
+  if (anyscanValidationSuppressedReason) {
+    const notes = appendUniqueNotes(
+      state.plannerNotes,
+      [
+        `AnyScan deploy throttle: ${anyscanValidationSuppressedReason}`,
+        'AnyScan deploy agent skipped AI advice because the observation signature is unchanged and the previous iteration produced no code.',
+      ],
+    );
+    return {
+      deployJobs,
+      plannerNotes: notes,
       aiAgentEnabled: state.aiAgentEnabled,
       aiAgentBackend: state.aiAgentBackend,
       aiAgentModel: state.aiAgentModel,
@@ -9485,6 +10617,48 @@ async function autonomousEditPlannerNode(state: ControlPlaneState): Promise<Part
       evidenceStatus: 'missing',
       validationRequired: true,
       deferReason: surfaceBrowserBlockingReason,
+    };
+  }
+  const anyscanValidationSuppressedReason = String(state.anyscanValidationSuppressedReason || '').trim();
+  const anyscanIntentUnchanged = Boolean(
+    anyscanValidationSuppressedReason
+    && !hasActionableRepairSignals(state.repairSignals)
+    && String(state.previousRepairIntentSummary || '').trim() === String(state.repairIntentSummary || '').trim()
+    && String(state.previousImprovementIntentSummary || '').trim() === String(state.improvementIntentSummary || '').trim(),
+  );
+  if (anyscanIntentUnchanged) {
+    const throttledOperationMode: AutonomousOperationMode = state.autonomousOperationMode === 'repair' || state.autonomousOperationMode === 'improvement'
+      ? state.autonomousOperationMode
+      : 'improvement';
+    const repairDecisionReason = 'No autonomous edits required while anyscan observation and intent remain unchanged.';
+    const notes = [
+      `AnyScan autonomous throttle: ${anyscanValidationSuppressedReason}`,
+      'AnyScan autonomous edit planner skipped AI code-edit planning because repair and improvement intent are unchanged and the previous iteration produced no code.',
+    ];
+    return {
+      autonomousOperationMode: throttledOperationMode,
+      proposedEdits: [],
+      appliedEdits: [],
+      autonomousEditNotes: notes,
+      autonomousEditReviewDecision: 'approved',
+      autonomousEditReviewReason: repairDecisionReason,
+      repairStatus: throttledOperationMode === 'repair' ? 'idle' : 'not-needed',
+      repairDecisionReason,
+      repairPromotedPaths: [],
+      repairRollbackPaths: [],
+      repairSmokeJobs: [],
+      repairSmokeResults: [],
+      postRepairValidationJobs: [],
+      postRepairValidationResults: [],
+      postRepairValidationStatus: 'not-needed',
+      experimentalRestartStatus: 'not-needed',
+      experimentalRestartReason: '',
+      repairSessionManifest: null,
+      repairNotes: appendUniqueNotes(state.repairNotes, notes),
+      plannerNotes: appendUniqueNotes(state.plannerNotes, notes),
+      aiAgentEnabled: state.aiAgentEnabled,
+      aiAgentBackend: state.aiAgentBackend,
+      aiAgentModel: state.aiAgentModel,
     };
   }
   const failedEditAnchorHints = buildFailedAutonomousEditAnchorHints(state);
@@ -10271,7 +11445,8 @@ type ResearchScoutVisitedPageRecord = {
   key: string;
   url: string;
   hostname: string;
-  family: 'control-plane' | 'api' | 'generic';
+  family: ResearchScoutQueryFamily;
+  sourceKind: ResearchScoutSourceKind;
   keywords: string[];
   mappedPaths: string[];
   totalScore: number;
@@ -10287,10 +11462,22 @@ type ResearchScoutVisitedPageHistory = {
   keywordSet: Set<string>;
 };
 
+type ResearchScoutVisitedUrlReceiptRecord = {
+  key: string;
+  url: string;
+  hostname: string;
+  family: ResearchScoutQueryFamily;
+  sourceKind: ResearchScoutSourceKind;
+  firstOpenedAt: string;
+  lastOpenedAt: string;
+  openCount: number;
+};
+
 type ResearchScoutWebsiteObservation = {
   url: string;
   hostname: string;
-  family: 'control-plane' | 'api' | 'generic';
+  family: ResearchScoutQueryFamily;
+  sourceKind: ResearchScoutSourceKind;
   searchTitle: string;
   searchDescription: string;
   searchScore: number;
@@ -10391,6 +11578,12 @@ function getResearchScoutPageMemoryNamespace(
   return [...getControlPlaneSemanticMemoryNamespace(state), 'research-scout-pages'];
 }
 
+function getResearchScoutUrlReceiptNamespace(
+  state: Pick<ControlPlaneState, 'langSmithProjectName' | 'governanceProfile'>,
+): string[] {
+  return [...getControlPlaneSemanticMemoryNamespace(state), 'research-scout-opened-urls'];
+}
+
 async function readResearchScoutVisitedPageRecords(
   store: BaseStore | undefined,
   state: Pick<ControlPlaneState, 'langSmithProjectName' | 'governanceProfile'>,
@@ -10414,7 +11607,13 @@ async function readResearchScoutVisitedPageRecords(
       key: String(item.key || url),
       url,
       hostname: getResearchScoutHostname(url),
-      family: value.family === 'control-plane' || value.family === 'api' ? value.family : 'generic',
+      family: value.family === 'control-plane' || value.family === 'api' || value.family === 'anyscan' ? value.family : 'generic',
+      sourceKind: value.sourceKind === 'docs'
+        || value.sourceKind === 'github'
+        || value.sourceKind === 'youtube'
+        || value.sourceKind === 'papers'
+        ? value.sourceKind
+        : inferResearchScoutSourceKindFromHostname(getResearchScoutHostname(url)),
       keywords: Array.isArray(value.keywords)
         ? value.keywords.map((entry) => String(entry || '').trim()).filter(Boolean)
         : [],
@@ -10432,25 +11631,83 @@ async function readResearchScoutVisitedPageRecords(
   return records;
 }
 
+async function readResearchScoutVisitedUrlReceipts(
+  store: BaseStore | undefined,
+  state: Pick<ControlPlaneState, 'langSmithProjectName' | 'governanceProfile'>,
+): Promise<ResearchScoutVisitedUrlReceiptRecord[]> {
+  if (!store) return [];
+  const namespace = getResearchScoutUrlReceiptNamespace(state);
+  const items = await store.search(namespace, {
+    limit: 128,
+  }).catch(() => [] as SearchItem[]);
+
+  const seenUrls = new Set<string>();
+  const records: ResearchScoutVisitedUrlReceiptRecord[] = [];
+  for (const item of items) {
+    const value = item.value && typeof item.value === 'object'
+      ? item.value as Record<string, unknown>
+      : {};
+    const url = normalizeHttpUrl(value.pageUrl || item.key);
+    if (!url || seenUrls.has(url)) continue;
+    seenUrls.add(url);
+    records.push({
+      key: String(item.key || url),
+      url,
+      hostname: getResearchScoutHostname(url),
+      family: value.family === 'control-plane' || value.family === 'api' || value.family === 'anyscan'
+        ? value.family
+        : inferResearchScoutQueryFamilyFromText(url),
+      sourceKind: value.sourceKind === 'docs'
+        || value.sourceKind === 'github'
+        || value.sourceKind === 'youtube'
+        || value.sourceKind === 'papers'
+        ? value.sourceKind
+        : inferResearchScoutSourceKindFromHostname(getResearchScoutHostname(url)),
+      firstOpenedAt: String(value.firstOpenedAt || '').trim(),
+      lastOpenedAt: String(value.lastOpenedAt || '').trim(),
+      openCount: Math.max(1, Math.floor(Number(value.openCount) || 1)),
+    });
+  }
+
+  return records;
+}
+
 function buildResearchScoutVisitedPageHistory(
   records: ResearchScoutVisitedPageRecord[],
+  receiptRecords: ResearchScoutVisitedUrlReceiptRecord[] = [],
 ): ResearchScoutVisitedPageHistory {
   const visitedUrls = new Set<string>();
   const hostVisitCounts = new Map<string, number>();
   const keywordSet = new Set<string>();
+  const visitWeightsByUrl = new Map<string, { hostname: string; weight: number }>();
+  const rememberVisit = (url: string, hostname: string, weight: number): void => {
+    const normalizedUrl = normalizeHttpUrl(url);
+    const normalizedHostname = String(hostname || '').trim().toLowerCase();
+    if (!normalizedUrl) return;
+    visitedUrls.add(normalizedUrl);
+    if (!normalizedHostname) return;
+    const nextWeight = Math.max(1, Math.floor(weight) || 1);
+    const existing = visitWeightsByUrl.get(normalizedUrl);
+    if (!existing || nextWeight > existing.weight) {
+      visitWeightsByUrl.set(normalizedUrl, { hostname: normalizedHostname, weight: nextWeight });
+    }
+  };
 
   for (const record of records) {
-    if (record.url) visitedUrls.add(record.url);
-    if (record.hostname) {
-      hostVisitCounts.set(
-        record.hostname,
-        (hostVisitCounts.get(record.hostname) || 0) + Math.max(1, record.visitCount),
-      );
-    }
+    rememberVisit(record.url, record.hostname, record.visitCount);
     for (const keyword of record.keywords) {
       const normalized = String(keyword || '').trim().toLowerCase();
       if (normalized) keywordSet.add(normalized);
     }
+  }
+  for (const receiptRecord of receiptRecords) {
+    rememberVisit(receiptRecord.url, receiptRecord.hostname, receiptRecord.openCount);
+  }
+  for (const visit of visitWeightsByUrl.values()) {
+    hostVisitCounts.set(
+      visit.hostname,
+      (hostVisitCounts.get(visit.hostname) || 0) + visit.weight,
+    );
   }
 
   return {
@@ -10462,7 +11719,8 @@ function buildResearchScoutVisitedPageHistory(
 
 function buildResearchScoutPageSearchText(
   input: {
-    family: 'control-plane' | 'api' | 'generic';
+    family: ResearchScoutQueryFamily;
+    sourceKind?: ResearchScoutSourceKind;
     pageTitle?: string;
     searchTitle?: string;
     searchDescription?: string;
@@ -10476,6 +11734,7 @@ function buildResearchScoutPageSearchText(
   return truncateTextMiddle(
     [
       input.family,
+      input.sourceKind,
       input.hostname,
       input.pageTitle,
       input.searchTitle,
@@ -10511,18 +11770,28 @@ function extractUrlsFromTextPreview(text: string): string[] {
 }
 
 function extractResearchScoutActionLinks(
-  action: Pick<McpExecutedAction, 'outputLinks' | 'outputPreview' | 'outputSummary' | 'title'>,
-): Array<{ url: string; title: string; description: string; source: string }> {
+  action: Pick<McpExecutedAction, 'outputLinks' | 'outputPreview' | 'outputSummary' | 'title'> & { tool?: string },
+): Array<{ url: string; title: string; description: string; source: string; sourceKind: ResearchScoutSourceKind }> {
   if (Array.isArray(action.outputLinks) && action.outputLinks.length > 0) {
-    return action.outputLinks;
+    return action.outputLinks.map((link) => ({
+      ...link,
+      sourceKind: link.sourceKind === 'docs'
+        || link.sourceKind === 'github'
+        || link.sourceKind === 'youtube'
+        || link.sourceKind === 'papers'
+        ? link.sourceKind
+        : inferResearchScoutSourceKindFromHostname(getResearchScoutHostname(link.url)),
+    }));
   }
 
+  const fallbackSourceKind = inferResearchScoutSourceKindFromAction(action);
   return extractUrlsFromTextPreview(action.outputPreview || action.outputSummary || '')
     .map((url) => ({
       url,
       title: action.title || '',
       description: action.outputSummary || action.outputPreview || '',
       source: 'preview-fallback',
+      sourceKind: fallbackSourceKind,
     }));
 }
 
@@ -10551,7 +11820,7 @@ function researchScoutHostnameMatchesConstraint(
 
 function inferResearchScoutQueryFamily(
   action: Pick<McpExecutedAction, 'arguments'>,
-): 'control-plane' | 'api' | 'generic' {
+): ResearchScoutQueryFamily {
   return inferResearchScoutQueryFamilyFromText(
     (action.arguments as Record<string, unknown> | undefined)?.query || '',
   );
@@ -10565,28 +11834,119 @@ function getResearchScoutHostname(rawUrl: string): string {
   }
 }
 
-function scoreResearchScoutDomain(hostname: string, family: 'control-plane' | 'api' | 'generic'): number {
-  if (!hostname) return 0;
+const RESEARCH_SCOUT_DOC_HOST_SUFFIXES = [
+  'docs.rs',
+  'tokio.rs',
+  'crates.io',
+  'readthedocs.io',
+  'developer.mozilla.org',
+  'modelcontextprotocol.io',
+  'temporal.io',
+  'qdrant.tech',
+  'platform.openai.com',
+  'openrouter.ai',
+  'docs.anthropic.com',
+  'ai.google.dev',
+  'developers.google.com',
+  'postman.com',
+  'docs.redis.com',
+  'redis.io',
+  'pypi.org',
+  'langchain.com',
+  'langchain.dev',
+  'rust-embedded.org',
+  'python-requests.org',
+];
+const RESEARCH_SCOUT_GITHUB_HOST_SUFFIXES = ['github.com'];
+const RESEARCH_SCOUT_YOUTUBE_HOST_SUFFIXES = ['youtube.com', 'youtu.be'];
+const RESEARCH_SCOUT_PAPER_HOST_SUFFIXES = ['arxiv.org', 'paperswithcode.com', 'dl.acm.org', 'ieeexplore.ieee.org'];
 
-  if (/github\.com$/.test(hostname)) return 6;
-  if (/docs?\./.test(hostname) || /readthedocs\.io$/.test(hostname)) return 6;
-  if (/langchain\.com$/.test(hostname) || /langchain\.dev$/.test(hostname)) return family === 'control-plane' ? 4 : 7;
-  if (/modelcontextprotocol\.io$/.test(hostname)) return family === 'control-plane' ? 9 : 5;
-  if (/qdrant\.tech$/.test(hostname)) return family === 'control-plane' ? 9 : 5;
-  if (/temporal\.io$/.test(hostname)) return family === 'control-plane' ? 9 : 3;
-  if (/openrouter\.ai$/.test(hostname)) return family === 'api' ? 7 : 3;
-  if (/platform\.openai\.com$/.test(hostname) || /openai\.com$/.test(hostname)) return family === 'api' ? 7 : 4;
-  if (/ai\.google\.dev$/.test(hostname) || /developers\.google\.com$/.test(hostname)) return family === 'api' ? 6 : 3;
-  if (/anthropic\.com$/.test(hostname) || /docs\.anthropic\.com$/.test(hostname)) return family === 'api' ? 6 : 3;
-  if (/arxiv\.org$/.test(hostname) || /paperswithcode\.com$/.test(hostname)) return 6;
-  if (/pypi\.org$/.test(hostname)) return 5;
-  if (/realpython\.com$/.test(hostname)) return 4;
-  if (/wikipedia\.org$/.test(hostname)) return 1;
-  if (/reddit\.com$/.test(hostname) || /redd\.it$/.test(hostname)) return -6;
-  if (/aws\.amazon\.com$/.test(hostname) || /cloudflare\.com$/.test(hostname)) return family === 'api' ? 0 : 2;
-  if (/medium\.com$/.test(hostname)) return family === 'control-plane' ? -5 : -3;
-  if (/geeksforgeeks\.org$/.test(hostname) || /forbes\.com$/.test(hostname)) return -2;
-  if (/harvard\.edu$/.test(hostname) || /hls\.harvard\.edu$/.test(hostname) || /cartoonstock\.com$/.test(hostname) || /insper\.edu\.br$/.test(hostname) || /hofstra\.edu$/.test(hostname)) return -8;
+function researchScoutHostnameMatchesSuffix(hostname: string, suffixes: string[]): boolean {
+  const normalizedHostname = String(hostname || '').trim().toLowerCase();
+  if (!normalizedHostname) return false;
+  return suffixes.some((suffix) => normalizedHostname === suffix || normalizedHostname.endsWith(`.${suffix}`));
+}
+
+function isResearchScoutDocsHost(hostname: string): boolean {
+  const normalizedHostname = String(hostname || '').trim().toLowerCase();
+  if (!normalizedHostname) return false;
+  return researchScoutHostnameMatchesSuffix(normalizedHostname, RESEARCH_SCOUT_DOC_HOST_SUFFIXES)
+    || /(^|\.)docs?\./.test(normalizedHostname);
+}
+
+function isResearchScoutGithubHost(hostname: string): boolean {
+  return researchScoutHostnameMatchesSuffix(hostname, RESEARCH_SCOUT_GITHUB_HOST_SUFFIXES);
+}
+
+function isResearchScoutYouTubeHost(hostname: string): boolean {
+  return researchScoutHostnameMatchesSuffix(hostname, RESEARCH_SCOUT_YOUTUBE_HOST_SUFFIXES);
+}
+
+function isResearchScoutPapersHost(hostname: string): boolean {
+  return researchScoutHostnameMatchesSuffix(hostname, RESEARCH_SCOUT_PAPER_HOST_SUFFIXES);
+}
+
+function inferResearchScoutSourceKindFromHostname(hostname: string): ResearchScoutSourceKind {
+  const normalizedHostname = String(hostname || '').toLowerCase();
+  if (!normalizedHostname) return 'web';
+  if (isResearchScoutYouTubeHost(normalizedHostname)) return 'youtube';
+  if (isResearchScoutGithubHost(normalizedHostname)) return 'github';
+  if (isResearchScoutPapersHost(normalizedHostname)) return 'papers';
+  if (isResearchScoutDocsHost(normalizedHostname)) return 'docs';
+  return 'web';
+}
+
+function inferResearchScoutSourceKindFromAction(
+  action: Pick<McpExecutedAction, 'outputLinks' | 'outputPreview' | 'outputSummary'> & { tool?: string },
+): ResearchScoutSourceKind {
+  if (action.tool === 'brave_docs_search') return 'docs';
+  if (action.tool === 'brave_github_search') return 'github';
+  if (action.tool === 'brave_youtube_search') return 'youtube';
+  if (action.tool === 'brave_papers_search') return 'papers';
+  if (Array.isArray(action.outputLinks) && action.outputLinks.length > 0) {
+    const first = action.outputLinks[0];
+    if (first?.sourceKind === 'docs' || first?.sourceKind === 'github' || first?.sourceKind === 'youtube' || first?.sourceKind === 'papers') {
+      return first.sourceKind;
+    }
+    const hostname = getResearchScoutHostname(first?.url || '');
+    return inferResearchScoutSourceKindFromHostname(hostname);
+  }
+  const previewHost = getResearchScoutHostname(
+    extractUrlsFromTextPreview(action.outputPreview || action.outputSummary || '')[0] || '',
+  );
+  return inferResearchScoutSourceKindFromHostname(previewHost);
+}
+
+function scoreResearchScoutDomain(hostname: string, family: ResearchScoutQueryFamily): number {
+  const normalizedHostname = String(hostname || '').trim().toLowerCase();
+  if (!normalizedHostname) return 0;
+
+  if (isResearchScoutGithubHost(normalizedHostname)) return 6;
+  if (researchScoutHostnameMatchesSuffix(normalizedHostname, ['docs.rs', 'tokio.rs', 'crates.io'])) {
+    return family === 'anyscan' ? 8 : 7;
+  }
+  if (researchScoutHostnameMatchesSuffix(normalizedHostname, ['docs.redis.com', 'redis.io'])) {
+    return family === 'anyscan' ? 8 : 4;
+  }
+  if (researchScoutHostnameMatchesSuffix(normalizedHostname, ['modelcontextprotocol.io'])) return family === 'control-plane' ? 9 : 5;
+  if (researchScoutHostnameMatchesSuffix(normalizedHostname, ['qdrant.tech'])) return family === 'control-plane' ? 9 : 5;
+  if (researchScoutHostnameMatchesSuffix(normalizedHostname, ['temporal.io'])) return family === 'control-plane' ? 9 : 3;
+  if (researchScoutHostnameMatchesSuffix(normalizedHostname, ['openrouter.ai'])) return family === 'api' ? 7 : 3;
+  if (researchScoutHostnameMatchesSuffix(normalizedHostname, ['platform.openai.com', 'openai.com'])) return family === 'api' ? 7 : 4;
+  if (researchScoutHostnameMatchesSuffix(normalizedHostname, ['ai.google.dev', 'developers.google.com'])) return family === 'api' ? 6 : 3;
+  if (researchScoutHostnameMatchesSuffix(normalizedHostname, ['anthropic.com', 'docs.anthropic.com'])) return family === 'api' ? 6 : 3;
+  if (researchScoutHostnameMatchesSuffix(normalizedHostname, ['langchain.com', 'langchain.dev'])) return family === 'control-plane' ? 4 : 7;
+  if (isResearchScoutPapersHost(normalizedHostname)) return 6;
+  if (researchScoutHostnameMatchesSuffix(normalizedHostname, ['pypi.org'])) return 5;
+  if (researchScoutHostnameMatchesSuffix(normalizedHostname, ['developer.mozilla.org', 'readthedocs.io'])) return 6;
+  if (isResearchScoutDocsHost(normalizedHostname)) return family === 'anyscan' ? 6 : 5;
+  if (/realpython\.com$/.test(normalizedHostname)) return 4;
+  if (/wikipedia\.org$/.test(normalizedHostname)) return 1;
+  if (/reddit\.com$/.test(normalizedHostname) || /redd\.it$/.test(normalizedHostname)) return -6;
+  if (/aws\.amazon\.com$/.test(normalizedHostname) || /cloudflare\.com$/.test(normalizedHostname)) return family === 'api' ? 0 : 2;
+  if (/medium\.com$/.test(normalizedHostname)) return family === 'control-plane' ? -5 : -3;
+  if (/geeksforgeeks\.org$/.test(normalizedHostname) || /forbes\.com$/.test(normalizedHostname)) return -2;
+  if (/harvard\.edu$/.test(normalizedHostname) || /hls\.harvard\.edu$/.test(normalizedHostname) || /cartoonstock\.com$/.test(normalizedHostname) || /insper\.edu\.br$/.test(normalizedHostname) || /hofstra\.edu$/.test(normalizedHostname)) return -8;
   return 0;
 }
 
@@ -10606,13 +11966,13 @@ function isResearchScoutLowValueCommunityHost(hostname: string): boolean {
 
 function isResearchScoutPreferredTechnicalHost(
   hostname: string,
-  family: 'control-plane' | 'api' | 'generic',
+  family: ResearchScoutQueryFamily,
 ): boolean {
   const normalizedHostname = String(hostname || '').toLowerCase();
   if (!normalizedHostname) return false;
-  if (/github\.com$|readthedocs\.io$|docs?\./.test(normalizedHostname)) return true;
-  if (/langchain\.com$|langchain\.dev$|modelcontextprotocol\.io$|qdrant\.tech$|temporal\.io$|arxiv\.org$|paperswithcode\.com$|pypi\.org$/.test(normalizedHostname)) return true;
-  if (family === 'api' && /openrouter\.ai$|platform\.openai\.com$|openai\.com$|ai\.google\.dev$|developers\.google\.com$|anthropic\.com$|docs\.anthropic\.com$|postman\.com$/.test(normalizedHostname)) return true;
+  if (isResearchScoutGithubHost(normalizedHostname) || isResearchScoutDocsHost(normalizedHostname)) return true;
+  if (isResearchScoutYouTubeHost(normalizedHostname) || isResearchScoutPapersHost(normalizedHostname)) return true;
+  if (family === 'api' && researchScoutHostnameMatchesSuffix(normalizedHostname, ['openai.com', 'anthropic.com'])) return true;
   return false;
 }
 
@@ -10622,7 +11982,7 @@ function isResearchScoutDictionaryHost(hostname: string): boolean {
 
 function isResearchScoutUndesiredHost(
   hostname: string,
-  family: 'control-plane' | 'api' | 'generic',
+  family: ResearchScoutQueryFamily,
 ): boolean {
   if (!hostname) return true;
   if (isResearchScoutDictionaryHost(hostname)) return true;
@@ -10672,6 +12032,15 @@ function extractResearchScoutTopicMarkers(text: string): string[] {
   if (/anthropic|claude/.test(normalized)) push('anthropic');
   if (/checkpoint|state graph|durable/.test(normalized)) push('durable');
   if (/routing|provider|rate limit|quota|capability/.test(normalized)) push('routing');
+  if (/reqwest/.test(normalized)) push('reqwest');
+  if (/axum/.test(normalized)) push('axum');
+  if (/tokio/.test(normalized)) push('tokio');
+  if (/redis|dragonfly/.test(normalized)) push('redis');
+  if (/robots\.txt|robots txt|robots/.test(normalized)) push('robots');
+  if (/sitemap/.test(normalized)) push('sitemap');
+  if (/crawler|crawl|discovery/.test(normalized)) push('crawler');
+  if (/sse|server-sent events/.test(normalized)) push('sse');
+  if (/secret scan|secret scanning|secret detection/.test(normalized)) push('secret-scan');
   return markers;
 }
 
@@ -10743,7 +12112,7 @@ type ResearchScoutPrefetchedPage = {
 
 async function fetchResearchScoutPagePreview(
   url: string,
-  family: 'control-plane' | 'api' | 'generic',
+  family: ResearchScoutQueryFamily,
 ): Promise<ResearchScoutPrefetchedPage | null> {
   const normalizedUrl = normalizeHttpUrl(url);
   if (!normalizedUrl) return null;
@@ -10834,6 +12203,7 @@ async function fetchResearchScoutPagePreview(
     if (/guide|reference|tutorial|overview|quickstart|examples?|best practices?|implementation/.test(combinedText.toLowerCase())) score += 2;
     if (family === 'control-plane' && /mcp|model context protocol|checkpoint|durable|state graph|governance|evaluation|observability|semantic memory|vector memory|hybrid search|agent orchestration|workflow/.test(combinedText.toLowerCase())) score += 4;
     if (family === 'api' && /api|provider|routing|retry|quota|rate limit|capability|openai|openrouter|gemini|anthropic|responses api/.test(combinedText.toLowerCase())) score += 4;
+    if (family === 'anyscan' && /rust|cargo|axum|reqwest|tokio|redis|robots\.txt|sitemap|crawler|crawl|secret scanning|sse/.test(combinedText.toLowerCase())) score += 4;
     if (!combinedText || combinedText.length < 120) score -= 2;
 
     return {
@@ -10907,6 +12277,8 @@ function scoreResearchScoutLink(
     if (isResearchScoutTechnicalDocLike(normalizedText)) score += 2;
     if (/what is\b|explained\b/.test(normalizedText)) score -= 2;
     if (!/api|gateway|routing|provider|retry|quota|capability|openai|openrouter|gemini|rate limit|resilience/.test(normalizedText)) score -= 5;
+  } else if (/rust|cargo|axum|reqwest|tokio|redis|robots\.txt|sitemap|crawler|crawl|secret scanning|sse/.test(normalizedText)) {
+    score += 5;
   }
 
   score += scoreResearchScoutDomain(hostname, family);
@@ -10921,6 +12293,60 @@ function getBestResearchScoutSearchScore(
   return Math.max(
     ...links.map((link) => scoreResearchScoutLink(action, link)),
   );
+}
+
+function assessResearchScoutSearchCoverage(
+  action: Pick<McpExecutedAction, 'arguments' | 'outputLinks' | 'outputPreview' | 'outputSummary' | 'title'>,
+): { bestScore: number; linkCount: number } {
+  const links = extractResearchScoutActionLinks(action);
+  if (links.length === 0) {
+    return { bestScore: 0, linkCount: 0 };
+  }
+  return {
+    bestScore: Math.max(...links.map((link) => scoreResearchScoutLink(action, link))),
+    linkCount: links.length,
+  };
+}
+
+function shouldPlanResearchScoutBroadWebFallback(
+  family: ResearchScoutQueryFamily,
+  executedActions: McpExecutedAction[],
+  braveInspection: McpInspection,
+): boolean {
+  if (family !== 'anyscan') return true;
+
+  const requiredSourceKinds = getResearchScoutRequiredPreWebFallbackSourceKinds(family)
+    .filter((sourceKind) => hasResearchScoutDedicatedSearchTool(braveInspection, sourceKind));
+  if (requiredSourceKinds.length === 0) return true;
+
+  const coverageByKind = new Map<ResearchScoutSourceKind, { bestScore: number; linkCount: number }>();
+  for (const action of executedActions) {
+    if (action.server !== 'brave-search' || action.status !== 'success') continue;
+    if (inferResearchScoutQueryFamily(action) !== family) continue;
+
+    const sourceKind = inferResearchScoutSourceKindFromAction(action);
+    if (!requiredSourceKinds.includes(sourceKind)) continue;
+
+    const coverage = isResearchScoutNoResultAction(action)
+      ? { bestScore: Number.NEGATIVE_INFINITY, linkCount: 0 }
+      : assessResearchScoutSearchCoverage(action);
+    const existingCoverage = coverageByKind.get(sourceKind);
+    if (
+      !existingCoverage
+      || coverage.bestScore > existingCoverage.bestScore
+      || (coverage.bestScore === existingCoverage.bestScore && coverage.linkCount > existingCoverage.linkCount)
+    ) {
+      coverageByKind.set(sourceKind, coverage);
+    }
+  }
+
+  return requiredSourceKinds.every((sourceKind) => {
+    const coverage = coverageByKind.get(sourceKind);
+    if (!coverage) return true;
+    if (coverage.bestScore < RESEARCH_SCOUT_ANYSCAN_RUNTIME_WEB_FALLBACK_MIN_SCORE) return true;
+    return coverage.bestScore < RESEARCH_SCOUT_ANYSCAN_RUNTIME_WEB_FALLBACK_STRONG_SCORE
+      && coverage.linkCount < RESEARCH_SCOUT_ANYSCAN_RUNTIME_WEB_FALLBACK_MIN_LINKS;
+  });
 }
 
 function buildResearchScoutFallbackSearchActions(
@@ -10954,34 +12380,36 @@ function buildResearchScoutFallbackSearchActions(
     const needsFallback = isResearchScoutNoResultAction(executedAction)
       || (family === 'api' && getBestResearchScoutSearchScore(executedAction) < 5);
     if (!needsFallback) continue;
-    const preferredTool = mcpInspectionHasTool(braveInspection, 'searxng_web_search')
-      ? 'searxng_web_search'
-      : 'brave_web_search';
-    const fallbackQueries = buildResearchScoutFallbackQueries(family);
-    for (const [index, query] of fallbackQueries.entries()) {
-      const fallbackId = `mcp-brave-idea-scout-${family}-fallback-${index + 1}`;
+
+    const fallbackRequests = family === 'anyscan'
+      ? (
+          shouldPlanResearchScoutBroadWebFallback(family, state.executedMcpActions || [], braveInspection)
+            ? buildResearchScoutFallbackQueries(family).filter((request) => request.sourceKind === 'web')
+            : []
+        )
+      : buildResearchScoutFallbackQueries(family);
+    for (const [index, request] of fallbackRequests.entries()) {
+      const tool = resolveResearchScoutSearchTool(braveInspection, request.sourceKind);
+      const fallbackId = `mcp-brave-idea-scout-${family}-fallback-${request.sourceKind}-${index + 1}`;
       if (existingIds.has(fallbackId)) continue;
 
       actions.push(buildMcpPlannedAction({
         id: fallbackId,
         server: 'brave-search',
-        tool: preferredTool,
-        title: family === 'control-plane'
-          ? 'Research control-plane fallback ideas with SearXNG'
-          : family === 'api'
-            ? 'Research API fallback ideas with SearXNG'
-            : 'Research fallback ideas with SearXNG',
-        reason: 'The first research query returned no results, so research-scout is retrying with a more targeted technical fallback query before selecting pages to inspect.',
+        tool,
+        title: buildResearchScoutSearchActionTitle(request, { fallback: true }),
+        reason: buildResearchScoutSearchActionReason(request, { fallback: true }),
         arguments: {
-          query,
+          query: request.query,
         },
         risk: 'low',
-        alwaysAllow: braveConfig.alwaysAllow.includes(preferredTool),
+        alwaysAllow: braveConfig.alwaysAllow.includes(tool),
       }));
+      existingIds.add(fallbackId);
     }
   }
 
-  return actions.slice(0, 3);
+  return actions.slice(0, 4);
 }
 
 async function buildResearchScoutRequestedSearchActions(
@@ -10990,23 +12418,38 @@ async function buildResearchScoutRequestedSearchActions(
     ControlPlaneState,
     | 'langSmithProjectName'
     | 'governanceProfile'
+    | 'threadId'
+    | 'scopes'
+    | 'effectiveScopes'
+    | 'scopeExpansionMode'
     | 'plannedMcpActions'
     | 'executedMcpActions'
     | 'mcpConfigPath'
     | 'mcpInspections'
   >,
-): Promise<McpPlannedAction[]> {
-  const requestedQueries = await readResearchScoutRequestedQueries(store, state).catch(() => [] as string[]);
-  if (requestedQueries.length === 0) return [];
+): Promise<{
+  actions: McpPlannedAction[];
+  claimedRequests: ResearchScoutRequestedQuery[];
+  freshScopedQueuedRequestCount: number;
+}> {
+  const requestedQueries = await readResearchScoutRequestedQueries(store, state).catch(() => [] as ResearchScoutRequestedQuery[]);
+  const freshScopedQueuedRequestCount = requestedQueries.length;
+  if (freshScopedQueuedRequestCount === 0) {
+    return { actions: [], claimedRequests: [], freshScopedQueuedRequestCount: 0 };
+  }
 
   const braveInspection = state.mcpInspections.find((inspection) => inspection.server === 'brave-search');
-  if (braveInspection?.status !== 'connected') return [];
+  if (braveInspection?.status !== 'connected') {
+    return { actions: [], claimedRequests: [], freshScopedQueuedRequestCount };
+  }
 
   const configsByServer = new Map(
     loadMcpServers(resolveMcpConfigPath(state as ControlPlaneState)).map((server) => [server.name, server] as const),
   );
   const braveConfig = configsByServer.get('brave-search');
-  if (!braveConfig) return [];
+  if (!braveConfig) {
+    return { actions: [], claimedRequests: [], freshScopedQueuedRequestCount };
+  }
 
   const existingIds = new Set(
     [
@@ -11014,27 +12457,61 @@ async function buildResearchScoutRequestedSearchActions(
       ...(state.executedMcpActions || []).map((action) => String(action.id || '').trim()),
     ].filter(Boolean),
   );
-  const preferredTool = mcpInspectionHasTool(braveInspection, 'searxng_web_search')
-    ? 'searxng_web_search'
-    : 'brave_web_search';
 
   const actions: McpPlannedAction[] = [];
-  for (const [index, query] of requestedQueries.entries()) {
-    const requestId = `mcp-brave-idea-scout-request-${index + 1}`;
-    if (existingIds.has(requestId)) continue;
-    actions.push(buildMcpPlannedAction({
-      id: requestId,
-      server: 'brave-search',
-      tool: preferredTool,
-      title: 'Research queued lane request with SearXNG',
-      reason: 'Another autonomous lane requested external implementation context, so research-scout is gathering bounded web evidence for the shared pool.',
-      arguments: { query },
-      risk: 'low',
-      alwaysAllow: braveConfig.alwaysAllow.includes(preferredTool),
-    }));
+  const claimedRequests: ResearchScoutRequestedQuery[] = [];
+  const claimedRequestKeys = new Set<string>();
+  const seenRequestKeys = new Set<string>();
+  for (const request of requestedQueries) {
+    let addedActionForRequest = false;
+    const sourcePreferences = request.sourcePreferences.length > 0
+      ? request.sourcePreferences
+      : buildResearchScoutSourcePreferenceOrder(request.family).slice(0, 3);
+    const requestToken = String(request.key || request.query)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 24) || `request-${claimedRequests.length + 1}`;
+
+    for (const sourceKind of sourcePreferences.slice(0, 3)) {
+      if (actions.length >= 4) break;
+      const requestKey = `${request.key}::${sourceKind}`;
+      if (seenRequestKeys.has(requestKey)) continue;
+      seenRequestKeys.add(requestKey);
+      const tool = resolveResearchScoutSearchTool(braveInspection, sourceKind);
+      const requestId = `mcp-brave-idea-scout-request-${requestToken}-${sourceKind}`;
+      if (existingIds.has(requestId)) continue;
+      const requestShape: ResearchScoutSearchRequest = {
+        family: request.family,
+        sourceKind,
+        query: request.query,
+      };
+      actions.push(buildMcpPlannedAction({
+        id: requestId,
+        server: 'brave-search',
+        tool,
+        title: buildResearchScoutSearchActionTitle(requestShape, { queued: true }),
+        reason: buildResearchScoutSearchActionReason(requestShape, { queued: true }),
+        arguments: { query: request.query },
+        risk: 'low',
+        alwaysAllow: braveConfig.alwaysAllow.includes(tool),
+      }));
+      existingIds.add(requestId);
+      addedActionForRequest = true;
+    }
+
+    if (addedActionForRequest && !claimedRequestKeys.has(request.key)) {
+      claimedRequestKeys.add(request.key);
+      claimedRequests.push(request);
+    }
+    if (actions.length >= 4) break;
   }
 
-  return actions.slice(0, 3);
+  if (claimedRequests.length > 0) {
+    await markResearchScoutRequestedQueriesClaimed(store, state, claimedRequests).catch(() => undefined);
+  }
+
+  return { actions, claimedRequests, freshScopedQueuedRequestCount };
 }
 
 function buildResearchScoutWebsiteInspectionNotes(
@@ -11075,16 +12552,18 @@ function buildResearchScoutSearchLinkIndex(
   title: string;
   description: string;
   source: string;
+  sourceKind: ResearchScoutSourceKind;
   searchScore: number;
-  family: 'control-plane' | 'api' | 'generic';
+  family: ResearchScoutQueryFamily;
 }> {
   const linksByUrl = new Map<string, {
     url: string;
     title: string;
     description: string;
     source: string;
+    sourceKind: ResearchScoutSourceKind;
     searchScore: number;
-    family: 'control-plane' | 'api' | 'generic';
+    family: ResearchScoutQueryFamily;
   }>();
 
   for (const action of state.executedMcpActions || []) {
@@ -11101,6 +12580,7 @@ function buildResearchScoutSearchLinkIndex(
           title: link.title,
           description: link.description,
           source: link.source,
+          sourceKind: link.sourceKind,
           searchScore,
           family,
         });
@@ -11109,6 +12589,80 @@ function buildResearchScoutSearchLinkIndex(
   }
 
   return linksByUrl;
+}
+
+function collectResearchScoutVisitedUrlReceiptObservations(
+  state: Pick<ControlPlaneState, 'executedMcpActions'>,
+  options?: { actionIds?: Set<string> },
+): Array<Omit<ResearchScoutVisitedUrlReceiptRecord, 'key' | 'firstOpenedAt' | 'lastOpenedAt'>> {
+  const searchLinksByUrl = buildResearchScoutSearchLinkIndex(state);
+  const receiptsByUrl = new Map<string, Omit<ResearchScoutVisitedUrlReceiptRecord, 'key' | 'firstOpenedAt' | 'lastOpenedAt'>>();
+
+  for (const action of state.executedMcpActions || []) {
+    if (action.server !== 'playwright' || action.status !== 'success' || action.tool !== 'browser_navigate') continue;
+    if (!/^mcp-playwright-research-/.test(String(action.id || ''))) continue;
+    if (options?.actionIds && !options.actionIds.has(String(action.id || '').trim())) continue;
+
+    const url = normalizeHttpUrl((action.arguments as Record<string, unknown> | undefined)?.url);
+    if (!url) continue;
+    const searchMetadata = searchLinksByUrl.get(url);
+    const existing = receiptsByUrl.get(url);
+    if (existing) {
+      existing.openCount += 1;
+      continue;
+    }
+
+    receiptsByUrl.set(url, {
+      url,
+      hostname: getResearchScoutHostname(url),
+      family: searchMetadata?.family || inferResearchScoutQueryFamilyFromText([
+        action.title,
+        action.outputSummary,
+        action.outputPreview,
+        url,
+      ].join(' | ')),
+      sourceKind: searchMetadata?.sourceKind || inferResearchScoutSourceKindFromHostname(getResearchScoutHostname(url)),
+      openCount: 1,
+    });
+  }
+
+  return Array.from(receiptsByUrl.values());
+}
+
+async function writeResearchScoutVisitedUrlReceipts(
+  store: BaseStore | undefined,
+  state: Pick<ControlPlaneState, 'langSmithProjectName' | 'governanceProfile'>,
+  executedState: Pick<ControlPlaneState, 'executedMcpActions'>,
+  options?: { actionIds?: Set<string> },
+): Promise<void> {
+  if (!store) return;
+  const receipts = collectResearchScoutVisitedUrlReceiptObservations(executedState, options);
+  if (receipts.length === 0) return;
+
+  const namespace = getResearchScoutUrlReceiptNamespace(state);
+  for (const receipt of receipts.slice(0, 8)) {
+    const key = normalizeHttpUrl(receipt.url);
+    if (!key) continue;
+    const existing = await store.get(namespace, key).catch(() => null);
+    const existingValue = existing?.value && typeof existing.value === 'object'
+      ? existing.value as Record<string, unknown>
+      : {};
+    const now = new Date().toISOString();
+    const firstOpenedAt = typeof existingValue.firstOpenedAt === 'string' && existingValue.firstOpenedAt.trim()
+      ? existingValue.firstOpenedAt.trim()
+      : now;
+    const openCount = Math.max(0, Math.floor(Number(existingValue.openCount) || 0)) + Math.max(1, receipt.openCount);
+
+    await store.put(namespace, key, {
+      pageUrl: key,
+      pageHostname: receipt.hostname,
+      family: receipt.family,
+      sourceKind: receipt.sourceKind,
+      firstOpenedAt,
+      lastOpenedAt: now,
+      openCount,
+    }, false).catch(() => undefined);
+  }
 }
 
 function collectResearchScoutWebsiteObservations(
@@ -11151,6 +12705,7 @@ function collectResearchScoutWebsiteObservations(
       url,
       hostname: getResearchScoutHostname(url),
       family: searchMetadata?.family || 'generic',
+      sourceKind: searchMetadata?.sourceKind || inferResearchScoutSourceKindFromHostname(getResearchScoutHostname(url)),
       searchTitle: searchMetadata?.title || '',
       searchDescription: searchMetadata?.description || '',
       searchScore: searchMetadata?.searchScore || 0,
@@ -11224,15 +12779,20 @@ async function scoreResearchScoutSemanticNovelty(
 }
 
 function scoreResearchScoutWebsiteInformation(
-  family: 'control-plane' | 'api' | 'generic',
+  family: ResearchScoutQueryFamily,
   pageText: string,
   hostname: string,
+  sourceKind: ResearchScoutSourceKind,
 ): number {
   const normalizedText = String(pageText || '').toLowerCase();
   let score = 0;
 
   if (normalizedText.length >= 240) score += 1;
   if (normalizedText.length >= 800) score += 1;
+  if (sourceKind === 'docs') score += 3;
+  if (sourceKind === 'github') score += /readme|example|sample|issue|discussion|pull request|repository|repo/.test(normalizedText) ? 3 : 2;
+  if (sourceKind === 'papers') score += 3;
+  if (sourceKind === 'youtube') score += /transcript|chapters|walkthrough|deep dive|demo|recording/.test(normalizedText) ? 1 : -1;
   if (isResearchScoutTechnicalDocLike(normalizedText)) score += 2;
   if (/guide|reference|tutorial|overview|quickstart|examples?|best practices?|implementation/.test(normalizedText)) score += 2;
   if (/abstract|method|evaluation|results|benchmark|paper/.test(normalizedText) && /arxiv\.org$|paperswithcode\.com$/.test(hostname)) score += 3;
@@ -11245,6 +12805,8 @@ function scoreResearchScoutWebsiteInformation(
   } else if (family === 'api') {
     if (/api|provider|routing|retry|backoff|quota|rate limit|rate limits|capability|fallback|error codes|responses api|tool use|tool calling|function calling|invalid argument|generatecontent/.test(normalizedText)) score += 5;
     if (/openai|openrouter|gemini|anthropic/.test(normalizedText)) score += 2;
+  } else if (/rust|cargo|axum|reqwest|tokio|redis|robots\.txt|sitemap|crawler|crawl|secret scanning|sse/.test(normalizedText)) {
+    score += 4;
   } else if (/framework|sdk|api|guide|reference|workflow|reliability|resilience/.test(normalizedText)) {
     score += 2;
   }
@@ -11283,6 +12845,7 @@ async function rankResearchScoutWebsiteFindings(
       observation.family,
       observation.pageText,
       observation.hostname,
+      observation.sourceKind,
     );
     const semanticNovelty = await scoreResearchScoutSemanticNovelty(store, state, observation);
     const rankedPaths = rankResearchScoutCandidatePaths(state, candidatePaths, observation.pageText);
@@ -11360,9 +12923,40 @@ function buildResearchScoutWebsiteRankingNotes(
       : 'no direct in-scope mapping';
     const keySignals = finding.keywords.slice(0, 4).join(', ') || 'n/a';
     notes.push(
-      `Research scout ranked ${finding.url} as ${finding.quality}-value website evidence (practicality: ${practicality}; novelty: ${novelty}; semantic novelty: ${semanticNovelty}; diversity: ${diversity}) — mapped to ${mappedPaths}; signals: ${keySignals}${finding.nearestNeighborUrl ? `; nearest prior page: ${finding.nearestNeighborUrl}` : ''}.`,
+      `Research scout ranked ${finding.url} as ${finding.quality}-value ${describeResearchScoutSourceKind(finding.sourceKind)} evidence (practicality: ${practicality}; novelty: ${novelty}; semantic novelty: ${semanticNovelty}; diversity: ${diversity}) — mapped to ${mappedPaths}; signals: ${keySignals}${finding.nearestNeighborUrl ? `; nearest prior page: ${finding.nearestNeighborUrl}` : ''}.`,
     );
   }
+
+  return Array.from(new Set(notes)).slice(0, 4);
+}
+
+function buildResearchScoutDeterministicSynthesisNotes(
+  findings: ResearchScoutWebsiteFinding[],
+  options?: { recoveredFromAiFailure?: boolean },
+): string[] {
+  if (findings.length === 0) return [];
+
+  const topFindings = findings.slice(0, 2);
+  const distinctHosts = new Set(topFindings.map((finding) => finding.hostname).filter(Boolean));
+  const mappedPaths = Array.from(new Set(topFindings.flatMap((finding) => finding.mappedPaths))).slice(0, 4);
+  const sourceKinds = Array.from(new Set(topFindings.map((finding) => describeResearchScoutSourceKind(finding.sourceKind))));
+  const notes = [
+    `Research scout synthesized ${topFindings.length} top evidence source(s) across ${Math.max(1, distinctHosts.size)} distinct domain(s)${mappedPaths.length > 0 ? ` for ${mappedPaths.join(', ')}` : ''}; preferred sources: ${sourceKinds.join(', ')}.`,
+    ...topFindings.map((finding) => {
+      const mappedTargets = finding.mappedPaths.length > 0
+        ? finding.mappedPaths.join(', ')
+        : 'no direct in-scope mapping';
+      const keySignals = finding.keywords.slice(0, 4).join(', ') || 'n/a';
+      const summary = truncateTextMiddle(
+        finding.pageSummary || finding.pagePreview || finding.searchDescription || finding.pageTitle || finding.url,
+        220,
+      );
+      return `Research scout synthesis fallback: prioritize ${mappedTargets} using ${finding.quality}-value ${describeResearchScoutSourceKind(finding.sourceKind)} evidence from ${finding.pageTitle || finding.searchTitle || finding.url}; signals: ${keySignals}; summary: ${summary}.`;
+    }),
+    ...(options?.recoveredFromAiFailure
+      ? ['Research scout kept deterministic synthesis notes after an AI backend interruption so the collected evidence remained usable.']
+      : []),
+  ];
 
   return Array.from(new Set(notes)).slice(0, 4);
 }
@@ -11398,6 +12992,7 @@ async function writeResearchScoutWebsiteFindings(
       pageUrl: key,
       pageHostname: finding.hostname,
       family: finding.family,
+      sourceKind: finding.sourceKind,
       pageTitle: truncateTextMiddle(finding.pageTitle || finding.url, 180),
       searchTitle: truncateTextMiddle(finding.searchTitle, 180),
       searchDescription: truncateTextMiddle(finding.searchDescription, 220),
@@ -11449,7 +13044,7 @@ async function pruneResearchScoutPageMemory(
     const url = normalizeHttpUrl(value.pageUrl || item.key);
     if (!url) continue;
     const hostname = getResearchScoutHostname(url);
-    const family = value.family === 'control-plane' || value.family === 'api'
+    const family = value.family === 'control-plane' || value.family === 'api' || value.family === 'anyscan'
       ? value.family
       : 'generic';
     const combinedText = [
@@ -11474,7 +13069,7 @@ async function pruneResearchScoutPageMemory(
 }
 
 async function buildResearchScoutTrustedSourceCandidates(
-  families: Array<'control-plane' | 'api' | 'generic'>,
+  families: ResearchScoutQueryFamily[],
   visitedUrls: Set<string>,
   hostVisitCounts: Map<string, number>,
 ): Promise<Array<{
@@ -11483,6 +13078,7 @@ async function buildResearchScoutTrustedSourceCandidates(
   title: string;
   description: string;
   source: string;
+  sourceKind: ResearchScoutSourceKind;
   score: number;
   previewScore: number;
   previewText: string;
@@ -11490,12 +13086,12 @@ async function buildResearchScoutTrustedSourceCandidates(
   preferredHost: boolean;
   topicMismatch: boolean;
   blockedReason: string;
-  family: 'control-plane' | 'api' | 'generic';
+  family: ResearchScoutQueryFamily;
   query: string;
 }>> {
   const normalizedFamilies = Array.from(new Set(
     families
-      .filter((family): family is 'control-plane' | 'api' => family === 'control-plane' || family === 'api'),
+      .filter((family): family is Exclude<ResearchScoutQueryFamily, 'generic'> => family !== 'generic'),
   ));
   if (normalizedFamilies.length === 0) return [];
 
@@ -11518,6 +13114,7 @@ async function buildResearchScoutTrustedSourceCandidates(
         title: candidate.title,
         description: preview?.description || candidate.title,
         source: 'trusted-source-pack',
+        sourceKind: candidate.sourceKind,
         score: 14 + Math.max(0, scoreResearchScoutDomain(hostname, candidate.family)),
         previewScore: preview?.score || 0,
         previewText,
@@ -11597,7 +13194,7 @@ async function buildResearchScoutWebsiteVisitActions(
   const candidateFamilies = Array.from(new Set(
     successfulSearchActions
       .map((action) => inferResearchScoutQueryFamily(action))
-      .filter((family): family is 'control-plane' | 'api' => family === 'control-plane' || family === 'api'),
+      .filter((family): family is Exclude<ResearchScoutQueryFamily, 'generic'> => family !== 'generic'),
   ));
 
   const prefetchedPreviews = await Promise.all(
@@ -11658,7 +13255,7 @@ async function buildResearchScoutWebsiteVisitActions(
     });
 
   const trustedSourceCandidates = await buildResearchScoutTrustedSourceCandidates(
-    candidateFamilies.length > 0 ? candidateFamilies : ['control-plane', 'api'],
+    candidateFamilies.length > 0 ? candidateFamilies : ['control-plane', 'api', 'anyscan'],
     visitedUrls,
     hostVisitCounts,
   );
@@ -11675,7 +13272,7 @@ async function buildResearchScoutWebsiteVisitActions(
     if ((selectedFamilyCounts.get(link.family) || 0) >= 2) continue;
     if (!link.preferredHost && link.previewQueryMatch < 3) continue;
     if (link.family === 'api' && isResearchScoutLowValueCommunityHost(link.hostname) && (link.score + link.previewScore) < 12) continue;
-    if (link.family === 'control-plane' && isResearchScoutLowValueCommunityHost(link.hostname)) continue;
+    if ((link.family === 'control-plane' || link.family === 'anyscan') && isResearchScoutLowValueCommunityHost(link.hostname)) continue;
     seenUrls.add(link.url);
     if (link.hostname) selectedHostnames.add(link.hostname);
     selectedLinks.push(link);
@@ -11753,7 +13350,12 @@ async function buildResearchScoutWebsiteVisitActions(
 
 async function webIdeaScoutNode(state: ControlPlaneState, runtime?: Runtime): Promise<Partial<ControlPlaneState>> {
   const prunedPoolUrls = await pruneResearchScoutPageMemory(runtime?.store, state).catch(() => [] as string[]);
-  const requestedSearchActions = await buildResearchScoutRequestedSearchActions(runtime?.store, state);
+  const prunedQueuedRequestQueries = await pruneResearchScoutRequestQueue(runtime?.store, state).catch(() => [] as string[]);
+  const {
+    actions: requestedSearchActions,
+    claimedRequests: claimedQueuedRequests,
+    freshScopedQueuedRequestCount,
+  } = await buildResearchScoutRequestedSearchActions(runtime?.store, state);
   const requestedSearchPlannedActions = appendUniqueMcpActions(state.plannedMcpActions, requestedSearchActions);
   const requestedSearchNotes = requestedSearchActions
     .map((action) => `Research scout picked up queued lane request: ${action.title} (${action.server}.${action.tool}).`)
@@ -11767,6 +13369,9 @@ async function webIdeaScoutNode(state: ControlPlaneState, runtime?: Runtime): Pr
         requestedSearchActions,
       )
     : {};
+  if (claimedQueuedRequests.length > 0 && requestedSearchActions.length > 0) {
+    await markResearchScoutRequestedQueriesProcessed(runtime?.store, state, claimedQueuedRequests).catch(() => undefined);
+  }
   const executedMcpActionsAfterRequests = requestedExecutionPatch.executedMcpActions || state.executedMcpActions;
 
   const fallbackSearchActions = buildResearchScoutFallbackSearchActions({
@@ -11795,7 +13400,8 @@ async function webIdeaScoutNode(state: ControlPlaneState, runtime?: Runtime): Pr
     executedMcpActions: executedMcpActionsAfterFallback,
   });
   const visitedPageRecords = await readResearchScoutVisitedPageRecords(runtime?.store, state).catch(() => [] as ResearchScoutVisitedPageRecord[]);
-  const visitedHistory = buildResearchScoutVisitedPageHistory(visitedPageRecords);
+  const visitedReceiptRecords = await readResearchScoutVisitedUrlReceipts(runtime?.store, state).catch(() => [] as ResearchScoutVisitedUrlReceiptRecord[]);
+  const visitedHistory = buildResearchScoutVisitedPageHistory(visitedPageRecords, visitedReceiptRecords);
   const followUpVisitPlan = await buildResearchScoutWebsiteVisitActions({
     ...state,
     plannedMcpActions: fallbackSearchPlannedActions,
@@ -11805,7 +13411,23 @@ async function webIdeaScoutNode(state: ControlPlaneState, runtime?: Runtime): Pr
   const followUpNotes = followUpBrowserActions
     .map((action) => `Research scout queued website inspection: ${action.title} (${action.server}.${action.tool}).`)
     .slice(0, 4);
-  if (notes.length === 0 && fallbackSearchActions.length === 0 && followUpBrowserActions.length === 0 && followUpVisitPlan.notes.length === 0) return {};
+  const researchScoutActionableWorkCount = requestedSearchActions.length + fallbackSearchActions.length + followUpBrowserActions.length;
+  const researchScoutIdleReason = freshScopedQueuedRequestCount === 0 && researchScoutActionableWorkCount === 0
+    ? 'No fresh scoped queued research work or follow-up scout actions were available.'
+    : '';
+  if (
+    prunedPoolUrls.length === 0
+    && prunedQueuedRequestQueries.length === 0
+    && notes.length === 0
+    && fallbackSearchActions.length === 0
+    && followUpBrowserActions.length === 0
+    && followUpVisitPlan.notes.length === 0
+  ) return {
+    researchScoutFreshQueuedRequestCount: freshScopedQueuedRequestCount,
+    researchScoutClaimedQueuedRequestCount: claimedQueuedRequests.length,
+    researchScoutActionableWorkCount,
+    researchScoutIdleReason,
+  };
 
   const plannedMcpActions = appendUniqueMcpActions(fallbackSearchPlannedActions, followUpBrowserActions);
   const browserExecutionPatch = followUpBrowserActions.length > 0
@@ -11819,6 +13441,22 @@ async function webIdeaScoutNode(state: ControlPlaneState, runtime?: Runtime): Pr
       )
     : {};
   const executedMcpActions = browserExecutionPatch.executedMcpActions || executedMcpActionsAfterFallback;
+  const previouslyExecutedActionIds = new Set(
+    executedMcpActionsAfterFallback
+      .map((action) => String(action.id || '').trim())
+      .filter(Boolean),
+  );
+  const newlyExecutedActionIds = new Set(
+    executedMcpActions
+      .map((action) => String(action.id || '').trim())
+      .filter((actionId) => Boolean(actionId) && !previouslyExecutedActionIds.has(actionId)),
+  );
+  await writeResearchScoutVisitedUrlReceipts(
+    runtime?.store,
+    state,
+    { executedMcpActions },
+    { actionIds: newlyExecutedActionIds },
+  ).catch(() => undefined);
   const browserInspectionNotes = buildResearchScoutWebsiteInspectionNotes({
     executedMcpActions,
   });
@@ -11864,12 +13502,16 @@ async function webIdeaScoutNode(state: ControlPlaneState, runtime?: Runtime): Pr
         notes: [],
         failureClass: state.lastAiFailureClass,
       };
-  const synthesisNotes = researchSynthesis.notes.map((note) => `AI research scout synthesis: ${note}`);
-  if (researchSynthesis.error) {
+  const usedDeterministicSynthesisFallback = Boolean(researchSynthesis.error && websiteFindings.length > 0);
+  const synthesisNotes = usedDeterministicSynthesisFallback
+    ? buildResearchScoutDeterministicSynthesisNotes(websiteFindings, { recoveredFromAiFailure: true })
+    : researchSynthesis.notes.map((note) => `AI research scout synthesis: ${note}`);
+  if (researchSynthesis.error && !usedDeterministicSynthesisFallback) {
     synthesisNotes.push(`AI research scout synthesis unavailable: ${researchSynthesis.error}`);
   }
   const combinedNotes = [
     ...(prunedPoolUrls.length > 0 ? [`Research scout pruned ${prunedPoolUrls.length} stale or low-value page(s) from the shared research pool.`] : []),
+    ...(prunedQueuedRequestQueries.length > 0 ? [`Research scout pruned ${prunedQueuedRequestQueries.length} stale or already-processed queued request(s) from the shared research inbox.`] : []),
     ...notes,
     ...requestedSearchNotes,
     ...fallbackSearchNotes,
@@ -11901,10 +13543,16 @@ async function webIdeaScoutNode(state: ControlPlaneState, runtime?: Runtime): Pr
       ],
     ),
     recentAutonomousLearningNotes: appendUniqueNotes(state.recentAutonomousLearningNotes, combinedNotes).slice(-12),
+    researchScoutFreshQueuedRequestCount: freshScopedQueuedRequestCount,
+    researchScoutClaimedQueuedRequestCount: claimedQueuedRequests.length,
+    researchScoutActionableWorkCount,
+    researchScoutIdleReason,
     aiAgentEnabled: state.aiAgentEnabled || researchSynthesis.enabled,
     aiAgentBackend: state.aiAgentBackend || researchSynthesis.backend,
     aiAgentModel: state.aiAgentModel || researchSynthesis.model,
-    lastAiFailureClass: researchSynthesis.error ? (researchSynthesis.failureClass || 'backend-error') : state.lastAiFailureClass,
+    lastAiFailureClass: usedDeterministicSynthesisFallback
+      ? state.lastAiFailureClass
+      : researchSynthesis.error ? (researchSynthesis.failureClass || 'backend-error') : state.lastAiFailureClass,
   };
 }
 
@@ -12526,13 +14174,18 @@ function deriveLaneHealthSnapshot(
     | 'improvementSignals'
     | 'plannerNotes'
     | 'repairNotes'
+    | 'repairIntentSummary'
+    | 'improvementIntentSummary'
+    | 'autonomousOperationMode'
     | 'evidenceStatus'
     | 'lastAiFailureClass'
     | 'validationRequired'
     | 'executedMcpActions'
+    | 'executedJobs'
     | 'appliedEdits'
     | 'repairPromotedPaths'
     | 'repairRollbackPaths'
+    | 'anyscanValidationSuppressedReason'
   >,
 ): {
   healthClass: HealthClass;
@@ -12542,9 +14195,10 @@ function deriveLaneHealthSnapshot(
   validationRequired: boolean;
 } {
   const browserValidation = evaluateBrowserValidationBundle(state);
-  const evidenceStatus = browserValidation.required
+  const effectiveScopeSet = new Set(getEffectiveScopes(state as ControlPlaneState));
+  const rawEvidenceStatus = browserValidation.required
     ? browserValidation.status
-    : (state.evidenceStatus === 'unknown' && getEffectiveScopes(state as ControlPlaneState).includes('research-scout'))
+    : (state.evidenceStatus === 'unknown' && effectiveScopeSet.has('research-scout'))
       ? (
           state.executedMcpActions.some((action) => action.server === 'playwright' && action.status === 'success')
             ? 'collected'
@@ -12553,7 +14207,12 @@ function deriveLaneHealthSnapshot(
               : 'missing'
         )
       : state.evidenceStatus;
-  const validationRequired = browserValidation.required || state.validationRequired;
+  const evidenceStatus = !browserValidation.required
+    && !effectiveScopeSet.has('research-scout')
+    && (rawEvidenceStatus === 'missing' || rawEvidenceStatus === 'unknown')
+      ? 'not-required'
+      : rawEvidenceStatus;
+  const validationRequired = browserValidation.required;
   const inferredAiFailureClass = state.lastAiFailureClass !== 'none'
     ? state.lastAiFailureClass
     : classifyAiFailureMessage(findLatestAiFailureMessage(state));
@@ -12569,12 +14228,65 @@ function deriveLaneHealthSnapshot(
   const externalBlocked = /out of scope|blocked subsystem|scope-blocked|blocked_external/.test(sourceText)
     || signalTextHasProviderAuthDriftFocus(sourceText)
     || /provider-bound|retrying the same .* unlikely|billing_not_active|insufficient_quota|invalid_api_key/.test(sourceText);
+  const noProgressGuardActive = /no-progress guard/i.test(sourceText);
+  const degradedReason = state.repairDecisionReason
+    || (noProgressGuardActive
+      ? 'No-progress loop guard is active; require a stronger path-bounded change or an explicit no-op before retrying the same lane outcome.'
+      : (inferredAiFailureClass !== 'none'
+          ? `Recent ${inferredAiFailureClass} churn degraded this lane and should not be treated as a pure external deferral.`
+          : ''));
+  const completedValidationJobs = state.executedJobs.filter((job) =>
+    (job.kind === 'build' || job.kind === 'test') && job.status === 'success'
+  ).length;
+  const failedValidationJobs = state.executedJobs.filter((job) =>
+    (job.kind === 'build' || job.kind === 'test') && job.status === 'failed'
+  ).length;
+  const boundedImprovementText = [state.repairIntentSummary, state.improvementIntentSummary]
+    .join(' | ')
+    .toLowerCase();
+  const anyscanValidationSuppressedReason = String(state.anyscanValidationSuppressedReason || '').trim();
+  const anyscanValidationSuppressed = Boolean(
+    anyscanValidationSuppressedReason
+    && effectiveScopeSet.has('anyscan')
+    && state.repairStatus === 'not-needed'
+    && !validationRequired,
+  );
+  const validatedBoundedImprovement = state.autonomousOperationMode === 'improvement'
+    && state.repairStatus === 'not-needed'
+    && completedValidationJobs > 0
+    && failedValidationJobs === 0
+    && /without a clear code-local repair target|bounded experimental improvement while monitoring|bounded improvement focus/.test(
+      boundedImprovementText,
+    );
+  const resolvedHealthyEvidenceStatus = validationRequired
+    ? 'validated'
+    : (evidenceStatus === 'unknown' ? 'not-required' : evidenceStatus);
+
+  if (validatedBoundedImprovement) {
+    return {
+      healthClass: 'healthy',
+      deferReason: state.repairDecisionReason,
+      evidenceStatus: resolvedHealthyEvidenceStatus,
+      lastAiFailureClass: inferredAiFailureClass,
+      validationRequired,
+    };
+  }
+
+  if (anyscanValidationSuppressed && inferredAiFailureClass === 'none') {
+    return {
+      healthClass: 'healthy',
+      deferReason: state.repairDecisionReason || anyscanValidationSuppressedReason,
+      evidenceStatus: resolvedHealthyEvidenceStatus,
+      lastAiFailureClass: inferredAiFailureClass,
+      validationRequired,
+    };
+  }
 
   if (state.repairStatus === 'promoted') {
     return {
       healthClass: 'healthy',
       deferReason: state.repairDecisionReason,
-      evidenceStatus: validationRequired ? 'validated' : (evidenceStatus === 'unknown' ? 'not-required' : evidenceStatus),
+      evidenceStatus: resolvedHealthyEvidenceStatus,
       lastAiFailureClass: inferredAiFailureClass,
       validationRequired,
     };
@@ -12584,16 +14296,6 @@ function deriveLaneHealthSnapshot(
     return {
       healthClass: 'waiting_evidence',
       deferReason: browserValidation.reason || state.repairDecisionReason,
-      evidenceStatus,
-      lastAiFailureClass: inferredAiFailureClass,
-      validationRequired,
-    };
-  }
-
-  if (externalBlocked) {
-    return {
-      healthClass: 'blocked_external',
-      deferReason: state.repairDecisionReason || 'The active lane is currently blocked by an external dependency or out-of-scope subsystem.',
       evidenceStatus,
       lastAiFailureClass: inferredAiFailureClass,
       validationRequired,
@@ -12610,10 +14312,20 @@ function deriveLaneHealthSnapshot(
     };
   }
 
-  if (inferredAiFailureClass !== 'none' || /no-progress guard/i.test(sourceText)) {
+  if (inferredAiFailureClass !== 'none' || noProgressGuardActive) {
     return {
       healthClass: 'degraded',
-      deferReason: state.repairDecisionReason,
+      deferReason: degradedReason,
+      evidenceStatus,
+      lastAiFailureClass: inferredAiFailureClass,
+      validationRequired,
+    };
+  }
+
+  if (externalBlocked) {
+    return {
+      healthClass: 'blocked_external',
+      deferReason: state.repairDecisionReason || 'The active lane is currently blocked by an external dependency or out-of-scope subsystem.',
       evidenceStatus,
       lastAiFailureClass: inferredAiFailureClass,
       validationRequired,
@@ -13125,7 +14837,7 @@ export async function createControlPlaneGraph(options: { repoRoot: string; check
   };
 }
 
-const defaultControlPlaneGraphRepoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+const defaultControlPlaneGraphRepoRoot = CONTROL_PLANE_REPO_ROOT;
 const defaultControlPlaneGraphCheckpointer = new FileMemorySaver(
   resolveControlPlaneCheckpointPath(defaultControlPlaneGraphRepoRoot, './apps/langgraph-control-plane/.control-plane/default-graph-checkpoints.json')
 );

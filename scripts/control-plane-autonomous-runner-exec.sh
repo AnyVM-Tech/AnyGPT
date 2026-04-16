@@ -14,11 +14,11 @@ if [[ -f "$ENV_FILE" ]]; then
   set +a
 fi
 
-: "${CONTROL_PLANE_AUTONOMOUS_GOAL:=Continuously monitor, fix, and improve AnyGPT across the repo, checking API, control-plane, UI, homepage, runtime health, routing, model availability, governance drift, and bounded safe improvements.}"
-: "${CONTROL_PLANE_AUTONOMOUS_SCOPES:=repo,api,api-experimental,control-plane,repo-surface}"
+: "${CONTROL_PLANE_AUTONOMOUS_GOAL:=Continuously monitor, fix, and improve AnyGPT anyscan and the closely related control-plane orchestration that supports it.}"
+: "${CONTROL_PLANE_AUTONOMOUS_SCOPES:=anyscan,research-scout}"
 : "${CONTROL_PLANE_AUTONOMOUS_INTERVAL_MS:=${CONTROL_PLANE_INTERVAL_MS:-1000}}"
 : "${CONTROL_PLANE_AUTONOMOUS_MAX_EDIT_ACTIONS:=6}"
-: "${CONTROL_PLANE_AUTONOMOUS_EDIT_ALLOWLIST:=apps/langgraph-control-plane,apps/api,apps/homepage,apps/ui,scripts,README.md,SETUP.md,package.json,turbo.json,pnpm-workspace.yaml,tsconfig.json,bun.sh}"
+: "${CONTROL_PLANE_AUTONOMOUS_EDIT_ALLOWLIST:=apps/anyscan,apps/langgraph-control-plane}"
 : "${CONTROL_PLANE_AUTONOMOUS_EDIT_DENYLIST:=}"
 : "${CONTROL_PLANE_REPO_ROOT:=$ROOT_DIR}"
 : "${CONTROL_PLANE_RUNTIME_DIR:=$CONTROL_DIR}"

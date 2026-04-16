@@ -11,6 +11,7 @@ import dotenv from 'dotenv';
 import {
   ControlPlaneStateSchema,
   createControlPlaneGraph,
+  describeControlPlaneAiBackend,
   resolveControlPlaneAiConfig,
   resolveControlPlaneCheckpointPath,
   writeSemanticMemoryNotes,
@@ -99,6 +100,8 @@ type RunnerStatus = {
   noProgressStreak?: number;
   noProgressReason?: string;
   lastProgressSignature?: string;
+  observationSignature?: string;
+  lastValidationOnlyOutcome?: boolean;
   repairStatus?: string;
   healthClass?: 'healthy' | 'degraded' | 'waiting_evidence' | 'blocked_external' | 'failed';
   deferReason?: string;
@@ -214,6 +217,8 @@ type RunnerStatus = {
   coordinatedRunners?: CoordinatedRunnerStatusEntry[];
 };
 
+type CoordinatorChildSpawnReason = 'initial' | 'failure-restart' | 'clean-rerun';
+
 type CoordinatedRunnerStatusEntry = {
   id: string;
   label: string;
@@ -239,6 +244,9 @@ type CoordinatedRunnerStatusEntry = {
   lastError?: string;
   lastUpdatedAt?: string;
   restartedCount: number;
+  failureRestartCount: number;
+  cleanRerunCount: number;
+  pendingSpawnReason?: CoordinatorChildSpawnReason;
   selfHealCount: number;
   lastSelfHealAt?: string;
   lastSelfHealReason?: string;
@@ -253,6 +261,7 @@ type CoordinatorChildSpec = {
   intervalMs: number;
   maxIterations: number | null;
   respawnDelayMs: number;
+  periodicRerunDelayMs?: number;
   editAllowlist: string[];
   checkpointPath: string;
   statusFilePath: string;
@@ -269,6 +278,11 @@ type CoordinatorChildRuntime = {
   pid?: number;
   lastSpawnedAtMs?: number;
   restartCount: number;
+  failureRestartCount: number;
+  cleanRerunCount: number;
+  spawnCount: number;
+  lastSpawnReason?: CoordinatorChildSpawnReason;
+  pendingSpawnReason?: CoordinatorChildSpawnReason;
   lastExitCode?: number | null;
   lastExitSignal?: NodeJS.Signals | null;
   nextRestartAt: number;
@@ -290,6 +304,10 @@ const DEFAULT_CONTROL_PLANE_PROMPT_IDENTIFIER = 'anygpt-control-plane-agent';
 const DEFAULT_CONTROL_PLANE_PROMPT_CHANNEL = 'live';
 const DEFAULT_CONTROL_PLANE_PROMPT_SYNC_CHANNEL = 'default';
 const MAX_NO_PROGRESS_STREAK = 3;
+const RESEARCH_SCOUT_IDLE_DELAY_MIN_MS = 120_000;
+const RESEARCH_SCOUT_IDLE_DELAY_MAX_MS = 300_000;
+const ANYSCAN_RUNTIME_IDLE_DELAY_MIN_MS = 60_000;
+const ANYSCAN_RUNTIME_IDLE_DELAY_MAX_MS = 180_000;
 const DEFAULT_AUTONOMOUS_FULL_COVERAGE_SCOPES = ['repo', 'api', 'api-experimental', 'control-plane', 'repo-surface'];
 const EXPANSIVE_SCOPE_ALIASES = new Set(['all', 'everything', 'adaptive', '*']);
 const DEFAULT_REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
@@ -1060,7 +1078,7 @@ function resolveLangSmithRunnerStatusSeed(): Partial<RunnerStatus> {
     langSmithWorkspaceName: configuredWorkspaceName || undefined,
     langSmithProjectName: runtimeConfig?.projectName || undefined,
     promptAvailableChannels: ['candidate', 'default', 'live'],
-    controlPlaneAiBackend: aiConfig.enabled ? aiConfig.baseUrl : '',
+    controlPlaneAiBackend: aiConfig.enabled ? describeControlPlaneAiBackend(aiConfig) : '',
     controlPlaneAiModel: aiConfig.enabled ? aiConfig.model : '',
   };
 }
@@ -1182,6 +1200,21 @@ function readPersistedLangSmithRunnerStatusSeed(
         : undefined,
       repairTouchedPaths: Array.isArray(parsed.repairTouchedPaths)
         ? parsed.repairTouchedPaths.map((entry) => String(entry || '').trim()).filter(Boolean)
+        : undefined,
+      repairStatus: typeof parsed.repairStatus === 'string' && parsed.repairStatus.trim()
+        ? parsed.repairStatus.trim()
+        : undefined,
+      repairIntentSummary: typeof parsed.repairIntentSummary === 'string' && parsed.repairIntentSummary.trim()
+        ? parsed.repairIntentSummary.trim()
+        : undefined,
+      improvementIntentSummary: typeof parsed.improvementIntentSummary === 'string' && parsed.improvementIntentSummary.trim()
+        ? parsed.improvementIntentSummary.trim()
+        : undefined,
+      observationSignature: typeof parsed.observationSignature === 'string' && parsed.observationSignature.trim()
+        ? parsed.observationSignature.trim()
+        : undefined,
+      lastValidationOnlyOutcome: parsed.lastValidationOnlyOutcome === true
+        ? true
         : undefined,
       recentAutonomousEditFailures,
       recentAutonomousLearningNotes,
@@ -1352,6 +1385,8 @@ function createBaseRunnerStatus(parsedArgs: ParsedArgs): RunnerStatus {
     noProgressStreak: 0,
     noProgressReason: '',
     lastProgressSignature: '',
+    observationSignature: '',
+    lastValidationOnlyOutcome: false,
     repairStatus: parsedArgs.autonomousEditEnabled ? 'idle' : 'not-needed',
     healthClass: 'healthy',
     deferReason: '',
@@ -1521,6 +1556,19 @@ function buildInitialGraphInput(
     repairDecisionReason: typeof runnerStatus.repairDecisionReason === 'string'
       ? runnerStatus.repairDecisionReason
       : initialState.repairDecisionReason,
+    previousRepairStatus: typeof runnerStatus.repairStatus === 'string'
+      ? runnerStatus.repairStatus
+      : initialState.previousRepairStatus,
+    previousRepairIntentSummary: typeof runnerStatus.repairIntentSummary === 'string'
+      ? runnerStatus.repairIntentSummary
+      : initialState.previousRepairIntentSummary,
+    previousImprovementIntentSummary: typeof runnerStatus.improvementIntentSummary === 'string'
+      ? runnerStatus.improvementIntentSummary
+      : initialState.previousImprovementIntentSummary,
+    previousObservationSignature: typeof runnerStatus.observationSignature === 'string'
+      ? runnerStatus.observationSignature
+      : initialState.previousObservationSignature,
+    previousValidationOnlyOutcome: runnerStatus.lastValidationOnlyOutcome === true,
   });
 }
 
@@ -1745,6 +1793,34 @@ function deriveNoProgressSignature(result: Record<string, unknown>): string {
   });
 }
 
+function isValidationOnlyOutcome(result: Record<string, unknown>): boolean {
+  if (summarizeTerminalRunFailure(result).trim()) {
+    return false;
+  }
+  if (Array.isArray(result.proposedEdits) && result.proposedEdits.length > 0) {
+    return false;
+  }
+  if (Array.isArray(result.appliedEdits) && result.appliedEdits.length > 0) {
+    return false;
+  }
+  const promotedPathCount = Array.isArray(result.repairPromotedPaths)
+    ? result.repairPromotedPaths.map((entry: any) => String(entry || '').trim()).filter(Boolean).length
+    : 0;
+  if (promotedPathCount > 0) {
+    return false;
+  }
+  const rollbackPathCount = Array.isArray(result.repairRollbackPaths)
+    ? result.repairRollbackPaths.map((entry: any) => String(entry || '').trim()).filter(Boolean).length
+    : 0;
+  if (rollbackPathCount > 0) {
+    return false;
+  }
+  const repairStatus = typeof result.repairStatus === 'string'
+    ? result.repairStatus.trim().toLowerCase()
+    : '';
+  return !repairStatus || ['idle', 'not-needed'].includes(repairStatus);
+}
+
 function hasMeaningfulIterationProgress(result: Record<string, unknown>): boolean {
   const appliedEditCount = Array.isArray(result.appliedEdits)
     ? result.appliedEdits.filter((edit: any) => edit?.status === 'applied').length
@@ -1776,6 +1852,133 @@ function getNoProgressDelayMs(baseIntervalMs: number, noProgressStreak: number):
   return Math.min(30_000, Math.max(5_000, normalizedBase * (2 ** backoffStep)));
 }
 
+function getResearchScoutIdleDelayMs(baseIntervalMs: number, noProgressStreak: number): number {
+  const normalizedBase = Number.isFinite(baseIntervalMs) ? Math.max(1_000, Math.floor(baseIntervalMs)) : 1_000;
+  const normalizedStreak = Number.isFinite(noProgressStreak) ? Math.max(0, Math.floor(noProgressStreak)) : 0;
+  const idleBaseDelayMs = Math.max(RESEARCH_SCOUT_IDLE_DELAY_MIN_MS, normalizedBase * 12);
+  const idleBackoffStep = normalizedStreak >= MAX_NO_PROGRESS_STREAK * 4
+    ? 2
+    : normalizedStreak >= MAX_NO_PROGRESS_STREAK * 2
+      ? 1
+      : 0;
+  return Math.min(RESEARCH_SCOUT_IDLE_DELAY_MAX_MS, idleBaseDelayMs * (2 ** idleBackoffStep));
+}
+
+function getAnyScanIdleDelayMs(baseIntervalMs: number, noProgressStreak: number): number {
+  const normalizedBase = Number.isFinite(baseIntervalMs) ? Math.max(1_000, Math.floor(baseIntervalMs)) : 1_000;
+  const normalizedStreak = Number.isFinite(noProgressStreak) ? Math.max(0, Math.floor(noProgressStreak)) : 0;
+  const idleBaseDelayMs = Math.max(ANYSCAN_RUNTIME_IDLE_DELAY_MIN_MS, normalizedBase * 20);
+  const idleBackoffStep = normalizedStreak >= MAX_NO_PROGRESS_STREAK * 3
+    ? 2
+    : normalizedStreak >= MAX_NO_PROGRESS_STREAK * 2
+      ? 1
+      : 0;
+  return Math.min(ANYSCAN_RUNTIME_IDLE_DELAY_MAX_MS, idleBaseDelayMs * (2 ** idleBackoffStep));
+}
+
+function isResearchScoutRunner(parsedArgs: Pick<ParsedArgs, 'coordinatorChildId' | 'scopes'>): boolean {
+  const normalizedChildId = String(parsedArgs.coordinatorChildId || '').trim().toLowerCase();
+  if (normalizedChildId === 'research-scout') {
+    return true;
+  }
+  return (parsedArgs.scopes || []).some((scope) => String(scope || '').trim().toLowerCase() === 'research-scout');
+}
+
+function isAnyScanRunner(parsedArgs: Pick<ParsedArgs, 'coordinatorChildId' | 'scopes'>): boolean {
+  const normalizedChildId = String(parsedArgs.coordinatorChildId || '').trim().toLowerCase();
+  if (normalizedChildId === 'anyscan') {
+    return true;
+  }
+  return (parsedArgs.scopes || []).some((scope) => String(scope || '').trim().toLowerCase() === 'anyscan');
+}
+
+function resolveResearchScoutIdleSleepReason(
+  parsedArgs: Pick<ParsedArgs, 'coordinatorChildId' | 'scopes'>,
+  resultRecord: Record<string, unknown>,
+  meaningfulProgress: boolean,
+): string | undefined {
+  if (!isResearchScoutRunner(parsedArgs) || meaningfulProgress) {
+    return undefined;
+  }
+  const healthClass = typeof resultRecord.healthClass === 'string' ? resultRecord.healthClass.trim().toLowerCase() : '';
+  if (healthClass !== 'healthy') {
+    return undefined;
+  }
+  const repairStatus = typeof resultRecord.repairStatus === 'string' ? resultRecord.repairStatus.trim().toLowerCase() : '';
+  if (repairStatus && repairStatus !== 'not-needed') {
+    return undefined;
+  }
+  const deferReason = typeof resultRecord.deferReason === 'string' ? resultRecord.deferReason.trim().toLowerCase() : '';
+  if (deferReason && !deferReason.includes('research scout lane contributes suggestions')) {
+    return undefined;
+  }
+  const freshScopedQueuedRequestCount = Number.isFinite(resultRecord.researchScoutFreshQueuedRequestCount)
+    ? Math.max(0, Math.floor(Number(resultRecord.researchScoutFreshQueuedRequestCount)))
+    : 0;
+  const actionableWorkCount = Number.isFinite(resultRecord.researchScoutActionableWorkCount)
+    ? Math.max(0, Math.floor(Number(resultRecord.researchScoutActionableWorkCount)))
+    : 0;
+  if (freshScopedQueuedRequestCount > 0 || actionableWorkCount > 0) {
+    return undefined;
+  }
+  const idleReason = typeof resultRecord.researchScoutIdleReason === 'string'
+    ? resultRecord.researchScoutIdleReason.trim()
+    : '';
+  return idleReason || 'No fresh scoped queued research work was available for this lane.';
+}
+
+function resolveAnyScanIdleSleepReason(
+  parsedArgs: Pick<ParsedArgs, 'coordinatorChildId' | 'scopes'>,
+  resultRecord: Record<string, unknown>,
+  meaningfulProgress: boolean,
+): string | undefined {
+  if (!isAnyScanRunner(parsedArgs) || meaningfulProgress) {
+    return undefined;
+  }
+  const healthClass = typeof resultRecord.healthClass === 'string' ? resultRecord.healthClass.trim().toLowerCase() : '';
+  if (healthClass !== 'healthy') {
+    return undefined;
+  }
+  if (!isValidationOnlyOutcome(resultRecord)) {
+    return undefined;
+  }
+  const suppressionReason = typeof (resultRecord as any).anyscanValidationSuppressedReason === 'string'
+    ? (resultRecord as any).anyscanValidationSuppressedReason.trim()
+    : '';
+  const validationSuppressed = Boolean((resultRecord as any).anyscanValidationSuppressed) || Boolean(suppressionReason);
+  if (!validationSuppressed) {
+    return undefined;
+  }
+  return suppressionReason || 'Repeated clean anyscan validation produced no edits and no new signals.';
+}
+
+function formatResearchScoutIdleCountdown(remainingMs: number): string {
+  const normalizedMs = Number.isFinite(remainingMs) ? Math.max(0, Math.floor(remainingMs)) : 0;
+  if (normalizedMs < 1_000) {
+    return `${normalizedMs}ms`;
+  }
+  const totalSeconds = Math.ceil(normalizedMs / 1_000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes === 0) {
+    return `${totalSeconds}s`;
+  }
+  if (seconds === 0) {
+    return `${minutes}m`;
+  }
+  return `${minutes}m ${seconds}s`;
+}
+
+function buildResearchScoutIdleSleepSummary(reason: string, remainingMs: number): string {
+  const normalizedReason = String(reason || '').trim() || 'No fresh scoped queued research work was available for this lane.';
+  return `Healthy research-scout idle: ${normalizedReason} Rechecking in ${formatResearchScoutIdleCountdown(remainingMs)}.`;
+}
+
+function buildAnyScanIdleSleepSummary(reason: string, remainingMs: number): string {
+  const normalizedReason = String(reason || '').trim() || 'No fresh anyscan work was available for this lane.';
+  return `Healthy anyscan idle: ${normalizedReason} Rechecking in ${formatResearchScoutIdleCountdown(remainingMs)}.`;
+}
+
 function formatError(error: unknown): string {
   if (error instanceof Error) return error.stack || error.message;
   return String(error);
@@ -1788,6 +1991,27 @@ function sleep(ms: number, jitterMs = 0): Promise<void> {
     ? safeMs + Math.floor(Math.random() * (safeJitterMs + 1))
     : safeMs;
   return new Promise((resolve) => setTimeout(resolve, delay));
+}
+
+async function sleepWithStatusHeartbeat(
+  delayMs: number,
+  heartbeatMs: number,
+  onHeartbeat: (remainingMs: number) => void,
+): Promise<void> {
+  const normalizedDelayMs = Number.isFinite(delayMs) ? Math.max(0, Math.floor(delayMs)) : 0;
+  if (normalizedDelayMs === 0) {
+    return;
+  }
+  const normalizedHeartbeatMs = Number.isFinite(heartbeatMs) ? Math.max(1_000, Math.floor(heartbeatMs)) : 1_000;
+  const wakeAtMs = Date.now() + normalizedDelayMs;
+  while (true) {
+    const remainingMs = wakeAtMs - Date.now();
+    if (remainingMs <= 0) {
+      return;
+    }
+    onHeartbeat(remainingMs);
+    await sleep(Math.min(normalizedHeartbeatMs, remainingMs));
+  }
 }
 
 async function readNextStreamChunkWithTimeout<T>(
@@ -2360,9 +2584,32 @@ function buildCoordinatorChildSpecs(parsedArgs: ParsedArgs): CoordinatorChildSpe
   const idleSurfaceRespawnDelayMs = Math.max(baseIntervalMs * 30, 30_000);
   const researchRespawnDelayMs = Math.max(baseIntervalMs * 60, 60_000);
   const apiBackgroundRespawnDelayMs = Math.max(baseIntervalMs * 10, 10_000);
+  const surfaceLaneIds = new Set(['workspace-surface', 'homepage-surface', 'ui-surface']);
+  const oneShotLaneIds = new Set(['control-plane', 'workspace-surface', 'homepage-surface', 'ui-surface', 'api-data', 'api-platform']);
+  const resolveCoordinatorChildMaxIterations = (laneId: string): number | null => (
+    oneShotLaneIds.has(laneId) ? 1 : parsedArgs.maxIterations
+  );
+  const resolveCoordinatorChildPeriodicRerunDelayMs = (laneId: string): number | undefined => {
+    if (laneId === 'control-plane') return apiBackgroundRespawnDelayMs;
+    if (surfaceLaneIds.has(laneId)) return idleSurfaceRespawnDelayMs;
+    if (laneId === 'api-data' || laneId === 'api-platform') return apiBackgroundRespawnDelayMs;
+    return undefined;
+  };
+  const resolveCoordinatorChildRespawnDelayMs = (laneId: string): number => {
+    if (laneId === 'research-scout') return researchRespawnDelayMs;
+    if (laneId === 'control-plane') return apiBackgroundRespawnDelayMs;
+    if (surfaceLaneIds.has(laneId)) return idleSurfaceRespawnDelayMs;
+    if (laneId === 'api-data' || laneId === 'api-platform' || laneId === 'anyscan') {
+      return apiBackgroundRespawnDelayMs;
+    }
+    return MULTI_RUNNER_RESTART_DELAY_MS;
+  };
 
   const includeApiFamilyLanes = requestedScopes.has('repo') || requestedScopes.has('api') || requestedScopes.has('api-experimental');
   const includeRepoSurfaceFamilyLanes = requestedScopes.has('repo') || requestedScopes.has('repo-surface');
+  const includeAnyScanLane = requestedScopes.has('repo') || requestedScopes.has('anyscan');
+  const includeControlPlaneLane = requestedScopes.has('repo') || requestedScopes.has('control-plane');
+  const includeResearchScoutLane = requestedScopes.has('repo') || requestedScopes.has('research-scout');
 
   if (includeApiFamilyLanes) {
     laneTemplates.push({
@@ -2433,7 +2680,17 @@ function buildCoordinatorChildSpecs(parsedArgs: ParsedArgs): CoordinatorChildSpe
     });
   }
 
-  if (requestedScopes.has('repo') || requestedScopes.has('control-plane')) {
+  if (includeAnyScanLane) {
+    laneTemplates.push({
+      id: 'anyscan',
+      label: 'AnyScan',
+      scopes: ['anyscan'],
+      intervalMs: Math.max(baseIntervalMs * 2, 2_000),
+      editAllowlist: ['apps/anyscan'],
+    });
+  }
+
+  if (includeControlPlaneLane) {
     laneTemplates.push({
       id: 'control-plane',
       label: 'Control Plane',
@@ -2441,6 +2698,9 @@ function buildCoordinatorChildSpecs(parsedArgs: ParsedArgs): CoordinatorChildSpe
       intervalMs: Math.max(baseIntervalMs * 2, 2_000),
       editAllowlist: ['apps/langgraph-control-plane'],
     });
+  }
+
+  if (includeResearchScoutLane) {
     laneTemplates.push({
       id: 'research-scout',
       label: 'Research Scout',
@@ -2501,24 +2761,9 @@ function buildCoordinatorChildSpecs(parsedArgs: ParsedArgs): CoordinatorChildSpe
       intervalMs: typeof lane.intervalMs === 'number' && Number.isFinite(lane.intervalMs)
         ? Math.max(1_000, Math.floor(lane.intervalMs))
         : baseIntervalMs,
-      maxIterations: laneId === 'research-scout'
-        ? 1
-        : laneId === 'control-plane'
-          ? 1
-        : ['workspace-surface', 'homepage-surface', 'ui-surface'].includes(laneId)
-          ? 1
-          : ['api-data', 'api-platform'].includes(laneId)
-            ? 1
-            : parsedArgs.maxIterations,
-      respawnDelayMs: laneId === 'research-scout'
-        ? researchRespawnDelayMs
-        : laneId === 'control-plane'
-          ? apiBackgroundRespawnDelayMs
-        : ['workspace-surface', 'homepage-surface', 'ui-surface'].includes(laneId)
-          ? idleSurfaceRespawnDelayMs
-          : ['api-data', 'api-platform'].includes(laneId)
-            ? apiBackgroundRespawnDelayMs
-            : MULTI_RUNNER_RESTART_DELAY_MS,
+      maxIterations: resolveCoordinatorChildMaxIterations(laneId),
+      periodicRerunDelayMs: resolveCoordinatorChildPeriodicRerunDelayMs(laneId),
+      respawnDelayMs: resolveCoordinatorChildRespawnDelayMs(laneId),
       editAllowlist: childAllowlist,
       checkpointPath,
       statusFilePath,
@@ -2540,17 +2785,27 @@ function buildCoordinatorChildArgs(parsedArgs: ParsedArgs, spec: CoordinatorChil
   return buildRunnerInvocationArgs(buildCoordinatorChildParsedArgs(parsedArgs, spec));
 }
 
-function spawnCoordinatorChild(parsedArgs: ParsedArgs, runtime: CoordinatorChildRuntime): void {
+function spawnCoordinatorChild(
+  parsedArgs: ParsedArgs,
+  runtime: CoordinatorChildRuntime,
+  reason: CoordinatorChildSpawnReason,
+): void {
   fs.mkdirSync(path.dirname(runtime.spec.logFilePath), { recursive: true });
+  const seedSummary = reason === 'failure-restart'
+    ? 'Failure restart starting...'
+    : reason === 'clean-rerun'
+      ? 'Scheduled rerun starting...'
+      : 'Waiting for graph output...';
   seedCoordinatorChildStatus(parsedArgs, runtime.spec, {
     running: true,
     phase: 'starting',
-    summary: 'Waiting for graph output...',
+    summary: seedSummary,
   });
-  const logFlags = runtime.restartCount === 0 ? 'w' : 'a';
+  const logFlags = runtime.spawnCount === 0 ? 'w' : 'a';
+  const nextSpawnCount = runtime.spawnCount + 1;
   fs.writeFileSync(
     runtime.spec.logFilePath,
-    `${logFlags === 'w' ? '' : '\n'}[${new Date().toISOString()}] coordinator spawning ${runtime.spec.id} (${runtime.spec.label})\n`,
+    `${logFlags === 'w' ? '' : '\n'}[${new Date().toISOString()}] coordinator spawning ${runtime.spec.id} (${runtime.spec.label}) reason=${reason} attempt=${nextSpawnCount}\n`,
     { encoding: 'utf8', flag: logFlags },
   );
 
@@ -2604,6 +2859,17 @@ function spawnCoordinatorChild(parsedArgs: ParsedArgs, runtime: CoordinatorChild
   child.stdout?.pipe(logStream);
   child.stderr?.pipe(logStream);
 
+  runtime.spawnCount = nextSpawnCount;
+  if (reason !== 'initial') {
+    runtime.restartCount += 1;
+    if (reason === 'failure-restart') {
+      runtime.failureRestartCount += 1;
+    } else if (reason === 'clean-rerun') {
+      runtime.cleanRerunCount += 1;
+    }
+  }
+  runtime.lastSpawnReason = reason;
+  runtime.pendingSpawnReason = undefined;
   runtime.process = child;
   runtime.logStream = logStream;
   runtime.pid = typeof child.pid === 'number' ? child.pid : readPidFile(runtime.spec.pidFilePath);
@@ -2632,10 +2898,14 @@ function spawnCoordinatorChild(parsedArgs: ParsedArgs, runtime: CoordinatorChild
     runtime.lastExitSignal = signal;
     runtime.pid = undefined;
     runtime.process = undefined;
-    runtime.nextRestartAt = Date.now() + Math.max(1_000, runtime.spec.respawnDelayMs || MULTI_RUNNER_RESTART_DELAY_MS);
+    const preservedPendingSpawnReason = runtime.pendingSpawnReason === 'failure-restart'
+      ? runtime.pendingSpawnReason
+      : undefined;
+    runtime.pendingSpawnReason = preservedPendingSpawnReason;
+    runtime.nextRestartAt = 0;
     fs.appendFileSync(
       runtime.spec.logFilePath,
-      `[${new Date().toISOString()}] coordinator observed exit code=${code ?? 'null'} signal=${signal ?? 'null'} next_restart_in_ms=${Math.max(1_000, runtime.spec.respawnDelayMs || MULTI_RUNNER_RESTART_DELAY_MS)}\n`,
+      `[${new Date().toISOString()}] coordinator observed exit code=${code ?? 'null'} signal=${signal ?? 'null'} pending_reason=${preservedPendingSpawnReason ?? 'unclassified'}\n`,
       'utf8',
     );
     runtime.logStream?.end();
@@ -2643,17 +2913,31 @@ function spawnCoordinatorChild(parsedArgs: ParsedArgs, runtime: CoordinatorChild
   });
 }
 
+function isCoordinatorCoreLaneId(laneId: string): boolean {
+  return ['api-routing', 'api-runtime'].includes(laneId);
+}
+
 function isCoordinatorCoreLane(runtime: CoordinatorChildRuntime): boolean {
-  return ['api-routing', 'api-runtime'].includes(runtime.spec.id);
+  return isCoordinatorCoreLaneId(runtime.spec.id);
+}
+
+function isCoordinatorBackgroundLaneId(laneId: string): boolean {
+  return !isCoordinatorCoreLaneId(laneId);
 }
 
 function getCoordinatorBackgroundActiveCount(runtimes: CoordinatorChildRuntime[]): number {
   return runtimes.filter((runtime) => {
-    if (isCoordinatorCoreLane(runtime)) return false;
+    if (!isCoordinatorBackgroundLaneId(runtime.spec.id)) return false;
     const processAlive = runtime.process ? runtime.process.exitCode === null : false;
     const pidAlive = isPidAlive(runtime.process?.pid) || isPidAlive(runtime.pid) || isPidAlive(readPidFile(runtime.spec.pidFilePath));
     return processAlive || pidAlive;
   }).length;
+}
+
+function hasCoordinatorChildDeferredTerminalState(runtime: CoordinatorChildRuntime): boolean {
+  const status = runtime.lastStatus;
+  const healthClass = typeof status?.healthClass === 'string' ? status.healthClass : '';
+  return healthClass === 'blocked_external' || healthClass === 'waiting_evidence';
 }
 
 function canCoordinatorChildRestart(
@@ -2662,7 +2946,87 @@ function canCoordinatorChildRestart(
 ): boolean {
   return parsedArgs.continuous
     && parsedArgs.maxIterations === null
-    && (!runtime.lastStatus || runtime.lastStatus.phase !== 'paused');
+    && (!runtime.lastStatus || runtime.lastStatus.phase !== 'paused')
+    && !hasCoordinatorChildDeferredTerminalState(runtime);
+}
+
+function coordinatorChildHasFailureOutcome(runtime: CoordinatorChildRuntime): boolean {
+  const status = runtime.lastStatus;
+  const healthClass = typeof status?.healthClass === 'string' ? status.healthClass.trim() : '';
+  const phase = typeof status?.phase === 'string' ? status.phase.trim() : '';
+  const repairStatus = typeof status?.repairStatus === 'string' ? status.repairStatus.trim() : '';
+  const lastError = typeof status?.lastError === 'string' ? status.lastError.trim() : '';
+  return healthClass === 'failed'
+    || healthClass === 'degraded'
+    || phase === 'failed'
+    || repairStatus === 'failed'
+    || repairStatus === 'rolled-back'
+    || Boolean(lastError)
+    || Boolean(runtime.lastSpawnError)
+    || (typeof runtime.lastExitCode === 'number' && runtime.lastExitCode !== 0)
+    || typeof runtime.lastExitSignal === 'string';
+}
+
+function resolveCoordinatorChildPeriodicRerunDelayMs(runtime: CoordinatorChildRuntime): number | undefined {
+  const configured = typeof runtime.spec.periodicRerunDelayMs === 'number' && Number.isFinite(runtime.spec.periodicRerunDelayMs)
+    ? Math.max(1_000, runtime.spec.periodicRerunDelayMs)
+    : undefined;
+  if (typeof configured === 'number') return configured;
+  return runtime.spec.maxIterations === null
+    ? Math.max(1_000, runtime.spec.respawnDelayMs || MULTI_RUNNER_RESTART_DELAY_MS)
+    : undefined;
+}
+
+function resolveCoordinatorChildPendingSpawnReason(
+  parsedArgs: ParsedArgs,
+  runtime: CoordinatorChildRuntime,
+  nowMs: number,
+): CoordinatorChildSpawnReason | undefined {
+  if (!canCoordinatorChildRestart(parsedArgs, runtime)) {
+    runtime.pendingSpawnReason = undefined;
+    runtime.nextRestartAt = 0;
+    return undefined;
+  }
+
+  if (typeof runtime.lastSpawnedAtMs !== 'number') {
+    runtime.pendingSpawnReason = 'initial';
+    runtime.nextRestartAt = 0;
+    return 'initial';
+  }
+
+  if (coordinatorChildHasFailureOutcome(runtime)) {
+    if (runtime.pendingSpawnReason !== 'failure-restart') {
+      runtime.nextRestartAt = nowMs + Math.max(1_000, runtime.spec.respawnDelayMs || MULTI_RUNNER_RESTART_DELAY_MS);
+    }
+    runtime.pendingSpawnReason = 'failure-restart';
+    return 'failure-restart';
+  }
+
+  const periodicRerunDelayMs = resolveCoordinatorChildPeriodicRerunDelayMs(runtime);
+  if (typeof periodicRerunDelayMs === 'number') {
+    if (runtime.pendingSpawnReason !== 'clean-rerun') {
+      runtime.nextRestartAt = nowMs + periodicRerunDelayMs;
+    }
+    runtime.pendingSpawnReason = 'clean-rerun';
+    return 'clean-rerun';
+  }
+
+  runtime.pendingSpawnReason = undefined;
+  runtime.nextRestartAt = 0;
+  return undefined;
+}
+
+function getCoordinatorChildSpawnReasonPriority(reason?: CoordinatorChildSpawnReason): number {
+  switch (reason) {
+    case 'initial':
+      return 0;
+    case 'failure-restart':
+      return 1;
+    case 'clean-rerun':
+      return 2;
+    default:
+      return 3;
+  }
 }
 
 function selectNextCoordinatorBackgroundLaneToSpawn(
@@ -2677,18 +3041,21 @@ function selectNextCoordinatorBackgroundLaneToSpawn(
   }
 
   const eligible = runtimes.filter((runtime) => {
-    if (isCoordinatorCoreLane(runtime)) return false;
-    if (!canCoordinatorChildRestart(parsedArgs, runtime)) return false;
+    if (!isCoordinatorBackgroundLaneId(runtime.spec.id)) return false;
     const processAlive = runtime.process ? runtime.process.exitCode === null : false;
     const pidAlive = isPidAlive(runtime.process?.pid) || isPidAlive(runtime.pid) || isPidAlive(readPidFile(runtime.spec.pidFilePath));
     if (processAlive || pidAlive) return false;
+    const pendingSpawnReason = resolveCoordinatorChildPendingSpawnReason(parsedArgs, runtime, nowMs);
+    if (!pendingSpawnReason) return false;
     return nowMs >= runtime.nextRestartAt;
   });
 
   if (eligible.length === 0) return null;
   eligible.sort((left, right) =>
-    (left.lastSpawnedAtMs ?? 0) - (right.lastSpawnedAtMs ?? 0)
-    || left.restartCount - right.restartCount
+    getCoordinatorChildSpawnReasonPriority(left.pendingSpawnReason) - getCoordinatorChildSpawnReasonPriority(right.pendingSpawnReason)
+    || (left.lastSpawnedAtMs ?? 0) - (right.lastSpawnedAtMs ?? 0)
+    || left.failureRestartCount - right.failureRestartCount
+    || left.cleanRerunCount - right.cleanRerunCount
     || left.spec.id.localeCompare(right.spec.id)
   );
   return eligible[0] || null;
@@ -2747,6 +3114,7 @@ function requestCoordinatorChildSelfHeal(runtime: CoordinatorChildRuntime, reaso
   runtime.lastSelfHealReason = reason;
   runtime.selfHealRequestedAtMs = nowMs;
   runtime.selfHealEscalateAtMs = nowMs + MULTI_RUNNER_SELF_HEAL_TERM_GRACE_MS;
+  runtime.pendingSpawnReason = 'failure-restart';
   runtime.nextRestartAt = 0;
   appendCoordinatorChildRuntimeNote(
     runtime,
@@ -2777,6 +3145,7 @@ function serviceCoordinatorChildSelfHeal(runtime: CoordinatorChildRuntime, nowMs
   if (!(typeof pid === 'number' && isPidAlive(pid))) {
     runtime.selfHealRequestedAtMs = undefined;
     runtime.selfHealEscalateAtMs = undefined;
+    runtime.pendingSpawnReason = 'failure-restart';
     runtime.nextRestartAt = 0;
     return;
   }
@@ -2876,10 +3245,11 @@ function collectCoordinatedRunnerEntry(runtime: CoordinatorChildRuntime): Coordi
       ? 'streaming'
       : (
         (typeof status.healthClass === 'string' && status.healthClass === 'failed')
+        || (typeof status.repairStatus === 'string' && status.repairStatus === 'failed')
         || (
-        (typeof status.lastError === 'string' && status.lastError.trim())
-        || runtime.lastSpawnError
-        || (typeof runtime.lastExitCode === 'number' && runtime.lastExitCode !== 0)
+          (typeof status.lastError === 'string' && status.lastError.trim())
+          || runtime.lastSpawnError
+          || (typeof runtime.lastExitCode === 'number' && runtime.lastExitCode !== 0)
         )
       )
         ? 'failed'
@@ -2923,6 +3293,9 @@ function collectCoordinatedRunnerEntry(runtime: CoordinatorChildRuntime): Coordi
       : runtime.lastSpawnError,
     lastUpdatedAt: typeof status.lastUpdatedAt === 'string' ? status.lastUpdatedAt : undefined,
     restartedCount: runtime.restartCount,
+    failureRestartCount: runtime.failureRestartCount,
+    cleanRerunCount: runtime.cleanRerunCount,
+    pendingSpawnReason: runtime.pendingSpawnReason,
     selfHealCount: runtime.selfHealCount,
     lastSelfHealAt: runtime.lastSelfHealAt,
     lastSelfHealReason: runtime.lastSelfHealReason,
@@ -2931,9 +3304,38 @@ function collectCoordinatedRunnerEntry(runtime: CoordinatorChildRuntime): Coordi
   };
 }
 
+function isCoordinatorChildFailedEntry(child: CoordinatedRunnerStatusEntry): boolean {
+  return child.healthClass === 'failed'
+    || child.phase === 'failed'
+    || child.repairStatus === 'failed';
+}
+
+function isCoordinatorChildDeferredEntry(child: CoordinatedRunnerStatusEntry): boolean {
+  return child.healthClass === 'blocked_external' || child.healthClass === 'waiting_evidence';
+}
+
+function isCoordinatorChildActionableDeferredEntry(child: CoordinatedRunnerStatusEntry): boolean {
+  if (!isCoordinatorChildDeferredEntry(child)) return false;
+  if (child.healthClass === 'waiting_evidence' && child.validationRequired === false) return false;
+  const deferReason = String(child.deferReason || '').trim();
+  if (!deferReason) return child.healthClass !== 'waiting_evidence' || child.validationRequired === true;
+  return !/browser validation is not required for this lane\.?/i.test(deferReason);
+}
+
+function isCoordinatorChildDegradedEntry(child: CoordinatedRunnerStatusEntry): boolean {
+  return child.healthClass === 'degraded' || child.repairStatus === 'rolled-back';
+}
+
+function isCoordinatorChildSuccessfulTerminalEntry(child: CoordinatedRunnerStatusEntry): boolean {
+  return !child.running
+    && !isCoordinatorChildFailedEntry(child)
+    && !isCoordinatorChildActionableDeferredEntry(child)
+    && !isCoordinatorChildDegradedEntry(child);
+}
+
 function summarizeCoordinatorRepairStatus(children: CoordinatedRunnerStatusEntry[]): RunnerStatus['repairStatus'] {
   const statuses = children.map((child) => String(child.repairStatus || '').trim()).filter(Boolean);
-  const failedChildren = children.filter((child) => child.healthClass === 'failed');
+  const failedChildren = children.filter((child) => isCoordinatorChildFailedEntry(child));
   if (failedChildren.length > 0 || statuses.includes('failed')) return 'failed';
   if (statuses.includes('promoted')) return 'promoted';
   if (statuses.includes('planned')) return 'planned';
@@ -2942,12 +3344,48 @@ function summarizeCoordinatorRepairStatus(children: CoordinatedRunnerStatusEntry
   return 'idle';
 }
 
+function summarizeCoordinatorEvidenceStatus(children: CoordinatedRunnerStatusEntry[]): RunnerStatus['evidenceStatus'] {
+  const actionableValidationChildren = children.filter((child) => child.validationRequired === true);
+  if (actionableValidationChildren.some((child) => child.evidenceStatus === 'missing')) return 'missing';
+  if (actionableValidationChildren.some((child) => child.evidenceStatus === 'planned')) return 'planned';
+  if (actionableValidationChildren.some((child) => child.evidenceStatus === 'collected')) return 'collected';
+  if (actionableValidationChildren.some((child) => child.evidenceStatus === 'validated')) return 'validated';
+  return actionableValidationChildren.length === 0 ? 'not-required' : 'unknown';
+}
+
+function summarizeCoordinatorDeferReason(children: CoordinatedRunnerStatusEntry[]): string {
+  return children
+    .filter((child) => isCoordinatorChildActionableDeferredEntry(child))
+    .map((child) => `${child.id}:${child.deferReason || child.healthClass}`)
+    .join('; ');
+}
+
 function summarizeCoordinatorHealthClass(children: CoordinatedRunnerStatusEntry[]): RunnerStatus['healthClass'] {
-  const healthClasses = children.map((child) => String(child.healthClass || '').trim()).filter(Boolean);
-  if (healthClasses.includes('failed')) return 'failed';
-  if (healthClasses.includes('waiting_evidence')) return 'waiting_evidence';
-  if (healthClasses.includes('blocked_external')) return 'blocked_external';
-  if (healthClasses.includes('degraded')) return 'degraded';
+  if (children.length === 0) return 'healthy';
+  const failedChildren = children.filter((child) => isCoordinatorChildFailedEntry(child));
+  const deferredChildren = children.filter((child) => isCoordinatorChildActionableDeferredEntry(child));
+  const degradedChildren = children.filter((child) => isCoordinatorChildDegradedEntry(child));
+  const resolvedChildren = children.filter((child) =>
+    !isCoordinatorChildFailedEntry(child)
+    && !isCoordinatorChildActionableDeferredEntry(child)
+    && !isCoordinatorChildDegradedEntry(child)
+  );
+
+  if (failedChildren.length === children.length) return 'failed';
+  if (failedChildren.length > 0) return 'degraded';
+  if (deferredChildren.length === children.length) {
+    return deferredChildren.some((child) => child.healthClass === 'waiting_evidence')
+      ? 'waiting_evidence'
+      : 'blocked_external';
+  }
+  if (deferredChildren.length > 0) {
+    return resolvedChildren.length > 0 || degradedChildren.length > 0
+      ? 'degraded'
+      : (deferredChildren.some((child) => child.healthClass === 'waiting_evidence')
+          ? 'waiting_evidence'
+          : 'blocked_external');
+  }
+  if (degradedChildren.length > 0) return 'degraded';
   return 'healthy';
 }
 
@@ -2962,19 +3400,47 @@ function buildCoordinatorSummary(
   } = {},
 ): string {
   const runningChildren = children.filter((child) => child.running);
-  const failedChildren = children.filter((child) => child.healthClass === 'failed');
-  const deferredChildren = children.filter((child) => child.healthClass === 'blocked_external' || child.healthClass === 'waiting_evidence');
-  const degradedChildren = children.filter((child) => child.healthClass === 'degraded');
+  const failedChildren = children.filter((child) => isCoordinatorChildFailedEntry(child));
+  const deferredChildren = children.filter((child) => isCoordinatorChildActionableDeferredEntry(child));
+  const degradedChildren = children.filter((child) => isCoordinatorChildDegradedEntry(child));
+  const successfulTerminalChildren = children.filter((child) => isCoordinatorChildSuccessfulTerminalEntry(child));
   const selfHealedChildren = children.filter((child) => child.selfHealCount > 0);
-  const backgroundRunningChildren = runningChildren.filter((child) => !['api-routing', 'api-runtime', 'control-plane'].includes(child.id));
+  const backgroundChildren = children.filter((child) => isCoordinatorBackgroundLaneId(child.id));
+  const backgroundRunningChildren = backgroundChildren.filter((child) => child.running);
+  const backgroundFailedChildren = backgroundChildren.filter((child) => isCoordinatorChildFailedEntry(child));
+  const backgroundDeferredChildren = backgroundChildren.filter((child) => isCoordinatorChildActionableDeferredEntry(child));
+  const backgroundDegradedChildren = backgroundChildren.filter((child) => isCoordinatorChildDegradedEntry(child));
+  const backgroundSuccessfulTerminalChildren = backgroundChildren.filter((child) => isCoordinatorChildSuccessfulTerminalEntry(child));
+  const pendingInitialChildren = children.filter((child) => !child.running && child.pendingSpawnReason === 'initial');
+  const pendingFailureRestartChildren = children.filter((child) => !child.running && child.pendingSpawnReason === 'failure-restart');
+  const pendingRerunChildren = children.filter((child) => !child.running && child.pendingSpawnReason === 'clean-rerun');
+  const failureRestartCount = children.reduce((sum, child) => sum + child.failureRestartCount, 0);
+  const cleanRerunCount = children.reduce((sum, child) => sum + child.cleanRerunCount, 0);
+  const promotedChildren = children.filter((child) => child.repairStatus === 'promoted');
+  const rolledBackChildren = children.filter((child) => child.repairStatus === 'rolled-back');
+  const plannedChildren = children.filter((child) => child.repairStatus === 'planned');
   const lines = [
     `Goal: ${parsedArgs.goal}`,
     `Coordinator mode: multi-runner (${children.length} child lane(s), interval=${parsedArgs.intervalMs}ms)`,
     `Background lane cap: ${backgroundActiveCap}/${MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_MAX} concurrent background lane(s)${cpuBusyPercent !== null ? ` (cpu_busy=${cpuBusyPercent.toFixed(1)}%)` : ''}`,
     `Requested scopes: ${parsedArgs.scopes.join(', ')}`,
-    `Children: ${children.map((child) => `${child.id}=${child.phase}${child.running ? '/running' : ''}`).join('; ') || 'none'}`,
+    `Children: ${children.map((child) => {
+      const runningSuffix = child.running ? '/running' : '';
+      const pendingSuffix = !child.running && child.pendingSpawnReason ? `/pending:${child.pendingSpawnReason}` : '';
+      return `${child.id}=${child.phase}${runningSuffix}${pendingSuffix}`;
+    }).join('; ') || 'none'}`,
+    `Lane outcomes: ${runningChildren.length} active, ${successfulTerminalChildren.length} successful, ${degradedChildren.length} degraded, ${deferredChildren.length} deferred, ${failedChildren.length} failed`,
     `Autonomous edits: ${children.reduce((sum, child) => sum + child.proposedEditCount, 0)} proposed, ${children.reduce((sum, child) => sum + child.appliedEditCount, 0)} applied`,
   ];
+
+  if (backgroundChildren.length > 0) {
+    lines.push(
+      `Background lane outcomes: ${backgroundRunningChildren.length} active, ${backgroundSuccessfulTerminalChildren.length} successful, ${backgroundDegradedChildren.length} degraded, ${backgroundDeferredChildren.length} deferred, ${backgroundFailedChildren.length} failed`,
+    );
+  }
+  if (failureRestartCount > 0 || cleanRerunCount > 0) {
+    lines.push(`Lane respawns: ${failureRestartCount} failure restart(s), ${cleanRerunCount} clean rerun(s)`);
+  }
 
   if ((options.warmupRemainingMs || 0) > 0 && backgroundActiveCap < MULTI_RUNNER_BACKGROUND_ACTIVE_CAP_MAX) {
     lines.push(
@@ -2986,7 +3452,24 @@ function buildCoordinatorSummary(
       `AI backpressure throttle: recent shared-backend queue saturation is limiting background lanes to ${backgroundActiveCap} for another ${formatDurationMs(options.aiBackpressureRemainingMs || 0)}.`,
     );
   }
-
+  if (promotedChildren.length > 0 || rolledBackChildren.length > 0 || plannedChildren.length > 0) {
+    lines.push(
+      `Repair outcomes: ${[
+        promotedChildren.length > 0 ? `promoted=${promotedChildren.map((child) => child.id).join(', ')}` : '',
+        rolledBackChildren.length > 0 ? `rolled-back=${rolledBackChildren.map((child) => child.id).join(', ')}` : '',
+        plannedChildren.length > 0 ? `planned=${plannedChildren.map((child) => child.id).join(', ')}` : '',
+      ].filter(Boolean).join('; ')}`,
+    );
+  }
+  if (pendingInitialChildren.length > 0 || pendingFailureRestartChildren.length > 0 || pendingRerunChildren.length > 0) {
+    lines.push(
+      `Queued lanes: ${[
+        pendingInitialChildren.length > 0 ? `initial=${pendingInitialChildren.map((child) => child.id).join(', ')}` : '',
+        pendingFailureRestartChildren.length > 0 ? `failure-restart=${pendingFailureRestartChildren.map((child) => child.id).join(', ')}` : '',
+        pendingRerunChildren.length > 0 ? `clean-rerun=${pendingRerunChildren.map((child) => child.id).join(', ')}` : '',
+      ].filter(Boolean).join('; ')}`,
+    );
+  }
   if (failedChildren.length > 0) {
     lines.push(`Failures: ${failedChildren.map((child) => `${child.id}${child.lastError ? ` (${child.lastError})` : ''}`).join('; ')}`);
   }
@@ -2994,7 +3477,7 @@ function buildCoordinatorSummary(
     lines.push(`Deferred lanes: ${deferredChildren.map((child) => `${child.id}${child.deferReason ? ` (${child.deferReason})` : ''}`).join('; ')}`);
   }
   if (degradedChildren.length > 0) {
-    lines.push(`Degraded lanes: ${degradedChildren.map((child) => `${child.id}${child.lastAiFailureClass ? ` (${child.lastAiFailureClass})` : ''}`).join('; ')}`);
+    lines.push(`Degraded lanes: ${degradedChildren.map((child) => `${child.id}${child.lastAiFailureClass && child.lastAiFailureClass !== 'none' ? ` (${child.lastAiFailureClass})` : child.repairStatus ? ` (${child.repairStatus})` : ''}`).join('; ')}`);
   }
   if (selfHealedChildren.length > 0) {
     lines.push(
@@ -3020,6 +3503,9 @@ async function runMultiRunnerCoordinator(parsedArgs: ParsedArgs): Promise<void> 
   const childRuntimes: CoordinatorChildRuntime[] = childSpecs.map((spec) => ({
     spec,
     restartCount: 0,
+    failureRestartCount: 0,
+    cleanRerunCount: 0,
+    spawnCount: 0,
     nextRestartAt: 0,
     selfHealCount: 0,
   }));
@@ -3051,6 +3537,8 @@ async function runMultiRunnerCoordinator(parsedArgs: ParsedArgs): Promise<void> 
       lastAiFailureClass: 'none',
       validationRequired: false,
       restartedCount: 0,
+      failureRestartCount: 0,
+      cleanRerunCount: 0,
       selfHealCount: 0,
       scopeExpansionMode: spec.scopeExpansionMode,
     })),
@@ -3099,6 +3587,8 @@ async function runMultiRunnerCoordinator(parsedArgs: ParsedArgs): Promise<void> 
         runtime.lastSemanticProgressSignature = buildCoordinatorChildSemanticProgressSignature(runtime.lastStatus);
         runtime.lastSemanticProgressAtMs = Date.now();
         runtime.lastStatusHeartbeatAtMs = parseIsoTimestampMs(runtime.lastStatus?.lastUpdatedAt) ?? Date.now();
+        runtime.spawnCount = 1;
+        runtime.lastSpawnReason = 'initial';
         continue;
       }
       seedCoordinatorChildStatus(parsedArgs, runtime.spec, {
@@ -3107,8 +3597,9 @@ async function runMultiRunnerCoordinator(parsedArgs: ParsedArgs): Promise<void> 
         summary: isCoordinatorCoreLane(runtime) ? 'Waiting for core lane spawn...' : 'Queued for background slot.',
       });
       if (isCoordinatorCoreLane(runtime)) {
-        spawnCoordinatorChild(parsedArgs, runtime);
+        spawnCoordinatorChild(parsedArgs, runtime, 'initial');
       } else {
+        runtime.pendingSpawnReason = 'initial';
         runtime.nextRestartAt = 0;
       }
     }
@@ -3137,15 +3628,26 @@ async function runMultiRunnerCoordinator(parsedArgs: ParsedArgs): Promise<void> 
         const canRestart = !shuttingDown && canCoordinatorChildRestart(parsedArgs, runtime);
         const processAlive = runtime.process ? runtime.process.exitCode === null : false;
         const pidAlive = isPidAlive(pidFromFile) || isPidAlive(runtime.pid);
+        if (processAlive || pidAlive) {
+          if (!runtime.selfHealRequestedAtMs) {
+            runtime.pendingSpawnReason = undefined;
+            runtime.nextRestartAt = 0;
+          }
+        } else if (shuttingDown) {
+          runtime.pendingSpawnReason = undefined;
+          runtime.nextRestartAt = 0;
+        }
         if ((processAlive || pidAlive) && canRestart) {
           const selfHealReason = evaluateCoordinatorChildSelfHealReason(runtime, nowMs);
           if (selfHealReason) {
             requestCoordinatorChildSelfHeal(runtime, selfHealReason, nowMs);
           }
         }
-        if (isCoordinatorCoreLane(runtime) && !processAlive && !pidAlive && canRestart && Date.now() >= runtime.nextRestartAt) {
-          runtime.restartCount += 1;
-          spawnCoordinatorChild(parsedArgs, runtime);
+        const pendingSpawnReason = !processAlive && !pidAlive && !shuttingDown
+          ? resolveCoordinatorChildPendingSpawnReason(parsedArgs, runtime, nowMs)
+          : undefined;
+        if (isCoordinatorCoreLane(runtime) && pendingSpawnReason && nowMs >= runtime.nextRestartAt) {
+          spawnCoordinatorChild(parsedArgs, runtime, pendingSpawnReason);
         }
       }
 
@@ -3165,18 +3667,24 @@ async function runMultiRunnerCoordinator(parsedArgs: ParsedArgs): Promise<void> 
       while (!shuttingDown) {
         const nextBackgroundLane = selectNextCoordinatorBackgroundLaneToSpawn(parsedArgs, childRuntimes, nowMs, backgroundActiveCap);
         if (!nextBackgroundLane) break;
-        nextBackgroundLane.restartCount += 1;
-        spawnCoordinatorChild(parsedArgs, nextBackgroundLane);
+        const nextBackgroundReason = nextBackgroundLane.pendingSpawnReason || 'initial';
+        spawnCoordinatorChild(parsedArgs, nextBackgroundLane, nextBackgroundReason);
       }
 
       const coordinatedRunners = childRuntimes.map((runtime) => collectCoordinatedRunnerEntry(runtime));
+      const activeChildren = coordinatedRunners.filter((child) => child.running);
+      const queuedChildren = coordinatedRunners.filter((child) => !child.running && Boolean(child.pendingSpawnReason));
+      const terminalFailedChildren = coordinatedRunners.filter((child) => !child.running && isCoordinatorChildFailedEntry(child));
+      const terminalNonFailedChildren = coordinatedRunners.filter((child) => !child.running && !isCoordinatorChildFailedEntry(child));
       const phase = coordinatedRunners.some((child) => child.phase === 'paused')
         ? 'paused'
-        : coordinatedRunners.some((child) => child.running)
+        : activeChildren.length > 0
           ? 'streaming'
-          : coordinatedRunners.some((child) => child.healthClass === 'failed' || child.phase === 'failed')
-            ? 'failed'
-            : 'completed';
+          : queuedChildren.length > 0
+            ? 'sleeping'
+            : terminalFailedChildren.length > 0 && terminalNonFailedChildren.length === 0
+              ? 'failed'
+              : 'completed';
       const iteration = coordinatedRunners.reduce((maxIteration, child) => Math.max(maxIteration, child.iteration), 0);
       const proposedEditCount = coordinatedRunners.reduce((sum, child) => sum + child.proposedEditCount, 0);
       const appliedEditCount = coordinatedRunners.reduce((sum, child) => sum + child.appliedEditCount, 0);
@@ -3187,7 +3695,7 @@ async function runMultiRunnerCoordinator(parsedArgs: ParsedArgs): Promise<void> 
       ));
 
       coordinatorStatus = mergeRunnerStatus(coordinatorStatus, {
-        running: !shuttingDown && coordinatedRunners.some((child) => child.running),
+        running: !shuttingDown && (activeChildren.length > 0 || queuedChildren.length > 0),
         phase,
         iteration,
         proposedEditCount,
@@ -3195,21 +3703,8 @@ async function runMultiRunnerCoordinator(parsedArgs: ParsedArgs): Promise<void> 
         lastAppliedEditPaths,
         repairStatus: summarizeCoordinatorRepairStatus(coordinatedRunners),
         healthClass: summarizeCoordinatorHealthClass(coordinatedRunners),
-        deferReason: coordinatedRunners
-          .filter((child) => child.healthClass === 'blocked_external' || child.healthClass === 'waiting_evidence')
-          .map((child) => `${child.id}:${child.deferReason || child.healthClass}`)
-          .join('; '),
-        evidenceStatus: coordinatedRunners.some((child) => child.evidenceStatus === 'missing')
-          ? 'missing'
-          : coordinatedRunners.some((child) => child.evidenceStatus === 'planned')
-            ? 'planned'
-            : coordinatedRunners.some((child) => child.evidenceStatus === 'collected')
-              ? 'collected'
-              : coordinatedRunners.some((child) => child.evidenceStatus === 'validated')
-                ? 'validated'
-                : coordinatedRunners.every((child) => child.validationRequired === false)
-                  ? 'not-required'
-                  : 'unknown',
+        deferReason: summarizeCoordinatorDeferReason(coordinatedRunners),
+        evidenceStatus: summarizeCoordinatorEvidenceStatus(coordinatedRunners),
         lastAiFailureClass: coordinatedRunners
           .map((child) => child.lastAiFailureClass)
           .find((value) => value && value !== 'none') || 'none',
@@ -3229,7 +3724,7 @@ async function runMultiRunnerCoordinator(parsedArgs: ParsedArgs): Promise<void> 
           .filter(Boolean)
           .sort()
           .slice(-1)[0] || coordinatorStatus.lastRunStartedAt,
-        lastRunCompletedAt: coordinatedRunners.every((child) => !child.running) ? new Date().toISOString() : coordinatorStatus.lastRunCompletedAt,
+        lastRunCompletedAt: activeChildren.length === 0 && queuedChildren.length === 0 ? new Date().toISOString() : coordinatorStatus.lastRunCompletedAt,
         lastError: coordinatedRunners
           .filter((child) => Boolean(child.lastError))
           .map((child) => `${child.id}: ${child.lastError}`)
@@ -3237,11 +3732,10 @@ async function runMultiRunnerCoordinator(parsedArgs: ParsedArgs): Promise<void> 
       });
       writeRunnerStatus(parsedArgs.statusFilePath, coordinatorStatus);
 
-      const activeChildren = coordinatedRunners.filter((child) => child.running).length;
-      if (shuttingDown && activeChildren === 0) {
+      if (shuttingDown && activeChildren.length === 0) {
         break;
       }
-      if ((!parsedArgs.continuous || parsedArgs.maxIterations !== null) && activeChildren === 0) {
+      if (activeChildren.length === 0 && queuedChildren.length === 0) {
         break;
       }
 
@@ -3400,6 +3894,10 @@ async function main() {
         noProgressStreak,
         noProgressReason,
         lastProgressSignature: progressSignature,
+        observationSignature: typeof (result as any).currentObservationSignature === 'string'
+          ? (result as any).currentObservationSignature
+          : runnerStatus.observationSignature,
+        lastValidationOnlyOutcome: isValidationOnlyOutcome(resultRecord),
         effectiveScopes: Array.isArray((result as any).effectiveScopes)
           ? (result as any).effectiveScopes.map((scope: any) => String(scope || '').trim()).filter(Boolean)
           : runnerStatus.effectiveScopes,
@@ -3780,22 +4278,67 @@ async function main() {
         break;
       }
 
+      const researchScoutIdleSleepReason = terminalFailureSummary
+        ? undefined
+        : resolveResearchScoutIdleSleepReason(parsedArgs, resultRecord, meaningfulProgress);
+      const anyscanIdleSleepReason = terminalFailureSummary
+        ? undefined
+        : resolveAnyScanIdleSleepReason(parsedArgs, resultRecord, meaningfulProgress);
       const nextDelayMs = terminalFailureSummary
         ? getContinuousRetryDelayMs(consecutiveTerminalFailures)
-        : getNoProgressDelayMs(parsedArgs.intervalMs, runnerStatus.noProgressStreak || 0);
-      runnerStatus = mergeRunnerStatus(runnerStatus, {
-        running: true,
-        phase: terminalFailureSummary ? 'failed' : 'sleeping',
-      });
+        : researchScoutIdleSleepReason
+          ? getResearchScoutIdleDelayMs(parsedArgs.intervalMs, runnerStatus.noProgressStreak || 0)
+          : anyscanIdleSleepReason
+            ? getAnyScanIdleDelayMs(parsedArgs.intervalMs, runnerStatus.noProgressStreak || 0)
+            : getNoProgressDelayMs(parsedArgs.intervalMs, runnerStatus.noProgressStreak || 0);
+      if (researchScoutIdleSleepReason) {
+        runnerStatus = mergeRunnerStatus(runnerStatus, {
+          running: true,
+          phase: 'sleeping',
+          summary: buildResearchScoutIdleSleepSummary(researchScoutIdleSleepReason, nextDelayMs),
+        });
+      } else if (anyscanIdleSleepReason) {
+        runnerStatus = mergeRunnerStatus(runnerStatus, {
+          running: true,
+          phase: 'sleeping',
+          summary: buildAnyScanIdleSleepSummary(anyscanIdleSleepReason, nextDelayMs),
+        });
+      } else {
+        runnerStatus = mergeRunnerStatus(runnerStatus, {
+          running: true,
+          phase: terminalFailureSummary ? 'failed' : 'sleeping',
+        });
+      }
       writeRunnerStatus(parsedArgs.statusFilePath, runnerStatus);
       if (terminalFailureSummary) {
         console.log(`\n[langgraph-control-plane] iteration ended with failure but continuous mode is enabled; sleeping ${nextDelayMs}ms before retry...`);
+      } else if (researchScoutIdleSleepReason) {
+        console.log(
+          `\n[langgraph-control-plane] ${researchScoutIdleSleepReason} Sleeping ${nextDelayMs}ms before rechecking for fresh queued scout work...`,
+        );
+      } else if (anyscanIdleSleepReason) {
+        console.log(
+          `\n[langgraph-control-plane] ${anyscanIdleSleepReason} Sleeping ${nextDelayMs}ms before rechecking for fresh anyscan work...`,
+        );
       } else if ((runnerStatus.noProgressStreak || 0) >= MAX_NO_PROGRESS_STREAK && runnerStatus.noProgressReason) {
         console.log(`\n[langgraph-control-plane] ${runnerStatus.noProgressReason} Sleeping ${nextDelayMs}ms before the next iteration...`);
       } else {
         console.log(`\n[langgraph-control-plane] sleeping ${nextDelayMs}ms before next iteration...`);
       }
-      await sleep(nextDelayMs);
+      if (researchScoutIdleSleepReason || anyscanIdleSleepReason) {
+        await sleepWithStatusHeartbeat(nextDelayMs, RUNNER_STATUS_HEARTBEAT_MS, (remainingMs) => {
+          runnerStatus = mergeRunnerStatus(runnerStatus, {
+            running: true,
+            phase: 'sleeping',
+            summary: researchScoutIdleSleepReason
+              ? buildResearchScoutIdleSleepSummary(researchScoutIdleSleepReason, remainingMs)
+              : buildAnyScanIdleSleepSummary(anyscanIdleSleepReason || '', remainingMs),
+          });
+          writeRunnerStatus(parsedArgs.statusFilePath, runnerStatus);
+        });
+      } else {
+        await sleep(nextDelayMs);
+      }
     } catch (error) {
       runnerStatus = mergeRunnerStatus(runnerStatus, {
         running: false,

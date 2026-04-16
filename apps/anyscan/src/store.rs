@@ -6,7 +6,7 @@ use crate::{
         FindingRecord, FindingsQuery, NewFinding, OptOutRecord, OptOutRequest,
         OwnershipClaimRecord, OwnershipClaimRequest, PortScanRecord, PortScanRequest,
         PublicFindingModerationRecord, PublicFindingModerationRequest, PublicFindingRecord,
-        PublicFindingSearchQuery, PublicWorkflowStatusUpdate, RecurringScheduleRecord,
+        PublicFindingSearchQuery, PublicWorkflowStatus, PublicWorkflowStatusUpdate, RecurringScheduleRecord,
         RepositoryDefinition, RepositoryRecord, RunScope, RunSummary, ScanDefaultsSummary,
         ScanJobRecord, ScanRunRecord, StoredEvent, TargetDefinition, TargetRecord,
         WorkerBootstrapCandidateApproval, WorkerBootstrapCandidateApprovalRequest,
@@ -19,6 +19,7 @@ use crate::{
     dragonfly_store::DragonflyAnyScanStore,
 };
 use anyhow::Result;
+use chrono::{DateTime, Utc};
 
 #[derive(Debug, Clone)]
 pub struct AnyScanStore {
@@ -506,6 +507,23 @@ impl AnyScanStore {
         self.inner.update_ownership_claim_status(claim_id, update)
     }
 
+    pub fn apply_ownership_claim_verification(
+        &self,
+        claim_id: i64,
+        status: PublicWorkflowStatus,
+        verification_summary: Option<&str>,
+        verification_attempted_at: Option<DateTime<Utc>>,
+        verification_completed_at: Option<DateTime<Utc>>,
+    ) -> Result<OwnershipClaimRecord> {
+        self.inner.apply_ownership_claim_verification(
+            claim_id,
+            status,
+            verification_summary,
+            verification_attempted_at,
+            verification_completed_at,
+        )
+    }
+
     pub fn create_opt_out_request(&self, request: &OptOutRequest) -> Result<OptOutRecord> {
         self.inner.create_opt_out_request(request)
     }
@@ -520,6 +538,23 @@ impl AnyScanStore {
         update: &PublicWorkflowStatusUpdate,
     ) -> Result<OptOutRecord> {
         self.inner.update_opt_out_status(opt_out_id, update)
+    }
+
+    pub fn apply_opt_out_verification(
+        &self,
+        opt_out_id: i64,
+        status: PublicWorkflowStatus,
+        verification_summary: Option<&str>,
+        verification_attempted_at: Option<DateTime<Utc>>,
+        verification_completed_at: Option<DateTime<Utc>>,
+    ) -> Result<OptOutRecord> {
+        self.inner.apply_opt_out_verification(
+            opt_out_id,
+            status,
+            verification_summary,
+            verification_attempted_at,
+            verification_completed_at,
+        )
     }
 
     pub fn create_abuse_report(&self, request: &AbuseReportRequest) -> Result<AbuseReportRecord> {

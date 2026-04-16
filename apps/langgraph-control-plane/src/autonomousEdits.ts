@@ -409,6 +409,8 @@ function describeAutonomousEditSelectionReason(
     reasons.push('API/provider hot path candidate.');
   } else if (candidatePath.startsWith('apps/langgraph-control-plane/')) {
     reasons.push('Control-plane orchestration candidate.');
+  } else if (candidatePath.startsWith('apps/anyscan/')) {
+    reasons.push('AnyScan Rust service candidate.');
   } else if (candidatePath.startsWith('apps/homepage/') || candidatePath.startsWith('apps/ui/')) {
     reasons.push('Repo surface candidate.');
   } else {
@@ -780,6 +782,24 @@ export function buildAutonomousEditCandidatePaths(scopes: string[]): string[] {
     candidates.add('apps/api/README.md');
     candidates.add('apps/api/package.json');
     candidates.add('apps/api/ws/wsServer.ts');
+  }
+
+  if (hasAnyScope('repo', 'anyscan')) {
+    candidates.add('apps/anyscan/Cargo.toml');
+    candidates.add('apps/anyscan/index.html');
+    candidates.add('apps/anyscan/deploy.sh');
+    candidates.add('apps/anyscan/anyscan-api.service');
+    candidates.add('apps/anyscan/anyscan-worker.service');
+    candidates.add('apps/anyscan/src/config.rs');
+    candidates.add('apps/anyscan/src/core.rs');
+    candidates.add('apps/anyscan/src/detectors.rs');
+    candidates.add('apps/anyscan/src/dragonfly_store.rs');
+    candidates.add('apps/anyscan/src/fetcher.rs');
+    candidates.add('apps/anyscan/src/lib.rs');
+    candidates.add('apps/anyscan/src/ops.rs');
+    candidates.add('apps/anyscan/src/store.rs');
+    candidates.add('apps/anyscan/src/bin/anyscan-api.rs');
+    candidates.add('apps/anyscan/src/bin/anyscan-worker.rs');
   }
 
   if (hasAnyScope('api-routing')) {
@@ -1350,6 +1370,12 @@ function shouldRunApiPostEditTypecheck(normalizedPath: string): boolean {
     || /(?:package\.json|tsconfig\.json)$/i.test(normalizedPath);
 }
 
+function shouldRunAnyScanPostEditCheck(normalizedPath: string): boolean {
+  if (!normalizedPath.startsWith('apps/anyscan/')) return false;
+  return /\.(?:rs)$/i.test(normalizedPath)
+    || /(?:Cargo\.toml)$/i.test(normalizedPath);
+}
+
 function sanitizePostEditValidatorOutput(value: string): string {
   return String(value || '')
     .replace(/\r\n/g, '\n')
@@ -1417,6 +1443,15 @@ function runAutonomousEditPostValidation(
       ok: true,
       message: `Post-edit validator api file-level checks passed for ${normalizedPath}; full API typecheck is deferred to repair smoke validation.`,
     };
+  }
+
+  if (shouldRunAnyScanPostEditCheck(normalizedPath)) {
+    return runPostEditValidatorCommand(
+      repoRoot,
+      normalizedPath,
+      'anyscan cargo check',
+      ['cargo', 'check', '--manifest-path', 'apps/anyscan/Cargo.toml'],
+    );
   }
 
   return { ok: true };

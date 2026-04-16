@@ -419,6 +419,10 @@ pub struct OwnershipClaimRecord {
     #[serde(default)]
     pub reviewer_notes: Option<String>,
     #[serde(default)]
+    pub verification_summary: Option<String>,
+    #[serde(default)]
+    pub verification_attempted_at: Option<DateTime<Utc>>,
+    #[serde(default)]
     pub verification_completed_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -456,6 +460,12 @@ pub struct OptOutRecord {
     pub status: PublicWorkflowStatus,
     #[serde(default)]
     pub reviewer_notes: Option<String>,
+    #[serde(default)]
+    pub verification_summary: Option<String>,
+    #[serde(default)]
+    pub verification_attempted_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub verification_completed_at: Option<DateTime<Utc>>,
     #[serde(default)]
     pub completed_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,

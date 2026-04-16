@@ -1,3 +1,0 @@
-faster-whisper>=1.1.1,<2
-yt-dlp>=2025.3.31
-youtube-transcript-api>=1.2.3,<2

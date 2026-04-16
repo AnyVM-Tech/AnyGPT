@@ -317,9 +317,9 @@ impl Default for PublicSiteConfig {
         Self {
             service_name: "AnyScan".to_string(),
             base_url: None,
-            security_email: "security@example.invalid".to_string(),
-            abuse_email: "abuse@example.invalid".to_string(),
-            opt_out_email: "optout@example.invalid".to_string(),
+            security_email: "security@anyvm.tech".to_string(),
+            abuse_email: "abuse@anyvm.tech".to_string(),
+            opt_out_email: "optout@anyvm.tech".to_string(),
             scanner_ip_ranges: Vec::new(),
             scanner_asns: Vec::new(),
             reverse_dns_patterns: Vec::new(),
@@ -548,17 +548,26 @@ const BACKUP_CONFIG_PATHS: &[&str] = &[
 const DEFAULT_BOOTSTRAP_REPOSITORY_NAME: &str = "VulnScanner-zmap-alternative";
 const DEFAULT_BOOTSTRAP_REPOSITORY_GITHUB_URL: &str =
     "https://github.com/Lorikazzzz/VulnScanner-zmap-alternative.git";
-const DEFAULT_BOOTSTRAP_REPOSITORY_LOCAL_PATH: &str = "/root/AnyGPT/VulnScanner-zmap-alternative-";
 const DEFAULT_BOOTSTRAP_REPOSITORY_STATUS: &str = "tracked";
 const DEFAULT_BOOTSTRAP_REPOSITORY_DESCRIPTION: &str =
     "Standalone C scanner repository tracked for later runtime execution work.";
 const DEFAULT_PORT_SCAN_RATE_LIMIT: u64 = 1_000;
 
+fn default_bootstrap_repository_local_path() -> String {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")))
+        .join("VulnScanner-zmap-alternative-")
+        .to_string_lossy()
+        .into_owned()
+}
+
 fn default_bootstrap_repositories() -> Vec<RepositoryDefinition> {
     vec![RepositoryDefinition {
         name: DEFAULT_BOOTSTRAP_REPOSITORY_NAME.to_string(),
         github_url: DEFAULT_BOOTSTRAP_REPOSITORY_GITHUB_URL.to_string(),
-        local_path: DEFAULT_BOOTSTRAP_REPOSITORY_LOCAL_PATH.to_string(),
+        local_path: default_bootstrap_repository_local_path(),
         description: Some(DEFAULT_BOOTSTRAP_REPOSITORY_DESCRIPTION.to_string()),
         status: DEFAULT_BOOTSTRAP_REPOSITORY_STATUS.to_string(),
         related_target_ids: Vec::new(),
@@ -2522,6 +2531,15 @@ impl AppConfig {
                 self.auth.session_ttl_seconds = parsed;
             }
         }
+        if let Ok(value) = env::var("ANYSCAN_SECURITY_EMAIL") {
+            self.public.security_email = value;
+        }
+        if let Ok(value) = env::var("ANYSCAN_ABUSE_EMAIL") {
+            self.public.abuse_email = value;
+        }
+        if let Ok(value) = env::var("ANYSCAN_OPT_OUT_EMAIL") {
+            self.public.opt_out_email = value;
+        }
         if let Ok(value) = env::var("ANYSCAN_ALLOWED_HOST_SUFFIXES") {
             self.inventory.allowed_host_suffixes = value
                 .split(',')
@@ -3143,7 +3161,7 @@ mod tests {
         );
         assert_eq!(
             repositories[0].local_path,
-            "/root/AnyGPT/VulnScanner-zmap-alternative-"
+            super::default_bootstrap_repository_local_path()
         );
         assert_eq!(repositories[0].status, "tracked");
     }

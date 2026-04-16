@@ -41,14 +41,12 @@ apps/langgraph-control-plane/studio-server.log
 /dist
 apps/api/dist
 apps/langgraph-control-plane/dist/
-apps/exp-studio/target/
-apps/exp-studio/backend/__pycache__/
-apps/exp-studio/.lane-secrets.env
 apps/exposure-runtime/target/
 apps/exposure-runtime/data/
 apps/anyscan/target/
 apps/anyscan/data/
 apps/anyscan/__pycache__/
+apps/anyscan/.external-runtime.env
 apps/langgraph-control-plane/__pycache__/
 # Specific files
 vite.config.ts.timestamp*
@@ -58,7 +56,6 @@ package-lock.json
 .turbo
 apps/api/providers.json
 apps/api/keys.json
-apps/exposure-studio/.lane-secrets.env
 apps/api/logs/admin-keys.json
 **/providers.json
 # Sensitive/generated config/data files in apps/api

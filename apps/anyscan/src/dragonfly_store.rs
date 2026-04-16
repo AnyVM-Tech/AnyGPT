@@ -1915,6 +1915,8 @@ impl DragonflyAnyScanStore {
                 notes: request.notes,
                 status: PublicWorkflowStatus::Submitted,
                 reviewer_notes: None,
+                verification_summary: None,
+                verification_attempted_at: None,
                 verification_completed_at: None,
                 created_at: now,
                 updated_at: now,
@@ -1953,6 +1955,30 @@ impl DragonflyAnyScanStore {
         })
     }
 
+    pub fn apply_ownership_claim_verification(
+        &self,
+        claim_id: i64,
+        status: PublicWorkflowStatus,
+        verification_summary: Option<&str>,
+        verification_attempted_at: Option<DateTime<Utc>>,
+        verification_completed_at: Option<DateTime<Utc>>,
+    ) -> Result<OwnershipClaimRecord> {
+        self.with_state_mut(|state| {
+            let claim = state
+                .ownership_claims
+                .iter_mut()
+                .find(|claim| claim.id == claim_id)
+                .ok_or_else(|| anyhow!("ownership claim {claim_id} not found"))?;
+            claim.status = status;
+            claim.verification_summary =
+                normalize_optional_text(verification_summary.map(str::to_string));
+            claim.verification_attempted_at = verification_attempted_at;
+            claim.verification_completed_at = verification_completed_at;
+            claim.updated_at = utc_now();
+            Ok(claim.clone())
+        })
+    }
+
     pub fn create_opt_out_request(&self, request: &OptOutRequest) -> Result<OptOutRecord> {
         let request = normalize_opt_out_request(request)?;
         self.with_state_mut(|state| {
@@ -1969,6 +1995,9 @@ impl DragonflyAnyScanStore {
                 justification: request.justification,
                 status: PublicWorkflowStatus::Submitted,
                 reviewer_notes: None,
+                verification_summary: None,
+                verification_attempted_at: None,
+                verification_completed_at: None,
                 completed_at: None,
                 created_at: now,
                 updated_at: now,
@@ -2000,6 +2029,30 @@ impl DragonflyAnyScanStore {
             if matches!(opt_out.status, PublicWorkflowStatus::Completed) {
                 opt_out.completed_at = Some(opt_out.updated_at);
             }
+            Ok(opt_out.clone())
+        })
+    }
+
+    pub fn apply_opt_out_verification(
+        &self,
+        opt_out_id: i64,
+        status: PublicWorkflowStatus,
+        verification_summary: Option<&str>,
+        verification_attempted_at: Option<DateTime<Utc>>,
+        verification_completed_at: Option<DateTime<Utc>>,
+    ) -> Result<OptOutRecord> {
+        self.with_state_mut(|state| {
+            let opt_out = state
+                .opt_out_requests
+                .iter_mut()
+                .find(|record| record.id == opt_out_id)
+                .ok_or_else(|| anyhow!("opt-out request {opt_out_id} not found"))?;
+            opt_out.status = status;
+            opt_out.verification_summary =
+                normalize_optional_text(verification_summary.map(str::to_string));
+            opt_out.verification_attempted_at = verification_attempted_at;
+            opt_out.verification_completed_at = verification_completed_at;
+            opt_out.updated_at = utc_now();
             Ok(opt_out.clone())
         })
     }
