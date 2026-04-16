@@ -1,0 +1,34 @@
+[Unit]
+Description=AnyScan Worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=anyscan
+Group=anyscan
+WorkingDirectory=/opt/anyscan
+EnvironmentFile=-/etc/anyscan/runtime.env
+ExecStart=/opt/anyscan/bin/anyscan-worker daemon
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectControlGroups=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+ReadWritePaths=/var/lib/anyscan
+StateDirectory=anyscan
+RuntimeDirectory=anyscan
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

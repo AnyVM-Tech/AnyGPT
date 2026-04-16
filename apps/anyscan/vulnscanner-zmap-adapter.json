@@ -1,0 +1,15 @@
+{
+  "name": "vulnscanner-zmap",
+  "version": "0.1.0",
+  "kind": "scanner_adapter",
+  "enabled": true,
+  "description": "AnyScan worker adapter for the Lorikazzzz VulnScanner zmap alternative utility",
+  "command": "./vulnscanner-zmap-adapter.py",
+  "args": [],
+  "tags": [
+    "vulnscanner-zmap",
+    "raw-syn",
+    "tcp"
+  ],
+  "output_format": "endpoint_lines"
+}
