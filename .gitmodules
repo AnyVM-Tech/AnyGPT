@@ -1,0 +1,3 @@
+[submodule "apps/anyscan"]
+	path = apps/anyscan
+	url = https://github.com/AnyVM-Tech/AnyScan.git
