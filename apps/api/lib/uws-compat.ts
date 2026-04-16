@@ -166,6 +166,30 @@ function buildHeadersRecord(headers: Headers): Record<string, string> {
     return record;
 }
 
+function normalizeHttpStatusCode(rawCode: unknown): number {
+    if (typeof rawCode === 'number' && Number.isInteger(rawCode)) {
+        return rawCode >= 200 && rawCode <= 599 ? rawCode : 500;
+    }
+
+    if (typeof rawCode === 'string') {
+        const trimmed = rawCode.trim();
+        const leadingCode = trimmed.match(/^(\d{3})\b/);
+        if (leadingCode) {
+            const parsedLeading = Number(leadingCode[1]);
+            if (Number.isInteger(parsedLeading) && parsedLeading >= 200 && parsedLeading <= 599) {
+                return parsedLeading;
+            }
+        }
+
+        const parsed = Number(trimmed);
+        if (Number.isInteger(parsed) && parsed >= 200 && parsed <= 599) {
+            return parsed;
+        }
+    }
+
+    return 500;
+}
+
 function resolveClientIp(server: any, request: globalThis.Request, headers: Record<string, string>): string | undefined {
     const forwarded = headers['x-forwarded-for'] || headers['x-real-ip'];
     if (forwarded) return forwarded.split(',')[0].trim();
@@ -354,8 +378,13 @@ export class Response {
         return this.startedPromise;
     }
 
-    status(code: number): this {
-        this.statusCode = code;
+    status(code: number | string): this {
+        const normalized = normalizeHttpStatusCode(code);
+        if (normalized !== code) {
+            // Guard against malformed status payloads like "404 Not Found".
+            console.warn(`[uws-compat] Coerced invalid status code '${String(code)}' to ${normalized}`);
+        }
+        this.statusCode = normalized;
         return this;
     }
 

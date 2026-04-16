@@ -539,13 +539,15 @@ class DataManager {
             ...(normalizedRedis.capability_skips || {}),
         };
         const mergedRateLimitRps = normalizedRedis.rate_limit_rps ?? normalizedFs.rate_limit_rps ?? null;
-        // For disabled_at / disable_count: prefer the more recent disable timestamp; take the higher count
-        const mergedDisabledAt = (normalizedRedis.disabled_at && normalizedFs.disabled_at)
-            ? Math.max(normalizedRedis.disabled_at, normalizedFs.disabled_at)
-            : (normalizedRedis.disabled_at ?? normalizedFs.disabled_at);
-        const mergedDisableCount = (normalizedRedis.disable_count !== undefined && normalizedFs.disable_count !== undefined)
-            ? Math.max(normalizedRedis.disable_count, normalizedFs.disable_count)
-            : (normalizedRedis.disable_count ?? normalizedFs.disable_count);
+        const preferredModel = dataSourcePreference === 'redis' ? normalizedRedis : normalizedFs;
+        const fallbackModel = preferredModel === normalizedRedis ? normalizedFs : normalizedRedis;
+        const mergedDisabled = Boolean(preferredModel.disabled);
+        const mergedDisabledAt = mergedDisabled
+            ? (preferredModel.disabled_at ?? fallbackModel.disabled_at)
+            : undefined;
+        const mergedDisableCount = mergedDisabled
+            ? (preferredModel.disable_count ?? fallbackModel.disable_count)
+            : undefined;
         return {
             id: normalizedRedis.id || normalizedFs.id || modelId,
             token_generation_speed: Math.max(1, normalizedRedis.token_generation_speed || normalizedFs.token_generation_speed || 50),
@@ -557,7 +559,7 @@ class DataManager {
             avg_token_speed: normalizedRedis.avg_token_speed ?? normalizedFs.avg_token_speed,
             rate_limit_rps: mergedRateLimitRps,
             capability_skips: Object.keys(mergedSkips).length ? mergedSkips : undefined,
-            disabled: Boolean(normalizedFs.disabled || normalizedRedis.disabled),
+            disabled: mergedDisabled,
             ...(mergedDisabledAt !== undefined ? { disabled_at: mergedDisabledAt } : {}),
             ...(mergedDisableCount !== undefined ? { disable_count: mergedDisableCount } : {}),
         };
@@ -641,6 +643,7 @@ class DataManager {
             const fsProvider = fsMap.get(providerId);
             const redisProvider = redisMap.get(providerId);
             const hasFilesystemProvider = fsMap.has(providerId);
+            const hasRedisProvider = redisMap.has(providerId);
             const baseFs = this.normalizeProviderData(fsProvider, providerId);
             const baseRedis = this.normalizeProviderData(redisProvider, providerId);
             const fsLastErrorAt = typeof baseFs.lastErrorAt === 'number' ? baseFs.lastErrorAt : 0;
@@ -648,13 +651,25 @@ class DataManager {
             const latestErrorSource = redisLastErrorAt >= fsLastErrorAt ? baseRedis : baseFs;
             const fallbackErrorSource = latestErrorSource === baseRedis ? baseFs : baseRedis;
             const mergedLastErrorAt = Math.max(fsLastErrorAt, redisLastErrorAt) || undefined;
+            const preferredDisabledSource =
+                dataSourcePreference === 'redis' && hasRedisProvider
+                    ? baseRedis
+                    : hasFilesystemProvider
+                        ? baseFs
+                        : baseRedis;
+            const secondaryDisabledSource =
+                preferredDisabledSource === baseRedis ? baseFs : baseRedis;
+            const mergedDisabled = Boolean(preferredDisabledSource.disabled);
+            const mergedDisabledReason = mergedDisabled
+                ? preferredDisabledSource.disabled_reason || secondaryDisabledSource.disabled_reason
+                : undefined;
             const mergedErrorFields = mergedLastErrorAt !== undefined
                 ? latestErrorSource
                 : {
                     lastError: latestErrorSource.lastError || fallbackErrorSource.lastError,
                     lastErrorCode: latestErrorSource.lastErrorCode || fallbackErrorSource.lastErrorCode,
                     lastStatus: latestErrorSource.lastStatus ?? fallbackErrorSource.lastStatus,
-                    disabled_reason: latestErrorSource.disabled_reason || fallbackErrorSource.disabled_reason,
+                    disabled_reason: mergedDisabledReason,
                 };
 
             const modelIds = new Set<string>([
@@ -673,7 +688,7 @@ class DataManager {
                 provider_urls: baseRedis.provider_urls || baseFs.provider_urls,
                 streamingCompatible: typeof baseRedis.streamingCompatible === 'boolean' ? baseRedis.streamingCompatible : baseFs.streamingCompatible,
                 models: mergedModels,
-                disabled: Boolean(baseFs.disabled || baseRedis.disabled),
+                disabled: mergedDisabled,
                 avg_response_time: baseRedis.avg_response_time ?? baseFs.avg_response_time,
                 avg_provider_latency: baseRedis.avg_provider_latency ?? baseFs.avg_provider_latency,
                 errors: Math.max(baseFs.errors || 0, baseRedis.errors || 0),
@@ -689,7 +704,7 @@ class DataManager {
                     ? { lastStatus: mergedErrorFields.lastStatus }
                     : {}),
                 ...(mergedLastErrorAt !== undefined ? { lastErrorAt: mergedLastErrorAt } : {}),
-                ...((mergedErrorFields.disabled_reason)
+                ...((mergedDisabledReason)
                     ? { disabled_reason: mergedErrorFields.disabled_reason }
                     : {}),
             });

@@ -396,10 +396,10 @@ const OFFICIAL_PRICES: Record<string, PricingSeed> = {
   'imagen-4.0-fast-generate-001': { input: 0, output: 0, per_image: 0.02, source: 'official' },
   'imagen-4.0-ultra-generate-001': { input: 0, output: 0, per_image: 0.08, source: 'official' },
   'veo-2.0-generate-001': { input: 0, output: 0, per_request: 0.35, source: 'official' },
-  'veo-3.0-generate-001': { input: 0, output: 0, per_request: 0.50, source: 'official' },
-  'veo-3.0-fast-generate-001': { input: 0, output: 0, per_request: 0.25, source: 'official' },
-  'veo-3.1-generate-preview': { input: 0, output: 0, per_request: 0.50, source: 'official' },
-  'veo-3.1-fast-generate-preview': { input: 0, output: 0, per_request: 0.25, source: 'official' },
+  'veo-3.0-generate-001': { input: 0, output: 0, per_image: 0.40, source: 'official' },
+  'veo-3.0-fast-generate-001': { input: 0, output: 0, per_image: 0.10, source: 'official' },
+  'veo-3.1-generate-preview': { input: 0, output: 0, per_image: 0.40, source: 'official' },
+  'veo-3.1-fast-generate-preview': { input: 0, output: 0, per_image: 0.10, source: 'official' },
 
   // ============================================================
   // Deepseek — https://api-docs.deepseek.com/quick_start/pricing

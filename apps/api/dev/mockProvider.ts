@@ -41,6 +41,75 @@ function extractResponsesInputText(input: any): string {
   return '';
 }
 
+function listResponsesInputItems(input: any): any[] {
+  if (Array.isArray(input)) {
+    return input.filter((entry) => entry && typeof entry === 'object');
+  }
+  return input && typeof input === 'object' ? [input] : [];
+}
+
+function extractFunctionCallOutput(input: any): { city?: string; time?: string } | null {
+  const functionOutputItem = listResponsesInputItems(input).find((entry) =>
+    String(entry?.type || '').toLowerCase() === 'function_call_output'
+  );
+  if (!functionOutputItem) return null;
+
+  const rawOutput = functionOutputItem.output;
+  if (rawOutput && typeof rawOutput === 'object') {
+    return {
+      city: typeof rawOutput.city === 'string' ? rawOutput.city : undefined,
+      time: typeof rawOutput.time === 'string' ? rawOutput.time : undefined,
+    };
+  }
+
+  if (typeof rawOutput === 'string' && rawOutput.trim()) {
+    try {
+      const parsed = JSON.parse(rawOutput);
+      return {
+        city: typeof parsed?.city === 'string' ? parsed.city : undefined,
+        time: typeof parsed?.time === 'string' ? parsed.time : undefined,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
+
+function getResponseInputFunctionCallItems(input: any): any[] {
+  return listResponsesInputItems(input).filter((entry) =>
+    String(entry?.type || '').toLowerCase() === 'function_call'
+  );
+}
+
+function getLatestResponseInputUserText(input: any): string {
+  const items = listResponsesInputItems(input);
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const entry = items[index];
+    const role = String(entry?.role || '').toLowerCase();
+    const type = String(entry?.type || '').toLowerCase();
+    if (role === 'user' || type === 'message') {
+      const text = extractResponsesInputText(entry);
+      if (text) return text;
+    }
+  }
+  return extractResponsesInputText(input);
+}
+
+function inferMockProviderIdentity(request: any): string {
+  const providerHeader = request?.headers?.['x-mock-provider-id'];
+  if (typeof providerHeader === 'string' && providerHeader.trim()) {
+    return providerHeader.trim();
+  }
+  const authHeader = request?.headers?.authorization;
+  if (typeof authHeader === 'string') {
+    if (/provider-b/i.test(authHeader)) return 'mock-openrouter';
+    if (/provider-a/i.test(authHeader)) return 'mock-openai';
+  }
+  return 'mock-openai';
+}
+
 function writeSseEvent(response: any, payload: Record<string, any>) {
   response.write(`event: ${payload.type}\n`);
   response.write(`data: ${JSON.stringify(payload)}\n\n`);
@@ -56,6 +125,21 @@ function splitTextIntoChunks(text: string, chunkSize: number): string[] {
     chunks.push(text.slice(index, index + normalizedChunkSize));
   }
   return chunks;
+}
+
+function wantsJsonObjectResponse(body: any): boolean {
+  const responseFormatType = typeof body?.response_format?.type === 'string'
+    ? body.response_format.type.trim().toLowerCase()
+    : '';
+  const textFormatType = typeof body?.text?.format?.type === 'string'
+    ? body.text.format.type.trim().toLowerCase()
+    : '';
+  return responseFormatType === 'json_object' || textFormatType === 'json_object';
+}
+
+function maybeWrapMockTextAsJson(body: any, text: string): string {
+  if (!wantsJsonObjectResponse(body)) return text;
+  return JSON.stringify({ reply: text });
 }
 
 // Default configuration (can be overridden via environment variables or API)
@@ -226,6 +310,7 @@ Code connects all worlds.`;
   } else {
     mockContent = `This is a mock response to your message: "${userMessage}". I'm a simulated AI provider for testing purposes.`;
   }
+  mockContent = maybeWrapMockTextAsJson(body, mockContent);
 
   // Calculate mock token usage
   const inputTokens = Math.ceil(userMessage.length / 4); // Rough estimate: 4 chars per token
@@ -262,35 +347,62 @@ Code connects all worlds.`;
     const created = Math.floor(Date.now() / 1000);
     const modelName = model || 'mock-gpt-3.5-turbo';
     
-    // Split content into chunks for streaming
-    const chunkSize = 3; // characters per chunk
-    const chunks: string[] = [];
-    for (let i = 0; i < mockContent.length; i += chunkSize) {
-      chunks.push(mockContent.substring(i, i + chunkSize));
-    }
-
     await new Promise(resolve => setTimeout(resolve, processingDelay));
 
     try {
-      // Send chunks
-      for (let i = 0; i < chunks.length; i++) {
-        const chunk = chunks[i];
-        const streamChunk = {
+      if (mockToolCall) {
+        const toolCallDelta = {
           id: requestId,
           object: 'chat.completion.chunk',
           created: created,
           model: modelName,
           choices: [{
             index: 0,
-            delta: { content: chunk },
+            delta: {
+              tool_calls: [{
+                index: 0,
+                id: mockToolCall.id,
+                type: 'function',
+                function: {
+                  name: mockToolCall.function.name,
+                  arguments: mockToolCall.function.arguments,
+                },
+              }],
+            },
             finish_reason: null
           }]
         };
 
-        response.write(`data: ${JSON.stringify(streamChunk)}\n\n`);
-
-        // Small delay between chunks to simulate real streaming
+        response.write(`data: ${JSON.stringify(toolCallDelta)}\n\n`);
         await new Promise(resolve => setTimeout(resolve, 50));
+      } else {
+        // Split content into chunks for streaming
+        const chunkSize = 3; // characters per chunk
+        const chunks: string[] = [];
+        for (let i = 0; i < mockContent.length; i += chunkSize) {
+          chunks.push(mockContent.substring(i, i + chunkSize));
+        }
+
+        // Send chunks
+        for (let i = 0; i < chunks.length; i++) {
+          const chunk = chunks[i];
+          const streamChunk = {
+            id: requestId,
+            object: 'chat.completion.chunk',
+            created: created,
+            model: modelName,
+            choices: [{
+              index: 0,
+              delta: { content: chunk },
+              finish_reason: null
+            }]
+          };
+
+          response.write(`data: ${JSON.stringify(streamChunk)}\n\n`);
+
+          // Small delay between chunks to simulate real streaming
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
       }
 
       // Send final chunk
@@ -302,7 +414,7 @@ Code connects all worlds.`;
         choices: [{
           index: 0,
           delta: {},
-          finish_reason: 'stop'
+          finish_reason: mockToolCall ? 'tool_calls' : 'stop'
         }]
       };
 
@@ -356,6 +468,7 @@ Code connects all worlds.`;
 
 app.post('/v1/responses', async (request, response) => {
   const body = await request.json();
+  const providerIdentity = inferMockProviderIdentity(request);
 
   if (mockConfig.enableLogs) {
     console.log('[MOCK] Received responses request:', JSON.stringify(body, null, 2));
@@ -364,16 +477,48 @@ app.post('/v1/responses', async (request, response) => {
   const model = typeof body?.model === 'string' ? body.model : 'mock-gpt-5.4';
   const stream = body?.stream === true;
   const tools = Array.isArray(body?.tools) ? body.tools : [];
-  const userMessage = extractResponsesInputText(body?.input);
+  const inputItems = listResponsesInputItems(body?.input);
+  const functionCallItems = getResponseInputFunctionCallItems(body?.input);
+  const hasReasoningItem = inputItems.some(
+    (entry) => String(entry?.type || '').toLowerCase() === 'reasoning'
+  );
+  const hasFunctionCallItem = functionCallItems.length > 0;
+  const hasFunctionCallOutputItem = inputItems.some(
+    (entry) => String(entry?.type || '').toLowerCase() === 'function_call_output'
+  );
+  const functionCallOutput = extractFunctionCallOutput(body?.input);
+  const shouldCompleteToolTurn =
+    hasFunctionCallOutputItem && hasFunctionCallItem && hasReasoningItem;
+  const userMessage = getLatestResponseInputUserText(body?.input);
+  const userMessageLower = userMessage.toLowerCase();
+  const summaryReplayDetected =
+    userMessageLower.includes('summarize the previous reasoning context in one sentence') &&
+    hasReasoningItem;
+  const crossProviderReplayDetected =
+    summaryReplayDetected &&
+    hasFunctionCallItem &&
+    hasFunctionCallOutputItem &&
+    providerIdentity === 'mock-openrouter';
+  const sameProviderContinuationDetected =
+    hasFunctionCallOutputItem && !hasFunctionCallItem && !hasReasoningItem;
 
   let mockContent = '';
-  if (userMessage.toLowerCase().includes('haiku')) {
+  if (crossProviderReplayDetected) {
+    mockContent = 'The prior tool call reasoning and result were replayed successfully across providers.';
+  } else if (sameProviderContinuationDetected) {
+    mockContent = 'Native upstream continuation stayed on the original provider.';
+  } else if (shouldCompleteToolTurn) {
+    const city = functionCallOutput?.city || 'NYC';
+    const time = functionCallOutput?.time || '10:00 AM';
+    mockContent = `The local time in ${city} is ${time}.`;
+  } else if (userMessageLower.includes('haiku')) {
     mockContent = `APIs connect bright,\nRequests flow through one clear gateway,\nSDKs rest easy.`;
-  } else if (userMessage.toLowerCase().includes('hello')) {
+  } else if (userMessageLower.includes('hello')) {
     mockContent = 'Hello from the mock Responses API.';
   } else {
     mockContent = `This is a mock responses reply to: "${userMessage}".`;
   }
+  mockContent = maybeWrapMockTextAsJson(body, mockContent);
 
   const inputTokens = Math.ceil(userMessage.length / 4);
   const outputTokens = Math.ceil(mockContent.length / 4);
@@ -387,11 +532,13 @@ app.post('/v1/responses', async (request, response) => {
   const reasoningId = `rs_${randomUUID().replace(/-/g, '').slice(0, 24)}`;
   const functionCallId = `fc_${randomUUID().replace(/-/g, '').slice(0, 24)}`;
   const created = Math.floor(Date.now() / 1000);
-  const mockReasoning = tools.length > 0
-    ? 'Selecting the best tool and preparing its arguments.'
-    : 'Planning the response before generating the final answer.';
+  const mockReasoning = shouldCompleteToolTurn
+    ? 'Using the returned tool result to complete the answer.'
+    : tools.length > 0
+      ? 'Selecting the best tool and preparing its arguments.'
+      : 'Planning the response before generating the final answer.';
   const reasoningChunks = splitTextIntoChunks(mockReasoning, 14);
-  const mockFunctionCall = tools.length > 0
+  const mockFunctionCall = tools.length > 0 && !shouldCompleteToolTurn
     ? {
         id: functionCallId,
         type: 'function_call',

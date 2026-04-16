@@ -44,9 +44,13 @@ import {
 	extractInputAudioFromContent,
 	extractImageUrlFromContent,
 	extractTextFromMessages,
+	extractInstructionTextFromMessages,
 	extractInputAudioFromMessages,
 	extractImageUrlFromMessages,
 	extractTextFromResponsesInput,
+	extractInstructionTextFromResponsesInput,
+	extractInstructionTextFromRequestBody,
+	mergeInstructionTextWithPrompt,
 	extractInputAudioFromResponsesInput,
 	extractImageUrlFromResponsesInput
 } from '../modules/contentExtraction.js';
@@ -167,6 +171,7 @@ import {
 	isGeminiVideoRequestId,
 	type VideoRequestCacheProvider
 } from '../modules/geminiVideo.js';
+import { resolveVideoPricingUnitRateOverride } from '../modules/videoPricing.js';
 import {
 	buildVideoRequestCacheProvider,
 	resolveVideoRequestCacheTtlMs
@@ -245,8 +250,21 @@ function writeResponsesSseEvent(
 	response: Response,
 	payload: Record<string, any>
 ): void {
-	response.write(`event: ${payload.type}\n`);
-	response.write(`data: ${JSON.stringify(payload)}\n\n`);
+	const responseWithSeq = response as Response & {
+		__responsesSequenceNumber?: number;
+	};
+	const sequenceNumber =
+		typeof payload.sequence_number === 'number' &&
+		Number.isFinite(payload.sequence_number)
+			? Math.max(0, Math.floor(payload.sequence_number))
+			: ((responseWithSeq.__responsesSequenceNumber || 0) + 1);
+	responseWithSeq.__responsesSequenceNumber = sequenceNumber;
+	const enrichedPayload =
+		payload.sequence_number === sequenceNumber
+			? payload
+			: { ...payload, sequence_number: sequenceNumber };
+	response.write(`event: ${enrichedPayload.type}\n`);
+	response.write(`data: ${JSON.stringify(enrichedPayload)}\n\n`);
 }
 
 function writeStreamingErrorAndClose(
@@ -675,6 +693,54 @@ function extractResponsesRequestBody(requestBody: any): {
 	return { message, modelId, stream: Boolean(requestBody.stream) };
 }
 
+function unwrapResponsesPlainText(text: string): string {
+	let value = String(text || '').trim();
+	if (!value) return '';
+	for (let i = 0; i < 3; i++) {
+		const match = value.match(
+			/^<(task|user_prompt|prompt|message)>\s*([\s\S]*?)\s*<\/\1>$/i
+		);
+		if (!match) break;
+		value = String(match[2] || '').trim();
+	}
+	return value;
+}
+
+function detectSimpleGreetingResponse(message: IMessage): string | null {
+	if (
+		typeof message.previous_response_id === 'string' &&
+		message.previous_response_id.trim()
+	) {
+		return null;
+	}
+	const rawText = unwrapResponsesPlainText(
+		extractTextFromResponsesInput(
+			Array.isArray(message.content) ? message.content : []
+		)
+	);
+	if (!rawText) return null;
+	const normalized = rawText
+		.toLowerCase()
+		.replace(/[`"'*_#]+/g, ' ')
+		.replace(/[.!?]+$/g, '')
+		.replace(/\s+/g, ' ')
+		.trim();
+	const simpleGreetings = new Set([
+		'hi',
+		'hello',
+		'hey',
+		'hey there',
+		'hellos',
+		'yo',
+		'sup',
+		'good morning',
+		'good afternoon',
+		'good evening'
+	]);
+	if (!simpleGreetings.has(normalized)) return null;
+	return 'Hi! What would you like help with?';
+}
+
 // Token estimation constants now imported from '../modules/tokenEstimation.js'
 const LOG_SENSITIVE_PAYLOADS = readEnvBool('LOG_SENSITIVE_PAYLOADS', false);
 if (LOG_SENSITIVE_PAYLOADS) {
@@ -762,6 +828,9 @@ const INTERNAL_CONTROL_PLANE_RATE_LIMIT_WAIT_BUDGET_MS = Math.max(
 	0,
 	readEnvNumber('INTERNAL_CONTROL_PLANE_RATE_LIMIT_WAIT_BUDGET_MS', 60_000)
 );
+const FORGE_TRACE_ENABLED = /^(1|true|yes|on)$/i.test(
+	String(process.env.ANYGPT_FORGE_TRACE || '').trim()
+);
 
 function resolveInternalRateLimitWaitBudgetMs(
 	request: Request
@@ -818,6 +887,79 @@ function buildHandlerRequestOptions(
 			: {}),
 		...extra
 	};
+}
+
+function detectForgeTraceClient(request: Pick<Request, 'headers'>): string | undefined {
+	const candidates = [
+		getHeaderValue(request.headers, 'user-agent'),
+		getHeaderValue(request.headers, 'x-client'),
+		getHeaderValue(request.headers, 'x-requested-with'),
+		getHeaderValue(request.headers, 'x-anygpt-internal-client')
+	].filter(Boolean) as string[];
+	const haystack = candidates.join(' | ').toLowerCase();
+	if (!haystack) return undefined;
+	if (haystack.includes('forge')) return 'forge';
+	if (haystack.includes('copilot')) return 'copilot';
+	if (haystack.includes('github')) return 'github';
+	return candidates[0];
+}
+
+function summarizeForgeTraceOutput(output: any): string[] {
+	if (!Array.isArray(output)) return [];
+	return output
+		.map(item =>
+			item && typeof item === 'object' && typeof item.type === 'string'
+				? item.type
+				: typeof item
+		)
+		.slice(0, 12);
+}
+
+function countForgeTraceToolCalls(output: any): number {
+	if (!Array.isArray(output)) return 0;
+	let count = 0;
+	for (const item of output) {
+		if (!item || typeof item !== 'object') continue;
+		if (item.type === 'function_call') {
+			count += 1;
+			continue;
+		}
+		if (!Array.isArray((item as any).content)) continue;
+		for (const part of (item as any).content) {
+			if (
+				part &&
+				typeof part === 'object' &&
+				part.type === 'tool_calls' &&
+				Array.isArray((part as any).tool_calls)
+			) {
+				count += (part as any).tool_calls.length;
+			}
+		}
+	}
+	return count;
+}
+
+function logForgeTrace(
+	scope: 'chat' | 'responses',
+	phase: string,
+	request: Pick<Request, 'headers' | 'method' | 'path' | 'url' | 'requestId'>,
+	payload: Record<string, unknown>
+): void {
+	if (!FORGE_TRACE_ENABLED) return;
+	logger.info(`[ForgeTrace][openai][${scope}][${phase}]`, {
+		requestId: request.requestId,
+		method: request.method,
+		path: request.path,
+		url: request.url,
+		client: detectForgeTraceClient(request),
+		userAgent: getHeaderValue(request.headers, 'user-agent'),
+		xClient: getHeaderValue(request.headers, 'x-client'),
+		internalClient: getHeaderValue(
+			request.headers,
+			'x-anygpt-internal-client'
+		),
+		...payload
+	});
 }
 
 function resolveRetryAfterSeconds(
@@ -2043,6 +2185,24 @@ openaiRouter.post(
 			const result = extractMessageFromRequestBody(requestBody);
 			let { messages: rawMessages, model: modelId } = result;
 			rawMessages = filterValidChatMessages(rawMessages);
+			logForgeTrace('chat', 'request.start', request, {
+				modelId,
+				stream: requestBody?.stream === true,
+				messageCount: Array.isArray(rawMessages)
+					? rawMessages.length
+					: undefined,
+				toolsCount: Array.isArray(requestBody?.tools)
+					? requestBody.tools.length
+					: undefined,
+				toolChoice:
+					typeof requestBody?.tool_choice === 'string'
+						? requestBody.tool_choice
+						: typeof requestBody?.tool_choice === 'object' &&
+						  requestBody.tool_choice
+							? 'object'
+							: undefined,
+				accept: getHeaderValue(request.headers, 'accept')
+			});
 			if (rawMessages.length === 0) {
 				if (!response.completed) {
 					return response.status(400).json({
@@ -2236,14 +2396,22 @@ openaiRouter.post(
 			// --- Block non-chat models with helpful error (or auto-fallback for image generation) ---
 			const nonChatType = isNonChatModel(modelId);
 			if (nonChatType) {
+				const chatInstructionText = [
+					extractInstructionTextFromRequestBody(requestBody),
+					extractInstructionTextFromMessages(rawMessages)
+				]
+					.filter((text) => typeof text === 'string' && text.trim().length > 0)
+					.join('\n\n');
 				if (
 					nonChatType === 'image-gen' &&
 					!isNanoBananaModel(modelId)
 				) {
-					const prompt =
+					const prompt = mergeInstructionTextWithPrompt(
 						typeof requestBody?.prompt === 'string'
 							? requestBody.prompt
-							: extractTextFromMessages(rawMessages);
+							: extractTextFromMessages(rawMessages),
+						chatInstructionText
+					);
 					const imageUrl = extractImageUrlFromMessages(rawMessages);
 					await handleImageGenFallbackFromChatOrResponses({
 						modelId,
@@ -2258,10 +2426,12 @@ openaiRouter.post(
 					return;
 				}
 				if (nonChatType === 'video-gen') {
-					const prompt =
+					const prompt = mergeInstructionTextWithPrompt(
 						typeof requestBody?.prompt === 'string'
 							? requestBody.prompt
-							: extractTextFromMessages(rawMessages);
+							: extractTextFromMessages(rawMessages),
+						chatInstructionText
+					);
 					const imageUrl = extractImageUrlFromMessages(rawMessages);
 						await handleVideoGenFallbackFromChatOrResponses({
 							modelId,
@@ -3620,6 +3790,29 @@ openaiRouter.post(
 
 			if (requestBody?.interaction) {
 				const interactionBody = requestBody.interaction;
+				requestBody.input =
+					interactionBody?.input ?? requestBody.input;
+				requestBody.model =
+					typeof interactionBody?.model === 'string'
+						? interactionBody.model
+						: requestBody.model;
+				if (
+					requestBody.tools === undefined &&
+					Array.isArray(interactionBody?.tools)
+				) {
+					requestBody.tools = interactionBody.tools;
+				}
+				if (
+					requestBody.reasoning === undefined &&
+					interactionBody?.reasoning !== undefined
+				) {
+					requestBody.reasoning = interactionBody.reasoning;
+				}
+				requestBody.interaction = undefined;
+			}
+
+			if (requestBody?.interaction) {
+				const interactionBody = requestBody.interaction;
 				const input =
 					typeof interactionBody?.input === 'string'
 						? interactionBody.input
@@ -3694,7 +3887,7 @@ openaiRouter.post(
 
 			const { message, modelId, stream } =
 				extractResponsesRequestBody(requestBody);
-			const responsesHistoryInputDelta = Array.isArray(message.content)
+			let responsesHistoryInputDelta = Array.isArray(message.content)
 				? cloneResponsesHistoryValue(message.content)
 				: [cloneResponsesHistoryValue(message.content)];
 			let responsesHistoryExpandedInputDelta: any[] =
@@ -3736,9 +3929,14 @@ openaiRouter.post(
 						previousEntry,
 						responsesHistoryInputDelta
 					);
-					message.content = mergedHistory.input;
+					responsesHistoryInputDelta = cloneResponsesHistoryValue(
+						mergedHistory.inputDelta
+					);
 					responsesHistoryMergedInput = cloneResponsesHistoryValue(
 						mergedHistory.input
+					);
+					message.content = cloneResponsesHistoryValue(
+						mergedHistory.inputDelta
 					);
 				} catch (historyError: any) {
 					if (!response.completed) {
@@ -3863,14 +4061,22 @@ openaiRouter.post(
 
 			const nonChatType = isNonChatModel(modelId);
 			if (nonChatType) {
+				const responsesInstructionText = [
+					extractInstructionTextFromRequestBody(requestBody),
+					extractInstructionTextFromResponsesInput(requestBody?.input)
+				]
+					.filter((text) => typeof text === 'string' && text.trim().length > 0)
+					.join('\n\n');
 				if (
 					nonChatType === 'image-gen' &&
 					!isNanoBananaModel(modelId)
 				) {
-					const prompt =
+					const prompt = mergeInstructionTextWithPrompt(
 						typeof requestBody?.prompt === 'string'
 							? requestBody.prompt
-							: extractTextFromResponsesInput(requestBody?.input);
+							: extractTextFromResponsesInput(requestBody?.input),
+						responsesInstructionText
+					);
 					const imageUrl = extractImageUrlFromResponsesInput(
 						requestBody?.input
 					);
@@ -3887,10 +4093,12 @@ openaiRouter.post(
 					return;
 				}
 				if (nonChatType === 'video-gen') {
-					const prompt =
+					const prompt = mergeInstructionTextWithPrompt(
 						typeof requestBody?.prompt === 'string'
 							? requestBody.prompt
-							: extractTextFromResponsesInput(requestBody?.input);
+							: extractTextFromResponsesInput(requestBody?.input),
+						responsesInstructionText
+					);
 					const imageUrl = extractImageUrlFromResponsesInput(
 						requestBody?.input
 					);
@@ -3952,6 +4160,205 @@ openaiRouter.post(
 				created,
 				model: modelId
 			};
+			logForgeTrace('responses', 'request.start', request, {
+				modelId,
+				stream,
+				effectiveStream,
+				previousResponseId: localPreviousResponseId,
+				inputDeltaItems: Array.isArray(responsesHistoryInputDelta)
+					? responsesHistoryInputDelta.length
+					: undefined,
+				mergedInputItems: Array.isArray(responsesHistoryMergedInput)
+					? responsesHistoryMergedInput.length
+					: undefined,
+				messageContentItems: Array.isArray(message.content)
+					? message.content.length
+					: undefined,
+				toolsCount: Array.isArray(message.tools)
+					? message.tools.length
+					: undefined,
+				toolChoice:
+					typeof message.tool_choice === 'string'
+						? message.tool_choice
+						: typeof message.tool_choice === 'object' &&
+						  message.tool_choice
+							? 'object'
+							: undefined,
+				reasoning:
+					typeof requestBody?.reasoning === 'string'
+						? requestBody.reasoning
+						: requestBody?.reasoning &&
+						  typeof requestBody.reasoning === 'object'
+							? 'object'
+							: undefined,
+				accept: getHeaderValue(request.headers, 'accept')
+			});
+			const simpleGreetingResponse = detectSimpleGreetingResponse(message);
+			if (simpleGreetingResponse) {
+				const simpleGreetingReasoning =
+					'Planning the response before generating the final answer.';
+				const greetingReasoningId = createResponsesItemId('resp').replace(
+					/^resp_/,
+					'rs_'
+				);
+				const greetingPayload = buildResponsesResponseObject({
+					id: responseId,
+					created,
+					model: modelId,
+					outputText: simpleGreetingResponse,
+					status: 'completed',
+					messageId: responseMessageId,
+					messageStatus: 'completed',
+					reasoningText: simpleGreetingReasoning,
+					reasoningId: greetingReasoningId,
+					usage: {
+						input_tokens: estimateTokensFromContent(message.content),
+						output_tokens:
+							estimateTokensFromText(simpleGreetingResponse),
+						total_tokens:
+							estimateTokensFromContent(message.content) +
+							estimateTokensFromText(simpleGreetingResponse)
+					}
+				});
+				const greetingReasoningItem = greetingPayload.output[0];
+				const greetingMessageItem = greetingPayload.output[1];
+				if (effectiveStream) {
+					response.setHeader('Content-Type', 'text/event-stream');
+					response.setHeader('Cache-Control', 'no-cache');
+					response.setHeader('Connection', 'keep-alive');
+					writeResponsesSseEvent(
+						response,
+						buildResponsesCreatedEvent({
+							...basePayload,
+							created_at: created,
+							status: 'in_progress',
+							output: [],
+							output_text: ''
+						})
+					);
+					writeResponsesSseEvent(response, {
+						type: 'response.output_item.added',
+						response_id: responseId,
+						output_index: 0,
+						item: {
+							id: greetingReasoningItem?.id,
+							type: 'reasoning',
+							status: 'in_progress',
+							summary: []
+						}
+					});
+					writeResponsesSseEvent(response, {
+						type: 'response.reasoning_summary_part.added',
+						response_id: responseId,
+						item_id: greetingReasoningItem?.id,
+						output_index: 0,
+						summary_index: 0,
+						part: { type: 'summary_text', text: '' }
+					});
+					writeResponsesSseEvent(response, {
+						type: 'response.reasoning_summary_text.delta',
+						response_id: responseId,
+						item_id: greetingReasoningItem?.id,
+						output_index: 0,
+						summary_index: 0,
+						delta: simpleGreetingReasoning
+					});
+					writeResponsesSseEvent(response, {
+						type: 'response.reasoning_summary_text.done',
+						response_id: responseId,
+						item_id: greetingReasoningItem?.id,
+						output_index: 0,
+						summary_index: 0,
+						text: simpleGreetingReasoning
+					});
+					writeResponsesSseEvent(response, {
+						type: 'response.reasoning_summary_part.done',
+						response_id: responseId,
+						item_id: greetingReasoningItem?.id,
+						output_index: 0,
+						summary_index: 0,
+						part: { type: 'summary_text', text: simpleGreetingReasoning }
+					});
+					writeResponsesSseEvent(
+						response,
+						buildResponsesOutputItemDoneEvent({
+							responseId,
+							outputIndex: 0,
+							item: greetingReasoningItem
+						})
+					);
+					writeResponsesSseEvent(
+						response,
+						buildResponsesOutputItemAddedEvent({
+							responseId,
+							outputIndex: 1,
+							item: createResponsesMessageItem('', {
+								id: responseMessageId,
+								status: 'in_progress'
+							})
+						})
+					);
+					writeResponsesSseEvent(
+						response,
+						buildResponsesContentPartAddedEvent({
+							responseId,
+							itemId: responseMessageId,
+							outputIndex: 1,
+							contentIndex: 0,
+							part: { type: 'output_text', text: '' }
+						})
+					);
+					writeResponsesSseEvent(
+						response,
+						buildResponsesOutputTextDeltaEvent({
+							responseId,
+							itemId: responseMessageId,
+							outputIndex: 1,
+							contentIndex: 0,
+							delta: simpleGreetingResponse
+						})
+					);
+					writeResponsesSseEvent(
+						response,
+						buildResponsesOutputTextDoneEvent({
+							responseId,
+							itemId: responseMessageId,
+							outputIndex: 1,
+							contentIndex: 0,
+							text: simpleGreetingResponse
+						})
+					);
+					writeResponsesSseEvent(
+						response,
+						buildResponsesContentPartDoneEvent({
+							responseId,
+							itemId: responseMessageId,
+							outputIndex: 1,
+							contentIndex: 0,
+							part: {
+								type: 'output_text',
+								text: simpleGreetingResponse
+							}
+						})
+					);
+					writeResponsesSseEvent(
+						response,
+						buildResponsesOutputItemDoneEvent({
+							responseId,
+							outputIndex: 1,
+							item: greetingMessageItem
+						})
+					);
+					writeResponsesSseEvent(
+						response,
+						buildResponsesCompletedEvent(greetingPayload)
+					);
+					response.write('data: [DONE]\n\n');
+					if (!response.completed) response.end();
+					return;
+				}
+				return response.json(greetingPayload);
+			}
 			const resolveResponsesHistoryStoragePlan =
 				(): ResponsesHistoryStoragePlan =>
 					inlineCompactionHistoryStoragePlan || 
@@ -4001,7 +4408,7 @@ openaiRouter.post(
 						Array.isArray(message.tools) &&
 						message.tools.length > 0;
 					let bufferingStructuredJson = false;
-					const reasoningItemId = createResponsesItemId('msg');
+					const reasoningItemId = createResponsesItemId('rs');
 					let reasoningItemStarted = false;
 
 					const persistResponsesStreamSideEffects = (
@@ -4009,7 +4416,9 @@ openaiRouter.post(
 						totalTokens: number,
 						promptTokens: number | undefined,
 						completionTokens: number | undefined,
-							toolCalls: any[] | undefined
+						toolCalls: any[] | undefined,
+						reasoningText: string | undefined,
+						reasoningId: string | undefined
 						) => {
 						void (async () => {
 							const historyStoragePlan =
@@ -4020,7 +4429,14 @@ openaiRouter.post(
 										model: modelId,
 										output: buildStoredResponsesHistoryOutput(
 											outputText,
-											toolCalls
+											toolCalls,
+											{
+												reasoningText,
+												reasoningId,
+												reasoningStatus: reasoningText
+													? 'completed'
+													: undefined
+											}
 										),
 										output_text: outputText,
 										created,
@@ -4541,8 +4957,23 @@ openaiRouter.post(
 							totalTokenUsage,
 							finalPromptTokensForPassthrough,
 							finalCompletionTokensForPassthrough,
-							toolCallsFromStream
+							toolCallsFromStream,
+							streamedReasoningText || undefined,
+							streamedReasoningText
+								? reasoningItemId
+								: undefined
 						);
+						logForgeTrace('responses', 'stream.final', request, {
+							modelId,
+							responseId,
+							passthrough: true,
+							outputTextChars: fullText.length,
+							toolCallCount: Array.isArray(toolCallsFromStream)
+								? toolCallsFromStream.length
+								: 0,
+							reasoningChars: streamedReasoningText.length,
+							totalTokens: totalTokenUsage
+						});
 						if (!response.completed) response.end();
 						return;
 					}
@@ -4559,6 +4990,13 @@ openaiRouter.post(
 							: typeof completionTokensFromUsage === 'number'
 								? completionTokensFromUsage
 								: estimateTokensFromText(fullText);
+					if (
+						(!toolCallsFromStream ||
+							toolCallsFromStream.length === 0) &&
+						(!fullText || fullText.trim().length === 0)
+					) {
+						throw new Error('Empty responses output from provider.');
+					}
 					if (totalTokenUsage <= 0) {
 						totalTokenUsage = finalInputTokens + finalOutputTokens;
 					}
@@ -4734,12 +5172,35 @@ openaiRouter.post(
 					);
 					response.write(`data: [DONE]\n\n`);
 					if (!response.completed) response.end();
+					logForgeTrace('responses', 'stream.final', request, {
+						modelId,
+						responseId,
+						passthrough: false,
+						outputTextChars:
+							typeof finalPayload.output_text === 'string'
+								? finalPayload.output_text.length
+								: 0,
+						outputTypes: summarizeForgeTraceOutput(
+							finalPayload.output
+						),
+						toolCallCount: countForgeTraceToolCalls(
+							finalPayload.output
+						),
+						reasoningChars: streamedReasoningText.length,
+						status:
+							typeof finalPayload.status === 'string'
+								? finalPayload.status
+								: undefined,
+						totalTokens: totalTokenUsage
+					});
 					persistResponsesStreamSideEffects(
 						fullText,
 						totalTokenUsage,
 						finalInputTokens,
 						finalOutputTokens,
-						toolCallsFromStream
+						toolCallsFromStream,
+						streamedReasoningText || undefined,
+						streamedReasoningText ? reasoningItemId : undefined
 					);
 					return;
 				} finally {
@@ -4780,11 +5241,23 @@ openaiRouter.post(
 				typeof result.completionTokens === 'number'
 					? result.completionTokens
 					: undefined;
-
 			const outputText =
 				effectiveToolCalls && effectiveToolCalls.length > 0
 					? ''
 					: assistantContent;
+			const nonStreamingReasoningText =
+				typeof result.reasoning === 'string' && result.reasoning.trim()
+					? result.reasoning
+					: (effectiveToolCalls && effectiveToolCalls.length > 0) ||
+					  (typeof outputText === 'string' && outputText.trim().length > 0)
+						? effectiveToolCalls && effectiveToolCalls.length > 0
+							? 'Selecting the best tool and preparing its arguments.'
+							: 'Planning the response before generating the final answer.'
+						: undefined;
+			const nonStreamingReasoningItemId = nonStreamingReasoningText
+				? createResponsesItemId('rs')
+				: undefined;
+
 			if (
 				(!effectiveToolCalls || effectiveToolCalls.length === 0) &&
 				(!outputText || outputText.trim().length === 0)
@@ -4796,23 +5269,42 @@ openaiRouter.post(
 				promptTokens: promptTokensUsed,
 				completionTokens: completionTokensUsed
 			});
-				const responseBody = buildResponsesResponseObject({
-					id: responseId,
-					created,
-					model: modelId,
-					outputText,
-					toolCalls: effectiveToolCalls,
-					reasoningText:
-						typeof result.reasoning === 'string'
-							? result.reasoning
-							: undefined,
+			const responseBody = buildResponsesResponseObject({
+				id: responseId,
+				created,
+				model: modelId,
+				outputText,
+				toolCalls: effectiveToolCalls,
+				reasoningText: nonStreamingReasoningText,
+				reasoningId: nonStreamingReasoningItemId,
+				reasoningStatus: nonStreamingReasoningText
+					? 'completed'
+					: undefined,
+				status: 'completed',
+				usage: {
+					input_tokens: promptTokensUsed,
+					output_tokens: completionTokensUsed,
+					total_tokens: totalTokensUsed
+				}
+			});
+			if (
+				nonStreamingReasoningText &&
+				!responseBody.output.some(
+					(item: any) => item && item.type === 'reasoning'
+				)
+			) {
+				responseBody.output.unshift({
+					id: nonStreamingReasoningItemId,
+					type: 'reasoning',
 					status: 'completed',
-					usage: {
-						input_tokens: promptTokensUsed,
-						output_tokens: completionTokensUsed,
-						total_tokens: totalTokensUsed
-					}
+					summary: [
+						{
+							type: 'summary_text',
+							text: nonStreamingReasoningText
+						}
+					]
 				});
+			}
 				if (inlineCompactionItem) {
 					responseBody.output = [
 						inlineCompactionItem,
@@ -4829,12 +5321,34 @@ openaiRouter.post(
 					model: modelId,
 					output: buildStoredResponsesHistoryOutput(
 						outputText,
-						effectiveToolCalls
+						effectiveToolCalls,
+						{
+							reasoningText: nonStreamingReasoningText,
+							reasoningId: nonStreamingReasoningItemId,
+							reasoningStatus: nonStreamingReasoningText
+								? 'completed'
+								: undefined
+						}
 					),
 					output_text: outputText,
 					created,
 					...historyStoragePlan
 				});
+			logForgeTrace('responses', 'nonstream.final', request, {
+				modelId,
+				responseId,
+				outputTextChars:
+					typeof responseBody.output_text === 'string'
+						? responseBody.output_text.length
+						: 0,
+				outputTypes: summarizeForgeTraceOutput(responseBody.output),
+				toolCallCount: countForgeTraceToolCalls(responseBody.output),
+				status:
+					typeof responseBody.status === 'string'
+						? responseBody.status
+						: undefined,
+				totalTokens: totalTokensUsed
+			});
 			return response.json(responseBody);
 		} catch (error: any) {
 			attachQueueOverloadMetadata(error, requestQueue, {
@@ -5909,15 +6423,19 @@ const handleVideoGenerationRequest = async (
 						upstreamTimeoutMs: UPSTREAM_TIMEOUT_MS
 					});
 			if (requestId) await setVideoRequestCache(String(requestId), provider);
-			response.json(responseJson);
+				response.json(responseJson);
 
-			const tokenEstimate = Math.ceil(prompt.length / 4) + 500;
-			const videoSeconds = resolveVideoBillingQuantity(billingRequestBody);
-			await updateUserTokenUsage(tokenEstimate, request.apiKey!, {
-				modelId: model,
-				pricingMetric: 'per_image',
-				pricingQuantity: videoSeconds
-			});
+				const tokenEstimate = Math.ceil(prompt.length / 4) + 500;
+				const videoSeconds = resolveVideoBillingQuantity(billingRequestBody);
+				const pricingUnitRateOverride = resolveVideoPricingUnitRateOverride(model, billingRequestBody);
+				await updateUserTokenUsage(tokenEstimate, request.apiKey!, {
+					modelId: model,
+					pricingMetric: 'per_image',
+					pricingQuantity: videoSeconds,
+					...(pricingUnitRateOverride
+						? { pricingUnitRateOverride }
+						: {})
+				});
 	} catch (error: any) {
 		await logError(error, request);
 		console.error('Video generation route error:', error.message);
@@ -6034,15 +6552,22 @@ openaiRouter.post(
 			response.json(resJson);
 
 				const prompt = extractParsedVideoField(parsedBody, 'prompt');
-				if (prompt) {
-					const tokenEstimate = Math.ceil(prompt.length / 4) + 500;
-					const videoSeconds = resolveParsedVideoBillingQuantity(parsedBody);
-					await updateUserTokenUsage(tokenEstimate, request.apiKey!, {
-						modelId: model || undefined,
-						pricingMetric: 'per_image',
-						pricingQuantity: videoSeconds
-					});
-				}
+					if (prompt) {
+						const tokenEstimate = Math.ceil(prompt.length / 4) + 500;
+						const videoSeconds = resolveParsedVideoBillingQuantity(parsedBody);
+						const pricingUnitRateOverride = resolveVideoPricingUnitRateOverride(
+							model || '',
+							parsedBody.jsonBody ?? parsedBody.multipart?.fields ?? {}
+						);
+						await updateUserTokenUsage(tokenEstimate, request.apiKey!, {
+							modelId: model || undefined,
+							pricingMetric: 'per_image',
+							pricingQuantity: videoSeconds,
+							...(pricingUnitRateOverride
+								? { pricingUnitRateOverride }
+								: {})
+						});
+					}
 		} catch (error: any) {
 			await logError(error, request);
 			console.error('Video edits route error:', error.message);
@@ -6104,15 +6629,22 @@ openaiRouter.post(
 			response.json(resJson);
 
 				const prompt = extractParsedVideoField(parsedBody, 'prompt');
-				if (prompt) {
-					const tokenEstimate = Math.ceil(prompt.length / 4) + 500;
-					const videoSeconds = resolveParsedVideoBillingQuantity(parsedBody);
-					await updateUserTokenUsage(tokenEstimate, request.apiKey!, {
-						modelId: model || undefined,
-						pricingMetric: 'per_image',
-						pricingQuantity: videoSeconds
-					});
-				}
+					if (prompt) {
+						const tokenEstimate = Math.ceil(prompt.length / 4) + 500;
+						const videoSeconds = resolveParsedVideoBillingQuantity(parsedBody);
+						const pricingUnitRateOverride = resolveVideoPricingUnitRateOverride(
+							model || '',
+							parsedBody.jsonBody ?? parsedBody.multipart?.fields ?? {}
+						);
+						await updateUserTokenUsage(tokenEstimate, request.apiKey!, {
+							modelId: model || undefined,
+							pricingMetric: 'per_image',
+							pricingQuantity: videoSeconds,
+							...(pricingUnitRateOverride
+								? { pricingUnitRateOverride }
+								: {})
+						});
+					}
 		} catch (error: any) {
 			await logError(error, request);
 			console.error('Video extensions route error:', error.message);
@@ -6276,18 +6808,29 @@ openaiRouter.post(
 			response.json(resJson);
 
 				const prompt = typeof body?.prompt === 'string' ? body.prompt : '';
-				if (prompt) {
-					const tokenEstimate = Math.ceil(prompt.length / 4) + 500;
-					const videoSeconds = resolveVideoBillingQuantity(body);
-					await updateUserTokenUsage(tokenEstimate, request.apiKey!, {
-						modelId:
+					if (prompt) {
+						const tokenEstimate = Math.ceil(prompt.length / 4) + 500;
+						const videoSeconds = resolveVideoBillingQuantity(body);
+						const remixModelId =
 							typeof body?.model === 'string' && body.model.trim()
 								? body.model
-								: undefined,
-						pricingMetric: 'per_image',
-						pricingQuantity: videoSeconds
-					});
-				}
+								: '';
+						const pricingUnitRateOverride = resolveVideoPricingUnitRateOverride(
+							remixModelId,
+							body
+						);
+						await updateUserTokenUsage(tokenEstimate, request.apiKey!, {
+							modelId:
+								typeof body?.model === 'string' && body.model.trim()
+									? body.model
+									: undefined,
+							pricingMetric: 'per_image',
+							pricingQuantity: videoSeconds,
+							...(pricingUnitRateOverride
+								? { pricingUnitRateOverride }
+								: {})
+						});
+					}
 		} catch (error: any) {
 			await logError(error, request);
 			console.error('Video remix route error:', error.message);

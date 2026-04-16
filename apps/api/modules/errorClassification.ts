@@ -24,1527 +24,451 @@ export function isRateLimitOrQuotaError(error: any): boolean {
 		error?.errorDetails?.modelId,
 	].map((value) => String(value || '').toLowerCase()).join(' ');
 	if (!message && !code && !status && !providerContext) return false;
-	const memoryPressureLike =
-		code === 'memory_pressure' ||
-		message.includes('memory pressure') ||
-		message.includes('rejected under memory pressure') ||
-		message.includes('swap_used_mb=') ||
-		message.includes('rss_mb=') ||
-		message.includes('active_runtime_mb=') ||
-		message.includes('external_mb=') ||
-		message.includes('heap_used_mb=');
-	const providerRetryChurnLike =
-		message.includes('rate limit/timeout: switching provider') ||
-		message.includes('timeout: switching provider') ||
-		message.includes('switching provider') ||
-		message.includes('no access: switching provider') ||
-		message.includes('unauthorized: switching provider') ||
-		message.includes('quota exceeded: switching provider');
-	const providerCredentialDriftLike =
-		(
-			(message.includes('openrouter') || providerContext.includes('openrouter')) && (
-				message.includes('unauthorized') ||
-				message.includes('key_invalid') ||
-				message.includes('invalid api key') ||
-				message.includes('invalid_api_key') ||
-				message.includes('incorrect api key') ||
-				message.includes('quota exceeded') ||
-				message.includes('key_no_quota') ||
-				status === 401 ||
-				status === 402
-			)
-		) ||
-		(
-			(message.includes('openai') || providerContext.includes('openai')) && (
-				message.includes('unauthorized') ||
-				message.includes('key_invalid') ||
-				message.includes('invalid api key') ||
-				message.includes('invalid_api_key') ||
-				message.includes('incorrect api key') ||
-				message.includes('quota exceeded') ||
-				message.includes('key_no_quota') ||
-				status === 401 ||
-				status === 402
-			)
-		);
+
+	const messageIncludesAny = (needles: readonly string[]): boolean => needles.some((needle) => message.includes(needle));
+	const codeMatchesAny = (codes: readonly string[]): boolean => codes.includes(code);
+	const providerContextIncludesAny = (needles: readonly string[]): boolean => needles.some((needle) => providerContext.includes(needle));
+	const statusMatchesAny = (statuses: readonly number[]): boolean => statuses.includes(status);
+
+	const memoryPressureLikePatterns = [
+		'memory pressure',
+		'rejected under memory pressure',
+		'swap_used_mb=',
+		'rss_mb=',
+		'active_runtime_mb=',
+		'external_mb=',
+		'heap_used_mb=',
+	] as const;
+	const providerRetryChurnPatterns = [
+		'rate limit/timeout: switching provider',
+		'timeout: switching provider',
+		'switching provider',
+		'no access: switching provider',
+		'unauthorized: switching provider',
+		'quota exceeded: switching provider',
+	] as const;
+	const providerCredentialDriftPatterns = [
+		'unauthorized',
+		'key_invalid',
+		'invalid api key',
+		'invalid_api_key',
+		'incorrect api key',
+		'quota exceeded',
+		'key_no_quota',
+	] as const;
+	const providerCredentialNames = ['openrouter', 'openai'] as const;
+	const upstreamAuthOrGovernanceDriftPatterns = [
+		'unauthorized',
+		'key_invalid',
+		'invalid api key',
+		'invalid_api_key',
+		'incorrect api key',
+		'authentication failed',
+		'authentication_error',
+		'api key not valid',
+		'api has not been used in project',
+		'service disabled',
+		'generative language api has not been used',
+		'enable it by visiting',
+		'project is not permitted',
+		'forbidden',
+		'permission denied',
+		'access denied',
+		'expired api key',
+		'api key expired',
+		'quota exceeded',
+		'key_no_quota',
+		'insufficient_quota',
+		'billing hard limit',
+		'credit balance is too low',
+		'status 401',
+		'status 402',
+		'billing not active',
+		'account not active',
+		'project has exceeded quota',
+		'disabled api key',
+		'invalid credentials',
+		'invalid token',
+		'invalid access token',
+		'invalid authorization',
+		'authorization failed',
+		'authorization error',
+		'account suspended',
+		'econnrefused',
+	] as const;
+	const upstreamQuotaGovernanceDriftPatterns = [
+		'key_no_quota',
+		'quota exceeded',
+		'quota exhausted',
+		'quota remaining',
+		'quota limit reached',
+		'quota has been exceeded',
+		'quota exceeded for this month',
+		'quota exceeded for metric',
+		'quota exceeded for this project',
+		'quota exceeded for this model',
+		'resource has been exhausted',
+		'resource has been exhausted (e.g. check quota)',
+		'resource exhausted',
+		'resource_exhausted',
+		'you exceeded your current quota',
+		'exceeded your current quota',
+		'check your plan and billing details',
+		'billing details',
+		'insufficient credits',
+		'credit balance is too low',
+		'credit balance',
+		'free tier requests',
+		'free tier input token count',
+		'free tier',
+		'payment required',
+		'payment required for this request',
+		'payment required for this operation',
+		'payment required to access this model',
+		'payment required to use this model',
+		'payment required to use this provider',
+		'payment required to use this endpoint',
+		'insufficient_quota',
+		'insufficient quota',
+		'quota exceeded for your current plan',
+		'quota exceeded for this key',
+		'quota exceeded for requests',
+		'quota exceeded for tokens',
+		'quota exceeded for requests per minute',
+		'quota exceeded for requests per day',
+		'quota exceeded for input token count',
+		'quota exceeded for output token count',
+		'out of credits',
+		'credits are exhausted',
+		'billing hard limit has been reached',
+		'exceeded the prepaid balance',
+		'payment method required',
+		'payment method is required',
+		'402 payment required',
+		'quota exceeded for your project',
+		'quota exceeded for your account',
+		'quota exceeded for organization',
+		'quota exceeded for this organization',
+		'you exceeded your quota',
+		'current quota',
+		'please check your plan and billing details',
+		'please check your plan or billing details',
+		'please check your billing details',
+		'please check your plan',
+		'upgrade your plan',
+		'add payment details',
+		'add a payment method',
+		'account balance is too low',
+		'quotaid',
+		'generativelanguage.googleapis.com/generate_content',
+		'requests per minute per project per model',
+		'requests per day per project per model',
+		'project has been suspended',
+		'api key expired',
+		'please renew the api key',
+		'status code 402',
+		'out of quota',
+		'no quota remaining',
+		'credits have been exhausted',
+		'credits exhausted',
+		'billing_not_active',
+		'account_not_active',
+		'monthly budget has been exceeded',
+		'reached your usage limit',
+		'usage limit reached',
+		'unsupported parameter',
+		'unsupported value for parameter',
+		'parameter is not supported with this model',
+		'not supported with this model',
+		'does not support parameter',
+		'does not support this parameter',
+		'model does not support parameter',
+		'unsupported setting for this model',
+		'temperature is not supported with this model',
+		'top_p is not supported with this model',
+		'reasoning_effort is not supported with this model',
+		'unsupported value for',
+		"unsupported parameter: 'temperature'",
+		'unsupported parameter: "temperature"',
+		'temperature is not supported for this model',
+		'unsupported value for temperature',
+		'unsupported tool_choice',
+		'tool_choice is not supported',
+		'function calling not enabled',
+		'payment required to use this account',
+		'payment required to continue',
+		'account balance',
+		'request failed with status code 402',
+		'insufficient balance',
+		'credit balance too low',
+		'payment',
+		'recharge your account',
+		'add credits to continue',
+		'billing quota',
+		'requires a paid account',
+		'requires billing',
+		'billing_hard_limit',
+		'insufficient credit',
+		'balance is too low',
+		'hard limit reached',
+		'out of credit',
+		'add credits',
+		'add credit',
+		'purchase credits',
+		'credits remaining',
+		'billing limit',
+		'billing disabled',
+		'payment method',
+		'add funds',
+		'quota exhaustion',
+		'payment exhausted',
+		'payment failed',
+		'payment overdue',
+		'payment declined',
+		'status 402',
+		'provider_no_quota',
+		'unsupported (rate limit/timeout)',
+		'provider switch worthless',
+		'request retry worthless',
+		'retry worthless',
+		'rate limit',
+		'rate limited',
+		'too many requests',
+		'provider payment required',
+		'payment required to access this resource',
+		'free tier request',
+		'retrydelay',
+		'retry delay',
+		'generaterequestsperminuteperprojectpermodel-freetier',
+		'generaterequestsperdayperprojectpermodel-freetier',
+		'generatecontentinputtokenspermodelperminute-freetier',
+		'payment or quota',
+		'quota payment required',
+		'credits are required',
+		'credit balance required',
+		'billing has been disabled',
+		'insufficient funds',
+		'low balance',
+		'balance too low',
+		'out of balance',
+		'402 payment',
+		'no credits left',
+		'not enough credits',
+		'requires credits',
+		'requires payment',
+		'top up your balance',
+		'billing issue',
+		'payment unavailable',
+		'credit balance is insufficient',
+		'billing quota exceeded',
+		'billing limit reached',
+		'payment required due to quota',
+		'insufficient credits remaining',
+		'account balance too low',
+		'monthly spend limit reached',
+		'spend limit reached',
+		'payment required due to insufficient balance',
+		'insufficient credits to process request',
+		'billing hard limit reached',
+		'payment required by provider',
+		'provider requires payment',
+		'monthly quota exceeded',
+		'spending limit reached',
+		'subscription required',
+		'account not funded',
+		'no allowed providers are available for the selected model',
+		'payment required or credits exhausted',
+		'credits exhausted for this request',
+		'provider has insufficient credits',
+		'provider credits exhausted',
+		'quota or payment',
+		'quota unavailable',
+		'recharge your balance',
+		'payment source',
+		'account has insufficient credits',
+		'payment source required',
+		'payment source is required',
+		'payment required due to insufficient credits',
+		'billing required',
+		'billing error',
+		'billing unavailable',
+		'billing account',
+		'credits left',
+		'no credits',
+		'status code: 402',
+		'billing inactive',
+		'insufficient balance remaining',
+		'recharge required',
+		'top up required',
+		'top-up required',
+		'top-up your balance',
+		'payment status',
+		'provider has no available credits',
+		'provider quota exhausted',
+		'provider quota exceeded',
+		'provider balance exhausted',
+		'credit limit reached',
+		'provider routing/probing blocked',
+		'payment for this request',
+		'payment is required to process this request',
+		'402 quota',
+		'payment/quota',
+		'quota/payment',
+		'http 402',
+		'payment has not been configured',
+		'payment is required',
+		'quota exceeded for this day',
+		'quota exceeded for this minute',
+		'quotametric',
+		'retryinfo',
+		'payment required to use your openrouter account',
+		'payment required to use your account',
+		'payment required to use tool calling',
+		'payment required for tool calling',
+		'no active subscription',
+		'credits exhausted for provider',
+		'provider balance exhausted',
+		'not enough balance',
+		'payment or billing issue',
+		'credit balance depleted',
+		'provider has no quota remaining',
+		'payment credits',
+	] as const;
+	const geminiCapabilityMismatchPatterns = [
+		'unsupported input mime type for this model',
+		'audio/s16le',
+		'function calling is not enabled for this model',
+		'does not support generatecontent',
+		'generatecontent unsupported',
+		'model does not support generatecontent',
+		'unsupported input mime type',
+	] as const;
+	const upstreamProviderAvailabilityDriftPatterns = [
+		'no allowed providers are available for the selected model',
+		'no allowed providers are available for this model',
+		'no allowed providers are available for the requested model',
+		'no allowed providers available for the selected model',
+		'no allowed providers available for this model',
+		'openrouter api call failed: no allowed providers are available',
+	] as const;
+	const upstreamRateLimitOrTimeoutSwitchChurnPatterns = [
+		'rate limit/timeout: switching provider',
+		'unsupported (rate limit/timeout)',
+		'provider retry worthless',
+		'request retry worthless',
+		'provider switch worthless',
+		'switching provider due to rate limit',
+		'switching provider due to timeout',
+		'timed out switching provider',
+		'switching provider',
+		'switch provider',
+		'retrying with another provider',
+		'retrying another provider',
+		'resource has been exhausted',
+		'resource_exhausted',
+		'check quota',
+	] as const;
+	const positiveMatchPatterns = [
+		'rate limit',
+		'rate_limit',
+		'resource_exhausted',
+		'payment required',
+		'billing',
+		'credits',
+		'too many requests',
+		'status 429',
+		' 429 ',
+		'status 402',
+		' 402 ',
+		'no endpoints found that support',
+		'provider routing',
+		'tool_choice value',
+		'tool choice must be auto',
+		'requires beta access',
+		'provider payment required',
+		'payment method required',
+		'insufficient credits',
+		'insufficient credit',
+		'credit balance is too low',
+		'requires more credits',
+		'credits are required',
+		'credits required',
+		'can only afford',
+		'billing disabled',
+		'billing has been disabled',
+		'billing not active',
+		'account not active',
+		'provider account is disabled',
+		'organization must be verified',
+		'account deactivated',
+		'unsupported input mime type for this model',
+		'unsupported input mime type',
+		'cannot fetch content from the provided url',
+		'failed to fetch content from the provided url',
+		'could not fetch content from the provided url',
+		'unable to fetch content from the provided url',
+		'cannot fetch image from the provided url',
+		'failed to fetch image from the provided url',
+		'audio/s16le',
+		'function calling is not enabled for this model',
+		'does not support generatecontent',
+		"does not support 'generatecontent'",
+		'resource has been exhausted',
+		'currently experiencing high demand',
+		'spikes in demand are usually temporary',
+		'status": "unavailable"',
+		"status': 'unavailable'",
+		'"status": "unavailable"',
+		"'status': 'unavailable'",
+	] as const;
+
+	const memoryPressureLike = code === 'memory_pressure' || messageIncludesAny(memoryPressureLikePatterns);
+	const providerRetryChurnLike = messageIncludesAny(providerRetryChurnPatterns);
+	const providerCredentialDriftLike = providerCredentialNames.some((providerName) => {
+		const providerTagged = message.includes(providerName) || providerContextIncludesAny([providerName]);
+		return providerTagged && (messageIncludesAny(providerCredentialDriftPatterns) || statusMatchesAny([401, 402]));
+	});
 	const upstreamAuthOrGovernanceDriftLike =
 		providerCredentialDriftLike ||
-		message.includes('unauthorized') ||
-		message.includes('key_invalid') ||
-		message.includes('invalid api key') ||
-		message.includes('invalid_api_key') ||
-		message.includes('incorrect api key') ||
-		message.includes('authentication failed') ||
-		message.includes('authentication_error') ||
-		message.includes('api key not valid') ||
-		message.includes('api has not been used in project') ||
-		message.includes('service disabled') ||
-		message.includes('generative language api has not been used') ||
-		message.includes('enable it by visiting') ||
-		message.includes('project is not permitted') ||
-		message.includes('forbidden') ||
-		message.includes('permission denied') ||
-		message.includes('access denied') ||
-		message.includes('expired api key') ||
-		message.includes('api key expired') ||
-		message.includes('quota exceeded') ||
-		message.includes('key_no_quota') ||
-		message.includes('insufficient_quota') ||
-		message.includes('billing hard limit') ||
-		message.includes('credit balance is too low') ||
-		((message.includes('openrouter') || message.includes('openai')) && (
-			status === 401 ||
-			status === 402 ||
-			message.includes('status 401') ||
-			message.includes('status 402') ||
-			message.includes('invalid api key') ||
-			message.includes('invalid_api_key') ||
-			message.includes('key_invalid') ||
-			message.includes('unauthorized') ||
-			message.includes('quota exceeded') ||
-			message.includes('key_no_quota')
-		)) ||
-		message.includes('quota exceeded') ||
-		message.includes('key_no_quota') ||
-		message.includes('insufficient_quota') ||
-		message.includes('credit balance is too low') ||
-		message.includes('billing not active') ||
-		message.includes('account not active') ||
-		message.includes('project has exceeded quota') ||
-		((message.includes('openrouter') || message.includes('openai')) &&
-			(message.includes('quota') ||
-			message.includes('unauthorized') ||
-			message.includes('invalid_api_key') ||
-			message.includes('invalid api key') ||
-			message.includes('key_invalid'))) ||
-		message.includes('disabled api key') ||
-		message.includes('invalid credentials') ||
-		message.includes('invalid token') ||
-		message.includes('invalid access token') ||
-		message.includes('invalid authorization') ||
-		message.includes('authorization failed') ||
-		message.includes('authorization error') ||
-		message.includes('account suspended') ||
-		code === 'key_invalid' ||
-		code === 'econnrefused' ||
-		status === 401 ||
-		message.includes('status 401') ||
-		status === 403 ||
-		message.includes('status 403') ||
-		message.includes('econnrefused');
+		messageIncludesAny(upstreamAuthOrGovernanceDriftPatterns) ||
+		codeMatchesAny(['key_invalid', 'econnrefused']) ||
+		statusMatchesAny([401, 403]) ||
+		(providerCredentialNames.some((providerName) => message.includes(providerName))
+			&& (statusMatchesAny([401, 402]) || messageIncludesAny(providerCredentialDriftPatterns) || message.includes('quota')));
 	const geminiCapabilityMismatchLike =
-		message.includes('unsupported input mime type for this model') ||
-		message.includes('audio/s16le') ||
-		message.includes('function calling is not enabled for this model') ||
-		message.includes('does not support generatecontent') ||
-		message.includes('generatecontent unsupported') ||
-		message.includes('model does not support generatecontent') ||
-		message.includes('unsupported input mime type') ||
-		(status === 400 && code === 'invalid_argument' && (
-			message.includes('function calling') ||
-			message.includes('mime type') ||
-			message.includes('generatecontent')
-		));
+		messageIncludesAny(geminiCapabilityMismatchPatterns)
+		|| (status === 400 && code === 'invalid_argument' && messageIncludesAny(['function calling', 'mime type', 'generatecontent']));
 	const upstreamQuotaGovernanceDriftLike =
-		message.includes('key_no_quota') ||
-		code === 'key_no_quota' ||
-		status === 402 ||
-		status === 429 ||
-		message.includes('quota exceeded') ||
-		message.includes('quota exhausted') ||
-		message.includes('quota remaining') ||
-		message.includes('quota limit reached') ||
-		message.includes('quota has been exceeded') ||
-		message.includes('quota exceeded for this month') ||
-		message.includes('quota exceeded for metric') ||
-		message.includes('quota exceeded for this project') ||
-		message.includes('quota exceeded for this model') ||
-		message.includes('resource has been exhausted') ||
-		message.includes('resource has been exhausted (e.g. check quota)') ||
-		message.includes('resource exhausted') ||
-		message.includes('resource_exhausted') ||
-		message.includes('you exceeded your current quota') ||
-		message.includes('exceeded your current quota') ||
-		message.includes('check your plan and billing details') ||
-		message.includes('billing details') ||
-		message.includes('insufficient credits') ||
-		message.includes('credit balance is too low') ||
-		message.includes('credit balance') ||
-		message.includes('free tier requests') ||
-		message.includes('free tier input token count') ||
-		message.includes('free tier') ||
-		message.includes('payment required') ||
-		message.includes('payment required for this request') ||
-		message.includes('payment required for this operation') ||
-		message.includes('payment required to access this model') ||
-		message.includes('payment required to use this model') ||
-		message.includes('payment required to use this provider') ||
-		message.includes('payment required to use this endpoint') ||
-		message.includes('insufficient_quota') ||
-		message.includes('insufficient quota') ||
-		message.includes('quota exceeded') ||
-		message.includes('quota exceeded for this request') ||
-		message.includes('quota exceeded for your current plan') ||
-		message.includes('quota exceeded for this key') ||
-		message.includes('quota exceeded for requests') ||
-		message.includes('quota exceeded for tokens') ||
-		message.includes('quota exceeded for metric') ||
-		message.includes('quota exceeded for metric:') ||
-		message.includes('quota exceeded for requests per minute') ||
-		message.includes('quota exceeded for requests per day') ||
-		message.includes('quota exceeded for input token count') ||
-		message.includes('quota exceeded for output token count') ||
-		message.includes('key_no_quota') ||
-		message.includes('out of credits') ||
-		message.includes('credits are exhausted') ||
-		message.includes('billing hard limit has been reached') ||
-		message.includes('exceeded the prepaid balance') ||
-		message.includes('payment method required') ||
-		message.includes('payment method is required') ||
-		message.includes('402 payment required') ||
-		message.includes('quota exceeded for your project') ||
-		message.includes('quota exceeded for your account') ||
-		message.includes('quota exceeded for organization') ||
-		message.includes('quota exceeded for this organization') ||
-		message.includes('you exceeded your quota') ||
-		message.includes('current quota') ||
-		message.includes('billing hard limit') ||
-		message.includes('please check your plan and billing details') ||
-		message.includes('please check your plan or billing details') ||
-		message.includes('please check your billing details') ||
-		message.includes('please check your plan') ||
-		message.includes('upgrade your plan') ||
-		message.includes('add payment details') ||
-		message.includes('add a payment method') ||
-		message.includes('account balance is too low') ||
-		message.includes('out of credits') ||
-		message.includes('quota exceeded for metric') ||
-		message.includes('quotaid') ||
-		message.includes('resource_exhausted') ||
-		message.includes('generativelanguage.googleapis.com/generate_content') ||
-		message.includes('requests per minute per project per model') ||
-		message.includes('requests per day per project per model') ||
-		message.includes('free tier input token count') ||
-		message.includes('free tier requests') ||
-		message.includes('project has been suspended') ||
-		message.includes('consumer') && message.includes('has been suspended') ||
-		message.includes('api key expired') ||
-		message.includes('please renew the api key') ||
-		message.includes('generative language api has not been used in project') ||
-		message.includes('enable it by visiting') ||
-		message.includes('payment required') ||
-		message.includes('status code 402') ||
-		message.includes('402 payment required') ||
-		message.includes('exceeded your quota') ||
-		message.includes('out of quota') ||
-		message.includes('no quota remaining') ||
-		message.includes('credits have been exhausted') ||
-		message.includes('credits exhausted') ||
-		message.includes('billing hard limit has been reached') ||
-		message.includes('billing_not_active') ||
-		message.includes('account_not_active') ||
-		message.includes('monthly budget has been exceeded') ||
-		message.includes('reached your usage limit') ||
-		message.includes('usage limit reached') ||
-		status === 402 ||
-		message.includes('payment required') ||
-		message.includes('payment required to use your openrouter account') ||
-		message.includes('payment required to use your account') ||
-		message.includes('payment required to use this model') ||
-		message.includes('unsupported parameter') ||
-		message.includes('unsupported value for parameter') ||
-		message.includes('parameter is not supported with this model') ||
-		message.includes('not supported with this model') ||
-		message.includes('does not support parameter') ||
-		message.includes('does not support this parameter') ||
-		message.includes('model does not support parameter') ||
-		message.includes('unsupported setting for this model') ||
-		message.includes('temperature is not supported with this model') ||
-		message.includes('top_p is not supported with this model') ||
-		message.includes('reasoning_effort is not supported with this model') ||
-		message.includes('unsupported value for') ||
-		message.includes("unsupported parameter: 'temperature'") ||
-		message.includes('unsupported parameter: "temperature"') ||
-		message.includes('temperature is not supported with this model') ||
-		message.includes('temperature is not supported for this model') ||
-		message.includes('unsupported value for temperature') ||
-		message.includes('unsupported parameter') ||
-		message.includes('parameter is not supported with this model') ||
-		message.includes('not supported with this model') ||
-		message.includes('unsupported tool_choice') ||
-		message.includes('tool_choice is not supported') ||
-		message.includes('function calling not enabled') ||
-		message.includes('payment required to use this provider') ||
-		message.includes('payment required to use this endpoint') ||
-		message.includes('payment required to use this account') ||
-		message.includes('payment required to continue') ||
-		message.includes('insufficient credits') ||
-		message.includes('credit balance is too low') ||
-		message.includes('credit balance') ||
-		message.includes('quota exceeded') ||
-		message.includes('quota has been exceeded') ||
-		message.includes('quota exceeded for this month') ||
-		message.includes('quota exceeded for metric') ||
-		message.includes('quota exceeded for this project') ||
-		message.includes('quota exceeded for this model') ||
-		message.includes('you exceeded your current quota') ||
-		message.includes('exceeded your current quota') ||
-		message.includes('resource has been exhausted') ||
-		message.includes('resource exhausted') ||
-		message.includes('resource_exhausted') ||
-		message.includes('insufficient_quota') ||
-		message.includes('insufficient quota') ||
-		message.includes('quota exceeded') ||
-		message.includes('quota has been exceeded') ||
-		message.includes('quota exceeded for this request') ||
-		message.includes('quota exceeded for this provider') ||
-		message.includes('quota exceeded for this account') ||
-		message.includes('out of credits') ||
-		message.includes('account balance') ||
-		message.includes('payment method required') ||
-		status === 402 ||
-		code === 'insufficient_quota' ||
-		message.includes('request failed with status code 402') ||
-		message.includes('status code 402') ||
-		(status === 402 && (
-			message.includes('payment') ||
-			message.includes('quota') ||
-			message.includes('credit') ||
-			message.includes('billing') ||
-			message.includes('insufficient')
-		)) ||
-		message.includes('payment required') ||
-		message.includes('402 payment required') ||
-		message.includes('status code 402') ||
-		message.includes('request failed with status code 402') ||
-		message.includes('insufficient quota') ||
-		message.includes('insufficient credits') ||
-		message.includes('credit balance is too low') ||
-		message.includes('credit balance too low') ||
-		message.includes('billing hard limit') ||
-		message.includes('billing_not_active') ||
-		message.includes('payment') && message.includes('required') ||
-		status === 402 ||
-		message.includes('request failed with status code 402') ||
-		message.includes('402 payment required') ||
-		message.includes('status code 402') ||
-		message.includes('insufficient balance') ||
-		message.includes('account balance is too low') ||
-		message.includes('payment method required') ||
-		message.includes('billing hard limit has been reached') ||
-		message.includes('billing_not_active') ||
-		message.includes('credits have been exhausted') ||
-		status === 402 ||
-		code === 'payment_required'
-		message.includes('payment required to use tool calling') ||
-		message.includes('payment required for tool calling') ||
-		message.includes('payment required for this model') ||
-		message.includes('payment required for this provider') ||
-		message.includes('payment required for your account') ||
-		message.includes('insufficient balance') ||
-		message.includes('insufficient credits remaining') ||
-		message.includes('account balance is too low') ||
-		message.includes('no credits remaining') ||
-		message.includes('out of credits') ||
-		(status === 402) ||
-		(code === 'payment_required') ||
-		(code === 'insufficient_quota') ||
-		(code === 'quota_exceeded') ||
-		(code === 'key_no_quota') ||
-		message.includes('payment required') ||
-		message.includes('insufficient balance') ||
-		message.includes('insufficient credits remaining') ||
-		message.includes('account balance is too low') ||
-		message.includes('billing hard limit has been reached') ||
-		message.includes('recharge your account') ||
-		message.includes('add credits to continue') ||
-		message.includes('payment required') ||
-		message.includes('402 payment required') ||
-		message.includes('status code 402') ||
-		message.includes('insufficient balance') ||
-		message.includes('account balance') ||
-		message.includes('credits have been exhausted') ||
-		message.includes('credits exhausted') ||
-		message.includes('out of credits') ||
-		message.includes('no credits remaining') ||
-		message.includes('payment required') ||
-		message.includes('insufficient_quota') ||
-		message.includes('quota exceeded') ||
-		message.includes('quota exhausted') ||
-		message.includes('quota limit reached') ||
-		message.includes('quota has been exceeded') ||
-		message.includes('out of credits') ||
-		message.includes('credit balance') ||
-		message.includes('billing hard limit') ||
-		message.includes('billing quota') ||
-		message.includes('check your plan and billing details') ||
-		message.includes('resource has been exhausted') ||
-		message.includes('resource exhausted') ||
-		message.includes('resource_exhausted') ||
-		message.includes('you exceeded your current quota') ||
-		message.includes('insufficient_quota') ||
-		message.includes('quota exceeded') ||
-		message.includes('quota exhausted') ||
-		message.includes('out of credits') ||
-		message.includes('account balance') ||
-		message.includes('billing hard limit') ||
-		message.includes('billing quota') ||
-		(status === 402 && (
-			message.includes('request failed with status code 402') ||
-			code === 'err_bad_request'
-		)) ||
-		message.includes('payment required') ||
-		message.includes('requires a paid account') ||
-		message.includes('requires billing') ||
-		message.includes('billing hard limit') ||
-		message.includes('billing_hard_limit') ||
-		message.includes('insufficient_quota') ||
-		message.includes('quota exceeded') ||
-		message.includes('quota exhausted') ||
-		(status === 402 && (
-			message.includes('payment') ||
-			message.includes('quota') ||
-			message.includes('credit') ||
-			message.includes('billing') ||
-			code.includes('insufficient_quota') ||
-			code.includes('payment_required')
-		)) ||
-		message.includes('insufficient balance') ||
-		message.includes('insufficient credit') ||
-		message.includes('insufficient credits') ||
-		message.includes('credits have been exhausted') ||
-		message.includes('credit balance is too low') ||
-		message.includes('credit balance too low') ||
-		message.includes('account balance is too low') ||
-		message.includes('balance is too low') ||
-		message.includes('payment method required') ||
-		message.includes('billing hard limit') ||
-		message.includes('hard limit reached') ||
-		message.includes('quota exhausted') ||
-		message.includes('quota has been exhausted') ||
-		message.includes('no quota remaining') ||
-		message.includes('out of credits') ||
-		message.includes('out of quota') ||
-		message.includes('402 payment required') ||
-		message.includes('insufficient balance') ||
-		message.includes('insufficient credits') ||
-		message.includes('insufficient credit') ||
-		message.includes('out of credits') ||
-		message.includes('out of credit') ||
-		message.includes('no credits remaining') ||
-		message.includes('credit balance is too low') ||
-		message.includes('credit balance too low') ||
-		message.includes('account balance is too low') ||
-		message.includes('balance is too low') ||
-		message.includes('add credits') ||
-		message.includes('add credit') ||
-		message.includes('purchase credits') ||
-		message.includes('billing hard limit') ||
-		message.includes('hard limit reached') ||
-		message.includes('402 payment required') ||
-		status === 402 ||
-		message.includes('insufficient_quota') ||
-		message.includes('insufficient quota') ||
-		message.includes('quota exceeded') ||
-		message.includes('quota exhausted') ||
-		message.includes('out of credits') ||
-		message.includes('credits have been exhausted') ||
-		(status === 402 && (
-			message.includes('payment') ||
-			message.includes('quota') ||
-			message.includes('credit') ||
-			code.includes('insufficient_quota')
-		)) ||
-		message.includes('payment required') ||
-		message.includes('insufficient balance') ||
-		message.includes('insufficient credits remaining') ||
-		message.includes('account balance is too low') ||
-		message.includes('credits remaining') ||
-		message.includes('add credits') ||
-		message.includes('purchase credits') ||
-		message.includes('billing hard limit') ||
-		message.includes('hard limit reached') ||
-		message.includes('payment method required') ||
-		message.includes('request failed with status code 402') ||
-		message.includes('status code 402') ||
-		message.includes('402 payment required') ||
-		message.includes('payment required') ||
-		message.includes('insufficient balance') ||
-		message.includes('insufficient credits remaining') ||
-		message.includes('credits remaining') ||
-		message.includes('account balance is too low') ||
-		message.includes('balance is too low') ||
-		message.includes('billing hard limit') ||
-		message.includes('billing_hard_limit') ||
-		message.includes('billing quota') ||
-		message.includes('billing limit') ||
-		message.includes('billing disabled') ||
-		message.includes('account balance') ||
-		message.includes('insufficient balance') ||
-		message.includes('payment method') ||
-		message.includes('add credits') ||
-		message.includes('purchase credits') ||
-		status === 402 ||
-		message.includes('insufficient_quota') ||
-		message.includes('account balance') ||
-		message.includes('balance is too low') ||
-		message.includes('credits have been exhausted') ||
-		message.includes('credits exhausted') ||
-		message.includes('payment method') ||
-		message.includes('add funds') ||
-		status === 402 ||
-		message.includes('402 payment required') ||
-		message.includes('status code 402') ||
-		message.includes('quota exhausted') ||
-		message.includes('quota exhaustion') ||
-		message.includes('payment exhausted') ||
-		message.includes('billing hard limit') ||
-		message.includes('credit balance is too low') ||
-		message.includes('insufficient balance') ||
-		message.includes('insufficient credit') ||
-		message.includes('insufficient credits') ||
-		message.includes('credits have been exhausted') ||
-		message.includes('credit balance exhausted') ||
-		message.includes('billing hard limit') ||
-		message.includes('billing quota') ||
-		message.includes('account balance') ||
-		message.includes('no credits remaining') ||
-		message.includes('payment method required') ||
-		status === 402 ||
-		message.includes('payment method required') ||
-		message.includes('payment method is required') ||
-		message.includes('billing hard limit') ||
-		message.includes('billing quota exceeded') ||
-		message.includes('quota payment required') ||
-		message.includes('payment has not been configured') ||
-		message.includes('payment is required') ||
-		message.includes('quota exceeded for metric') ||
-		message.includes('quota exceeded for this month') ||
-		message.includes('quota exceeded for this day') ||
-		message.includes('quota exceeded for this minute') ||
-		message.includes('quota exceeded for this request') ||
-		message.includes('quota exceeded for this model') ||
-		message.includes('quota exceeded for this project') ||
-		message.includes('quota has been exceeded') ||
-		message.includes('quota limit reached') ||
-		message.includes('quota remaining') ||
-		message.includes('quotaid') ||
-		message.includes('quotametric') ||
-		message.includes('retryinfo') ||
-		message.includes('retry delay') ||
-		message.includes('payment required') ||
-		message.includes('payment required to access this model') ||
-		message.includes('payment required to use this model') ||
-		message.includes('payment required for this request') ||
-		message.includes('payment required for this model') ||
-		message.includes('402 payment required') ||
-		message.includes('status code 402') ||
-		message.includes('request failed with status code 402') ||
-		message.includes('resource has been exhausted (e.g. check quota).') ||
-		message.includes('payment required for this request') ||
-		message.includes('resource has been exhausted (e.g. check quota).') ||
-		message.includes('resource has been exhausted (e.g. check quota).') ||
-		message.includes('resource has been exhausted (e.g. check quota)') ||
-		message.includes('resource has been exhausted') ||
-		message.includes('resource_exhausted') ||
-		message.includes('quota exceeded') ||
-		message.includes('quota exceeded.') ||
-		message.includes('quota exceeded,') ||
-		message.includes('quota exceeded:') ||
-		message.includes('quota exceeded;') ||
-		message.includes('quota exceeded for metric:') ||
-		message.includes('limit: 0') ||
-		message.includes('retrydelay') ||
-		message.includes('retry delay') ||
-		message.includes('402 payment required') ||
-		message.includes('status code 402') ||
-		message.includes('request failed with status code 402') ||
-		message.includes('payment method required') ||
-		message.includes('payment failed') ||
-		message.includes('payment overdue') ||
-		message.includes('payment declined') ||
-		message.includes('status 402') ||
-		message.includes('status code 402') ||
-		message.includes('request failed with status code 402') ||
-		message.includes('quota payment required') ||
-		message.includes('key_no_quota') ||
-		message.includes('quota remaining') ||
-		message.includes('key_no_quota') ||
-		message.includes('provider_no_quota') ||
-		message.includes('resource has been exhausted') ||
-		message.includes('resource has been exhausted (e.g. check quota)') ||
-		message.includes('resource exhausted') ||
-		message.includes('resource_exhausted') ||
-		message.includes('you exceeded your current quota') ||
-		message.includes('exceeded your current quota') ||
-		message.includes('check your plan and billing details') ||
-		message.includes('billing details') ||
-		message.includes('free tier requests') ||
-		message.includes('free tier input token count') ||
-		message.includes('generativelanguage.googleapis.com/generate_content') ||
-		message.includes('generativelanguage.googleapis.com/generate_content_free_tier_requests') ||
-		message.includes('generativelanguage.googleapis.com/generate_content_free_tier_input_token_count') ||
-		message.includes('quotaid') ||
-		message.includes('quotametric') ||
-		message.includes('retryinfo') ||
-		message.includes('retrydelay') ||
-		message.includes('rate limit/timeout: switching provider') ||
-		message.includes('unsupported (rate limit/timeout)') ||
-		message.includes('provider switch worthless') ||
-		message.includes('request retry worthless') ||
-		message.includes('retry worthless') ||
-		message.includes('rate limit') ||
-		message.includes('rate limited') ||
-		message.includes('too many requests') ||
-		message.includes('billing details') ||
-		message.includes('billing hard limit') ||
-		message.includes('insufficient credits') ||
-		message.includes('insufficient credit') ||
-		message.includes('insufficient balance') ||
-		message.includes('credit balance is too low') ||
-		message.includes('credits exhausted') ||
-		message.includes('credit balance exhausted') ||
-		message.includes('payment required') ||
-		message.includes('payment required for this request') ||
-		message.includes('payment required to access this resource') ||
-		status === 402 ||
-		message.includes('provider payment required') ||
-		message.includes('payment method required') ||
-		message.includes('payment method') ||
-		message.includes('payment failed') ||
-		message.includes('payment overdue') ||
-		message.includes('payment declined') ||
-		message.includes('payment is required') ||
-		message.includes('resource has been exhausted (e.g. check quota)') ||
-		message.includes('quota exceeded for metric') ||
-		message.includes('free tier requests') ||
-		message.includes('free tier request') ||
-		message.includes('free tier input token count') ||
-		message.includes('free tier') ||
-		message.includes('retrydelay') ||
-		message.includes('retry delay') ||
-		message.includes('generaterequestsperminuteperprojectpermodel-freetier') ||
-		message.includes('generaterequestsperdayperprojectpermodel-freetier') ||
-		message.includes('generatecontentinputtokenspermodelperminute-freetier') ||
-		message.includes('please check your plan and billing details') ||
-		message.includes('payment or quota') ||
-		message.includes('quota payment required') ||
-		message.includes('payment required for this request') ||
-		message.includes('payment required to access this model') ||
-		message.includes('credits are required') ||
-		message.includes('credit balance required') ||
-		message.includes('resource has been exhausted (e.g. check quota)') ||
-		message.includes('quota exceeded for metric') ||
-		message.includes('free tier requests') ||
-		message.includes('free tier input token count') ||
-		message.includes('billing hard limit') ||
-		message.includes('billing disabled') ||
-		message.includes('billing has been disabled') ||
-		message.includes('billing not active') ||
-		message.includes('account not active') ||
-		message.includes('insufficient funds') ||
-		message.includes('low balance') ||
-		message.includes('balance too low') ||
-		message.includes('out of credits') ||
-		message.includes('out of balance') ||
-		message.includes('402 payment') ||
-		message.includes('status code 402') ||
-		message.includes('no credits left') ||
-		message.includes('out of credits') ||
-		message.includes('not enough credits') ||
-		message.includes('requires credits') ||
-		message.includes('requires a paid account') ||
-		message.includes('requires payment') ||
-		message.includes('add credits') ||
-		message.includes('top up your balance') ||
-		message.includes('billing issue') ||
-		message.includes('payment unavailable') ||
-		message.includes('credit balance is insufficient') ||
-		message.includes('insufficient funds') ||
-		message.includes('out of credits') ||
-		message.includes('credits have been exhausted') ||
-		message.includes('no credits left') ||
-		message.includes('billing quota exceeded') ||
-		message.includes('billing limit reached') ||
-		message.includes('payment required due to quota') ||
-		message.includes('402 payment required') ||
-		message.includes('insufficient funds') ||
-		message.includes('insufficient credits remaining') ||
-		message.includes('no credits remaining') ||
-		message.includes('out of credits') ||
-		message.includes('account balance too low') ||
-		message.includes('balance too low') ||
-		message.includes('billing quota exceeded') ||
-		message.includes('monthly spend limit reached') ||
-		message.includes('spend limit reached') ||
-		message.includes('payment required due to insufficient balance') ||
-		message.includes('insufficient credits to process request') ||
-		message.includes('insufficient credits remaining') ||
-		message.includes('credit balance too low') ||
-		message.includes('account balance too low') ||
-		message.includes('billing quota exceeded') ||
-		message.includes('billing hard limit reached') ||
-		message.includes('payment required by provider') ||
-		message.includes('provider requires payment') ||
-		message.includes('insufficient funds') ||
-		message.includes('insufficient credits remaining') ||
-		message.includes('out of credits') ||
-		message.includes('no credits remaining') ||
-		message.includes('account balance too low') ||
-		message.includes('balance too low') ||
-		message.includes('billing quota exceeded') ||
-		message.includes('monthly quota exceeded') ||
-		message.includes('usage limit reached') ||
-		message.includes('spending limit reached') ||
-		message.includes('402 payment required') ||
-		message.includes('credit balance is too low') ||
-		message.includes('credits exhausted') ||
-		message.includes('credit balance exhausted') ||
-		message.includes('insufficient credits') ||
-		message.includes('insufficient credit') ||
-		message.includes('insufficient balance') ||
-		message.includes('billing hard limit') ||
-		message.includes('billing disabled') ||
-		message.includes('billing has been disabled') ||
-		message.includes('key_no_quota') ||
-		message.includes('credit balance is insufficient') ||
-		message.includes('insufficient funds') ||
-		message.includes('out of credits') ||
-		message.includes('no credits remaining') ||
-		message.includes('billing not active') ||
-		message.includes('billing issue') ||
-		message.includes('subscription required') ||
-		message.includes('account not funded') ||
-		message.includes('no allowed providers are available for the selected model') ||
-		message.includes('insufficient_quota') ||
-		message.includes('billing_not_active') ||
-		message.includes('billing not active') ||
-		message.includes('account_not_active') ||
-		message.includes('account not active') ||
-		message.includes('payment required or credits exhausted') ||
-		message.includes('credits exhausted for this request') ||
-		message.includes('provider has insufficient credits') ||
-		message.includes('provider credits exhausted') ||
-		message.includes('quota or payment') ||
-		message.includes('402 payment') ||
-		message.includes('status code 402') ||
-		message.includes('insufficient quota') ||
-		message.includes('quota exceeded for this request') ||
-		message.includes('quota exceeded for this model') ||
-		message.includes('out of credits') ||
-		message.includes('credits remaining') ||
-		message.includes('no credits remaining') ||
-		message.includes('billing quota exceeded') ||
-		message.includes('payment required by provider') ||
-		message.includes('provider credits exhausted') ||
-		message.includes('insufficient quota') ||
-		message.includes('quota unavailable') ||
-		message.includes('out of credits') ||
-		message.includes('out of balance') ||
-		message.includes('billing quota exceeded') ||
-		message.includes('billing hard limit reached') ||
-		message.includes('recharge your balance') ||
-		message.includes('add payment details') ||
-		message.includes('payment source') ||
-		message.includes('402 payment required') ||
-		message.includes('insufficient_quota') ||
-		message.includes('billing_not_active') ||
-		message.includes('billing not active') ||
-		message.includes('account not active') ||
-		message.includes('account has insufficient credits') ||
-		message.includes('no credits left') ||
-		message.includes('out of credits') ||
-		message.includes('payment source required') ||
-		message.includes('subscription required') ||
-		message.includes('insufficient credits to process request') ||
-		message.includes('insufficient credits to process this request') ||
-		message.includes('no credits remaining') ||
-		message.includes('out of credits') ||
-		message.includes('account balance too low') ||
-		message.includes('balance too low') ||
-		message.includes('payment required due to insufficient credits') ||
-		message.includes('billing required') ||
-		message.includes('billing issue') ||
-		message.includes('billing error') ||
-		message.includes('billing unavailable') ||
-		message.includes('billing not active') ||
-		message.includes('billing account') ||
-		message.includes('insufficient funds') ||
-		message.includes('low balance') ||
-		message.includes('balance too low') ||
-		message.includes('account balance') ||
-		message.includes('credits left') ||
-		message.includes('out of credits') ||
-		message.includes('no credits') ||
-		message.includes('402 payment') ||
-		message.includes('status code 402') ||
-		message.includes('status code: 402') ||
-		message.includes('insufficient_quota') ||
-		message.includes('billing quota exceeded') ||
-		message.includes('billing hard limit reached') ||
-		message.includes('monthly spend limit reached') ||
-		message.includes('usage limit reached') ||
-		message.includes('account balance') ||
-		message.includes('add credits') ||
-		message.includes('recharge your balance') ||
-		message.includes('no credits left') ||
-		message.includes('out of credits') ||
-		message.includes('not enough credits') ||
-		message.includes('low balance') ||
-		message.includes('balance too low') ||
-		message.includes('billing not active') ||
-		message.includes('billing inactive') ||
-		message.includes('billing issue') ||
-		message.includes('subscription required') ||
-		message.includes('account not active') ||
-		message.includes('insufficient credits remaining') ||
-		message.includes('insufficient balance remaining') ||
-		message.includes('no credits left') ||
-		message.includes('out of credits') ||
-		message.includes('billing not active') ||
-		message.includes('billing inactive') ||
-		message.includes('account balance is too low') ||
-		message.includes('payment required due to quota') ||
-		message.includes('402 payment required') ||
-		message.includes('insufficient credits to process request') ||
-		message.includes('insufficient credits remaining') ||
-		message.includes('no credits remaining') ||
-		message.includes('out of credits') ||
-		message.includes('billing not active') ||
-		message.includes('billing inactive') ||
-		message.includes('account not funded') ||
-		message.includes('payment source required') ||
-		message.includes('payment source is required') ||
-		message.includes('recharge required') ||
-		message.includes('top up required') ||
-		message.includes('top-up required') ||
-		message.includes('insufficient credits to process request') ||
-		message.includes('insufficient credits remaining') ||
-		message.includes('no credits remaining') ||
-		message.includes('out of credits') ||
-		message.includes('account balance is too low') ||
-		message.includes('billing not active') ||
-		message.includes('billing inactive') ||
-		message.includes('billing required') ||
-		message.includes('recharge required') ||
-		message.includes('top up your balance') ||
-		message.includes('add credits') ||
-		message.includes('insufficient_quota') ||
-		message.includes('billing_not_active') ||
-		message.includes('account_not_active') ||
-		message.includes('no credits') ||
-		message.includes('out of credits') ||
-		message.includes('credits remaining') ||
-		message.includes('add credits') ||
-		message.includes('recharge required') ||
-		message.includes('top up your balance') ||
-		message.includes('top-up your balance') ||
-		message.includes('purchase credits') ||
-		message.includes('payment status') ||
-		message.includes('insufficient_quota') ||
-		message.includes('billing_not_active') ||
-		message.includes('billing not active') ||
-		message.includes('account_not_active') ||
-		message.includes('account not active') ||
-		message.includes('no allowed providers are available for the selected model') ||
-		message.includes('provider has no available credits') ||
-		message.includes('provider has insufficient credits') ||
-		message.includes('provider credits exhausted') ||
-		message.includes('provider quota exhausted') ||
-		message.includes('provider quota exceeded') ||
-		message.includes('insufficient funds') ||
-		message.includes('insufficient credits remaining') ||
-		message.includes('out of credits') ||
-		message.includes('no credits remaining') ||
-		message.includes('billing not active') ||
-		message.includes('billing issue') ||
-		message.includes('billing error') ||
-		message.includes('payment source') ||
-		message.includes('recharge required') ||
-		message.includes('top up required') ||
-		message.includes('add credits') ||
-		message.includes('purchase credits') ||
-		message.includes('account balance too low') ||
-		message.includes('insufficient credits to process request') ||
-		message.includes('insufficient credits remaining') ||
-		message.includes('no credits remaining') ||
-		message.includes('account balance is too low') ||
-		message.includes('balance is too low') ||
-		message.includes('billing quota exceeded') ||
-		message.includes('billing limit reached') ||
-		message.includes('payment required by provider') ||
-		message.includes('provider credits exhausted') ||
-		message.includes('billing required') ||
-		message.includes('billing issue') ||
-		message.includes('billing error') ||
-		message.includes('billing unavailable') ||
-		message.includes('billing not active') ||
-		message.includes('account balance') ||
-		message.includes('low balance') ||
-		message.includes('balance too low') ||
-		message.includes('insufficient funds') ||
-		message.includes('out of credits') ||
-		message.includes('out of quota') ||
-		message.includes('quota payment') ||
-		message.includes('402 payment') ||
-		message.includes('status code 402') ||
-		message.includes('credit balance is required') ||
-		message.includes('credit balance too low') ||
-		message.includes('balance too low') ||
-		message.includes('insufficient quota') ||
-		message.includes('insufficient funds') ||
-		message.includes('402 payment required') ||
-		message.includes('status code 402') ||
-		message.includes('no credits remaining') ||
-		message.includes('no allowed providers are available for the selected model') ||
-		message.includes('insufficient_quota') ||
-		message.includes('credit limit reached') ||
-		message.includes('billing not active') ||
-		message.includes('billing account') ||
-		message.includes('account balance') ||
-		message.includes('no allowed providers are available for the selected model') ||
-		message.includes('insufficient_quota') ||
-		message.includes('billing_not_active') ||
-		message.includes('billing not active') ||
-		message.includes('account balance') ||
-		message.includes('low balance') ||
-		message.includes('out of credits') ||
-		message.includes('credits remaining') ||
-		message.includes('402 payment') ||
-		message.includes('credit balance is too low') ||
-		message.includes('credits exhausted') ||
-		message.includes('credit balance exhausted') ||
-		message.includes('insufficient credits') ||
-		message.includes('insufficient credit') ||
-		message.includes('insufficient balance') ||
-		message.includes('billing hard limit') ||
-		message.includes('billing disabled') ||
-		message.includes('billing has been disabled') ||
-		message.includes('key_no_quota') ||
-		message.includes('quota exceeded') ||
-		message.includes('quota exhausted') ||
-		message.includes('quota limit reached') ||
-		message.includes('quota has been exceeded') ||
-		message.includes('resource has been exhausted') ||
-		status === 402 ||
-		message.includes('insufficient_quota') ||
-		message.includes('billing_not_active') ||
-		message.includes('billing not active') ||
-		message.includes('account not active') ||
-		message.includes('no active subscription') ||
-		message.includes('subscription required') ||
-		message.includes('credits exhausted for provider') ||
-		message.includes('provider credits exhausted') ||
-		message.includes('provider quota exhausted') ||
-		message.includes('provider balance exhausted') ||
-		message.includes('balance too low') ||
-		message.includes('not enough credits') ||
-		message.includes('not enough balance') ||
-		message.includes('insufficient_quota') ||
-		message.includes('insufficient quota') ||
-		message.includes('quota exceeded for this request') ||
-		message.includes('quota exceeded for this model') ||
-		message.includes('account balance') ||
-		message.includes('balance is too low') ||
-		message.includes('billing quota') ||
-		message.includes('payment or billing issue') ||
-		message.includes('402 payment required') ||
-		message.includes('no allowed providers are available for the selected model') ||
-		message.includes('insufficient_quota') ||
-		message.includes('billing_not_active') ||
-		message.includes('billing not active') ||
-		message.includes('account not active') ||
-		message.includes('account has insufficient credits') ||
-		message.includes('payment required due to insufficient credits') ||
-		message.includes('quota or payment') ||
-		message.includes('no allowed providers are available for the selected model') ||
-		message.includes('insufficient_quota') ||
-		message.includes('billing_not_active') ||
-		message.includes('account_not_active') ||
-		message.includes('credits have been exhausted') ||
-		message.includes('credit balance depleted') ||
-		message.includes('payment required by provider') ||
-		message.includes('provider has no quota remaining') ||
-		message.includes('out of credits') ||
-		message.includes('account balance is too low') ||
-		message.includes('balance is too low') ||
-		message.includes('billing quota exceeded') ||
-		message.includes('402 payment required') ||
-		message.includes('status code 402') ||
-		message.includes('request failed with status code 402') ||
-		message.includes('insufficient_quota') ||
-		message.includes('insufficient credits') ||
-		message.includes('insufficient credit') ||
-		message.includes('insufficient balance') ||
-		message.includes('credit balance is too low') ||
-		message.includes('credits exhausted') ||
-		message.includes('credit balance exhausted') ||
-		message.includes('no quota remaining') ||
-		message.includes('out of credits') ||
-		message.includes('billing not active') ||
-		message.includes('billing inactive') ||
-		message.includes('payment source required') ||
-		message.includes('insufficient credits remaining') ||
-		message.includes('credits remaining') ||
-		message.includes('payment credits') ||
-		message.includes('billing quota exceeded') ||
-		message.includes('billing limit reached') ||
-		message.includes('monthly spend limit reached') ||
-		message.includes('usage limit reached') ||
-		message.includes('account balance') ||
-		message.includes('low balance') ||
-		message.includes('balance too low') ||
-		message.includes('billing hard limit') ||
-		message.includes('billing disabled') ||
-		message.includes('billing has been disabled') ||
-		message.includes('no allowed providers are available for the selected model') ||
-		message.includes('provider routing/probing blocked') ||
-		message.includes('credit balance is too low') ||
-		message.includes('credits exhausted') ||
-		message.includes('credit balance exhausted') ||
-		message.includes('billing hard limit') ||
-		message.includes('billing disabled') ||
-		message.includes('billing has been disabled') ||
-		message.includes('payment for this request') ||
-		message.includes('payment is required to process this request') ||
-		message.includes('credits are required') ||
-		message.includes('no credits remaining') ||
-		message.includes('out of credits') ||
-		message.includes('402 payment') ||
-		message.includes('status 402') ||
-		message.includes('request failed with status code 402') ||
-		message.includes('402 payment required') ||
-		message.includes('402 quota') ||
-		message.includes('payment/quota') ||
-		message.includes('credits remaining') ||
-		message.includes('request failed with status code 402') ||
-		message.includes('no allowed providers are available for the selected model') ||
-		message.includes('no allowed providers are available');
-		message.includes('request failed with status code 402') ||
-		message.includes('402 payment required') ||
-		message.includes('payment required for this request') ||
-		message.includes('payment required for this operation') ||
-		message.includes('payment required for this model') ||
-		message.includes('credits are required') ||
-		message.includes('not enough credits') ||
-		message.includes('no credits remaining') ||
-		message.includes('out of credits') ||
-		message.includes('balance exhausted') ||
-		message.includes('billing quota exceeded') ||
-		message.includes('quota or payment') ||
-		message.includes('402') && (
-			message.includes('openrouter') ||
-			message.includes('payment') ||
-			message.includes('quota') ||
-			message.includes('credit') ||
-			message.includes('billing')
-		) ||
-		message.includes('status code 402') ||
-		message.includes('http 402') ||
-		message.includes('402 payment required') ||
-		message.includes('request failed with status code 402') ||
-		message.includes('request failed with status code 402') ||
-		message.includes('402 payment required') ||
-		message.includes('payment/quota') ||
-		message.includes('quota/payment') ||
-		message.includes('no allowed providers are available for the selected model') ||
-		status === 402 ||
-		message.includes('status code 402') ||
-		message.includes('status 402') ||
-		message.includes('http 402') ||
-		message.includes('402 payment required') ||
-		message.includes('request failed with status code 402') ||
-		(code === 'err_bad_request' && status === 402) ||
-		status === 402 ||
-		message.includes('out of balance') ||
-		message.includes('billing hard limit') ||
-		message.includes('billing soft limit') ||
-		message.includes('billing disabled') ||
-		message.includes('billing has been disabled') ||
-		message.includes('billing not active') ||
-		message.includes('credits remaining') ||
-		message.includes('out of credits') ||
-		message.includes('no credits') ||
-		message.includes('no allowed providers are available') ||
-		message.includes('402 payment required') ||
-		message.includes('status 402') ||
-		message.includes('request failed with status code 402') ||
-		message.includes('402') && (
-			message.includes('credit') ||
-			message.includes('credits') ||
-			message.includes('quota') ||
-			message.includes('payment') ||
-			message.includes('billing')
-		) ||
-		status === 402 ||
-		status === 429 ||
-		message.includes('status 429') ||
-		code === 'payment_required';
-		message.includes('request failed with status code 429') ||
-		message.includes('quota exceeded for this provider') ||
-		message.includes('provider quota exceeded') ||
-		message.includes('quota exceeded for this organization') ||
-		message.includes('no allowed providers are available for the selected model') ||
-		(status === 404 && message.includes('allowed providers')) ||
-		(status === 404 && message.includes('selected model')) ||
-		(status === 402 && message.includes('openrouter')) ||
-		(status === 402 && message.includes('payment')) ||
-		(status === 402 && message.includes('quota'));
-		geminiCapabilityMismatchLike ||
-		message.includes('unsupported input mime type for this model') ||
-		message.includes('audio/s16le') ||
-		message.includes('function calling is not enabled for this model') ||
-		message.includes('does not support generatecontent') ||
-		message.includes('unsupported input mime type for this model') ||
-		message.includes('audio/s16le') ||
-		message.includes('function calling is not enabled for this model') ||
-		message.includes('does not support generatecontent') ||
-		message.includes('does not support sendmessage') ||
-		message.includes('unsupported input mime type for this model') ||
-		message.includes('audio/s16le') ||
-		message.includes('function calling is not enabled for this model') ||
-		message.includes('does not support generatecontent') ||
-		message.includes('unsupported input mime type for this model') ||
-		message.includes('audio/s16le') ||
-		message.includes('function calling is not enabled for this model') ||
-		message.includes('does not support generatecontent') ||
-		message.includes('unsupported input mime type for this model') ||
-		message.includes('function calling is not enabled for this model') ||
-		message.includes('does not support generatecontent') ||
-		message.includes('generatecontent unsupported') ||
-		message.includes('unsupported input mime type for this model') ||
-		message.includes('audio/s16le') ||
-		message.includes('function calling is not enabled for this model') ||
-		message.includes('does not support generatecontent') ||
-		message.includes('generatecontent unsupported') ||
-		message.includes('credit balance is too low') ||
-		message.includes('account not active') ||
-		message.includes('project has exceeded quota') ||
-		message.includes('no allowed providers are available for the selected model') ||
-		message.includes('unsupported input mime type for this model') ||
-		message.includes('audio/s16le') ||
-		message.includes('function calling is not enabled for this model') ||
-		message.includes('does not support generatecontent') ||
-		message.includes('unsupported input mime type for this model') ||
-		message.includes('unsupported input mime type') ||
-		message.includes('audio/s16le') ||
-		message.includes('function calling is not enabled for this model') ||
-		message.includes('does not support generatecontent') ||
-		message.includes('model does not support generatecontent');
-		message.includes('unsupported input mime type for this model') ||
-		message.includes('audio/s16le') ||
-		message.includes('function calling is not enabled for this model') ||
-		message.includes('does not support generatecontent') ||
-		message.includes('requires more credits') ||
-		message.includes('can only afford') ||
-		message.includes('credits are required') ||
-		message.includes('credits required') ||
-		message.includes('organization must be verified') ||
-		message.includes('account deactivated') ||
-		message.includes('provider account is disabled') ||
-		message.includes('api key disabled') ||
-		message.includes('unsupported input mime type for this model') ||
-		message.includes('function calling is not enabled for this model') ||
-		message.includes('unsupported input mime type for this model') ||
-		message.includes('audio/s16le') ||
-		message.includes('function calling is not enabled for this model') ||
-		message.includes('does not support \'generatecontent\'') ||
-		message.includes('does not support "generatecontent"') ||
-		message.includes('image generation unavailable in country') ||
-		message.includes('image generation unavailable in provider region') ||
-		message.includes('provider_cap_blocked') ||
-		message.includes('provider_model_removed') ||
-		message.includes('image generation unavailable in country') ||
-		message.includes('image generation unavailable in provider region') ||
-		message.includes('unsupported input mime type for this model') ||
-		message.includes('audio/s16le') ||
-		message.includes('function calling is not enabled for this model') ||
-		message.includes('does not support generatecontent') ||
-		message.includes('rate limit/timeout: switching provider') ||
-		message.includes('switching provider due to rate limit') ||
-		message.includes('switching provider due to timeout') ||
-		message.includes('probe_retry') ||
-		message.includes('provider switch worthless') ||
-		message.includes('request retry worthless') ||
-		message.includes('no allowed providers are available for the selected model') ||
-		(status === 404 && message.includes('allowed providers')) ||
-		message.includes('rate limit/timeout: switching provider') ||
-		(message.includes('switching provider') && (message.includes('rate limit') || message.includes('timeout'))) ||
-		message.includes('image generation unavailable in country') ||
-		message.includes('image generation unavailable in provider region') ||
-		message.includes('generation is unavailable in your country') ||
-		message.includes('generation is unavailable in your region') ||
-		message.includes('cannot fetch content from the provided url') ||
-		message.includes('resource has been exhausted') ||
-		message.includes('quota exceeded') ||
-		message.includes('quota exhausted') ||
-		message.includes('quota reached') ||
-		message.includes('quota limit reached') ||
-		message.includes('billing hard limit') ||
-		message.includes('billing disabled') ||
-		message.includes('billing has been disabled') ||
-		message.includes('insufficient_quota') ||
-		message.includes('insufficient quota') ||
-		message.includes('credit balance is too low') ||
-		message.includes('credits are required') ||
-		message.includes('credits required') ||
-		message.includes('payment required') ||
-		message.includes('payment required to access this model') ||
-		message.includes('key_no_quota') ||
-		message.includes('unauthorized') ||
-		message.includes('unauthorised') ||
-		message.includes('invalid api key') ||
-		message.includes('invalid_api_key') ||
-		message.includes('key invalid') ||
-		message.includes('key_invalid') ||
-		message.includes('authentication failed') ||
-		message.includes('authentication_error') ||
-		message.includes('not_authorized_invalid_key_type') ||
-		message.includes('api key not found') ||
-		message.includes('api key not valid') ||
-		message.includes('api key expired') ||
-		message.includes('expired api key') ||
-		message.includes('expired token') ||
-		message.includes('provider account is disabled') ||
-		message.includes('payment required') ||
-		message.includes('provider payment required') ||
-		message.includes('payment method required') ||
-		message.includes('status 402') ||
-		message.includes('request failed with status code 402') ||
-		message.includes('quota exceeded') ||
-		message.includes('quota exhausted') ||
-		message.includes('key_no_quota') ||
-		message.includes('insufficient credits') ||
-		message.includes('insufficient credit') ||
-		message.includes('credit balance is too low') ||
-		message.includes('requires more credits') ||
-		message.includes('credits are required') ||
-		message.includes('credits required') ||
-		message.includes('billing hard limit') ||
-		message.includes('billing soft limit') ||
-		message.includes('billing disabled') ||
-		message.includes('billing has been disabled') ||
-		message.includes('billing not active') ||
-		message.includes('account not active') ||
-		message.includes('account deactivated') ||
-		message.includes('organization must be verified') ||
-		message.includes('unsupported input mime type for this model') ||
-		message.includes('function calling is not enabled for this model') ||
-		message.includes('api key disabled') ||
-		(status === 401 && !message.includes('not found')) ||
-		status === 402 ||
-		status === 402 ||
-		status === 403 ||
-		(code === 'err_bad_response' && status >= 500) ||
-		(code === 'err_bad_request' && status === 402) ||
-		status >= 500 ||
-		message.includes('request failed with status code 500') ||
-		message.includes('request failed with status code 502') ||
-		message.includes('request failed with status code 503') ||
-		message.includes('request failed with status code 504') ||
-		message.includes('internal server error') ||
-		message.includes('bad gateway') ||
-		message.includes('service unavailable') ||
-		message.includes('gateway timeout') ||
-		message.includes('upstream request failed') ||
-		message.includes('upstream service unavailable') ||
-		message.includes('upstream request failed') ||
-		message.includes('upstream error') ||
-		message.includes('upstream service error') ||
-		message.includes('upstream server error') ||
-		message.includes('provider server error') ||
-		message.includes('provider returned 5') ||
-		message.includes('provider returned 50') ||
-		message.includes('provider returned 51') ||
-		message.includes('provider returned 52') ||
-		message.includes('provider returned 53') ||
-		message.includes('provider returned 54') ||
-		message.includes('axioserror') ||
-		(code === 'err_bad_response' && status >= 500) ||
-		message.includes('err_bad_response') ||
-		message.includes('request failed with status code 500') ||
-		message.includes('request failed with status code 502') ||
-		message.includes('request failed with status code 503') ||
-		message.includes('request failed with status code 504') ||
-		message.includes('request failed with status code 5') ||
-		message.includes('upstream request failed with status code 5') ||
-		message.includes('returned an empty streaming response') ||
-		message.includes('empty streaming response') ||
-		message.includes('unauthorized') ||
-		message.includes('unauthorised') ||
-		message.includes('forbidden') ||
-		message.includes('invalid api key') ||
-		message.includes('invalid_api_key') ||
-		message.includes('incorrect api key') ||
-		message.includes('key invalid') ||
-		message.includes('key_invalid') ||
-		message.includes('api_key_invalid') ||
-		message.includes('authentication failed') ||
-		message.includes('auth failed') ||
-		message.includes('invalid authentication') ||
-		message.includes('api key not valid') ||
-		message.includes('api key expired') ||
-		message.includes('access token expired') ||
-		message.includes('expired access token') ||
-		message.includes('invalid access token') ||
-		message.includes('invalid token') ||
-		message.includes('quota exceeded') ||
-		message.includes('quota exhausted') ||
-		message.includes('key_no_quota') ||
-		message.includes('billing hard limit') ||
-		message.includes('billing disabled') ||
-		message.includes('billing has been disabled') ||
-		message.includes('resource has been exhausted') ||
-		message.includes('api_key_invalid') ||
-		message.includes('not_authorized_invalid_key_type') ||
-		status === 401 ||
-		message.includes('status 401') ||
-		message.includes('request failed with status code 401') ||
-		status === 429 ||
-		message.includes('status 429') ||
-		message.includes('request failed with status code 429') ||
-		message.includes('resource has been exhausted') ||
-		message.includes('rate limit exceeded') ||
-		message.includes('too many requests') ||
-		(status >= 500 && status < 600) ||
-		message.includes('status 500') ||
-		message.includes('status 502') ||
-		message.includes('status 503') ||
-		message.includes('status 504') ||
-		message.includes('request failed with status code 500') ||
-		message.includes('request failed with status code 502') ||
-		message.includes('request failed with status code 503') ||
-		message.includes('request failed with status code 504') ||
-		message.includes('api key revoked') ||
-		message.includes('invalid api key') ||
-		message.includes('invalid_api_key') ||
-		message.includes('incorrect api key') ||
-		message.includes('invalid authentication') ||
-		message.includes('authentication failed') ||
-		message.includes('auth failed') ||
-		message.includes('unauthorized') ||
-		message.includes('status 401') ||
-		message.includes('request failed with status code 401') ||
-		status === 401 ||
-		code === 'unauthorized' ||
-		code === 'invalid_api_key' ||
-		code === 'authentication_error' ||
-		message.includes('provider account disabled') ||
-		message.includes('unauthorized') ||
-		message.includes('request failed with status code 401') ||
-		message.includes('request failed with status code 403') ||
-		message.includes('unauthorized') ||
-		message.includes('invalid_api_key') ||
-		message.includes('invalid api key') ||
-		message.includes('key_invalid') ||
-		message.includes('key invalid') ||
-		message.includes('invalid authentication') ||
-		message.includes('incorrect api key') ||
-		status === 401 ||
-		message.includes('status 401') ||
-		message.includes('unauthorized') ||
-		message.includes('not authorized') ||
-		message.includes('invalid api key') ||
-		message.includes('invalid_api_key') ||
-		message.includes('key invalid') ||
-		message.includes('key_invalid') ||
-		message.includes('invalid authentication') ||
-		message.includes('incorrect api key') ||
-		message.includes('api key not valid') ||
-		message.includes('api_key_invalid') ||
-		message.includes('401 unauthorized') ||
-		message.includes('status 401') ||
-		status === 401 ||
-		code === 'unauthorized';
-		message.includes('requires more credits to run this request') ||
-		message.includes('provider billing') ||
-		message.includes('provider quota') ||
-		message.includes('unauthorized') ||
-		message.includes('not authorized') ||
-		message.includes('invalid_api_key') ||
-		message.includes('invalid api key') ||
-		message.includes('key invalid') ||
-		message.includes('key_invalid') ||
-		status === 401 ||
-		message.includes('status 401') ||
-		message.includes('unauthorized') ||
-		message.includes('not authorized') ||
-		message.includes('authentication failed') ||
-		message.includes('authentication_error') ||
-		message.includes('invalid api key') ||
-		message.includes('invalid_api_key') ||
-		message.includes('key invalid') ||
-		message.includes('key_invalid') ||
-		message.includes('invalid authentication') ||
-		message.includes('incorrect api key') ||
-		message.includes('api key not valid') ||
-		message.includes('api key not found') ||
-		message.includes('api key expired') ||
-		message.includes('please renew the api key') ||
-		message.includes('provider account disabled') ||
-		message.includes('provider account is disabled') ||
-		status === 401 ||
-		message.includes('status 401');
-		message.includes('provider billing disabled') ||
-		message.includes('provider billing not active') ||
-		message.includes('provider has no credits') ||
-		message.includes('provider has insufficient credits') ||
-		message.includes('provider quota') ||
-		message.includes('unauthorized') ||
-		message.includes('unauthorised') ||
-		(message.includes('request failed with status code 401') &&
-			(message.includes('openrouter') || message.includes('openai'))) ||
-		(message.includes('request failed with status code 402') &&
-			(message.includes('openrouter') || message.includes('openai'))) ||
-		message.includes('not authorized') ||
-		message.includes('not authorised') ||
-		message.includes('authorization failed') ||
-		message.includes('authorisation failed') ||
-		message.includes('authentication failed') ||
-		message.includes('invalid api key') ||
-		message.includes('invalid_api_key') ||
-		message.includes('key invalid') ||
-		message.includes('key_invalid') ||
-		message.includes('invalid token') ||
-		message.includes('invalid access token') ||
-		message.includes('incorrect api key') ||
-		message.includes('api key not valid') ||
-		message.includes('api key expired') ||
-		message.includes('api_key_invalid') ||
-		status === 401 ||
-		message.includes('status 401') ||
-		code === 'key_invalid' ||
-		code === 'invalid_api_key';
-		message.includes('status 401') ||
-		status === 401 ||
-		message.includes('api key not found') ||
-		message.includes('api key not valid') ||
-		message.includes('api key expired') ||
-		message.includes('unauthorized') ||
-		message.includes('not authorized') ||
-		message.includes('invalid api key') ||
-		message.includes('invalid_api_key') ||
-		message.includes('key invalid') ||
-		message.includes('key_invalid') ||
-		status === 402 ||
-		message.includes('status 402') ||
-		code === 'key_invalid' ||
-		code === 'key_no_quota' ||
-		message.includes('please renew the api key') ||
-		message.includes('incorrect api key') ||
-		message.includes('authentication failed') ||
-		message.includes('authentication error') ||
-		message.includes('authentication_error') ||
-		message.includes('invalid credentials') ||
-		message.includes('invalid authorization') ||
-		message.includes('unauthorized') ||
-		message.includes('invalid api key') ||
-		message.includes('invalid_api_key') ||
-		message.includes('invalid authentication') ||
-		status === 401 ||
-		status === 402;
-		message.includes('incorrect api key') ||
-		message.includes('authentication failed') ||
-		message.includes('authentication error') ||
-		message.includes('authentication_error') ||
-		message.includes('key_invalid') ||
-		status === 401 ||
-		message.includes('status 401') ||
-		status === 402 ||
-		message.includes('status 402');
+		messageIncludesAny(upstreamQuotaGovernanceDriftPatterns)
+		|| codeMatchesAny(['key_no_quota', 'insufficient_quota', 'payment_required', 'quota_exceeded'])
+		|| statusMatchesAny([402, 429])
+		|| (message.includes('consumer') && message.includes('has been suspended'))
+		|| (message.includes('payment') && message.includes('required'))
+		|| (status === 402 && messageIncludesAny(['payment', 'quota', 'credit', 'billing', 'insufficient']))
+		|| (status === 402 && code === 'err_bad_request')
+		|| (message.includes('402') && messageIncludesAny(['openrouter', 'payment', 'quota', 'credit', 'billing']));
 	const upstreamProviderAvailabilityDriftLike =
-		message.includes('no allowed providers are available for the selected model') ||
-		message.includes('no allowed providers are available for this model') ||
-		message.includes('no allowed providers are available for the requested model') ||
-		message.includes('no allowed providers available for the selected model') ||
-		message.includes('no allowed providers available for this model') ||
-		message.includes('openrouter api call failed: no allowed providers are available') ||
-		(message.includes('no allowed providers are available') && status === 404) ||
-		(message.includes('selected model') && message.includes('status 404')) ||
-		(message.includes('allowed providers') && message.includes('selected model')) ||
-		(message.includes('allowed providers') && message.includes('requested model')) ||
-		(message.includes('allowed providers') && message.includes('status 404')) ||
-		(message.includes('openrouter') && message.includes('allowed providers') && status === 404);
+		messageIncludesAny(upstreamProviderAvailabilityDriftPatterns)
+		|| (message.includes('no allowed providers are available') && status === 404)
+		|| (message.includes('selected model') && message.includes('status 404'))
+		|| (message.includes('allowed providers') && message.includes('selected model'))
+		|| (message.includes('allowed providers') && message.includes('requested model'))
+		|| (message.includes('allowed providers') && message.includes('status 404'))
+		|| (message.includes('openrouter') && message.includes('allowed providers') && status === 404);
 	const upstreamRateLimitOrTimeoutSwitchChurnLike =
-		message.includes('rate limit/timeout: switching provider') ||
-		message.includes('unsupported (rate limit/timeout)') ||
-		message.includes('provider retry worthless') ||
-		message.includes('request retry worthless') ||
-		message.includes('provider switch worthless') ||
-		message.includes('switching provider due to rate limit') ||
-		message.includes('switching provider due to timeout') ||
-		message.includes('timed out switching provider') ||
-		message.includes('switching provider') ||
-		message.includes('switch provider') ||
-		message.includes('retrying with another provider') ||
-		message.includes('retrying another provider') ||
-		message.includes('resource has been exhausted') ||
-		message.includes('resource_exhausted') ||
-		message.includes('check quota') ||
-		(message.includes('timeout') && message.includes('switching provider')) ||
-		(message.includes('rate limit') && message.includes('switching provider')) ||
-		(message.includes('timed out') && message.includes('provider'));
+		messageIncludesAny(upstreamRateLimitOrTimeoutSwitchChurnPatterns)
+		|| (message.includes('timeout') && message.includes('switching provider'))
+		|| (message.includes('rate limit') && message.includes('switching provider'))
+		|| (message.includes('timed out') && message.includes('provider'));
 	if (memoryPressureLike || providerRetryChurnLike || upstreamAuthOrGovernanceDriftLike || upstreamQuotaGovernanceDriftLike || upstreamProviderAvailabilityDriftLike || upstreamRateLimitOrTimeoutSwitchChurnLike) return false;
 	return (
-		message.includes('rate limit') ||
-		message.includes('rate_limit') ||
-		message.includes('resource_exhausted') ||
-		message.includes('payment required') ||
-		message.includes('billing') ||
-		message.includes('credits') ||
-		message.includes('too many requests') ||
-		message.includes('status 429') ||
-		message.includes(' 429 ') ||
-		message.includes('status 402') ||
-		message.includes(' 402 ') ||
-		message.includes('no endpoints found that support') ||
-		message.includes('provider routing') ||
-		message.includes('tool_choice value') ||
-		message.includes('tool choice must be auto') ||
-		message.includes('requires beta access') ||
-		message.includes('provider payment required') ||
-		message.includes('payment required') ||
-		message.includes('payment method required') ||
-		message.includes('insufficient credits') ||
-		message.includes('insufficient credit') ||
-		message.includes('credit balance is too low') ||
-		message.includes('requires more credits') ||
-		message.includes('credits are required') ||
-		message.includes('credits required') ||
-		message.includes('can only afford') ||
-		message.includes('billing disabled') ||
-		message.includes('billing has been disabled') ||
-		message.includes('billing not active') ||
-		message.includes('account not active') ||
-		message.includes('provider account is disabled') ||
-		message.includes('organization must be verified') ||
-		message.includes('account deactivated') ||
-		message.includes('unsupported input mime type for this model') ||
-		message.includes('unsupported input mime type') ||
-		message.includes('cannot fetch content from the provided url') ||
-		message.includes('failed to fetch content from the provided url') ||
-		message.includes('could not fetch content from the provided url') ||
-		message.includes('unable to fetch content from the provided url') ||
-		message.includes('cannot fetch image from the provided url') ||
-		message.includes('failed to fetch image from the provided url') ||
-		message.includes('audio/s16le') ||
-		message.includes('function calling is not enabled for this model') ||
-		message.includes('does not support generatecontent') ||
-		message.includes("does not support 'generatecontent'") ||
-		message.includes('resource has been exhausted') ||
-		code === 'insufficient_quota' ||
-		code === 'insufficient_credits' ||
-		code === 'payment_required' ||
-		status === 402 ||
-		message.includes('currently experiencing high demand') ||
-		message.includes('spikes in demand are usually temporary') ||
-		(message.includes('status": "unavailable"') ||
-			message.includes("status': 'unavailable'") ||
-			message.includes('"status": "unavailable"') ||
-			message.includes("'status': 'unavailable'")) ||
-		(status === 503 && message.includes('overload'))
+		messageIncludesAny(positiveMatchPatterns)
+		|| codeMatchesAny(['insufficient_quota', 'insufficient_credits', 'payment_required'])
+		|| status === 402
+		|| (status === 503 && message.includes('overload'))
 	);
 }
+
 
 // --- Retry-After ---
 
@@ -1968,6 +892,8 @@ export function isModelAccessError(error: any): boolean {
 		message.includes('no gemini model available') ||
 		message.includes('no eligible image models found') ||
 		message.includes('not found for api version') ||
+		message.includes('no longer available to new users') ||
+		message.includes('update your code to use a newer model') ||
 		message.includes('model not found') ||
 		(message.includes('the model') && message.includes('does not exist')) ||
 		message.includes('not supported for this model') ||
@@ -3011,4 +1937,46 @@ export function isToolUnsupportedError(error: any): boolean {
 	)
 		return true;
 	return false;
+}
+
+export function isProviderRequestShapeError(error: any): boolean {
+	const message = [
+		error?.message,
+		error?.clientMessage,
+		error?.error?.message,
+		error?.response?.data?.error?.message,
+		error?.response?.data?.message,
+		error?.errorDetails?.upstream,
+		error?.cause?.message,
+		error?.cause,
+	]
+		.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+		.join('\n')
+		.toLowerCase();
+	const code = String(
+		error?.code ||
+		error?.error?.code ||
+		error?.response?.data?.error?.code ||
+		''
+	).toLowerCase();
+
+	if (!message && !code) return false;
+
+	const patterns = [
+		"unknown parameter: 'input[1].status'",
+		'unknown parameter: "input[1].status"',
+		"invalid 'max_output_tokens': integer below minimum value",
+		'invalid schema for function',
+		'invalid_function_parameters',
+		'no tool call found for function call output',
+		'function tools with reasoning_effort are not supported',
+		"invalid value: 'input_text'. supported values are",
+		'param": "input[0]"',
+		'param": "reasoning_effort"',
+	];
+
+	return (
+		patterns.some((pattern) => message.includes(pattern)) ||
+		code === 'invalid_function_parameters'
+	);
 }

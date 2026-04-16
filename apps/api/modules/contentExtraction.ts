@@ -1,10 +1,25 @@
+function joinUniqueTextBlocks(blocks: Array<string | null | undefined>): string {
+  const normalized: string[] = [];
+  const seen = new Set<string>();
+  for (const block of blocks) {
+    const text = typeof block === 'string' ? block.trim() : '';
+    if (!text || seen.has(text)) continue;
+    seen.add(text);
+    normalized.push(text);
+  }
+  return normalized.join('\n\n');
+}
+
 export function extractTextFromContent(content: any): string {
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) {
-    const textPart = content.find((part: any) =>
-      part && (part.type === 'text' || part.type === 'input_text') && typeof part.text === 'string'
-    );
-    if (textPart?.text) return textPart.text;
+    const textParts = content
+      .filter((part: any) =>
+        part && (part.type === 'text' || part.type === 'input_text') && typeof part.text === 'string'
+      )
+      .map((part: any) => part.text)
+      .filter((text: string) => text.length > 0);
+    if (textParts.length > 0) return textParts.join('\n');
   }
   return '';
 }
@@ -35,6 +50,46 @@ export function extractImageUrlFromContent(content: any): string | null {
     }
   }
   return null;
+}
+
+export function extractInstructionTextFromMessages(rawMessages: any[]): string {
+  if (!Array.isArray(rawMessages)) return '';
+  return joinUniqueTextBlocks(
+    rawMessages
+      .filter((message: any) => {
+        const role = typeof message?.role === 'string' ? message.role.toLowerCase() : '';
+        return role === 'system' || role === 'developer';
+      })
+      .map((message: any) => extractTextFromContent(message?.content))
+  );
+}
+
+export function extractInstructionTextFromResponsesInput(input: any): string {
+  if (!Array.isArray(input)) return '';
+  return joinUniqueTextBlocks(
+    input
+      .filter((item: any) => {
+        const role = typeof item?.role === 'string' ? item.role.toLowerCase() : '';
+        return role === 'system' || role === 'developer';
+      })
+      .map((item: any) => extractTextFromContent(item?.content ?? item))
+  );
+}
+
+export function extractInstructionTextFromRequestBody(requestBody: any): string {
+  const systemTexts = Array.isArray(requestBody?.system)
+    ? requestBody.system.filter((value: any) => typeof value === 'string')
+    : (typeof requestBody?.system === 'string' ? [requestBody.system] : []);
+  const instructions = typeof requestBody?.instructions === 'string' ? requestBody.instructions : '';
+  return joinUniqueTextBlocks([...systemTexts, instructions]);
+}
+
+export function mergeInstructionTextWithPrompt(prompt: string, instructionText: string): string {
+  const normalizedPrompt = typeof prompt === 'string' ? prompt.trim() : '';
+  const normalizedInstruction = typeof instructionText === 'string' ? instructionText.trim() : '';
+  if (!normalizedPrompt) return '';
+  if (!normalizedInstruction) return normalizedPrompt;
+  return `Instructions:\n${normalizedInstruction}\n\nPrompt:\n${normalizedPrompt}`;
 }
 
 export function extractTextFromMessages(rawMessages: any[]): string {

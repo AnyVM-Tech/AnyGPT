@@ -6,6 +6,7 @@ import { spawn } from 'child_process';
 import redis from './db.js';
 import { dataManager, LoadedProviders, LoadedProviderData } from './dataManager.js';
 import { checkKeyHealth, type KeyHealthStatus } from './keyChecker.js';
+import { isProviderRequestShapeError } from './errorClassification.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -268,8 +269,19 @@ function getProviderFamily(providerId: string): string {
   return '';
 }
 
+function hasRecoverableDisableReason(provider: LoadedProviderData): boolean {
+  const reason = String(
+    (provider as any)?.disabled_reason ||
+    (provider as any)?.disabledReason ||
+    ''
+  ).trim();
+  if (!reason) return false;
+  return isProviderRequestShapeError({ message: reason });
+}
+
 function shouldReenableDisabledProvider(provider: LoadedProviderData, status: KeyHealthStatus): boolean {
   if (status.health === 'healthy') return true;
+  if (hasRecoverableDisableReason(provider) && status.isValid === true) return true;
   const family = getProviderFamily(provider.id);
   return family === 'gemini' && status.isValid === true && status.health === 'no-quota';
 }
@@ -313,6 +325,8 @@ async function checkDisabledProviderKeys(): Promise<boolean> {
           const idx = providers.findIndex((p: LoadedProviderData) => p.id === provider.id);
           if (idx !== -1) {
             providers[idx].disabled = false;
+            delete (providers[idx] as any).disabled_reason;
+            delete (providers[idx] as any).disabledReason;
             // Also re-enable all models that were disabled due to consecutive errors
             for (const modelId of Object.keys(providers[idx].models || {})) {
               const model = providers[idx].models[modelId] as any;
@@ -325,9 +339,11 @@ async function checkDisabledProviderKeys(): Promise<boolean> {
             }
             reEnabled++;
             changed = true;
-            const reason = status.health === 'healthy'
-              ? 'key is valid with quota'
-              : 'Gemini quota exhaustion is treated as temporary';
+            const reason = hasRecoverableDisableReason(provider)
+              ? 'stale request-shape disable reason cleared'
+              : status.health === 'healthy'
+                ? 'key is valid with quota'
+                : 'Gemini quota exhaustion is treated as temporary';
             console.log(`[AdminKeySync] Re-enabled provider ${provider.id} — ${reason}.`);
           }
         } else if (status.health === 'indeterminate') {
@@ -339,6 +355,15 @@ async function checkDisabledProviderKeys(): Promise<boolean> {
           console.log(`[AdminKeySync] Provider ${provider.id} stays disabled (${reason}).`);
         }
       }
+    }
+
+    for (const provider of providers) {
+      if (provider.disabled) continue;
+      if (!hasRecoverableDisableReason(provider)) continue;
+      delete (provider as any).disabled_reason;
+      delete (provider as any).disabledReason;
+      changed = true;
+      console.log(`[AdminKeySync] Cleared stale disable reason on active provider ${provider.id}.`);
     }
 
     if (changed) {

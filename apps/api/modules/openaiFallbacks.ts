@@ -33,6 +33,7 @@ import {
   type VideoRequestCacheProvider,
 } from './geminiVideo.js';
 import { resolveSoraVideoModelId } from './openaiRouteUtils.js';
+import { resolveVideoPricingUnitRateOverride } from './videoPricing.js';
 import {
   buildVideoRequestCacheProvider,
   resolveVideoRequestCacheTtlMs,
@@ -1712,9 +1713,13 @@ export async function handleVideoGenFallbackFromChatOrResponses(params: {
 
   const tokenEstimate = Math.ceil(prompt.length / 4) + 500;
   const videoSeconds = resolveVideoBillingQuantity(requestBody);
+  const pricingUnitRateOverride = resolveVideoPricingUnitRateOverride(modelId, requestBody);
   await updateUserTokenUsage(tokenEstimate, request.apiKey!, {
     modelId,
     pricingMetric: 'per_image',
     pricingQuantity: videoSeconds,
+    ...(pricingUnitRateOverride
+      ? { pricingUnitRateOverride }
+      : {}),
   });
 }

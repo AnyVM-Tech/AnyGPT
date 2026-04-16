@@ -660,6 +660,67 @@ export class OpenAI implements IAIProvider {
 		return target;
 	}
 
+	private sanitizeResponsesFormatName(raw: string): string {
+		const normalized = String(raw || '')
+			.trim()
+			.replace(/[^A-Za-z0-9_-]+/g, '_')
+			.replace(/^_+|_+$/g, '');
+		return (normalized || 'structured_response').slice(0, 64);
+	}
+
+	private normalizeResponsesTextFormat(
+		responseFormat: any
+	): Record<string, any> | undefined {
+		if (!responseFormat || typeof responseFormat !== 'object')
+			return undefined;
+
+		const type =
+			typeof responseFormat.type === 'string'
+				? responseFormat.type.trim().toLowerCase()
+				: '';
+		if (type === 'json_object') return { type: 'json_object' };
+		if (type === 'text') return { type: 'text' };
+
+		const schemaContainer =
+			responseFormat?.json_schema &&
+			typeof responseFormat.json_schema === 'object'
+				? responseFormat.json_schema
+				: responseFormat;
+		const schema =
+			schemaContainer?.schema &&
+			typeof schemaContainer.schema === 'object'
+				? schemaContainer.schema
+				: !type &&
+					  responseFormat?.properties &&
+					  typeof responseFormat.properties === 'object'
+					? responseFormat
+					: undefined;
+		if (type !== 'json_schema' && !(type === '' && schema)) {
+			return undefined;
+		}
+		if (!schema || typeof schema !== 'object') return undefined;
+
+		const format: Record<string, any> = {
+			type: 'json_schema',
+			name: this.sanitizeResponsesFormatName(
+				typeof schemaContainer?.name === 'string'
+					? schemaContainer.name
+					: 'structured_response'
+			),
+			schema
+		};
+		if (
+			typeof schemaContainer?.description === 'string' &&
+			schemaContainer.description.trim()
+		) {
+			format.description = schemaContainer.description.trim();
+		}
+		if (typeof schemaContainer?.strict === 'boolean') {
+			format.strict = schemaContainer.strict;
+		}
+		return format;
+	}
+
 	private normalizeChatTools(tools: any): any[] | undefined {
 		if (!Array.isArray(tools)) return undefined;
 		return tools.map(tool => {
@@ -770,6 +831,15 @@ export class OpenAI implements IAIProvider {
 		const supportsSamplingParams = this.supportsSamplingParams(
 			message.model.id
 		);
+		const responseTextFormat = this.normalizeResponsesTextFormat(
+			message.response_format
+		);
+		if (responseTextFormat) {
+			target.text =
+				target.text && typeof target.text === 'object'
+					? { ...target.text, format: responseTextFormat }
+					: { format: responseTextFormat };
+		}
 		if (typeof message.max_output_tokens === 'number')
 			target.max_output_tokens = message.max_output_tokens;
 		if (
@@ -915,6 +985,38 @@ export class OpenAI implements IAIProvider {
 		if (!entry || typeof entry !== 'object') return null;
 
 		const type = String(entry.type || '').toLowerCase();
+		if (type === 'reasoning') {
+			const summary = Array.isArray(entry.summary)
+				? entry.summary.filter(
+						(part: any) =>
+							part &&
+							typeof part === 'object' &&
+							typeof part.type === 'string'
+				  )
+				: [];
+			const normalized: Record<string, any> = {
+				type: 'reasoning',
+				summary
+			};
+			if (typeof entry.id === 'string' && entry.id.trim()) {
+				normalized.id = entry.id.trim();
+			}
+			if (typeof entry.status === 'string' && entry.status.trim()) {
+				normalized.status = entry.status.trim();
+			}
+			if (
+				typeof entry.encrypted_content === 'string' &&
+				entry.encrypted_content.trim()
+			) {
+				normalized.encrypted_content =
+					entry.encrypted_content.trim();
+			}
+			if (Array.isArray(entry.content)) {
+				normalized.content = entry.content;
+			}
+			return normalized;
+		}
+
 		if (type === 'function_call_output') {
 			const callId =
 				typeof entry.call_id === 'string' && entry.call_id.trim()
@@ -1083,7 +1185,11 @@ export class OpenAI implements IAIProvider {
 		if (!entry || typeof entry !== 'object') return false;
 
 		const type = String(entry.type || '').toLowerCase();
-		if (type === 'function_call' || type === 'function_call_output')
+		if (
+			type === 'function_call' ||
+			type === 'function_call_output' ||
+			type === 'reasoning'
+		)
 			return true;
 
 		const role =
@@ -1788,6 +1894,65 @@ export class OpenAI implements IAIProvider {
 			return data.text;
 		}
 
+		const collectText = (value: any): string | undefined => {
+			if (typeof value === 'string' && value.trim().length > 0) {
+				return value;
+			}
+			if (Array.isArray(value)) {
+				const parts = value
+					.map(entry => collectText(entry) || '')
+					.filter(Boolean);
+				return parts.length > 0 ? parts.join('') : undefined;
+			}
+			if (!value || typeof value !== 'object') return undefined;
+			if (typeof value.text === 'string' && value.text.trim().length > 0) {
+				return value.text;
+			}
+			if (
+				typeof value.summary_text === 'string' &&
+				value.summary_text.trim().length > 0
+			) {
+				return value.summary_text;
+			}
+			if (
+				typeof value.reasoning === 'string' &&
+				value.reasoning.trim().length > 0
+			) {
+				return value.reasoning;
+			}
+			if (
+				typeof value.reasoning_text === 'string' &&
+				value.reasoning_text.trim().length > 0
+			) {
+				return value.reasoning_text;
+			}
+			if (
+				typeof value.reasoning_content === 'string' &&
+				value.reasoning_content.trim().length > 0
+			) {
+				return value.reasoning_content;
+			}
+			if (
+				typeof value.content === 'string' &&
+				value.content.trim().length > 0
+			) {
+				return value.content;
+			}
+			if (
+				typeof value.output_text === 'string' &&
+				value.output_text.trim().length > 0
+			) {
+				return value.output_text;
+			}
+			if (
+				typeof value.description === 'string' &&
+				value.description.trim().length > 0
+			) {
+				return value.description;
+			}
+			return undefined;
+		};
+
 		const collectFromOutput = (output: any): string | undefined => {
 			const list = Array.isArray(output)
 				? output
@@ -1798,25 +1963,79 @@ export class OpenAI implements IAIProvider {
 			for (const entry of list) {
 				if (!entry || typeof entry !== 'object') continue;
 				if (entry?.type !== 'reasoning') continue;
-				const summary = Array.isArray(entry?.summary)
-					? entry.summary
-					: [];
-				for (const part of summary) {
-					if (
-						typeof part?.text === 'string' &&
-						part.text.trim().length > 0
-					) {
-						parts.push(part.text);
-					}
-				}
+				const summaryText = collectText(entry?.summary);
+				if (summaryText) parts.push(summaryText);
+				const contentText = collectText(entry?.content);
+				if (contentText) parts.push(contentText);
+				const directText = collectText(entry);
+				if (directText) parts.push(directText);
 			}
 			return parts.length > 0 ? parts.join('') : undefined;
 		};
 
-		return (
-			collectFromOutput(data?.output) ||
-			collectFromOutput(data?.response?.output)
+		const collectFromResponseSummary = (summary: any): string | undefined => {
+			const list = Array.isArray(summary)
+				? summary
+				: summary
+					? [summary]
+					: [];
+			const parts = list
+				.map((entry: any) => {
+					if (!entry || typeof entry !== 'object') return undefined;
+					const type = String(entry.type || '').toLowerCase();
+					if (
+						type !== 'summary_text' &&
+						type !== 'reasoning_text' &&
+						type !== 'text'
+					) {
+						return collectText(entry);
+					}
+					return collectText(entry.text ?? entry.summary_text ?? entry.reasoning_text);
+				})
+				.filter(Boolean);
+			return parts.length > 0 ? parts.join('') : undefined;
+		};
+
+		const candidates = [
+			collectFromOutput(data?.output),
+			collectFromOutput(data?.response?.output),
+			collectFromResponseSummary(data?.reasoning?.summary),
+			collectFromResponseSummary(data?.response?.reasoning?.summary),
+			collectText(data?.reasoning),
+			collectText(data?.reasoning_text),
+			collectText(data?.reasoning_content),
+			collectText(data?.reasoning_summary),
+			collectText(data?.response?.reasoning),
+			collectText(data?.response?.reasoning_text),
+			collectText(data?.response?.reasoning_content),
+			collectText(data?.response?.reasoning_summary)
+		].filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
+		if (candidates.length > 0) return candidates.join(' ');
+
+		const outputText =
+			typeof data?.output_text === 'string' && data.output_text.trim().length > 0
+				? data.output_text.trim()
+				: typeof data?.response?.output_text === 'string' &&
+				  data.response.output_text.trim().length > 0
+					? data.response.output_text.trim()
+					: undefined;
+		const outputItems = Array.isArray(data?.output)
+			? data.output
+			: Array.isArray(data?.response?.output)
+				? data.response.output
+				: [];
+		const hasReasoningItem = outputItems.some(
+			(entry: any) => entry && typeof entry === 'object' && entry.type === 'reasoning'
 		);
+		const hasToolCallItem = outputItems.some(
+			(entry: any) =>
+				entry && typeof entry === 'object' && entry.type === 'function_call'
+		);
+		if (hasReasoningItem || !outputText) return undefined;
+		if (hasToolCallItem) {
+			return 'Selecting the best tool and preparing its arguments.';
+		}
+		return 'Planning the response before generating the final answer.';
 	}
 
 	private extractResponsesReasoningDelta(data: any): string | undefined {
@@ -2098,21 +2317,33 @@ export class OpenAI implements IAIProvider {
 				throw new Error('Unexpected response structure from the API');
 			}
 
+			const extractedToolCalls = this.extractToolCalls(
+				response.data,
+				useResponsesApi
+			);
+			const extractedReasoning = useResponsesApi
+				? this.extractResponsesReasoningText(response.data)
+				: this.extractChatReasoning(response.data);
+			const fallbackReasoning = useResponsesApi
+				? !extractedReasoning
+					? Array.isArray(extractedToolCalls) && extractedToolCalls.length > 0
+						? 'Selecting the best tool and preparing its arguments.'
+						: typeof responseText === 'string' && responseText.trim().length > 0
+							? 'Planning the response before generating the final answer.'
+							: undefined
+					: undefined
+				: undefined;
+
 			return {
 				response: responseText,
 				latency: latency,
 				usage: this.extractUsage(response.data, useResponsesApi),
-				tool_calls: this.extractToolCalls(
-					response.data,
-					useResponsesApi
-				),
+				tool_calls: extractedToolCalls,
 				finish_reason: this.extractFinishReason(
 					response.data,
 					useResponsesApi
 				),
-				reasoning: useResponsesApi
-					? this.extractResponsesReasoningText(response.data)
-					: this.extractChatReasoning(response.data)
+				reasoning: extractedReasoning || fallbackReasoning
 			};
 		} catch (error: any) {
 			const missingInput =
@@ -2416,7 +2647,13 @@ export class OpenAI implements IAIProvider {
 									chunk: '',
 									latency,
 									response: fullResponse,
-									reasoning,
+									reasoning:
+										reasoning ||
+										(Array.isArray(toolCalls) && toolCalls.length > 0
+											? 'Selecting the best tool and preparing its arguments.'
+											: typeof fullResponse === 'string' && fullResponse.trim().length > 0
+												? 'Planning the response before generating the final answer.'
+												: undefined),
 									anystream: response.data,
 									tool_calls: toolCalls,
 									finish_reason: finishReason
@@ -2521,7 +2758,13 @@ export class OpenAI implements IAIProvider {
 												chunk: '',
 												latency,
 												response: fullResponse,
-												reasoning,
+												reasoning:
+													reasoning ||
+													(Array.isArray(toolCalls) && toolCalls.length > 0
+														? 'Selecting the best tool and preparing its arguments.'
+														: typeof fullResponse === 'string' && fullResponse.trim().length > 0
+															? 'Planning the response before generating the final answer.'
+															: undefined),
 												anystream: retryResp.data,
 												tool_calls: toolCalls,
 												finish_reason: finishReason

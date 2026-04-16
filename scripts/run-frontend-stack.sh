@@ -9,7 +9,7 @@ HOMEPAGE_DIR="$ROOT/apps/homepage"
 SKIP_INSTALL_IF_PRESENT="${ANYGPT_FRONTEND_SKIP_INSTALL_IF_PRESENT:-1}"
 READINESS_TIMEOUT_SECONDS="${ANYGPT_FRONTEND_READINESS_TIMEOUT_SECONDS:-15}"
 HOMEPAGE_START_TIMEOUT_SECONDS="${ANYGPT_HOMEPAGE_START_TIMEOUT_SECONDS:-0}"
-SUPPORTED_MODES="dev start readiness preflight preflight-ready readiness-ready readiness-only preflight-status status workspace-status install-check-status install-summary install-check install-check-only operator-preflight doctor same-thread-defer-status same-thread-status workspace-surface-strict workspace-surface-fast-status workspace-surface-pending-status workspace-surface-typecheck workspace-surface-install-typecheck workspace-surface-preflight workspace-surface-quickcheck workspace-surface-summary workspace-surface-defer workspace-surface-goal-status workspace-surface-same-thread-reminder workspace-surface-root-smoke workspace-surface-root-check frontend-install-status frontend-preflight frontend-typecheck help"
+SUPPORTED_MODES="dev start readiness preflight preflight-ready readiness-ready readiness-only preflight-status status workspace-status install-check-status install-summary install-check install-check-only operator-preflight doctor same-thread-defer-status same-thread-status workspace-surface-strict workspace-surface-fast-status workspace-surface-pending-status workspace-surface-typecheck workspace-surface-install-typecheck workspace-surface-preflight workspace-surface-summary workspace-surface-defer workspace-surface-goal-status workspace-surface-same-thread-reminder workspace-surface-root-smoke workspace-surface-root-check frontend-install-status frontend-preflight frontend-typecheck help"
 LANGSMITH_PENDING_RUNS_SAMPLE="${ANYGPT_LANGSMITH_PENDING_RUNS_SAMPLE:-4}"
 
 report_frontend_install_status() {
@@ -118,28 +118,6 @@ if [[ "$MODE" == "frontend-typecheck" ]]; then
   exit 0
 fi
 
-if [[ "$MODE" == "workspace-surface-quickcheck" ]]; then
-  echo "Workspace-surface quickcheck for thread 8bd76091-7a92-4314-abf8-926521f7bacf:workspace-surface"
-  echo "Goal context: continuously monitor, fix, and improve AnyGPT across the repo with one bounded workspace-surface install-and-typecheck validation step."
-  echo "Observability note: ${LANGSMITH_PENDING_RUNS_SAMPLE} sampled pending LangSmith run(s) are partial observability only; cross-thread or pending-only activity does not satisfy this iteration."
-  echo "Running bounded workspace quickcheck without starting the UI/homepage stack."
-  cd "$ROOT"
-  bash "$BUN_SH" run frontend:install:status
-  bash "$BUN_SH" run frontend:typecheck
-  echo "Workspace-surface validation reminder for thread 8bd76091-7a92-4314-abf8-926521f7bacf:workspace-surface: quickcheck passed locally, but next still confirm at least one fresh same-thread LangSmith run/trace with explicit goal context plus a passed workspace smoke/typecheck result, or preserve a clear operator-facing no-run defer reason if no run was emitted"
-  exit 0
-fi
-
-if [[ "$MODE" == "workspace-surface-quickcheck" ]]; then
-  echo "Workspace-surface quickcheck for thread 8bd76091-7a92-4314-abf8-926521f7bacf:workspace-surface"
-  echo "Goal context: continuously monitor, fix, and improve AnyGPT across the repo with one bounded workspace-surface install-status plus frontend-typecheck step."
-  echo "Observability note: ${LANGSMITH_PENDING_RUNS_SAMPLE} sampled pending LangSmith run(s) are partial observability only; cross-thread or pending-only activity does not satisfy this iteration."
-  echo "Running bounded workspace quickcheck without starting the UI/homepage stack."
-  "$0" install-check-status
-  "$0" frontend-typecheck
-  echo "Workspace-surface validation reminder for thread 8bd76091-7a92-4314-abf8-926521f7bacf:workspace-surface: quickcheck completed locally, but next still confirm at least one fresh same-thread LangSmith run/trace with explicit goal context plus a passed workspace smoke/typecheck result, or preserve a clear operator-facing no-run defer reason if no run was emitted"
-  exit 0
-fi
 
 print_workspace_surface_defer_reason() {
   echo "Workspace-surface defer reason for thread 2ecf435b-4dc3-45ec-bdae-27cee1f93b64:workspace-surface: no fresh same-thread LangSmith run/trace was emitted yet for this bounded workspace-surface iteration."
@@ -154,19 +132,6 @@ if [[ "$MODE" == "workspace-surface-defer" ]]; then
   exit 0
 fi
 
-if [[ "$MODE" == "workspace-surface-quickcheck" ]]; then
-  echo "Workspace-surface quickcheck for thread 2ecf435b-4dc3-45ec-bdae-27cee1f93b64:workspace-surface"
-  echo "Goal context: continuously monitor, fix, and improve AnyGPT across the repo with one bounded root-workspace developer-workflow improvement."
-  echo "Observability note: ${LANGSMITH_PENDING_RUNS_SAMPLE} sampled pending LangSmith run(s) are partial observability only for this thread; pending-only or cross-thread activity does not satisfy this iteration."
-  echo "Operator note: this quickcheck captures frontend install status first, then frontend typecheck, to provide bounded local validation without widening into app/provider code."
-  echo "Success condition: confirm at least one fresh same-thread LangSmith control-plane run/trace with explicit goal context for this iteration plus a passed workspace smoke/typecheck result, or preserve a clear operator-facing no-run defer reason if no run was emitted."
-  cd "$ROOT"
-  bash "$BUN_SH" run frontend:install:status
-  echo "Workspace-surface quickcheck: frontend install status completed; proceeding to frontend typecheck."
-  bash "$BUN_SH" run frontend:typecheck
-  echo "Workspace-surface quickcheck completed local install-status and frontend typecheck. Validation is still incomplete until a fresh same-thread LangSmith run/trace exists, or an operator-facing no-run defer reason is preserved."
-  exit 0
-fi
 
 if [[ "$MODE" == "workspace-surface-preflight" ]]; then
   echo "Workspace-surface preflight for thread 2ecf435b-4dc3-45ec-bdae-27cee1f93b64:workspace-surface"

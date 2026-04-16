@@ -141,8 +141,34 @@ export function formatReasoningBlock(raw: string | undefined): string {
   return `<think>${trimmed}</think>`;
 }
 
+function shouldSuppressReasoningInAssistantContent(headers?: Record<string, string>): boolean {
+  if (!headers || typeof headers !== 'object') return false;
+  const candidates = [
+    headers['user-agent'],
+    headers['User-Agent'],
+    headers['x-client'],
+    headers['X-Client'],
+    headers['x-requested-with'],
+    headers['X-Requested-With'],
+    headers['x-anygpt-internal-client'],
+    headers['X-AnyGPT-Internal-Client'],
+  ]
+    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    .join(' | ')
+    .toLowerCase();
+  if (!candidates) return false;
+  return (
+    candidates.includes('forge') ||
+    candidates.includes('copilot') ||
+    candidates.includes('github')
+  );
+}
+
 export function composeAssistantContent(rawResponse: string, rawReasoning?: string, headers?: Record<string, string>): string {
   const response = formatAssistantContent(rawResponse, headers);
+  if (shouldSuppressReasoningInAssistantContent(headers)) {
+    return response;
+  }
   const reasoningBlock = formatReasoningBlock(rawReasoning);
   if (!reasoningBlock) return response;
   if (!response) return reasoningBlock;

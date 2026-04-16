@@ -974,29 +974,29 @@
       "input": 0,
       "output": 0,
       "source": "official",
-      "updated_at": "2026-03-23T06:57:36.802Z",
-      "per_image": 0.0625
+      "updated_at": "2026-04-14T21:02:48Z",
+      "per_image": 0.4
     },
     "veo-3.0-fast-generate-001": {
       "input": 0,
       "output": 0,
       "source": "official",
-      "updated_at": "2026-03-23T06:57:36.802Z",
-      "per_image": 0.03125
+      "updated_at": "2026-04-14T21:02:48Z",
+      "per_image": 0.1
     },
     "veo-3.1-generate-preview": {
       "input": 0,
       "output": 0,
       "source": "official",
-      "updated_at": "2026-03-23T06:57:36.802Z",
-      "per_image": 0.0625
+      "updated_at": "2026-04-14T21:02:48Z",
+      "per_image": 0.4
     },
     "veo-3.1-fast-generate-preview": {
       "input": 0,
       "output": 0,
       "source": "official",
-      "updated_at": "2026-03-23T06:57:36.802Z",
-      "per_image": 0.03125
+      "updated_at": "2026-04-14T21:02:48Z",
+      "per_image": 0.1
     },
     "gemini-2.5-flash-native-audio-latest": {
       "input": 0.15,

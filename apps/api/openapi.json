@@ -1447,6 +1447,60 @@
         }
       }
     },
+    "/api/admin/api-keys/settle-billing": {
+      "post": {
+        "summary": "Settle API key billing",
+        "description": "Marks the current billing-period usage for the selected API key as paid and starts a new billing period.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyHeader": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/AdminApiKeySelector" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Billing period settled"
+          }
+        }
+      }
+    },
+    "/api/admin/api-keys/mark-paid": {
+      "post": {
+        "summary": "Mark API key paid",
+        "description": "Alias for settling the current billing-period usage for the selected API key.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyHeader": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/AdminApiKeySelector" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Billing period settled"
+          }
+        }
+      }
+    },
     "/api/admin/api-keys/update": {
       "post": {
         "summary": "Update API key",

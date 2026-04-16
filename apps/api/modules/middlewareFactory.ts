@@ -3,9 +3,12 @@ import { enforceInMemoryRateLimit, RateLimitDecision, RequestTimestampStore, Tie
 import { evaluateCompletionRateLimit, readCompletionRateLimitCounters } from './completionRateLimit.js';
 
 const API_KEY_MIN_LENGTH = (() => {
-  const raw = Number(process.env.API_KEY_MIN_LENGTH);
-  if (Number.isFinite(raw) && raw >= 0) return Math.floor(raw);
-  return 32;
+  const raw = process.env.API_KEY_MIN_LENGTH;
+  if (typeof raw === 'string' && raw.trim().length > 0) {
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed >= 0) return Math.floor(parsed);
+  }
+  return 1;
 })();
 
 const API_KEY_MAX_LENGTH = (() => {

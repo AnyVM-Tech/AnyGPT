@@ -281,8 +281,26 @@ function calculateRequestCost(
   promptTokens?: number,
   completionTokens?: number,
   pricingMetric?: SpecialPricingMetric,
-  pricingQuantity?: number
+  pricingQuantity?: number,
+  pricingUnitRateOverride?: number
 ): number {
+  if (
+    pricingMetric
+    && typeof pricingUnitRateOverride === 'number'
+    && Number.isFinite(pricingUnitRateOverride)
+    && pricingUnitRateOverride > 0
+  ) {
+    const quantity =
+      typeof pricingQuantity === 'number' && Number.isFinite(pricingQuantity) && pricingQuantity > 0
+        ? pricingQuantity
+        : pricingMetric === 'per_request'
+          ? 1
+          : 0;
+    if (quantity > 0) {
+      return pricingUnitRateOverride * quantity;
+    }
+  }
+
   if (modelId && _pricingCache.has(modelId)) {
     const pricing = _pricingCache.get(modelId)!;
     if (pricingMetric) {
@@ -685,7 +703,9 @@ export function extractMessageFromRequestBody(requestBody: any): {
     let trimmedMessages = normalizedMessages;
     while (trimmedMessages.length > 0) {
       const lastRole = trimmedMessages[trimmedMessages.length - 1]?.role;
-      if (lastRole === 'assistant' || lastRole === 'system' || lastRole === 'developer') {
+      // Preserve trailing system/developer instructions so provider adapters can
+      // translate them into native instruction fields when supported.
+      if (lastRole === 'assistant') {
         trimmedMessages = trimmedMessages.slice(0, -1);
         continue;
       }
@@ -756,6 +776,7 @@ export async function updateUserTokenUsage(
     completionTokens?: number;
     pricingMetric?: SpecialPricingMetric;
     pricingQuantity?: number;
+    pricingUnitRateOverride?: number;
   } = {}
 ): Promise<void> {
   if (typeof numberOfTokens !== 'number' || isNaN(numberOfTokens) || numberOfTokens < 0) {
@@ -772,7 +793,8 @@ export async function updateUserTokenUsage(
     options.promptTokens,
     options.completionTokens,
     options.pricingMetric,
-    options.pricingQuantity
+    options.pricingQuantity,
+    options.pricingUnitRateOverride
   );
 
   const tiers = await loadTiers();

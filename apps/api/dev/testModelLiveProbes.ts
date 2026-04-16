@@ -1356,6 +1356,17 @@ function markServerError(providerId: string) {
   }
 }
 
+function getProviderReadyAt(providerId: string): number {
+  const providerWaitUntil = Math.max(
+    rateLimitUntil.get(providerId) || 0,
+    serverErrorUntil.get(providerId) || 0,
+    providerCooldownUntil.get(providerId) || 0
+  );
+  return providerId.includes('openrouter')
+    ? Math.max(providerWaitUntil, openrouterGlobalRateLimitUntil)
+    : providerWaitUntil;
+}
+
 async function withProviderLimit<T>(providerId: string, fn: () => Promise<T>): Promise<T> {
   const isOpenRouter = providerId.includes('openrouter');
   const semaphore = isOpenRouter ? openrouterSemaphore : getProviderSemaphore(providerId);
@@ -1396,13 +1407,19 @@ function buildProviderInstance(p: LoadedProviderData, endpointHint?: EndpointHin
   return new OpenAI(key, url);
 }
 
+type PickProviderOptions = {
+  readyOnly?: boolean;
+};
+
 function pickProvider(
   providers: LoadedProviders,
   modelId: string,
   providerStatus?: Map<string, { ok: boolean; hasQuota: boolean }>,
-  exclude?: Set<string>
+  exclude?: Set<string>,
+  options?: PickProviderOptions,
 ): LoadedProviderData | null {
   const candidates: LoadedProviderData[] = [];
+  const now = Date.now();
   for (const p of providers) {
     if (exclude && exclude.has(p.id)) continue;
     if (p.disabled) continue;
@@ -1416,6 +1433,13 @@ function pickProvider(
   if (candidates.length === 0) return null;
 
   candidates.sort((a, b) => {
+    const readyAtA = getProviderReadyAt(a.id);
+    const readyAtB = getProviderReadyAt(b.id);
+    const readyA = readyAtA <= now;
+    const readyB = readyAtB <= now;
+    if (readyA !== readyB) return readyA ? -1 : 1;
+    if (!readyA && readyAtA !== readyAtB) return readyAtA - readyAtB;
+
     const tierA = getProviderTierRank(a.id);
     const tierB = getProviderTierRank(b.id);
     if (tierA !== tierB) return tierB - tierA;
@@ -1423,6 +1447,10 @@ function pickProvider(
     const idxB = providerOrderIndex.get(b.id) ?? 0;
     return idxA - idxB;
   });
+
+  if (options?.readyOnly) {
+    return candidates.find((candidate) => getProviderReadyAt(candidate.id) <= now) || null;
+  }
 
   return candidates[0];
 }
@@ -2012,7 +2040,10 @@ async function main() {
   }
 
   function shouldPersistQuotaDisable(provider: LoadedProviderData): boolean {
-    return resolveProviderFamily(provider.id) !== 'gemini';
+    // Treat quota/rate-limit findings as temporary capacity signals for all
+    // families. The runtime cooldown logic already handles these without
+    // collapsing the provider catalog into a stale disabled set.
+    return false;
   }
 
   function removeModelFromProvider(provider: LoadedProviderData, modelId: string, reason: string) {
@@ -2333,7 +2364,6 @@ async function main() {
       const results: Record<string, string> = {};
       const serverErrorProviderCounts = new Map<string, number>();
       const serverErrorTestCounts = new Map<string, number>();
-      const rateLimitTimeoutTestCounts = new Map<string, number>();
       const caps = new Set<ModelCapability>(declaredCaps);
       let endpointHintOverride: EndpointHint | undefined = undefined;
       const hintedEndpoint = probeHints.modelEndpointHints.get(model.id);
@@ -2643,6 +2673,8 @@ async function main() {
               const isRateLimited = isRateLimitError(outcomeLower);
               if (isRateLimited) {
                 markRateLimited(provider.id);
+              } else {
+                markServerError(provider.id);
               }
 
               const attempt = MAX_RETRIES - retriesLeft + 1;
@@ -2657,16 +2689,21 @@ async function main() {
                 continue;
               }
 
-              const prevCount = rateLimitTimeoutTestCounts.get(key) || 0;
-              const nextCount = prevCount + 1;
-              rateLimitTimeoutTestCounts.set(key, nextCount);
-              if (MAX_RATE_LIMIT_TIMEOUT_RETRIES > 0 && nextCount >= MAX_RATE_LIMIT_TIMEOUT_RETRIES) {
-                skipReason = 'unsupported (rate limit/timeout)';
-                skipScope = 'test';
-                break;
+              const canRotateProvider = MAX_RATE_LIMIT_TIMEOUT_RETRIES <= 0
+                || providerTried.size < MAX_RATE_LIMIT_TIMEOUT_RETRIES;
+              if (!canRotateProvider) {
+                continue;
               }
 
-              const nextProvider = pickProvider(providers, model.id, providerValidity, providerTried);
+              const exhaustedProviders = new Set(providerTried);
+              exhaustedProviders.add(provider.id);
+              const nextProvider = pickProvider(
+                providers,
+                model.id,
+                providerValidity,
+                exhaustedProviders,
+                { readyOnly: true },
+              );
               if (nextProvider) {
                 appendProbeLog({ type: 'probe_retry', modelId: model.id, providerId: provider.id, test: key, reason: 'rate limit/timeout: switching provider' });
                 providerTried.add(provider.id);

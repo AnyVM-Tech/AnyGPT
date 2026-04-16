@@ -62,6 +62,8 @@ import {
 	isModelAccessError as isModelAccessErrorShared,
 	isInsufficientCreditsError as isInsufficientCreditsErrorShared,
 	isToolUnsupportedError as isToolUnsupportedErrorShared,
+	isProviderRequestShapeError as isProviderRequestShapeErrorShared,
+	isTransientProviderGatewayError,
 	extractRetryAfterMs,
 	extractRateLimitRps,
 	extractRateLimitWindow
@@ -205,6 +207,14 @@ const RATE_LIMIT_TOTAL_WAIT_BUDGET_MS = (() => {
 	const parsed = Number(raw);
 	return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : 5_000;
 })();
+const GEMINI_RATE_LIMIT_TOTAL_WAIT_BUDGET_MS = (() => {
+	const raw = process.env.GEMINI_RATE_LIMIT_TOTAL_WAIT_BUDGET_MS;
+	if (raw === undefined) return 45_000;
+	const parsed = Number(raw);
+	return Number.isFinite(parsed) && parsed >= 0
+		? Math.floor(parsed)
+		: 45_000;
+})();
 const RATE_LIMIT_WAKE_EARLY_MS = (() => {
 	const raw = process.env.RATE_LIMIT_WAKE_EARLY_MS;
 	const parsed = raw !== undefined ? Number(raw) : NaN;
@@ -314,12 +324,80 @@ const PROVIDER_AUTH_FAILURE_FAST_SKIP_MS = (() => {
 		? Math.floor(parsed)
 		: 10 * 60 * 1000;
 })();
+const PROVIDER_LIVE_AUTONOMOUS_TRANSIENT_SKIP_MS = (() => {
+	const raw = process.env.PROVIDER_LIVE_AUTONOMOUS_TRANSIENT_SKIP_MS;
+	const parsed = raw !== undefined ? Number(raw) : NaN;
+	return Number.isFinite(parsed) && parsed > 0
+		? Math.floor(parsed)
+		: 5 * 60 * 1000;
+})();
+const PROVIDER_LIVE_AUTONOMOUS_COOLDOWN_SKIP_MS = (() => {
+	const raw = process.env.PROVIDER_LIVE_AUTONOMOUS_COOLDOWN_SKIP_MS;
+	const parsed = raw !== undefined ? Number(raw) : NaN;
+	return Number.isFinite(parsed) && parsed > 0
+		? Math.floor(parsed)
+		: 2 * 60 * 1000;
+})();
+const PROVIDER_QUOTA_REENABLE_CANDIDATE_LIMIT = (() => {
+	const raw = process.env.PROVIDER_QUOTA_REENABLE_CANDIDATE_LIMIT;
+	const parsed = raw !== undefined ? Number(raw) : NaN;
+	return Number.isFinite(parsed) && parsed > 0
+		? Math.max(1, Math.floor(parsed))
+		: 100;
+})();
+const PROVIDER_HEALTH_FILTER_BREADTH_TARGET = (() => {
+	const raw = process.env.PROVIDER_HEALTH_FILTER_BREADTH_TARGET;
+	const parsed = raw !== undefined ? Number(raw) : NaN;
+	return Number.isFinite(parsed) && parsed > 0
+		? Math.max(1, Math.floor(parsed))
+		: 16;
+})();
+const GEMINI_MAX_RATE_LIMIT_FAILURES_PER_REQUEST = (() => {
+	const raw = process.env.GEMINI_MAX_RATE_LIMIT_FAILURES_PER_REQUEST;
+	const parsed = raw !== undefined ? Number(raw) : NaN;
+	return Number.isFinite(parsed) && parsed > 0
+		? Math.max(1, Math.floor(parsed))
+		: 12;
+})();
+const GEMINI_MODEL_NEGATIVE_CACHE_RATE_LIMIT_FLOOR_MS = (() => {
+	const raw = process.env.GEMINI_MODEL_NEGATIVE_CACHE_RATE_LIMIT_FLOOR_MS;
+	const parsed = raw !== undefined ? Number(raw) : NaN;
+	return Number.isFinite(parsed) && parsed > 0
+		? Math.floor(parsed)
+		: 15_000;
+})();
+const GEMINI_MODEL_NEGATIVE_CACHE_ZERO_QUOTA_FLOOR_MS = (() => {
+	const raw = process.env.GEMINI_MODEL_NEGATIVE_CACHE_ZERO_QUOTA_FLOOR_MS;
+	const parsed = raw !== undefined ? Number(raw) : NaN;
+	return Number.isFinite(parsed) && parsed > 0
+		? Math.floor(parsed)
+		: 60_000;
+})();
+const GEMINI_MODEL_NEGATIVE_CACHE_NOT_FOUND_MS = (() => {
+	const raw = process.env.GEMINI_MODEL_NEGATIVE_CACHE_NOT_FOUND_MS;
+	const parsed = raw !== undefined ? Number(raw) : NaN;
+	return Number.isFinite(parsed) && parsed > 0
+		? Math.floor(parsed)
+		: 60 * 60 * 1000;
+})();
 const providerCooldowns = new Map<string, number>();
 const providerDistributedCooldowns = new Map<string, number>();
 const providerRateLimitStarts = new Map<string, number>();
 const providerRateLimitWindows = new Map<string, number[]>();
 const providerFastSkips = new Map<string, number>();
+type ModelNegativeCacheEntry = {
+	family: 'gemini';
+	modelId: string;
+	reason: 'rate_limit' | 'model_not_found';
+	statusCode: 429 | 404;
+	code: 'GEMINI_MODEL_RATE_LIMITED' | 'model_not_found';
+	message: string;
+	retryAfterMs?: number;
+	expiresAt: number;
+};
+const modelNegativeCaches = new Map<string, ModelNegativeCacheEntry>();
 const COOLDOWN_EVICTION_INTERVAL_MS = 5 * 60 * 1000; // Sweep expired entries every 5 minutes
+const MODEL_NEGATIVE_CACHE_REDIS_PREFIX = 'provider:model-negative:';
 const PROVIDER_RATE_LIMIT_TRACKING_TTL_MS = (() => {
 	const fallback = Number.isFinite(RATE_LIMIT_WAIT_MAX_MS)
 		? Math.max(10 * 60 * 1000, Math.floor(RATE_LIMIT_WAIT_MAX_MS * 4))
@@ -414,10 +492,16 @@ const _cooldownEvictionTimer = setInterval(() => {
 			evicted++;
 		}
 	}
+	for (const [key, entry] of modelNegativeCaches) {
+		if (!entry || entry.expiresAt <= now) {
+			modelNegativeCaches.delete(key);
+			evicted++;
+		}
+	}
 	if (evicted > 0) {
 		console.log(
 			`[CooldownEviction] Swept ${evicted} expired cooldown/rate-limit entries. ` +
-				`Remaining cooldowns=${providerCooldowns.size}, rateWindows=${providerRateLimitWindows.size}`
+				`Remaining cooldowns=${providerCooldowns.size}, rateWindows=${providerRateLimitWindows.size}, modelNegativeCaches=${modelNegativeCaches.size}`
 		);
 	}
 }, COOLDOWN_EVICTION_INTERVAL_MS);
@@ -429,6 +513,124 @@ function getCooldownKey(key: string): string {
 }
 
 // extractRetryAfterMs is now imported from '../modules/errorClassification.js'
+
+function buildModelNegativeCacheIdentity(
+	family: 'gemini',
+	modelId: string
+): string {
+	return `${family}::${String(modelId || '').toLowerCase()}`;
+}
+
+function getModelNegativeCacheRedisKey(
+	family: 'gemini',
+	modelId: string
+): string {
+	return `${MODEL_NEGATIVE_CACHE_REDIS_PREFIX}${hashToken(buildModelNegativeCacheIdentity(family, modelId))}`;
+}
+
+function cloneModelNegativeCacheEntry(
+	entry: ModelNegativeCacheEntry
+): ModelNegativeCacheEntry {
+	return {
+		...entry,
+		modelId: String(entry.modelId || '').toLowerCase(),
+	};
+}
+
+async function getModelNegativeCacheEntry(
+	family: 'gemini',
+	modelId: string
+): Promise<ModelNegativeCacheEntry | null> {
+	const identity = buildModelNegativeCacheIdentity(family, modelId);
+	const now = Date.now();
+	const cached = modelNegativeCaches.get(identity);
+	if (cached) {
+		if (cached.expiresAt > now) {
+			return cloneModelNegativeCacheEntry(cached);
+		}
+		modelNegativeCaches.delete(identity);
+	}
+
+	if (!redis || redis.status !== 'ready') return null;
+	try {
+		const raw = await redis.get(getModelNegativeCacheRedisKey(family, modelId));
+		if (!raw) return null;
+		const parsed = JSON.parse(String(raw || '')) as Partial<ModelNegativeCacheEntry>;
+		const expiresAt = Number(parsed?.expiresAt || 0);
+		if (!Number.isFinite(expiresAt) || expiresAt <= now) {
+			return null;
+		}
+		const entry: ModelNegativeCacheEntry = {
+			family: 'gemini',
+			modelId: String(parsed?.modelId || modelId).toLowerCase(),
+			reason:
+				parsed?.reason === 'model_not_found'
+					? 'model_not_found'
+					: 'rate_limit',
+			statusCode: parsed?.statusCode === 404 ? 404 : 429,
+			code:
+				parsed?.code === 'model_not_found'
+					? 'model_not_found'
+					: 'GEMINI_MODEL_RATE_LIMITED',
+			message: String(parsed?.message || '').trim() || 'Gemini model temporarily unavailable.',
+			...(Number.isFinite(parsed?.retryAfterMs as number) &&
+			(parsed?.retryAfterMs as number) > 0
+				? { retryAfterMs: Math.max(1, Math.ceil(parsed?.retryAfterMs as number)) }
+				: {}),
+			expiresAt,
+		};
+		modelNegativeCaches.set(identity, entry);
+		return cloneModelNegativeCacheEntry(entry);
+	} catch {
+		return null;
+	}
+}
+
+async function setModelNegativeCacheEntry(
+	entry: Omit<ModelNegativeCacheEntry, 'expiresAt'>,
+	ttlMs: number
+): Promise<void> {
+	if (!Number.isFinite(ttlMs) || ttlMs <= 0) return;
+	const normalizedTtlMs = Math.max(1, Math.ceil(ttlMs));
+	const normalizedEntry: ModelNegativeCacheEntry = {
+		...entry,
+		modelId: String(entry.modelId || '').toLowerCase(),
+		expiresAt: Date.now() + normalizedTtlMs,
+	};
+	const identity = buildModelNegativeCacheIdentity(
+		normalizedEntry.family,
+		normalizedEntry.modelId
+	);
+	modelNegativeCaches.set(identity, normalizedEntry);
+	if (!redis || redis.status !== 'ready') return;
+	try {
+		await redis.set(
+			getModelNegativeCacheRedisKey(
+				normalizedEntry.family,
+				normalizedEntry.modelId
+			),
+			JSON.stringify(normalizedEntry),
+			'PX',
+			String(normalizedTtlMs)
+		);
+	} catch {
+		return;
+	}
+}
+
+async function clearModelNegativeCacheEntry(
+	family: 'gemini',
+	modelId: string
+): Promise<void> {
+	const identity = buildModelNegativeCacheIdentity(family, modelId);
+	modelNegativeCaches.delete(identity);
+	if (!redis || redis.status !== 'ready') return;
+	try {
+		await redis.del(getModelNegativeCacheRedisKey(family, modelId));
+	} catch {
+		return;
+	}
+}
 
 function buildCooldownKey(apiKey: string, modelId: string): string {
 	return `${hashToken(apiKey)}::${String(modelId || '').toLowerCase()}`;
@@ -1382,6 +1584,83 @@ export class MessageHandler {
 		return isModelAccessErrorShared(error);
 	}
 
+	private isGeminiRetiredModelError(error: any): boolean {
+		const message = String(error?.message || error || '').toLowerCase();
+		return (
+			message.includes('no longer available to new users') ||
+			message.includes('update your code to use a newer model')
+		);
+	}
+
+	private isGeminiModelId(modelId: string): boolean {
+		return this.normalizeModelId(modelId).startsWith('gemini-');
+	}
+
+	private async clearGeminiModelNegativeCache(modelId: string): Promise<void> {
+		if (!this.isGeminiModelId(modelId)) return;
+		await clearModelNegativeCacheEntry('gemini', modelId);
+	}
+
+	private async getGeminiModelNegativeCacheError(
+		modelId: string
+	): Promise<Error | null> {
+		if (!this.isGeminiModelId(modelId)) return null;
+		const entry = await getModelNegativeCacheEntry('gemini', modelId);
+		if (!entry) return null;
+		if (entry.reason === 'rate_limit') {
+			await clearModelNegativeCacheEntry('gemini', modelId);
+			return null;
+		}
+		console.warn(
+			`[GeminiModelNegativeCache] Short-circuiting ${entry.modelId} with cached ${entry.reason} state.`
+		);
+		const error = new Error(entry.message);
+		(error as any).status = entry.statusCode;
+		(error as any).statusCode = entry.statusCode;
+		(error as any).code = entry.code;
+		(error as any).modelId = entry.modelId;
+		if (entry.statusCode === 429) {
+			const retryAfterMs = Math.max(
+				1,
+				Math.ceil(entry.retryAfterMs ?? GEMINI_MODEL_NEGATIVE_CACHE_RATE_LIMIT_FLOOR_MS)
+			);
+			(error as any).retryAfterMs = retryAfterMs;
+			(error as any).retryAfterSeconds = Math.max(
+				1,
+				Math.ceil(retryAfterMs / 1000)
+			);
+			(error as any).allSkippedByRateLimit = true;
+		}
+		return error;
+	}
+
+	private async cacheGeminiModelNegativeOutcome(
+		modelId: string,
+		lastError: any,
+		nextCooldownMs: number | null
+	): Promise<void> {
+		if (!this.isGeminiModelId(modelId)) return;
+		const normalizedModelId = this.normalizeModelId(modelId);
+		if (
+			lastError &&
+			this.isModelAccessError(lastError) &&
+			this.isGeminiRetiredModelError(lastError)
+		) {
+			await setModelNegativeCacheEntry(
+				{
+					family: 'gemini',
+					modelId: normalizedModelId,
+					reason: 'model_not_found',
+					statusCode: 404,
+					code: 'model_not_found',
+					message: `Gemini model ${normalizedModelId} is no longer available to new users.`
+				},
+				GEMINI_MODEL_NEGATIVE_CACHE_NOT_FOUND_MS
+			);
+			return;
+		}
+	}
+
 	private isInsufficientCreditsError(error: any): boolean {
 		return isInsufficientCreditsErrorShared(error);
 	}
@@ -1392,6 +1671,10 @@ export class MessageHandler {
 
 	private isToolUnsupportedError(error: any): boolean {
 		return isToolUnsupportedErrorShared(error);
+	}
+
+	private isProviderRequestShapeError(error: any): boolean {
+		return isProviderRequestShapeErrorShared(error);
 	}
 
 	private getProviderFamilyId(providerId: string): string {
@@ -1463,7 +1746,23 @@ export class MessageHandler {
 		provider: LoadedProviderData,
 		modelId?: string
 	): boolean {
-		if (!provider) return false;
+		return this.getRecentRateLimitOrTimeoutSignalStrength(provider, modelId) !== null;
+	}
+
+	private getRecentRateLimitOrTimeoutSignalStrength(
+		provider: LoadedProviderData,
+		modelId?: string
+	): 'cooldown' | 'transient' | null {
+		if (!provider) return null;
+		const now = Date.now();
+		const fastSkipUntil = providerFastSkips.get(provider.id) ?? 0;
+		if (fastSkipUntil > now) {
+			return 'transient';
+		}
+		const providerCooldownUntil = providerCooldowns.get(provider.id) ?? 0;
+		if (providerCooldownUntil > now) {
+			return 'cooldown';
+		}
 		const modelData = modelId
 			? ((provider.models?.[modelId] as any) ?? null)
 			: null;
@@ -1471,10 +1770,14 @@ export class MessageHandler {
 			provider.lastError,
 			(provider as any).last_error,
 			(provider as any).error,
+			(provider as any).disabled_reason,
+			(provider as any).disabledReason,
 			modelData?.lastError,
 			modelData?.last_error,
+			modelData?.disabled_reason,
+			modelData?.disabledReason
 		]
-			.map((value) => String(value || '').trim().toLowerCase())
+			.map(value => String(value || '').trim())
 			.filter(Boolean)
 			.join(' ');
 		const code = String(
@@ -1483,7 +1786,7 @@ export class MessageHandler {
 				modelData?.lastErrorCode ||
 				modelData?.last_error_code ||
 				''
-		).toLowerCase();
+		);
 		const status = Number(
 			(provider as any).lastStatus ||
 				(provider as any).last_status ||
@@ -1491,36 +1794,13 @@ export class MessageHandler {
 				modelData?.last_status ||
 				0
 		);
-		const memoryPressureLike =
-			code === 'memory_pressure' ||
-			message.includes('memory pressure') ||
-			message.includes('rejected under memory pressure') ||
-			message.includes('swap_used_mb=') ||
-			message.includes('rss_mb=') ||
-			message.includes('active_runtime_mb=') ||
-			message.includes('external_mb=') ||
-			message.includes('heap_used_mb=');
-		const recentTransientFailureLike =
-			memoryPressureLike ||
-			status === 408 ||
-			status === 409 ||
-			status === 425 ||
-			status === 429 ||
-			code === 'econnaborted' ||
-			code === 'etimedout' ||
-			code === 'timeout' ||
-			message.includes('rate limit') ||
-			message.includes('rate_limit') ||
-			message.includes('too many requests') ||
-			message.includes('resource_exhausted') ||
-			message.includes('quota exceeded') ||
-			message.includes('quota exhausted') ||
-			message.includes('timed out') ||
-			message.includes('timeout');
-		if (!recentTransientFailureLike) {
-			return false;
+		const errorLike = { message, code, status };
+		const transientLike =
+			isTransientProviderGatewayError(errorLike) ||
+			this.isRateLimitOrQuotaError(errorLike);
+		if (!transientLike) {
+			return null;
 		}
-
 		const newestFailureAt = Math.max(
 			0,
 			Number(
@@ -1531,11 +1811,19 @@ export class MessageHandler {
 			Number(modelData?.lastErrorAt || modelData?.last_error_at || 0),
 			Number(modelData?.disabled_at || 0)
 		);
-		return (
-			newestFailureAt > 0 &&
-			Date.now() - newestFailureAt <=
-				PROVIDER_AUTH_FAILURE_FAST_SKIP_MS
-		);
+		if (newestFailureAt <= 0) {
+			return Boolean(provider.disabled || modelData?.disabled)
+				? 'transient'
+				: null;
+		}
+		const ageMs = now - newestFailureAt;
+		if (ageMs <= PROVIDER_LIVE_AUTONOMOUS_COOLDOWN_SKIP_MS) {
+			return 'cooldown';
+		}
+		if (ageMs <= PROVIDER_LIVE_AUTONOMOUS_TRANSIENT_SKIP_MS) {
+			return 'transient';
+		}
+		return null;
 	}
 
 	private preferStableToolCallingProviders(
@@ -1543,7 +1831,20 @@ export class MessageHandler {
 		modelId: string,
 		required: Set<ModelCapability>
 	): LoadedProviderData[] {
-		if (!required.has('tool_calling')) return providers;
+		const shouldPreferStablePool =
+			required.has('tool_calling') ||
+			providers.some(
+				(provider: LoadedProviderData) =>
+					this.hasRecentRateLimitOrTimeoutFailureSignal(
+						provider,
+						modelId
+					) ||
+					this.hasRecentInsufficientCreditsFailureSignal(
+						provider,
+						modelId
+					)
+			);
+		if (!shouldPreferStablePool) return providers;
 		const stableProviders = providers.filter(
 			(provider: LoadedProviderData) =>
 				!this.hasRecentRateLimitOrTimeoutFailureSignal(
@@ -1555,7 +1856,36 @@ export class MessageHandler {
 					modelId
 				)
 		);
-		return stableProviders.length > 0 ? stableProviders : providers;
+		if (stableProviders.length === 0) return providers;
+		const targetCount = Math.max(
+			PROVIDER_MIN_ACTIVE_MODEL_CANDIDATES,
+			PROVIDER_QUOTA_REENABLE_CANDIDATE_LIMIT
+		);
+		if (
+			stableProviders.length >= providers.length ||
+			stableProviders.length >= targetCount
+		) {
+			return stableProviders;
+		}
+
+		const stableProviderIds = new Set(
+			stableProviders.map(provider => provider.id)
+		);
+		const fallbackProviders = providers
+			.filter(provider => !stableProviderIds.has(provider.id))
+			.slice(
+				0,
+				Math.max(
+					0,
+					targetCount - stableProviders.length
+				)
+			);
+		if (fallbackProviders.length > 0) {
+			console.warn(
+				`[ProviderStability] Preserving fallback breadth for ${modelId}: ${stableProviders.length} stable + ${fallbackProviders.length} fallback provider(s).`
+			);
+		}
+		return [...stableProviders, ...fallbackProviders];
 	}
 
 	private getEffectiveProviderScore(
@@ -1578,6 +1908,38 @@ export class MessageHandler {
 			);
 			return provider.provider_score ?? null;
 		}
+	}
+
+	private preserveProviderBreadth(
+		preferredProviders: LoadedProviderData[],
+		fallbackPool: LoadedProviderData[],
+		modelId: string,
+		reason: string,
+		targetCount: number = Math.max(
+			PROVIDER_MIN_ACTIVE_MODEL_CANDIDATES,
+			PROVIDER_HEALTH_FILTER_BREADTH_TARGET
+		)
+	): LoadedProviderData[] {
+		if (
+			preferredProviders.length === 0 ||
+			preferredProviders.length >= fallbackPool.length ||
+			preferredProviders.length >= targetCount
+		) {
+			return preferredProviders;
+		}
+
+		const preferredIds = new Set(
+			preferredProviders.map(provider => provider.id)
+		);
+		const fallbackProviders = fallbackPool
+			.filter(provider => !preferredIds.has(provider.id))
+			.slice(0, Math.max(0, targetCount - preferredProviders.length));
+		if (fallbackProviders.length > 0) {
+			console.warn(
+				`[ProviderBreadth] Preserving ${modelId} breadth after ${reason}: ${preferredProviders.length} preferred + ${fallbackProviders.length} fallback provider(s).`
+			);
+		}
+		return [...preferredProviders, ...fallbackProviders];
 	}
 
 	private shouldPreventProviderAutoDisable(
@@ -1617,6 +1979,156 @@ export class MessageHandler {
 			if (skips[cap]) return true;
 		}
 		return false;
+	}
+
+	private providerSupportsLiveAutonomousTraffic(
+		provider: LoadedProviderData
+	): boolean {
+		if (!provider) return false;
+		const normalizedId = String(provider.id || '').trim().toLowerCase();
+		if (!normalizedId) return false;
+		const explicitLive = (provider as any).live === true;
+		const explicitAutonomous =
+			(provider as any).autonomous === true ||
+			(provider as any).autonomous_enabled === true;
+		if (explicitLive || explicitAutonomous) return true;
+		return !/(^|[-_])(mock|test|sandbox|fake)([-_]|$)/.test(normalizedId);
+	}
+
+	private filterLiveAutonomousProviders(
+		providers: LoadedProviderData[]
+	): LoadedProviderData[] {
+		const liveProviders = providers.filter(provider =>
+			this.providerSupportsLiveAutonomousTraffic(provider)
+		);
+		return liveProviders.length > 0 ? liveProviders : providers;
+	}
+
+	private appendRecentFailureFallbackProviders(
+		allProviders: LoadedProviders,
+		candidateProviders: LoadedProviderData[],
+		selectedProvider: LoadedProviderData,
+		modelId: string,
+		required: Set<ModelCapability>,
+		triedProviderIds: Set<string>,
+		failureSignal: 'cooldown' | 'transient' | null
+	): number {
+		if (!failureSignal) return 0;
+		const targetUrl = selectedProvider.provider_url;
+		const targetFamily = this.getProviderFamilyId(selectedProvider.id);
+		let added = 0;
+
+		for (const provider of allProviders) {
+			if (!provider?.models?.[modelId]) continue;
+			if (provider.id === selectedProvider.id) continue;
+			if (triedProviderIds.has(provider.id)) continue;
+			if (candidateProviders.some(candidate => candidate.id === provider.id)) {
+				continue;
+			}
+			if (!this.providerSupportsLiveAutonomousTraffic(provider)) continue;
+			if (this.providerSkipsRequiredCaps(provider, modelId, required)) continue;
+			if (this.hasRecentInsufficientCreditsFailureSignal(provider, modelId)) {
+				continue;
+			}
+			if (this.getRecentRateLimitOrTimeoutSignalStrength(provider, modelId)) {
+				continue;
+			}
+			const sameUrl = Boolean(targetUrl && provider.provider_url === targetUrl);
+			const sameFamily =
+				this.getProviderFamilyId(provider.id) === targetFamily;
+			if (!sameUrl && !sameFamily) continue;
+			candidateProviders.push(provider);
+			added += 1;
+		}
+
+		return added;
+	}
+
+	private appendQuotaRecoveryFallbackProviders(
+		allProviders: LoadedProviders,
+		candidateProviders: LoadedProviderData[],
+		selectedProvider: LoadedProviderData,
+		modelId: string,
+		required: Set<ModelCapability>,
+		triedProviderIds: Set<string>
+	): number {
+		const targetUrl = selectedProvider.provider_url;
+		const targetFamily = this.getProviderFamilyId(selectedProvider.id);
+		let added = 0;
+
+		for (const provider of allProviders) {
+			if (!provider?.models?.[modelId]) continue;
+			if (provider.id === selectedProvider.id) continue;
+			if (triedProviderIds.has(provider.id)) continue;
+			if (candidateProviders.some(candidate => candidate.id === provider.id)) {
+				continue;
+			}
+			if (!this.providerSupportsLiveAutonomousTraffic(provider)) continue;
+			if (this.hasRecentInsufficientCreditsFailureSignal(provider, modelId)) {
+				continue;
+			}
+			if (
+				this.getRecentRateLimitOrTimeoutSignalStrength(provider, modelId)
+			) {
+				continue;
+			}
+			if (this.providerSkipsRequiredCaps(provider, modelId, required)) continue;
+			const sameUrl = Boolean(targetUrl && provider.provider_url === targetUrl);
+			const sameFamily =
+				this.getProviderFamilyId(provider.id) === targetFamily;
+			if (!sameUrl && !sameFamily) continue;
+			candidateProviders.push(provider);
+			added += 1;
+			if (added >= PROVIDER_QUOTA_REENABLE_CANDIDATE_LIMIT) break;
+		}
+
+		return added;
+	}
+
+	private appendDisabledProviderCandidates(
+		allProviders: LoadedProviders,
+		candidateProviders: LoadedProviderData[],
+		modelId: string,
+		required: Set<ModelCapability>,
+		triedProviderIds: Set<string>,
+		options?: {
+			limit?: number;
+			predicate?: (provider: LoadedProviderData) => boolean;
+		}
+	): number {
+		const limit =
+			options?.limit && Number.isFinite(options.limit)
+				? Math.max(0, Math.floor(options.limit))
+				: Number.POSITIVE_INFINITY;
+		if (limit === 0) return 0;
+		let added = 0;
+		for (const provider of allProviders) {
+			if (!provider?.models?.[modelId]) continue;
+			if (triedProviderIds.has(provider.id)) continue;
+			if (candidateProviders.some(cand => cand.id === provider.id)) {
+				continue;
+			}
+			if (!this.providerSupportsLiveAutonomousTraffic(provider)) continue;
+			if (
+				options?.predicate &&
+				!options.predicate(provider)
+			) {
+				continue;
+			}
+			if (this.providerSkipsRequiredCaps(provider, modelId, required)) continue;
+			const clone = { ...provider, disabled: false };
+			const modelData = clone.models?.[modelId] as any;
+			if (modelData) {
+				clone.models = {
+					...clone.models,
+					[modelId]: { ...modelData, disabled: false }
+				};
+			}
+			candidateProviders.push(clone);
+			added += 1;
+			if (added >= limit) break;
+		}
+		return added;
 	}
 
 	private temporarilyReenableDisabledModelCandidates(
@@ -1684,40 +2196,14 @@ export class MessageHandler {
 		required: Set<ModelCapability>,
 		triedProviderIds: Set<string>
 	): number {
-		const targetUrl = selectedProvider.provider_url;
-		const targetFamily = this.getProviderFamilyId(selectedProvider.id);
-		let added = 0;
-
-		for (const provider of allProviders) {
-			if (!provider?.models?.[modelId]) continue;
-			if (triedProviderIds.has(provider.id)) continue;
-			if (candidateProviders.some(cand => cand.id === provider.id))
-				continue;
-			if (
-				this.hasRecentInsufficientCreditsFailureSignal(
-					provider,
-					modelId
-				)
-			)
-				continue;
-			const modelData = provider.models?.[modelId] as any;
-			const isDisabled = Boolean(
-				provider.disabled || modelData?.disabled
-			);
-			if (!isDisabled) continue;
-			if (this.providerSkipsRequiredCaps(provider, modelId, required))
-				continue;
-
-			const sameUrl = targetUrl && provider.provider_url === targetUrl;
-			const sameFamily =
-				this.getProviderFamilyId(provider.id) === targetFamily;
-			if (!sameUrl && !sameFamily) continue;
-
-			candidateProviders.push(provider);
-			added += 1;
-		}
-
-		return added;
+		return this.appendQuotaRecoveryFallbackProviders(
+			allProviders,
+			candidateProviders,
+			selectedProvider,
+			modelId,
+			required,
+			triedProviderIds
+		);
 	}
 
 	/**
@@ -1732,36 +2218,18 @@ export class MessageHandler {
 		required: Set<ModelCapability>,
 		triedProviderIds: Set<string>
 	): number {
-		let added = 0;
-		for (const provider of allProviders) {
-			if (!provider?.models?.[modelId]) continue;
-			if (triedProviderIds.has(provider.id)) continue;
-			if (candidateProviders.some(cand => cand.id === provider.id))
-				continue;
-			if (
-				this.hasRecentInsufficientCreditsFailureSignal(
-					provider,
-					modelId
-				)
-			)
-				continue;
-			if (this.providerSkipsRequiredCaps(provider, modelId, required))
-				continue;
-
-			// Include disabled providers/models — force-enable for this attempt
-			const clone = { ...provider, disabled: false };
-			const modelData = clone.models?.[modelId] as any;
-			if (modelData) {
-				clone.models = {
-					...clone.models,
-					[modelId]: { ...modelData, disabled: false }
-				};
+		return this.appendDisabledProviderCandidates(
+			allProviders,
+			candidateProviders,
+			modelId,
+			required,
+			triedProviderIds,
+			{
+				predicate: provider =>
+					!this.hasRecentInsufficientCreditsFailureSignal(provider, modelId) &&
+					!this.getRecentRateLimitOrTimeoutSignalStrength(provider, modelId)
 			}
-
-			candidateProviders.push(clone);
-			added += 1;
-		}
-		return added;
+		);
 	}
 
 	private normalizeUsage(
@@ -1959,6 +2427,8 @@ export class MessageHandler {
 			}
 		}
 
+		activeProviders = this.filterLiveAutonomousProviders(activeProviders);
+
 		try {
 			applyTimeWindow(
 				activeProviders as ProviderStateStructure[],
@@ -1994,13 +2464,31 @@ export class MessageHandler {
 				return Boolean(modelData && !(modelData as any).disabled);
 			}
 		);
-		const creditHealthyCompatibleProviders = compatibleProviders.filter(
-			(p: LoadedProviderData) =>
-				!this.hasRecentInsufficientCreditsFailureSignal(p, modelId)
-		);
-		if (creditHealthyCompatibleProviders.length > 0) {
-			compatibleProviders = creditHealthyCompatibleProviders;
-		}
+			compatibleProviders = this.filterLiveAutonomousProviders(compatibleProviders);
+			const creditHealthyCompatibleProviders = compatibleProviders.filter(
+				(p: LoadedProviderData) =>
+					!this.hasRecentInsufficientCreditsFailureSignal(p, modelId)
+			);
+			if (creditHealthyCompatibleProviders.length > 0) {
+				compatibleProviders = this.preserveProviderBreadth(
+					creditHealthyCompatibleProviders,
+					compatibleProviders,
+					modelId,
+					'credit-health filtering'
+				);
+			}
+			const transientHealthyCompatibleProviders = compatibleProviders.filter(
+				(p: LoadedProviderData) =>
+					!this.hasRecentRateLimitOrTimeoutFailureSignal(p, modelId)
+			);
+			if (transientHealthyCompatibleProviders.length > 0) {
+				compatibleProviders = this.preserveProviderBreadth(
+					transientHealthyCompatibleProviders,
+					compatibleProviders,
+					modelId,
+					'transient-health filtering'
+				);
+			}
 		if (compatibleProviders.length === 0) {
 			const activeModelDisabled = activeProviders
 				.filter((p: LoadedProviderData) =>
@@ -2065,6 +2553,12 @@ export class MessageHandler {
 			compatibleProviders,
 			modelId,
 			PROVIDER_MIN_ACTIVE_MODEL_CANDIDATES
+		);
+		compatibleProviders = this.filterLiveAutonomousProviders(compatibleProviders);
+		compatibleProviders = this.preferStableToolCallingProviders(
+			compatibleProviders,
+			modelId,
+			new Set<ModelCapability>()
 		);
 
 		const selectionScoreCache = new Map<string, number | null>();
@@ -2494,15 +2988,46 @@ export class MessageHandler {
 					}
 				}
 			}
-			// Remove model from provider if error indicates permanent access denial
-			if (this.isModelAccessError(attemptError)) {
-				console.warn(
-					`Removing model ${modelId} from provider ${providerId} due to permanent access restriction (Error: ${attemptError?.message || 'unknown'}).`
-				);
-				delete providerData.models[modelId];
-				// Return immediately without incrementing errors or disabling provider
-				return providers;
-			}
+				// Remove model from provider if error indicates permanent access denial
+				if (this.isModelAccessError(attemptError)) {
+					console.warn(
+						`Removing model ${modelId} from provider ${providerId} due to permanent access restriction (Error: ${attemptError?.message || 'unknown'}).`
+					);
+					delete providerData.models[modelId];
+					if (
+						this.isGeminiFamilyProvider(providerId) &&
+						this.isGeminiRetiredModelError(attemptError)
+					) {
+						const sourceUrl = String(providerData.provider_url || '');
+						let removedSiblingCount = 0;
+						for (const siblingProvider of providers) {
+							if (!siblingProvider || siblingProvider.id === providerId) {
+								continue;
+							}
+							if (!this.isGeminiFamilyProvider(siblingProvider.id)) {
+								continue;
+							}
+							if (
+								sourceUrl &&
+								String(siblingProvider.provider_url || '') !== sourceUrl
+							) {
+								continue;
+							}
+							if (!siblingProvider.models?.[modelId]) {
+								continue;
+							}
+							delete siblingProvider.models[modelId];
+							removedSiblingCount += 1;
+						}
+						if (removedSiblingCount > 0) {
+							console.warn(
+								`Removing model ${modelId} from ${removedSiblingCount} sibling Gemini provider(s) after upstream retired-model response.`
+							);
+						}
+					}
+					// Return immediately without incrementing errors or disabling provider
+					return providers;
+				}
 
 			if (AUTO_DISABLE_PROVIDERS && isZeroQuotaError(attemptError)) {
 				if (!providerData.disabled) {
@@ -2524,7 +3049,8 @@ export class MessageHandler {
 				// Skip error counting entirely for excluded error patterns
 			} else if (
 				isExcludedError(attemptError) ||
-				this.isToolUnsupportedError(attemptError)
+				this.isToolUnsupportedError(attemptError) ||
+				this.isProviderRequestShapeError(attemptError)
 			) {
 				// Don't increment errors or disable — treat as a non-event
 			} else if (
@@ -2607,17 +3133,16 @@ export class MessageHandler {
 				modelData.disabled_at = undefined;
 				modelData.disable_count = 0;
 			}
-			// Only re-enable provider if ALL models are now healthy (no disabled models remain)
 			if (providerData.disabled) {
 				const remainingDisabled = Object.values(
 					providerData.models || {}
 				).filter((m: any) => m?.disabled).length;
-				if (remainingDisabled === 0) {
-					console.log(
-						`Re-enabling provider ${providerId} — all models are healthy after success on ${modelId}.`
-					);
-					providerData.disabled = false;
-				}
+				console.log(
+					remainingDisabled === 0
+						? `Re-enabling provider ${providerId} — all models are healthy after success on ${modelId}.`
+						: `Re-enabling provider ${providerId} after success on ${modelId}; ${remainingDisabled} model(s) remain disabled.`
+				);
+				providerData.disabled = false;
 			}
 		}
 
@@ -2642,7 +3167,10 @@ export class MessageHandler {
 	// Temporary model reroute map — requests for key are redirected to value
 	// To add a reroute: MODEL_REROUTES['source-model'] = 'target-model';
 	private static readonly MODEL_REROUTES: Record<string, string> = {
-		'gemini-2.0-flash-001': 'gemini-2.5-flash-lite-preview-09-2025'
+		'gemini-2.0-flash': 'gemini-2.5-flash',
+		'gemini-2.0-flash-001': 'gemini-2.5-flash',
+		'google/gemini-2.0-flash': 'gemini-2.5-flash',
+		'google/gemini-2.0-flash-001': 'gemini-2.5-flash'
 	};
 
 	private applyModelReroute(modelId: string): string {
@@ -2652,6 +3180,40 @@ export class MessageHandler {
 			return target;
 		}
 		return modelId;
+	}
+
+	private relaxUnsupportedToolCalling(
+		modelId: string,
+		messages: IMessage[]
+	): IMessage[] {
+		const normalized = this.normalizeModelId(modelId);
+		if (!normalized.startsWith('gemini-')) return messages;
+
+		const capabilities = this.modelCapabilitiesMap.get(normalized) || [];
+		if (capabilities.includes('tool_calling')) return messages;
+
+		let stripped = false;
+		const relaxedMessages = messages.map((message: IMessage) => {
+			const hasTools =
+				Array.isArray(message?.tools) && message.tools.length > 0;
+			const hasToolChoice =
+				typeof message?.tool_choice !== 'undefined';
+			if (!hasTools && !hasToolChoice) return message;
+
+			stripped = true;
+			const nextMessage: IMessage = { ...message };
+			delete (nextMessage as any).tools;
+			delete (nextMessage as any).tool_choice;
+			return nextMessage;
+		});
+
+		if (stripped) {
+			console.warn(
+				`[CapabilityRelax] ${normalized} does not support tool_calling; dropping tools/tool_choice for this request.`
+			);
+		}
+
+		return stripped ? relaxedMessages : messages;
 	}
 
 	async handleMessages(
@@ -2682,17 +3244,21 @@ export class MessageHandler {
 				throw new Error('Invalid arguments');
 			if (!messageHandler)
 				throw new Error('Service temporarily unavailable.');
-			modelId = this.applyModelReroute(modelId);
+				modelId = this.applyModelReroute(modelId);
 
-			await this.refreshModelCapabilities();
-			modelId = await this.resolveModelIdForRequest(modelId);
-			this.validateModelCapabilities(modelId, messages);
-			const requiredCaps = this.detectRequiredCapabilities(
-				messages,
-				modelId
-			);
+				await this.refreshModelCapabilities();
+				modelId = await this.resolveModelIdForRequest(modelId);
+				const cachedGeminiModelError =
+					await this.getGeminiModelNegativeCacheError(modelId);
+				if (cachedGeminiModelError) throw cachedGeminiModelError;
+				messages = this.relaxUnsupportedToolCalling(modelId, messages);
+				const requiredCaps = this.detectRequiredCapabilities(
+					messages,
+					modelId
+				);
+				this.validateModelCapabilities(modelId, messages);
 
-			const validationResult = await validateApiKeyAndUsage(apiKey);
+				const validationResult = await validateApiKeyAndUsage(apiKey);
 			if (
 				!validationResult.valid ||
 				!validationResult.userData ||
@@ -2707,21 +3273,41 @@ export class MessageHandler {
 					`${statusCode === 429 ? 'Limit reached' : 'Unauthorized'}: ${validationResult.error}`
 				);
 			}
-			const userData: UserData = validationResult.userData;
-			const tierLimits: TierData = validationResult.tierLimits;
-			const userTierName = userData.tier;
-			assertModelAllowedForTier(modelId, tierLimits);
-			const allProvidersOriginal =
-				await dataManager.load<LoadedProviders>('providers');
-			let candidateProviders = this.prepareCandidateProviders(
-				allProvidersOriginal,
-				modelId,
-				tierLimits,
-				userTierName
-			);
-			candidateProviders = this.filterProvidersByCapabilitySkips(
-				candidateProviders,
-				modelId,
+				const userData: UserData = validationResult.userData;
+				const tierLimits: TierData = validationResult.tierLimits;
+				const userTierName = userData.tier;
+				assertModelAllowedForTier(modelId, tierLimits);
+				const allProvidersOriginal =
+					await dataManager.load<LoadedProviders>('providers');
+				let candidateProviders: LoadedProviderData[];
+				try {
+					candidateProviders = this.prepareCandidateProviders(
+						allProvidersOriginal,
+						modelId,
+						tierLimits,
+						userTierName
+					);
+				} catch (error: any) {
+					if (
+						this.isGeminiModelId(modelId) &&
+						/no currently active provider supports model/i.test(
+							String(error?.message || '')
+						)
+					) {
+						await this.cacheGeminiModelNegativeOutcome(
+							modelId,
+							null,
+							GEMINI_MODEL_NEGATIVE_CACHE_RATE_LIMIT_FLOOR_MS
+						);
+						const cachedGeminiModelError =
+							await this.getGeminiModelNegativeCacheError(modelId);
+						if (cachedGeminiModelError) throw cachedGeminiModelError;
+					}
+					throw error;
+				}
+				candidateProviders = this.filterProvidersByCapabilitySkips(
+					candidateProviders,
+					modelId,
 				requiredCaps
 			);
 			candidateProviders = this.preferStableToolCallingProviders(
@@ -2771,11 +3357,13 @@ export class MessageHandler {
 			let disabledFallbackAdded = false;
 			const requestStartTime = Date.now();
 			const totalCandidates = candidateProviders.length;
+			let effectiveRateLimitWaitBudgetMs = rateLimitWaitBudgetMs;
 			let cooldownWaitSpentMs = 0;
-			let nextCooldownMs: number | null = null;
-			let nextCooldownEarlyWakeMs: number | null = null;
-			let attemptedSinceCooldown = false;
-			let staleCooldownProbeUsed = false;
+				let nextCooldownMs: number | null = null;
+				let nextCooldownEarlyWakeMs: number | null = null;
+				let attemptedSinceCooldown = false;
+				let geminiRateLimitFailureCount = 0;
+				let staleCooldownProbeUsed = false;
 			const tryStaleCooldownProbe = (
 				providerId: string,
 				modelId: string,
@@ -2814,15 +3402,33 @@ export class MessageHandler {
 							break;
 						}
 
-						const selectedProvider = candidateProviders[idx];
-						const providerId = selectedProvider.id;
-						const providerApiKey = selectedProvider.apiKey ?? '';
-						const modelStats = selectedProvider?.models?.[modelId];
-						if (
-							getProviderFastSkipRemainingMs(providerId) !== null
-						) {
-							continue;
-						}
+							const selectedProvider = candidateProviders[idx];
+							const providerId = selectedProvider.id;
+							const providerApiKey = selectedProvider.apiKey ?? '';
+							const modelStats = selectedProvider?.models?.[modelId];
+							const fastSkipRemainingMs =
+								getProviderFastSkipRemainingMs(providerId);
+							if (fastSkipRemainingMs !== null) {
+								if (
+									tryStaleCooldownProbe(
+										providerId,
+										modelId,
+										'provider fast-skip'
+									)
+								) {
+									// Probe one candidate despite fast-skip state.
+								} else {
+									skippedByCooldown++;
+									if (
+										nextCooldownMs === null ||
+										fastSkipRemainingMs < nextCooldownMs
+									) {
+										nextCooldownMs = fastSkipRemainingMs;
+										nextCooldownEarlyWakeMs = null;
+									}
+									continue;
+								}
+							}
 						if (
 							providerApiKey &&
 							(await isApiKeyCoolingDownForModel(
@@ -3226,10 +3832,10 @@ export class MessageHandler {
 							sendMessageError = error;
 						}
 
-						if (
-							sendMessageError &&
-							this.isRateLimitOrQuotaError(sendMessageError)
-						) {
+							if (
+								sendMessageError &&
+								this.isRateLimitOrQuotaError(sendMessageError)
+							) {
 							const retryAfterMs = extractRetryAfterMs(
 								String(
 									sendMessageError?.message ||
@@ -3260,20 +3866,34 @@ export class MessageHandler {
 							console.warn(
 								`Rate limit/quota hit for ${providerId}; skipping this key for the remainder of the request.`
 							);
-							if (
-								shouldRespectCooldowns &&
-								cooldownMs &&
-								cooldownMs > 0
-							) {
+								if (
+									shouldRespectCooldowns &&
+									cooldownMs &&
+									cooldownMs > 0
+								) {
 								nextCooldownMs =
 									nextCooldownMs === null
 										? cooldownMs
 										: Math.min(nextCooldownMs, cooldownMs);
 								if (nextCooldownMs === cooldownMs) {
-									nextCooldownEarlyWakeMs = null;
+										nextCooldownEarlyWakeMs = null;
+									}
+								}
+								if (this.isGeminiFamilyProvider(providerId)) {
+									geminiRateLimitFailureCount += 1;
+									if (
+										GEMINI_MAX_RATE_LIMIT_FAILURES_PER_REQUEST > 0 &&
+										geminiRateLimitFailureCount >=
+											GEMINI_MAX_RATE_LIMIT_FAILURES_PER_REQUEST
+									) {
+										console.warn(
+											`[GeminiRateLimitBudget] Stopping ${modelId} after ${geminiRateLimitFailureCount} Gemini rate-limit/quota failures in one request.`
+										);
+										lastError = sendMessageError;
+										break;
+									}
 								}
 							}
-						}
 						if (
 							sendMessageError &&
 							(this.isInvalidProviderCredentialError(
@@ -3329,15 +3949,18 @@ export class MessageHandler {
 								(typeof result.reasoning === 'string' &&
 									result.reasoning.trim().length > 0))
 						);
-						if (
-							!sendMessageError &&
-							result &&
-							responseEntry &&
-							hasMeaningfulResult
-						) {
-							clearProviderFastSkip(providerId);
-							return {
-								response: result.response,
+							if (
+								!sendMessageError &&
+								result &&
+								responseEntry &&
+								hasMeaningfulResult
+							) {
+								if (this.isGeminiFamilyProvider(providerId)) {
+									await this.clearGeminiModelNegativeCache(modelId);
+								}
+								clearProviderFastSkip(providerId);
+								return {
+									response: result.response,
 								latency: result.latency,
 								tokenUsage: responseEntry.tokens_generated,
 								promptTokens: responseEntry.input_tokens,
@@ -3384,6 +4007,30 @@ export class MessageHandler {
 									`Insufficient credits on ${providerId}; added ${added} fallback provider(s) for model ${modelId}.`
 								);
 							}
+						} else if (
+							sendMessageError &&
+							(this.isRateLimitOrQuotaError(sendMessageError) ||
+								isTransientProviderGatewayError(sendMessageError))
+						) {
+							const failureSignal = this.isRateLimitOrQuotaError(
+								sendMessageError
+							)
+								? 'cooldown'
+								: 'transient';
+							const added = this.appendRecentFailureFallbackProviders(
+								allProvidersOriginal,
+								candidateProviders,
+								selectedProvider,
+								modelId,
+								requiredCaps,
+								triedProviderIds,
+								failureSignal
+							);
+							if (added > 0) {
+								console.warn(
+									`Transient provider failure on ${providerId}; added ${added} fresh sibling fallback provider(s) for model ${modelId}.`
+								);
+							}
 						}
 
 						// When all current candidates are exhausted, try disabled providers as last resort
@@ -3414,9 +4061,17 @@ export class MessageHandler {
 
 				const hasCooldownSkips =
 					skippedByCooldown > 0 || skippedByProviderRateLimit > 0;
+				effectiveRateLimitWaitBudgetMs =
+					maybeExtendGeminiRateLimitWaitBudget(
+						effectiveRateLimitWaitBudgetMs,
+						candidateProviders,
+						nextCooldownMs,
+						modelId,
+						false
+					);
 				const remainingCooldownWaitBudgetMs = Math.max(
 					0,
-					rateLimitWaitBudgetMs - cooldownWaitSpentMs
+					effectiveRateLimitWaitBudgetMs - cooldownWaitSpentMs
 				);
 				const shouldRetryAfterCooldown =
 					hasCooldownSkips &&
@@ -3439,7 +4094,7 @@ export class MessageHandler {
 					stream: false,
 					cooldownMs: effectiveCooldownMs,
 					waitBudgetRemainingMs: remainingCooldownWaitBudgetMs,
-					totalWaitBudgetMs: rateLimitWaitBudgetMs,
+					totalWaitBudgetMs: effectiveRateLimitWaitBudgetMs,
 					earlyWakeMs: nextCooldownEarlyWakeMs,
 					requestAgeMs: cooldownWaitStartedAt - requestStartTime
 				});
@@ -3459,9 +4114,9 @@ export class MessageHandler {
 					cooldownMs: effectiveCooldownMs,
 					waitBudgetRemainingMs: Math.max(
 						0,
-						rateLimitWaitBudgetMs - cooldownWaitSpentMs
+						effectiveRateLimitWaitBudgetMs - cooldownWaitSpentMs
 					),
-					totalWaitBudgetMs: rateLimitWaitBudgetMs,
+					totalWaitBudgetMs: effectiveRateLimitWaitBudgetMs,
 					earlyWakeMs: nextCooldownEarlyWakeMs,
 					waited,
 					waitElapsedMs,
@@ -3487,9 +4142,9 @@ export class MessageHandler {
 				(skippedByCooldown > 0 ||
 					skippedByBlockedKey > 0 ||
 					skippedByProviderRateLimit > 0);
-			let detail: string;
-			if (allSkipped) {
-				const parts: string[] = [];
+				let detail: string;
+				if (allSkipped) {
+					const parts: string[] = [];
 				if (skippedByCooldown > 0)
 					parts.push(
 						`${skippedByCooldown} rate-limited/cooling down`
@@ -3503,14 +4158,38 @@ export class MessageHandler {
 				detail = `All ${totalCandidates} provider(s) for model ${modelId} are temporarily unavailable (${parts.join(', ')}). Try again shortly.`;
 			} else if (attempted > 0 && lastError) {
 				detail = `${attempted} provider(s) attempted for model ${modelId}, all failed. Last error: ${lastError.message}`;
-			} else {
-				detail =
-					lastError?.message ||
-					`No providers could serve model ${modelId}.`;
-			}
-			console.error(
-				`All attempts failed for model ${modelId}. Attempted: ${attempted}, Cooldown: ${skippedByCooldown}, ProviderRateLimit: ${skippedByProviderRateLimit}, Blocked: ${skippedByBlockedKey}. Detail: ${detail}`
-			);
+				} else {
+					detail =
+						lastError?.message ||
+						`No providers could serve model ${modelId}.`;
+				}
+				if (this.isGeminiModelId(modelId)) {
+					if (
+						lastError &&
+						this.isModelAccessError(lastError) &&
+						this.isGeminiRetiredModelError(lastError)
+					) {
+						await this.cacheGeminiModelNegativeOutcome(
+							modelId,
+							lastError,
+							null
+						);
+					} else if (
+						nextCooldownMs !== null &&
+						(allSkipped ||
+							(lastError &&
+								this.isRateLimitOrQuotaError(lastError)))
+					) {
+						await this.cacheGeminiModelNegativeOutcome(
+							modelId,
+							lastError,
+							nextCooldownMs
+						);
+					}
+				}
+				console.error(
+					`All attempts failed for model ${modelId}. Attempted: ${attempted}, Cooldown: ${skippedByCooldown}, ProviderRateLimit: ${skippedByProviderRateLimit}, Blocked: ${skippedByBlockedKey}. Detail: ${detail}`
+				);
 			const finalError = new Error(
 				`Failed to process request: ${detail}`
 			);
@@ -3566,14 +4245,18 @@ export class MessageHandler {
 			throw new Error('Invalid arguments for streaming');
 		if (!messageHandler)
 			throw new Error('Service temporarily unavailable.');
-		modelId = this.applyModelReroute(modelId);
+			modelId = this.applyModelReroute(modelId);
 
-		await this.refreshModelCapabilities();
-		modelId = await this.resolveModelIdForRequest(modelId);
-		this.validateModelCapabilities(modelId, messages);
-		const requiredCaps = this.detectRequiredCapabilities(messages, modelId);
+			await this.refreshModelCapabilities();
+			modelId = await this.resolveModelIdForRequest(modelId);
+			const cachedGeminiModelError =
+				await this.getGeminiModelNegativeCacheError(modelId);
+			if (cachedGeminiModelError) throw cachedGeminiModelError;
+			messages = this.relaxUnsupportedToolCalling(modelId, messages);
+			const requiredCaps = this.detectRequiredCapabilities(messages, modelId);
+			this.validateModelCapabilities(modelId, messages);
 
-		const validationResult = await validateApiKeyAndUsage(apiKey);
+			const validationResult = await validateApiKeyAndUsage(apiKey);
 		if (
 			!validationResult.valid ||
 			!validationResult.userData ||
@@ -3584,22 +4267,42 @@ export class MessageHandler {
 			);
 		}
 
-		const userData: UserData = validationResult.userData;
-		const tierLimits: TierData = validationResult.tierLimits;
-		const userTierName = userData.tier;
-		assertModelAllowedForTier(modelId, tierLimits);
+			const userData: UserData = validationResult.userData;
+			const tierLimits: TierData = validationResult.tierLimits;
+			const userTierName = userData.tier;
+			assertModelAllowedForTier(modelId, tierLimits);
 
-		const allProvidersOriginal =
-			await dataManager.load<LoadedProviders>('providers');
-		let candidateProviders = this.prepareCandidateProviders(
-			allProvidersOriginal,
-			modelId,
-			tierLimits,
-			userTierName
-		);
-		candidateProviders = this.filterProvidersByCapabilitySkips(
-			candidateProviders,
-			modelId,
+			const allProvidersOriginal =
+				await dataManager.load<LoadedProviders>('providers');
+			let candidateProviders: LoadedProviderData[];
+			try {
+				candidateProviders = this.prepareCandidateProviders(
+					allProvidersOriginal,
+					modelId,
+					tierLimits,
+					userTierName
+				);
+			} catch (error: any) {
+				if (
+					this.isGeminiModelId(modelId) &&
+					/no currently active provider supports model/i.test(
+						String(error?.message || '')
+					)
+				) {
+					await this.cacheGeminiModelNegativeOutcome(
+						modelId,
+						null,
+						GEMINI_MODEL_NEGATIVE_CACHE_RATE_LIMIT_FLOOR_MS
+					);
+					const cachedGeminiModelError =
+						await this.getGeminiModelNegativeCacheError(modelId);
+					if (cachedGeminiModelError) throw cachedGeminiModelError;
+				}
+				throw error;
+			}
+			candidateProviders = this.filterProvidersByCapabilitySkips(
+				candidateProviders,
+				modelId,
 			requiredCaps
 		);
 		candidateProviders = this.preferStableToolCallingProviders(
@@ -3647,11 +4350,13 @@ export class MessageHandler {
 		let disabledFallbackAdded = false;
 		const requestStartTime = Date.now();
 		const totalCandidates = candidateProviders.length;
+		let effectiveRateLimitWaitBudgetMs = rateLimitWaitBudgetMs;
 		let cooldownWaitSpentMs = 0;
-		let nextCooldownMs: number | null = null;
-		let nextCooldownEarlyWakeMs: number | null = null;
-		let attemptedSinceCooldown = false;
-		let staleCooldownProbeUsed = false;
+			let nextCooldownMs: number | null = null;
+			let nextCooldownEarlyWakeMs: number | null = null;
+			let attemptedSinceCooldown = false;
+			let geminiRateLimitFailureCount = 0;
+			let staleCooldownProbeUsed = false;
 		const tryStaleCooldownProbe = (
 			providerId: string,
 			modelId: string,
@@ -3699,13 +4404,33 @@ export class MessageHandler {
 						break;
 					}
 
-					const selectedProviderData = candidateProviders[idx];
-					const providerId = selectedProviderData.id;
-					const providerApiKey = selectedProviderData.apiKey ?? '';
-					const modelStats = selectedProviderData?.models?.[modelId];
-					if (getProviderFastSkipRemainingMs(providerId) !== null) {
-						continue;
-					}
+						const selectedProviderData = candidateProviders[idx];
+						const providerId = selectedProviderData.id;
+						const providerApiKey = selectedProviderData.apiKey ?? '';
+						const modelStats = selectedProviderData?.models?.[modelId];
+						const fastSkipRemainingMs =
+							getProviderFastSkipRemainingMs(providerId);
+						if (fastSkipRemainingMs !== null) {
+							if (
+								tryStaleCooldownProbe(
+									providerId,
+									modelId,
+									'provider fast-skip'
+								)
+							) {
+								// Probe one candidate despite fast-skip state.
+							} else {
+								skippedByCooldown++;
+								if (
+									nextCooldownMs === null ||
+									fastSkipRemainingMs < nextCooldownMs
+								) {
+									nextCooldownMs = fastSkipRemainingMs;
+									nextCooldownEarlyWakeMs = null;
+								}
+								continue;
+							}
+						}
 					if (
 						providerApiKey &&
 						(await isApiKeyCoolingDownForModel(
@@ -4123,6 +4848,9 @@ export class MessageHandler {
 								responseEntry,
 								false
 							);
+							if (this.isGeminiFamilyProvider(providerId)) {
+								await this.clearGeminiModelNegativeCache(modelId);
+							}
 							clearProviderFastSkip(providerId);
 
 							yield {
@@ -4281,6 +5009,20 @@ export class MessageHandler {
 									nextCooldownEarlyWakeMs = null;
 								}
 							}
+							if (this.isGeminiFamilyProvider(providerId)) {
+								geminiRateLimitFailureCount += 1;
+								if (
+									GEMINI_MAX_RATE_LIMIT_FAILURES_PER_REQUEST > 0 &&
+									geminiRateLimitFailureCount >=
+										GEMINI_MAX_RATE_LIMIT_FAILURES_PER_REQUEST
+								) {
+									console.warn(
+										`[GeminiRateLimitBudget] Stopping ${modelId} after ${geminiRateLimitFailureCount} Gemini rate-limit/quota failures in one streaming request.`
+									);
+									lastError = error;
+									break;
+								}
+							}
 						}
 						if (this.isInsufficientCreditsError(error)) {
 							const added = this.appendCreditFallbackProviders(
@@ -4294,6 +5036,27 @@ export class MessageHandler {
 							if (added > 0) {
 								console.warn(
 									`Insufficient credits on ${providerId}; added ${added} fallback provider(s) for model ${modelId}.`
+								);
+							}
+						} else if (
+							this.isRateLimitOrQuotaError(error) ||
+							isTransientProviderGatewayError(error)
+						) {
+							const failureSignal = this.isRateLimitOrQuotaError(error)
+								? 'cooldown'
+								: 'transient';
+							const added = this.appendRecentFailureFallbackProviders(
+								allProvidersOriginal,
+								candidateProviders,
+								selectedProviderData,
+								modelId,
+								requiredCaps,
+								triedProviderIds,
+								failureSignal
+							);
+							if (added > 0) {
+								console.warn(
+									`Transient provider failure on ${providerId}; added ${added} fresh sibling fallback provider(s) for model ${modelId}.`
 								);
 							}
 						}
@@ -4326,9 +5089,17 @@ export class MessageHandler {
 
 			const hasCooldownSkips =
 				skippedByCooldown > 0 || skippedByProviderRateLimit > 0;
+			effectiveRateLimitWaitBudgetMs =
+				maybeExtendGeminiRateLimitWaitBudget(
+					effectiveRateLimitWaitBudgetMs,
+					candidateProviders,
+					nextCooldownMs,
+					modelId,
+					true
+				);
 			const remainingCooldownWaitBudgetMs = Math.max(
 				0,
-				rateLimitWaitBudgetMs - cooldownWaitSpentMs
+				effectiveRateLimitWaitBudgetMs - cooldownWaitSpentMs
 			);
 			const shouldRetryAfterCooldown =
 				hasCooldownSkips &&
@@ -4351,7 +5122,7 @@ export class MessageHandler {
 				stream: true,
 				cooldownMs: effectiveCooldownMs,
 				waitBudgetRemainingMs: remainingCooldownWaitBudgetMs,
-				totalWaitBudgetMs: rateLimitWaitBudgetMs,
+				totalWaitBudgetMs: effectiveRateLimitWaitBudgetMs,
 				earlyWakeMs: nextCooldownEarlyWakeMs,
 				requestAgeMs: cooldownWaitStartedAt - requestStartTime
 			});
@@ -4371,9 +5142,9 @@ export class MessageHandler {
 				cooldownMs: effectiveCooldownMs,
 				waitBudgetRemainingMs: Math.max(
 					0,
-					rateLimitWaitBudgetMs - cooldownWaitSpentMs
+					effectiveRateLimitWaitBudgetMs - cooldownWaitSpentMs
 				),
-				totalWaitBudgetMs: rateLimitWaitBudgetMs,
+				totalWaitBudgetMs: effectiveRateLimitWaitBudgetMs,
 				earlyWakeMs: nextCooldownEarlyWakeMs,
 				waited,
 				waitElapsedMs,
@@ -4399,9 +5170,9 @@ export class MessageHandler {
 			(skippedByCooldown > 0 ||
 				skippedByBlockedKey > 0 ||
 				skippedByProviderRateLimit > 0);
-		let detail: string;
-		if (allSkipped) {
-			const parts: string[] = [];
+			let detail: string;
+			if (allSkipped) {
+				const parts: string[] = [];
 			if (skippedByCooldown > 0)
 				parts.push(`${skippedByCooldown} rate-limited/cooling down`);
 			if (skippedByBlockedKey > 0)
@@ -4413,14 +5184,38 @@ export class MessageHandler {
 			detail = `All ${totalCandidates} provider(s) for model ${modelId} are temporarily unavailable (${parts.join(', ')}). Try again shortly.`;
 		} else if (attempted > 0 && lastError) {
 			detail = `${attempted} provider(s) attempted for model ${modelId}, all failed. Last error: ${lastError.message}`;
-		} else {
-			detail =
-				lastError?.message ||
-				`No providers could serve model ${modelId}.`;
-		}
-		console.error(
-			`All streaming attempts failed for model ${modelId}. Attempted: ${attempted}, Cooldown: ${skippedByCooldown}, ProviderRateLimit: ${skippedByProviderRateLimit}, Blocked: ${skippedByBlockedKey}. Detail: ${detail}`
-		);
+			} else {
+				detail =
+					lastError?.message ||
+					`No providers could serve model ${modelId}.`;
+			}
+			if (this.isGeminiModelId(modelId)) {
+				if (
+					lastError &&
+					this.isModelAccessError(lastError) &&
+					this.isGeminiRetiredModelError(lastError)
+				) {
+					await this.cacheGeminiModelNegativeOutcome(
+						modelId,
+						lastError,
+						null
+					);
+				} else if (
+					nextCooldownMs !== null &&
+					(allSkipped ||
+						(lastError &&
+							this.isRateLimitOrQuotaError(lastError)))
+				) {
+					await this.cacheGeminiModelNegativeOutcome(
+						modelId,
+						lastError,
+						nextCooldownMs
+					);
+				}
+			}
+			console.error(
+				`All streaming attempts failed for model ${modelId}. Attempted: ${attempted}, Cooldown: ${skippedByCooldown}, ProviderRateLimit: ${skippedByProviderRateLimit}, Blocked: ${skippedByBlockedKey}. Detail: ${detail}`
+			);
 		const finalError = new Error(
 			`Failed to process streaming request: ${detail}`
 		);
@@ -4740,6 +5535,50 @@ function shouldSkipGeminiProviderForMessage(
 	}
 
 	return false;
+}
+
+function isGeminiCandidateProvider(
+	provider: LoadedProviderData | null | undefined
+): boolean {
+	const providerId = String(provider?.id || '').toLowerCase();
+	const providerType = String(
+		(provider as any)?.provider || (provider as any)?.type || ''
+	).toLowerCase();
+	return (
+		providerId.includes('gemini') ||
+		providerId === 'google' ||
+		providerType.includes('gemini') ||
+		providerType.includes('google')
+	);
+}
+
+function maybeExtendGeminiRateLimitWaitBudget(
+	currentBudgetMs: number,
+	candidateProviders: LoadedProviderData[],
+	nextCooldownMs: number | null,
+	modelId: string,
+	stream: boolean
+): number {
+	if (
+		!Number.isFinite(nextCooldownMs as number) ||
+		(nextCooldownMs as number) <= 0 ||
+		GEMINI_RATE_LIMIT_TOTAL_WAIT_BUDGET_MS <= currentBudgetMs ||
+		candidateProviders.length === 0 ||
+		!candidateProviders.every(provider => isGeminiCandidateProvider(provider))
+	) {
+		return currentBudgetMs;
+	}
+
+	const targetBudgetMs = Math.min(
+		GEMINI_RATE_LIMIT_TOTAL_WAIT_BUDGET_MS,
+		Math.max(currentBudgetMs, Math.ceil(nextCooldownMs as number))
+	);
+	if (targetBudgetMs <= currentBudgetMs) return currentBudgetMs;
+
+	console.warn(
+		`[GeminiWaitBudget] Extending ${stream ? 'streaming ' : ''}wait budget for ${modelId} from ${currentBudgetMs}ms to ${targetBudgetMs}ms to honor Gemini retry-after guidance.`
+	);
+	return targetBudgetMs;
 }
 
 export { messageHandler };

@@ -216,7 +216,7 @@ export async function checkOpenAI(apiKey: string): Promise<KeyStatus> {
             {
                 model: probeModel,
                 input: [{ role: 'user', content: [{ type: 'input_text', text: 'ping' }] }],
-                max_output_tokens: 1,
+                max_output_tokens: 16,
             },
             { headers: { Authorization: `Bearer ${apiKey}` }, validateStatus: () => true, timeout: 10000 }
         );

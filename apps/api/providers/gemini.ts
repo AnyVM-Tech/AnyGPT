@@ -795,6 +795,10 @@ export class GeminiAI implements IAIProvider {
     return collected.length > 0 ? collected : undefined;
   }
 
+  private isGeminiInstructionRole(roleRaw: string): boolean {
+    return roleRaw === 'system' || roleRaw === 'developer';
+  }
+
   private buildContentsFromMessages(message: IMessage): { contents: any[]; systemText: string } {
     const sourceMessages = Array.isArray(message.messages) && message.messages.length > 0
       ? message.messages
@@ -805,7 +809,7 @@ export class GeminiAI implements IAIProvider {
 
     for (const entry of sourceMessages) {
       const roleRaw = typeof entry.role === 'string' ? entry.role.toLowerCase() : 'user';
-      if (roleRaw === 'system') {
+      if (this.isGeminiInstructionRole(roleRaw)) {
         const text = this.contentToText(entry.content);
         if (text) systemTexts.push(text);
         continue;
@@ -900,6 +904,136 @@ export class GeminiAI implements IAIProvider {
       content: contentParts.join(''),
       reasoning: reasoningParts.join(''),
     };
+  }
+
+  private humanizeGeminiEnum(value: string): string {
+    return String(value || '')
+      .trim()
+      .toLowerCase()
+      .replace(/_/g, ' ')
+      .replace(/\s+/g, ' ');
+  }
+
+  private normalizeGeminiFinishReason(value: any): string | undefined {
+    const normalized = typeof value === 'string' ? value.trim().toUpperCase() : '';
+    if (!normalized) return undefined;
+    if (normalized === 'MAX_TOKENS') return 'length';
+    if ([
+      'SAFETY',
+      'RECITATION',
+      'BLOCKLIST',
+      'PROHIBITED_CONTENT',
+      'SPII',
+      'LANGUAGE',
+      'IMAGE_SAFETY',
+      'IMAGE_PROHIBITED_CONTENT',
+      'IMAGE_RECITATION',
+    ].includes(normalized)) {
+      return 'content_filter';
+    }
+    return 'stop';
+  }
+
+  private isGeminiFilteredFinishReason(value: string): boolean {
+    const normalized = String(value || '').trim().toUpperCase();
+    return [
+      'SAFETY',
+      'RECITATION',
+      'BLOCKLIST',
+      'PROHIBITED_CONTENT',
+      'SPII',
+      'LANGUAGE',
+      'IMAGE_SAFETY',
+      'IMAGE_PROHIBITED_CONTENT',
+      'IMAGE_RECITATION',
+    ].includes(normalized);
+  }
+
+  private buildGeminiNoContentOutcome(result: any): { response: string; finishReason?: string } | null {
+    const promptBlockReason =
+      typeof result?.promptFeedback?.blockReason === 'string'
+        ? result.promptFeedback.blockReason.trim()
+        : '';
+    const promptBlockMessage =
+      typeof result?.promptFeedback?.blockReasonMessage === 'string'
+        ? result.promptFeedback.blockReasonMessage.trim()
+        : '';
+    if (promptBlockReason) {
+      return {
+        response:
+          promptBlockMessage ||
+          `Gemini blocked the prompt due to ${this.humanizeGeminiEnum(promptBlockReason)}.`,
+        finishReason: 'content_filter',
+      };
+    }
+
+    const candidate = result?.candidates?.[0];
+    const rawFinishReason =
+      typeof candidate?.finishReason === 'string'
+        ? candidate.finishReason.trim()
+        : '';
+    const finishMessage =
+      typeof candidate?.finishMessage === 'string'
+        ? candidate.finishMessage.trim()
+        : '';
+    if (!rawFinishReason) return null;
+
+    if (this.isGeminiFilteredFinishReason(rawFinishReason)) {
+      return {
+        response:
+          finishMessage ||
+          `Gemini blocked the response due to ${this.humanizeGeminiEnum(rawFinishReason)}.`,
+        finishReason: 'content_filter',
+      };
+    }
+
+    if (finishMessage) {
+      return {
+        response: finishMessage,
+        finishReason: this.normalizeGeminiFinishReason(rawFinishReason),
+      };
+    }
+
+    if (rawFinishReason.toUpperCase() === 'MAX_TOKENS') {
+      return {
+        response: 'Gemini reached the maximum output token limit before returning text.',
+        finishReason: 'length',
+      };
+    }
+
+    return null;
+  }
+
+  private buildGeminiNoContentError(result: any): Error {
+    const promptBlockReason =
+      typeof result?.promptFeedback?.blockReason === 'string'
+        ? result.promptFeedback.blockReason.trim()
+        : '';
+    const candidate = result?.candidates?.[0];
+    const rawFinishReason =
+      typeof candidate?.finishReason === 'string'
+        ? candidate.finishReason.trim()
+        : '';
+    const finishMessage =
+      typeof candidate?.finishMessage === 'string'
+        ? candidate.finishMessage.trim()
+        : '';
+    const details: string[] = [];
+    if (promptBlockReason) details.push(`prompt blockReason=${promptBlockReason}`);
+    if (rawFinishReason) details.push(`finishReason=${rawFinishReason}`);
+    if (finishMessage) details.push(`finishMessage=${finishMessage}`);
+    const error = new Error(
+      details.length > 0
+        ? `Gemini returned no text, reasoning, or tool calls (${details.join(', ')}).`
+        : 'Gemini returned no text, reasoning, or tool calls.'
+    );
+    (error as any).code = rawFinishReason
+      ? 'GEMINI_EMPTY_CANDIDATE'
+      : 'GEMINI_INVALID_RESPONSE_STRUCTURE';
+    (error as any).retryable = true;
+    (error as any).providerSwitchWorthless = false;
+    (error as any).requestRetryWorthless = false;
+    return error;
   }
 
   private extractUsage(usageMetadata: any): { promptTokens?: number; completionTokens?: number; totalTokens?: number } {
@@ -998,7 +1132,26 @@ export class GeminiAI implements IAIProvider {
       const responseText = extracted.content;
       const reasoningText = extracted.reasoning;
       if (!responseText && !reasoningText && (!toolCalls || toolCalls.length === 0)) {
-        throw new Error('Invalid response structure received from Gemini API');
+        const structuredOutcome = this.buildGeminiNoContentOutcome(result);
+        if (structuredOutcome) {
+          const endTime = Date.now();
+          const latency = endTime - startTime;
+          const usageMetadata = result?.usageMetadata;
+          const usage = this.extractUsage(usageMetadata);
+          return {
+            response: structuredOutcome.response,
+            latency: latency,
+            reasoning: undefined,
+            tool_calls: toolCalls,
+            finish_reason: structuredOutcome.finishReason,
+            usage: {
+              prompt_tokens: usage.promptTokens,
+              completion_tokens: usage.completionTokens,
+              total_tokens: usage.totalTokens,
+            }
+          };
+        }
+        throw this.buildGeminiNoContentError(result);
       }
 
       const endTime = Date.now();
@@ -1050,6 +1203,7 @@ export class GeminiAI implements IAIProvider {
       }
       const isProjectAuthFailure = /generative language api has not been used in project|api\s+has\s+not\s+been\s+used\s+in\s+project|service disabled|api_disabled|accessnotconfigured/i.test(errorMessage);
       const isInvalidKeyFailure = /api key not found|api key not valid|api_key_invalid/i.test(errorMessage);
+      const isModelUnavailableFailure = /no longer available to new users|update your code to use a newer model|model[_\s]?not[_\s]?found/i.test(errorMessage);
       // Rethrow the error to be handled by the MessageHandler
       const wrappedError = copyGeminiErrorMetadata(new Error(`Gemini API call failed: ${errorMessage}`), error);
       (wrappedError as any).__providerUniqueLogged = true;
@@ -1066,6 +1220,12 @@ export class GeminiAI implements IAIProvider {
         (wrappedError as any).code = 'GEMINI_INVALID_API_KEY';
         (wrappedError as any).retryable = false;
         (wrappedError as any).authFailure = true;
+      } else if (isModelUnavailableFailure) {
+        const status = Number((wrappedError as any).status ?? (wrappedError as any).statusCode ?? 404);
+        (wrappedError as any).status = status;
+        (wrappedError as any).statusCode = status;
+        (wrappedError as any).code = 'model_not_found';
+        (wrappedError as any).retryable = false;
       } else if (/invalid response structure received from gemini api/i.test(errorMessage) && (wrappedError as any).code === undefined) {
         (wrappedError as any).code = 'GEMINI_INVALID_RESPONSE_STRUCTURE';
         (wrappedError as any).retryable = false;
@@ -1100,6 +1260,9 @@ export class GeminiAI implements IAIProvider {
         const parts = nonStreamJson?.candidates?.[0]?.content?.parts || [];
         const extracted = this.extractOutputAndReasoningFromParts(parts);
         const toolCalls = this.extractGeminiToolCalls(nonStreamJson);
+        const finishReason = this.normalizeGeminiFinishReason(
+          nonStreamJson?.candidates?.[0]?.finishReason
+        );
         if (extracted.content || extracted.reasoning || (toolCalls && toolCalls.length > 0)) {
           const latency = Date.now() - startTime;
           yield {
@@ -1109,7 +1272,24 @@ export class GeminiAI implements IAIProvider {
             reasoning: extracted.reasoning || undefined,
             anystream: null,
             tool_calls: toolCalls,
+            finish_reason: finishReason,
           };
+        } else {
+          const structuredOutcome = this.buildGeminiNoContentOutcome(nonStreamJson);
+          if (structuredOutcome) {
+            const latency = Date.now() - startTime;
+            yield {
+              chunk: structuredOutcome.response,
+              latency,
+              response: structuredOutcome.response,
+              reasoning: undefined,
+              anystream: null,
+              tool_calls: toolCalls,
+              finish_reason: structuredOutcome.finishReason,
+            };
+          } else {
+            throw this.buildGeminiNoContentError(nonStreamJson);
+          }
         }
         return;
       }
@@ -1126,6 +1306,11 @@ export class GeminiAI implements IAIProvider {
       const decoder = new TextDecoder();
       let buffer = '';
       let fullResponse = '';
+      let sawMeaningfulOutput = false;
+      let lastStructuredNoContentOutcome:
+        | { response: string; finishReason?: string }
+        | null = null;
+      let lastNoContentPayload: any = null;
       let idleTimeoutId: NodeJS.Timeout | null = null;
       let idleTimedOut = false;
 
@@ -1190,11 +1375,22 @@ export class GeminiAI implements IAIProvider {
           const parts = parsed?.candidates?.[0]?.content?.parts;
           const extracted = this.extractOutputAndReasoningFromParts(parts || []);
           const toolCalls = this.extractGeminiToolCalls(parsed);
+          const finishReason = this.normalizeGeminiFinishReason(
+            parsed?.candidates?.[0]?.finishReason
+          );
           const chunkOutput = extracted.content;
           const reasoningOutput = extracted.reasoning;
-          if (!chunkOutput && !reasoningOutput && (!toolCalls || toolCalls.length === 0)) continue;
+          if (!chunkOutput && !reasoningOutput && (!toolCalls || toolCalls.length === 0)) {
+            lastNoContentPayload = parsed;
+            const structuredOutcome = this.buildGeminiNoContentOutcome(parsed);
+            if (structuredOutcome) {
+              lastStructuredNoContentOutcome = structuredOutcome;
+            }
+            continue;
+          }
 
           fullResponse += chunkOutput;
+          sawMeaningfulOutput = true;
           const latency = Date.now() - startTime;
           yield {
             chunk: chunkOutput,
@@ -1203,7 +1399,26 @@ export class GeminiAI implements IAIProvider {
             reasoning: reasoningOutput || undefined,
             anystream: null,
             tool_calls: toolCalls,
+            finish_reason: finishReason,
           };
+        }
+      }
+
+      if (!sawMeaningfulOutput) {
+        if (lastStructuredNoContentOutcome) {
+          const latency = Date.now() - startTime;
+          yield {
+            chunk: lastStructuredNoContentOutcome.response,
+            latency,
+            response: lastStructuredNoContentOutcome.response,
+            reasoning: undefined,
+            anystream: null,
+            finish_reason: lastStructuredNoContentOutcome.finishReason,
+          };
+          return;
+        }
+        if (lastNoContentPayload) {
+          throw this.buildGeminiNoContentError(lastNoContentPayload);
         }
       }
     } catch (error: any) {
@@ -1222,12 +1437,15 @@ export class GeminiAI implements IAIProvider {
       const isUnsupportedRemoteMediaUrl = /cannot fetch content from the provided url/i.test(errorMessage);
       const isProjectAuthFailure = /generative language api has not been used in project|it is disabled\. enable it by visiting|permission_denied/i.test(errorMessage);
       const isInvalidKeyFailure = /api key not found|api key not valid|api_key_invalid/i.test(errorMessage);
+      const isModelUnavailableFailure = /no longer available to new users|update your code to use a newer model|model[_\s]?not[_\s]?found/i.test(errorMessage);
       const normalizedMessage = isUnsupportedRemoteMediaUrl
         ? 'gemini:invalid_argument:unsupported_remote_media_url'
         : isProjectAuthFailure
           ? 'gemini:auth_failure:project_api_disabled_or_unavailable'
           : isInvalidKeyFailure
             ? 'gemini:auth_failure:invalid_api_key'
+          : isModelUnavailableFailure
+            ? 'gemini:model_not_found'
           : errorMessage;
       const wrappedError = copyGeminiErrorMetadata(new Error(`Gemini API stream call failed: ${normalizedMessage}`), error);
       (wrappedError as any).__providerUniqueLogged = true;
@@ -1235,17 +1453,29 @@ export class GeminiAI implements IAIProvider {
         ? 400
         : ((isProjectAuthFailure || isInvalidKeyFailure)
           ? Number((wrappedError as any).status ?? (wrappedError as any).statusCode ?? (isProjectAuthFailure ? 403 : 400))
-          : Number((wrappedError as any).status ?? (wrappedError as any).statusCode ?? 400));
+          : Number((wrappedError as any).status ?? (wrappedError as any).statusCode ?? (isModelUnavailableFailure ? 404 : 400)));
       (wrappedError as any).status = status;
       (wrappedError as any).statusCode = status;
-      (wrappedError as any).code = isUnsupportedRemoteMediaUrl
-        ? 'GEMINI_UNSUPPORTED_REMOTE_MEDIA_URL'
-        : isProjectAuthFailure
-          ? 'GEMINI_PROJECT_AUTH_FAILURE'
-          : isInvalidKeyFailure
-            ? 'GEMINI_INVALID_API_KEY'
-          : 'GEMINI_API_ERROR';
-      (wrappedError as any).retryable = false;
+      if (isUnsupportedRemoteMediaUrl) {
+        (wrappedError as any).code = 'GEMINI_UNSUPPORTED_REMOTE_MEDIA_URL';
+        (wrappedError as any).retryable = false;
+      } else if (isProjectAuthFailure) {
+        (wrappedError as any).code = 'GEMINI_PROJECT_AUTH_FAILURE';
+        (wrappedError as any).retryable = false;
+      } else if (isInvalidKeyFailure) {
+        (wrappedError as any).code = 'GEMINI_INVALID_API_KEY';
+        (wrappedError as any).retryable = false;
+      } else if (isModelUnavailableFailure) {
+        (wrappedError as any).code = 'model_not_found';
+        (wrappedError as any).retryable = false;
+      } else {
+        if ((wrappedError as any).code === undefined) {
+          (wrappedError as any).code = 'GEMINI_API_ERROR';
+        }
+        if ((wrappedError as any).retryable === undefined) {
+          (wrappedError as any).retryable = false;
+        }
+      }
       (wrappedError as any).authFailure = isProjectAuthFailure || isInvalidKeyFailure;
       // Gemini may reject remote media URLs that other providers can still consume,
       // so keep provider fallback available while avoiding pointless retries against

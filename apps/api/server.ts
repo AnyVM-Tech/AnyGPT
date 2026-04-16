@@ -51,8 +51,8 @@ import geminiRouter from './routes/gemini.js';
 import groqRouter from './routes/groq.js';
 import ollamaRouter from './routes/ollama.js';
 import openrouterRouter from './routes/openrouter.js';
-import openapiRouter from './routes/openapi.js';
 import nativeProviderRouter from './routes/nativeProviders.js';
+import openapiRouter from './routes/openapi.js';
 import { attachWebSocket } from './ws/wsServer.js';
 import { attachRealtimeWebSocket } from './ws/realtime.js';
 
@@ -481,7 +481,9 @@ async function startServer() {
         // Mount at both /api and root so clients can hit /v1/models directly
         app.use('/api', modelsRouter);
         app.use('/', modelsRouter);
+        app.use('/native/openai', modelsRouter);
         console.log('  ✓ Models routes enabled: /api and /');
+        console.log('  ✓ Native models alias enabled: /native/openai/v1/models');
     } else {
         console.log('  𐄂 Models routes disabled.');
     }
@@ -521,6 +523,13 @@ async function startServer() {
         console.log('  ✓ Gemini compatible routes enabled: /v2');
     } else {
         console.log('  𐄂 Gemini compatible routes disabled.');
+    }
+
+    if (isRouterEnabled('NATIVE_PROVIDER')) {
+        app.use('/native', nativeProviderRouter);
+        console.log('  ✓ Native provider passthrough routes enabled: /native/:family/*');
+    } else {
+        console.log('  𐄂 Native provider passthrough routes disabled.');
     }
 
     if (isRouterEnabled('GROQ')) {

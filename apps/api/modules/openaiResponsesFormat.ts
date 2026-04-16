@@ -79,7 +79,7 @@ function buildResponsesFunctionCallItem(
 }
 
 export function createResponsesItemId(
-	prefix: 'msg' | 'resp' | 'evt' | 'fc' = 'msg'
+	prefix: 'msg' | 'resp' | 'evt' | 'fc' | 'rs' = 'msg'
 ): string {
 	return createRandomId(prefix);
 }
@@ -111,16 +111,30 @@ export function createResponsesMessageItem(
 
 export function createResponsesReasoningItem(
 	text: string,
-	options: { id?: string; status?: string } = {}
+	options: {
+		id?: string;
+		status?: string;
+		summary?: Record<string, any>[];
+		encryptedContent?: string;
+		content?: Record<string, any>[];
+	} = {}
 ): Record<string, any> {
 	const summaryText = typeof text === 'string' ? text : '';
+	const normalizedSummary = Array.isArray(options.summary)
+		? options.summary
+		: summaryText
+			? [{ type: 'summary_text', text: summaryText }]
+			: [];
 	return {
-		id: options.id || createRandomId('msg'),
+		id: options.id || createRandomId('rs'),
 		type: 'reasoning',
 		status: options.status || 'completed',
-		summary: summaryText
-			? [{ type: 'summary_text', text: summaryText }]
-			: []
+		summary: normalizedSummary,
+		...(typeof options.encryptedContent === 'string' &&
+		options.encryptedContent
+			? { encrypted_content: options.encryptedContent }
+			: {}),
+		...(Array.isArray(options.content) ? { content: options.content } : {})
 	};
 }
 
@@ -134,12 +148,23 @@ export function buildResponsesOutputItems(
 		reasoningText?: string;
 		reasoningId?: string;
 		reasoningStatus?: string;
+		reasoningSummary?: Record<string, any>[];
+		reasoningEncryptedContent?: string;
+		reasoningContent?: Record<string, any>[];
 	} = {}
 ): any[] {
 	const items: any[] = [];
 	const normalizedText = typeof outputText === 'string' ? outputText : '';
 	const normalizedReasoningText =
 		typeof options.reasoningText === 'string' ? options.reasoningText : '';
+	const hasReasoningPayload =
+		normalizedReasoningText.length > 0 ||
+		(Array.isArray(options.reasoningSummary) &&
+			options.reasoningSummary.length > 0) ||
+		(typeof options.reasoningEncryptedContent === 'string' &&
+			options.reasoningEncryptedContent.length > 0) ||
+		(Array.isArray(options.reasoningContent) &&
+			options.reasoningContent.length > 0);
 	const normalizedToolCalls = Array.isArray(toolCalls)
 		? toolCalls
 				.map((call: any) =>
@@ -156,11 +181,14 @@ export function buildResponsesOutputItems(
 			? [{ type: 'tool_calls', tool_calls: normalizedToolCalls }]
 			: [];
 
-	if (normalizedReasoningText.length > 0) {
+	if (hasReasoningPayload) {
 		items.push(
 			createResponsesReasoningItem(normalizedReasoningText, {
 				id: options.reasoningId,
-				status: options.reasoningStatus || 'completed'
+				status: options.reasoningStatus || 'completed',
+				summary: options.reasoningSummary,
+				encryptedContent: options.reasoningEncryptedContent,
+				content: options.reasoningContent
 			})
 		);
 	}
@@ -179,7 +207,7 @@ export function buildResponsesOutputItems(
 
 export function buildResponsesUsage(
 	usage?: ResponsesUsage
-): Record<string, number> {
+): Record<string, any> {
 	const inputTokens =
 		typeof usage?.input_tokens === 'number'
 			? usage.input_tokens
@@ -204,8 +232,22 @@ export function buildResponsesUsage(
 		...(typeof inputTokens === 'number'
 			? { input_tokens: inputTokens }
 			: {}),
+		...(typeof inputTokens === 'number'
+			? {
+					input_tokens_details: {
+						cached_tokens: 0
+					}
+			  }
+			: {}),
 		...(typeof outputTokens === 'number'
 			? { output_tokens: outputTokens }
+			: {}),
+		...(typeof outputTokens === 'number'
+			? {
+					output_tokens_details: {
+						reasoning_tokens: 0
+					}
+			  }
 			: {}),
 		...(typeof totalTokens === 'number'
 			? { total_tokens: totalTokens }
@@ -226,6 +268,9 @@ export function buildResponsesResponseObject(params: {
 	reasoningText?: string;
 	reasoningId?: string;
 	reasoningStatus?: string;
+	reasoningSummary?: Record<string, any>[];
+	reasoningEncryptedContent?: string;
+	reasoningContent?: Record<string, any>[];
 	usage?: ResponsesUsage;
 }): Record<string, any> {
 	const usage = buildResponsesUsage(params.usage);
@@ -233,6 +278,7 @@ export function buildResponsesResponseObject(params: {
 		id: params.id,
 		object: 'response',
 		created: params.created,
+		created_at: params.created,
 		model: params.model,
 		status: params.status || 'completed',
 		output: buildResponsesOutputItems(params.outputText, params.toolCalls, {
@@ -241,7 +287,10 @@ export function buildResponsesResponseObject(params: {
 			functionCallStatus: params.functionCallStatus,
 			reasoningText: params.reasoningText,
 			reasoningId: params.reasoningId,
-			reasoningStatus: params.reasoningStatus
+			reasoningStatus: params.reasoningStatus,
+			reasoningSummary: params.reasoningSummary,
+			reasoningEncryptedContent: params.reasoningEncryptedContent,
+			reasoningContent: params.reasoningContent
 		}),
 		output_text: params.outputText,
 		...(Object.keys(usage).length > 0 ? { usage } : {})

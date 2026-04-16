@@ -1085,7 +1085,7 @@ adminRouter.post('/api-keys/reset-usage', adminOnlyMiddleware, async (request: R
     }
 });
 
-adminRouter.post('/api-keys/settle-billing', adminOnlyMiddleware, async (request: Request, response: Response) => {
+async function handleSettleBillingRequest(request: Request, response: Response) {
     try {
         const payload = await request.json();
         if (!validateAdminApiKeySelector(payload)) {
@@ -1141,7 +1141,10 @@ adminRouter.post('/api-keys/settle-billing', adminOnlyMiddleware, async (request
             });
         }
     }
-});
+}
+
+adminRouter.post('/api-keys/settle-billing', adminOnlyMiddleware, handleSettleBillingRequest);
+adminRouter.post('/api-keys/mark-paid', adminOnlyMiddleware, handleSettleBillingRequest);
 
 adminRouter.post('/api-keys/update', adminOnlyMiddleware, async (request: Request, response: Response) => {
     try {

@@ -21,8 +21,10 @@ export type StoredResponsesHistoryEntry = {
 
 export type ResponsesHistoryMergeResult = {
   input: any[];
+  inputDelta: any[];
   replayDepth: number;
   itemCount: number;
+  overlapTrimmed: number;
 };
 
 export type ResponsesHistoryStoragePlan = {
@@ -270,10 +272,27 @@ export async function saveResponsesHistoryEntry(entry: StoredResponsesHistoryEnt
   }
 }
 
-export function buildStoredResponsesHistoryOutput(outputText: string, toolCalls?: any[]): any[] {
+export function buildStoredResponsesHistoryOutput(
+  outputText: string,
+  toolCalls?: any[],
+  options: {
+    reasoningText?: string;
+    reasoningId?: string;
+    reasoningStatus?: string;
+    reasoningSummary?: Record<string, any>[];
+    reasoningEncryptedContent?: string;
+    reasoningContent?: Record<string, any>[];
+  } = {},
+): any[] {
   return buildResponsesOutputItems(outputText || '', toolCalls, {
     messageStatus: 'completed',
     functionCallStatus: 'completed',
+    reasoningText: options.reasoningText,
+    reasoningId: options.reasoningId,
+    reasoningStatus: options.reasoningStatus,
+    reasoningSummary: options.reasoningSummary,
+    reasoningEncryptedContent: options.reasoningEncryptedContent,
+    reasoningContent: options.reasoningContent,
   });
 }
 
@@ -289,6 +308,55 @@ function estimateResponsesHistoryStorageBytes(value: unknown): number {
   } catch {
     return Buffer.byteLength(String(value ?? ''), 'utf8');
   }
+}
+
+function serializeResponsesHistoryItem(value: unknown): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value ?? '');
+  }
+}
+
+/**
+ * Prevent duplicated context growth when callers send input that already
+ * contains reconstructed history (full replay or overlapping tail).
+ */
+function computeResponsesHistoryInputOverlap(historyItems: any[], nextInput: any[]): number {
+  if (!Array.isArray(historyItems) || !Array.isArray(nextInput) || nextInput.length === 0) {
+    return 0;
+  }
+
+  const historySerialized = historyItems.map((item) => serializeResponsesHistoryItem(item));
+  const nextSerialized = nextInput.map((item) => serializeResponsesHistoryItem(item));
+  const historyLength = historySerialized.length;
+
+  // Full replay: next input starts with the entire reconstructed history.
+  if (
+    historyLength > 0
+    && historyLength <= nextSerialized.length
+    && historySerialized.every((item, index) => item === nextSerialized[index])
+  ) {
+    return historyLength;
+  }
+
+  // Partial replay: next input starts with a suffix from reconstructed history.
+  const maxOverlap = Math.min(historyLength, nextSerialized.length);
+  for (let overlapSize = maxOverlap; overlapSize > 0; overlapSize -= 1) {
+    let matched = true;
+    for (let index = 0; index < overlapSize; index += 1) {
+      if (
+        historySerialized[historyLength - overlapSize + index]
+        !== nextSerialized[index]
+      ) {
+        matched = false;
+        break;
+      }
+    }
+    if (matched) return overlapSize;
+  }
+
+  return 0;
 }
 
 export function buildResponsesHistoryStoragePlan(params: {
@@ -374,9 +442,18 @@ export async function mergeResponsesHistoryInput(
     }
   }
 
+  const reconstructedHistory = cloneResponsesHistoryValue(merged);
   const clonedNextInput = cloneResponsesHistoryValue(nextInput || []);
-  storageBytes += estimateResponsesHistoryStorageBytes(clonedNextInput);
-  merged.push(...clonedNextInput);
+  const overlapTrimmed = computeResponsesHistoryInputOverlap(
+    reconstructedHistory,
+    clonedNextInput,
+  );
+  const inputDelta = overlapTrimmed > 0
+    ? clonedNextInput.slice(overlapTrimmed)
+    : clonedNextInput;
+
+  storageBytes += estimateResponsesHistoryStorageBytes(inputDelta);
+  merged.push(...inputDelta);
   if (countHistoryItems(merged) > RESPONSES_HISTORY_MAX_ITEMS) {
     throw new Error(
       `Responses history exceeded item limit (${RESPONSES_HISTORY_MAX_ITEMS}). Start a new response thread.`
@@ -390,7 +467,9 @@ export async function mergeResponsesHistoryInput(
 
   return {
     input: merged,
+    inputDelta,
     replayDepth: chain.length + 1,
     itemCount: countHistoryItems(merged),
+    overlapTrimmed,
   };
 }

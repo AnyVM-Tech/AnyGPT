@@ -5,6 +5,7 @@ import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { isNonChatModel } from './openaiRouteUtils.js';
 import { extractRetryAfterMs } from './errorClassification.js';
+import { buildVideoPricingMetadata } from './videoPricing.js';
 
 // --- Dynamic Pricing ---
 // Loads base pricing from pricing.json and adjusts based on provider count
@@ -434,293 +435,135 @@ function collectAvailabilityConstraintMetadata(modelData: any): {
         };
     }
 
+    const capabilityConstraintAliases = new Map<string, ReadonlySet<string>>([
+        ['image_output', new Set([
+            'image',
+            'image_output',
+            'image_generation',
+            'image_gen',
+            'image_output_generation',
+            'image_output_gen',
+            'image_output_only',
+            'image_output_create',
+            'image_output_create_only',
+            'image_creation',
+            'image_generation_unavailable',
+            'image_generation_unavailable_in_country',
+            'image_generation_unavailable_in_countries',
+            'image_generation_unavailable_in_region',
+            'image_generation_unavailable_in_regions',
+            'generation_unavailable_in_country',
+            'generation_unavailable_in_countries',
+            'generation_unavailable_in_region',
+            'generation_unavailable_in_regions',
+            'blocked_in_country',
+            'blocked_in_region',
+            'blocked_in_provider_country',
+            'blocked_in_provider_region',
+            'country_blocked',
+            'region_blocked',
+            'image_generation_unavailable_in_provider_region',
+            'image_generation_unavailable_in_provider_regions',
+            'image_generation_unavailable_in_provider_country',
+            'image_generation_unavailable_in_provider_countries',
+            'generation_unavailable_in_provider_region',
+            'generation_unavailable_in_provider_regions',
+            'generation_unavailable_in_provider_country',
+            'generation_unavailable_in_provider_countries',
+            'provider_region',
+            'provider_country',
+            'provider_region_unavailable',
+            'provider_country_unavailable',
+            'provider_cap_blocked',
+            'capability_blocked',
+            'blocked_image_output',
+            'image_output_blocked',
+            'image_output_unavailable',
+            'image_output_unavailable_in_country',
+            'image_output_unavailable_in_region',
+            'provider_region_blocked',
+            'regional_availability',
+            'image_generation_blocked_in_country',
+            'image_generation_blocked_in_region',
+            'image_generation_blocked_in_provider_region',
+            'image_output_unavailable_in_provider_region',
+            'image_output_unavailable_in_provider_regions',
+            'image_output_blocked_in_country',
+            'image_output_blocked_in_region',
+            'image_output_blocked_in_provider_region',
+            'image_output_blocked_in_provider_regions',
+            'image_generation_unavailable_in_the_provider_region',
+            'image_generation_unavailable_in_the_provider_regions',
+            'image_generation_unavailable_in_your_country',
+            'image_generation_unavailable_in_your_region',
+            'image_generation_unavailable_for_your_country',
+            'image_generation_unavailable_for_your_region',
+            'image_generation_unavailable_in_providers_region',
+            'image_generation_unavailable_in_location',
+            'provider_region_image_output',
+            'country_image_output',
+            'image_generation_output',
+            'image_generation_only',
+            'image_generation_create',
+            'image_generation_create_output',
+            'image_generation_create_only',
+            'image_generation_create_capability',
+            'image_generation_capability',
+            'image_generation_blocked',
+            'image_generation_disabled',
+            'image_generation_restricted',
+            'image_generation_region_blocked',
+            'image_generation_country_blocked',
+            'image_generation_geo_blocked',
+            'image_generation_geo_restricted',
+            'image_generation_not_available',
+            'image_generation_not_supported',
+            'image_generation_only_blocked',
+            'image_generation_only_unavailable',
+            'image_create',
+            'image_create_only',
+            'image_create_capability',
+            'image_creation_only',
+            'image_creation_capability',
+            'images',
+            'images_generation',
+            'images_create',
+            'generate_images',
+            'generated_images',
+            'image_gen_blocked',
+            'image_gen_unavailable',
+            'image_output_disabled',
+            'image_output_restricted',
+            'image_output_region_blocked',
+            'image_output_country_blocked',
+            'image_output_geo_blocked',
+            'image_output_not_available',
+            'image_output_not_supported',
+            'image_generation_removed',
+            'image_output_removed',
+            'image_generation_create_image',
+            'image_generation_create_images',
+            'image_generation_images',
+            'image_generation_image',
+            'image_output_create_image',
+            'image_output_create_images',
+            'image_output_images',
+            'image_output_image',
+        ])],
+        ['image_input', new Set(['vision', 'image_input_vision'])],
+        ['audio_input', new Set(['audio', 'speech_to_text', 'speech_input', 'transcription'])],
+        ['audio_output', new Set(['text_to_speech', 'speech', 'speech_output'])],
+        ['tool_calling', new Set(['tools', 'function_calling', 'tool_use'])],
+    ]);
+
     const normalizeCapabilityConstraintKey = (key: unknown): string => {
         const normalized = String(key || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
         if (!normalized) return '';
-        if (
-            normalized === 'image'
-            || normalized === 'image_output'
-            || normalized === 'image_generation'
-            || normalized === 'image_gen'
-            || normalized === 'image_output_generation'
-            || normalized === 'image_output_gen'
-            || normalized === 'image_output_only'
-            || normalized === 'image_output_create'
-            || normalized === 'image_output_create_only'
-            || normalized === 'image_creation'
-            || normalized === 'image_generation_unavailable'
-            || normalized === 'image_generation_unavailable_in_country'
-            || normalized === 'image_generation_unavailable_in_countries'
-            || normalized === 'image_generation_unavailable_in_region'
-            || normalized === 'image_generation_unavailable_in_regions'
-            || normalized === 'generation_unavailable_in_country'
-            || normalized === 'generation_unavailable_in_countries'
-            || normalized === 'generation_unavailable_in_region'
-            || normalized === 'generation_unavailable_in_regions'
-            || normalized === 'blocked_in_country'
-            || normalized === 'blocked_in_region'
-            || normalized === 'blocked_in_provider_country'
-            || normalized === 'blocked_in_provider_region'
-            || normalized === 'country_blocked'
-            || normalized === 'region_blocked'
-            || normalized === 'image_generation_unavailable_in_region'
-            || normalized === 'image_generation_unavailable_in_regions'
-            || normalized === 'image_generation_unavailable_in_provider_region'
-            || normalized === 'image_generation_unavailable_in_provider_regions'
-            || normalized === 'image_generation_unavailable_in_provider_country'
-            || normalized === 'image_generation_unavailable_in_provider_countries'
-            || normalized === 'generation_unavailable_in_country'
-            || normalized === 'generation_unavailable_in_countries'
-            || normalized === 'generation_unavailable_in_region'
-            || normalized === 'generation_unavailable_in_regions'
-            || normalized === 'generation_unavailable_in_provider_region'
-            || normalized === 'generation_unavailable_in_provider_regions'
-            || normalized === 'generation_unavailable_in_provider_country'
-            || normalized === 'generation_unavailable_in_provider_countries'
-            || normalized === 'provider_region'
-            || normalized === 'provider_country'
-            || normalized === 'provider_region_unavailable'
-            || normalized === 'provider_country_unavailable'
-            || normalized === 'provider_cap_blocked'
-            || normalized === 'capability_blocked'
-            || normalized === 'blocked_image_output'
-            || normalized === 'image_output_blocked'
-            || normalized === 'image_output_unavailable'
-            || normalized === 'image_output_unavailable_in_country'
-            || normalized === 'image_output_unavailable_in_region'
-            || normalized === 'image_generation_unavailable_in_provider_region'
-            || normalized === 'image_generation_unavailable_in_provider_regions'
-            || normalized === 'image_generation_unavailable_in_region'
-            || normalized === 'image_generation_unavailable_in_regions'
-            || normalized === 'provider_region_blocked'
-            || normalized === 'provider_region_unavailable'
-            || normalized === 'region_blocked'
-            || normalized === 'regional_availability'
-            || normalized === 'image_generation_unavailable_in_region'
-            || normalized === 'image_generation_unavailable_in_regions'
-            || normalized === 'image_generation_unavailable_in_provider_region'
-            || normalized === 'image_generation_unavailable_in_provider_regions'
-            || normalized === 'image_generation_blocked_in_country'
-            || normalized === 'image_generation_blocked_in_region'
-            || normalized === 'image_generation_blocked_in_provider_region'
-            || normalized === 'image_generation_unavailable_in_region'
-            || normalized === 'image_generation_unavailable_in_regions'
-            || normalized === 'image_generation_unavailable_in_provider_region'
-            || normalized === 'image_generation_unavailable_in_provider_regions'
-            || normalized === 'generation_unavailable_in_country'
-            || normalized === 'generation_unavailable_in_countries'
-            || normalized === 'generation_unavailable_in_region'
-            || normalized === 'generation_unavailable_in_regions'
-            || normalized === 'generation_unavailable_in_provider_region'
-            || normalized === 'generation_unavailable_in_provider_regions'
-            || normalized === 'image_generation_unavailable_in_provider_region'
-            || normalized === 'generation_unavailable_in_country'
-            || normalized === 'generation_unavailable_in_region'
-            || normalized === 'generation_unavailable_in_provider_region'
-            || normalized === 'image_generation_unavailable_in_provider_region'
-            || normalized === 'image_generation_unavailable_in_provider_regions'
-            || normalized === 'image_output_unavailable_in_country'
-            || normalized === 'image_output_unavailable_in_region'
-            || normalized === 'image_output_unavailable_in_provider_region'
-            || normalized === 'image_output_unavailable_in_provider_regions'
-            || normalized === 'image_output_blocked_in_country'
-            || normalized === 'image_output_blocked_in_region'
-            || normalized === 'image_output_blocked_in_provider_region'
-            || normalized === 'image_output_blocked_in_provider_regions'
-            || normalized === 'image_generation_unavailable_in_country'
-            || normalized === 'image_generation_unavailable_in_provider_region'
-            || normalized === 'image_generation_unavailable_in_provider_regions'
-            || normalized === 'image_output_unavailable_in_country'
-            || normalized === 'image_output_unavailable_in_provider_region'
-            || normalized === 'image_output_unavailable_in_provider_regions'
-            || normalized === 'image_output_blocked_in_country'
-            || normalized === 'image_output_blocked_in_provider_region'
-            || normalized === 'image_output_blocked_in_provider_regions'
-            || normalized === 'image_generation_unavailable_in_provider_region'
-            || normalized === 'image_generation_unavailable_in_provider_regions'
-            || normalized === 'image_output_unavailable_in_country'
-            || normalized === 'image_output_unavailable_in_region'
-            || normalized === 'image_output_unavailable_in_provider_region'
-            || normalized === 'image_output_blocked_in_country'
-            || normalized === 'image_output_blocked_in_region'
-            || normalized === 'image_output_blocked_in_provider_region'
-            || normalized === 'image_generation_unavailable_in_provider_region'
-            || normalized === 'image_generation_unavailable_in_provider_regions'
-            || normalized === 'image_generation_unavailable_in_the_provider_region'
-            || normalized === 'image_generation_unavailable_in_the_provider_regions'
-            || normalized === 'image_generation_unavailable_in_your_country'
-            || normalized === 'image_generation_unavailable_in_your_region'
-            || normalized === 'image_generation_unavailable_for_your_country'
-            || normalized === 'image_generation_unavailable_for_your_region'
-            || normalized === 'image_generation_unavailable_in_provider_region'
-            || normalized === 'image_generation_unavailable_in_country'
-            || normalized === 'blocked_in_provider_region'
-            || normalized === 'blocked_in_country'
-            || normalized === 'provider_region_blocked'
-            || normalized === 'country_blocked'
-            || normalized === 'image_generation_unavailable_in_provider_region'
-            || normalized === 'image_generation_unavailable_in_provider_regions'
-            || normalized === 'image_output_unavailable_in_country'
-            || normalized === 'image_output_unavailable_in_region'
-            || normalized === 'image_output_unavailable_in_provider_region'
-            || normalized === 'image_output_unavailable_in_provider_regions'
-            || normalized === 'blocked_in_country'
-            || normalized === 'blocked_in_region'
-            || normalized === 'blocked_in_provider_region'
-            || normalized === 'image_generation_unavailable_in_provider_region'
-            || normalized === 'image_generation_unavailable_in_the_provider_region'
-            || normalized === 'image_generation_unavailable_in_your_country'
-            || normalized === 'image_generation_unavailable_in_your_region'
-            || normalized === 'image_generation_unavailable_for_your_region'
-            || normalized === 'image_generation_unavailable_for_your_country'
-            || normalized === 'image_generation_blocked_in_country'
-            || normalized === 'image_generation_blocked_in_region'
-            || normalized === 'image_generation_blocked_in_provider_region'
-            || normalized === 'image_output_unavailable_in_country'
-            || normalized === 'image_output_unavailable_in_region'
-            || normalized === 'image_output_unavailable_in_provider_region'
-            || normalized === 'image_output_blocked_in_country'
-            || normalized === 'image_output_blocked_in_region'
-            || normalized === 'image_output_blocked_in_provider_region'
-            || normalized === 'image_generation_unavailable_in_provider_region'
-            || normalized === 'image_generation_blocked_in_country'
-            || normalized === 'image_generation_blocked_in_region'
-            || normalized === 'image_generation_blocked_in_provider_region'
-            || normalized === 'blocked_in_country'
-            || normalized === 'blocked_in_region'
-            || normalized === 'blocked_in_provider_region'
-            || normalized === 'provider_region_blocked'
-            || normalized === 'country_blocked'
-            || normalized === 'region_blocked'
-            || normalized === 'image_generation_unavailable_in_provider_region'
-            || normalized === 'image_generation_blocked_in_country'
-            || normalized === 'image_generation_blocked_in_region'
-            || normalized === 'image_generation_blocked_in_provider_region'
-            || normalized === 'blocked_in_country'
-            || normalized === 'blocked_in_region'
-            || normalized === 'blocked_in_provider_region'
-            || normalized === 'image_generation_unavailable_in_provider_region'
-            || normalized === 'image_generation_unavailable_in_providers_region'
-            || normalized === 'image_generation_blocked_in_country'
-            || normalized === 'image_generation_blocked_in_region'
-            || normalized === 'image_generation_blocked_in_provider_region'
-            || normalized === 'image_output_unavailable_in_country'
-            || normalized === 'image_output_unavailable_in_region'
-            || normalized === 'image_output_unavailable_in_provider_region'
-            || normalized === 'image_output_blocked_in_country'
-            || normalized === 'image_output_blocked_in_region'
-            || normalized === 'image_output_blocked_in_provider_region'
-            || normalized === 'image_generation_unavailable_in_provider_region'
-            || normalized === 'image_generation_unavailable_in_location'
-            || normalized === 'blocked_in_country'
-            || normalized === 'blocked_in_region'
-            || normalized === 'blocked_in_provider_region'
-            || normalized === 'image_generation_unavailable_in_provider_region'
-            || normalized === 'image_output_unavailable'
-            || normalized === 'image_output_unavailable_in_country'
-            || normalized === 'image_output_unavailable_in_region'
-            || normalized === 'image_output_unavailable_in_provider_region'
-            || normalized === 'blocked_in_country'
-            || normalized === 'blocked_in_region'
-            || normalized === 'blocked_in_provider_region'
-            || normalized === 'image_generation_unavailable_in_provider_region'
-            || normalized === 'image_output_unavailable'
-            || normalized === 'image_output_unavailable_in_country'
-            || normalized === 'image_output_unavailable_in_region'
-            || normalized === 'image_output_unavailable_in_provider_region'
-            || normalized === 'provider_region_image_output'
-            || normalized === 'country_image_output'
-            || normalized === 'image_generation_output'
-            || normalized === 'image_generation_only'
-            || normalized === 'image_generation_create'
-            || normalized === 'image_generation_create_output'
-            || normalized === 'image_generation_create_only'
-            || normalized === 'image_generation_create_capability'
-            || normalized === 'image_generation_capability'
-            || normalized === 'image_generation_blocked'
-            || normalized === 'image_generation_unavailable'
-            || normalized === 'image_generation_disabled'
-            || normalized === 'image_generation_restricted'
-            || normalized === 'image_generation_region_blocked'
-            || normalized === 'image_generation_country_blocked'
-            || normalized === 'image_generation_geo_blocked'
-            || normalized === 'image_generation_geo_restricted'
-            || normalized === 'image_generation_not_available'
-            || normalized === 'image_generation_not_supported'
-            || normalized === 'image_generation_only_blocked'
-            || normalized === 'image_generation_only_unavailable'
-            || normalized === 'image_create'
-            || normalized === 'image_create_only'
-            || normalized === 'image_create_capability'
-            || normalized === 'image_creation_only'
-            || normalized === 'image_creation_capability'
-            || normalized === 'images'
-            || normalized === 'images_generation'
-            || normalized === 'images_create'
-            || normalized === 'generate_images'
-            || normalized === 'generated_images'
-            || normalized === 'image_gen_blocked'
-            || normalized === 'image_gen_unavailable'
-            || normalized === 'image_output_blocked'
-            || normalized === 'image_output_unavailable'
-            || normalized === 'image_output_disabled'
-            || normalized === 'image_output_restricted'
-            || normalized === 'image_output_region_blocked'
-            || normalized === 'image_output_country_blocked'
-            || normalized === 'image_output_geo_blocked'
-            || normalized === 'image_output_not_available'
-            || normalized === 'image_output_not_supported'
-            || normalized === 'image_generation_unavailable'
-            || normalized === 'image_output_unavailable'
-            || normalized === 'image_generation_blocked'
-            || normalized === 'image_output_blocked'
-            || normalized === 'image_generation_region_blocked'
-            || normalized === 'image_output_region_blocked'
-            || normalized === 'image_generation_country_blocked'
-            || normalized === 'image_output_country_blocked'
-            || normalized === 'image_generation_create_only'
-            || normalized === 'image_generation_create_image'
-            || normalized === 'image_generation_create_images'
-            || normalized === 'image_generation_unavailable'
-            || normalized === 'image_generation_blocked'
-            || normalized === 'image_generation_disabled'
-            || normalized === 'image_generation_removed'
-            || normalized === 'image_generation_create_image'
-            || normalized === 'image_generation_create_images'
-            || normalized === 'image_generation_unavailable'
-            || normalized === 'image_generation_blocked'
-            || normalized === 'image_generation_disabled'
-            || normalized === 'image_generation_removed'
-            || normalized === 'image_output_unavailable'
-            || normalized === 'image_output_blocked'
-            || normalized === 'image_output_disabled'
-            || normalized === 'image_output_removed'
-            || normalized === 'image_generation_images'
-            || normalized === 'image_generation_image'
-            || normalized === 'image_generation_capability'
-            || normalized === 'image_output_create'
-            || normalized === 'image_output_create_image'
-            || normalized === 'image_output_create_images'
-            || normalized === 'image_output_images'
-            || normalized === 'image_output_image'
-        ) return 'image_output';
-        if (normalized === 'vision' || normalized === 'image_input_vision') return 'image_input';
-        if (
-            normalized === 'audio'
-            || normalized === 'speech_to_text'
-            || normalized === 'speech_input'
-            || normalized === 'transcription'
-        ) return 'audio_input';
-        if (
-            normalized === 'text_to_speech'
-            || normalized === 'speech'
-            || normalized === 'speech_output'
-        ) return 'audio_output';
-        if (
-            normalized === 'tools'
-            || normalized === 'function_calling'
-            || normalized === 'tool_use'
-        ) return 'tool_calling';
+        for (const [canonicalKey, aliases] of capabilityConstraintAliases) {
+            if (aliases.has(normalized)) {
+                return canonicalKey;
+            }
+        }
         return normalized;
     };
 
@@ -1186,6 +1029,10 @@ export function calculateDynamicPricing(modelId: string, providerCount: number):
         shown.output = 0;
     }
     shown.unit = 'per_million_tokens';
+    const videoPricingMetadata = buildVideoPricingMetadata(modelId);
+    if (videoPricingMetadata) {
+        Object.assign(shown, videoPricingMetadata);
+    }
     return shown;
 }
 

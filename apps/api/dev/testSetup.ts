@@ -5,11 +5,7 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const apiRoot = path.resolve(__dirname, '..');
-const testDataRoot = path.join(apiRoot, '.tmp', 'test-data');
-const DEFAULT_TEST_MODELS_CREATED_AT = 1_700_000_000;
-
-export const DEFAULT_TEST_API_KEY = 'test-key-for-automated-testing-0123456789abcdef';
-const LEGACY_TEST_API_KEY = 'test-key-for-mock-provider';
+export const DEFAULT_TEST_API_KEY = 'test-key-for-mock-provider';
 
 function resolveTestDataPath(envVarName: string, defaultPath: string): string {
   const override = process.env[envVarName];
@@ -20,37 +16,76 @@ function resolveTestDataPath(envVarName: string, defaultPath: string): string {
 }
 
 // Create a test configuration that sets up providers.json to use the mock provider
-export function setupMockProviderConfig(mode: 'openai' | 'anthropic' = 'openai') {
+export function setupMockProviderConfig(_mode: 'openai' | 'anthropic' = 'openai') {
   const mockPort = Number(process.env.MOCK_PROVIDER_PORT || '3001');
   const testApiKey = process.env.TEST_API_KEY || DEFAULT_TEST_API_KEY;
   const hashSecret = process.env.API_KEY_HASH_SECRET || 'anygpt-api';
   const hashIterations = Number(process.env.API_KEY_HASH_ITERATIONS || '20000');
   const hashKeylen = Number(process.env.API_KEY_HASH_KEYLEN || '32');
   const hashDigest = 'sha256';
-  const providersFilePath = resolveTestDataPath('API_PROVIDERS_FILE', path.join(testDataRoot, 'providers.json'));
-  const keysFilePath = resolveTestDataPath('API_KEYS_FILE', path.join(testDataRoot, 'keys.json'));
-  const modelsFilePath = resolveTestDataPath('API_MODELS_FILE', path.join(testDataRoot, 'models.json'));
+  const providersFilePath = resolveTestDataPath('API_PROVIDERS_FILE', path.join(apiRoot, 'providers.json'));
+  const keysFilePath = resolveTestDataPath('API_KEYS_FILE', path.join(apiRoot, 'keys.json'));
+  const modelsFilePath = resolveTestDataPath('API_MODELS_FILE', path.join(apiRoot, 'models.json'));
   const backupProvidersPath = `${providersFilePath}.backup`;
   const backupKeysPath = `${keysFilePath}.backup`;
   const backupModelsPath = `${modelsFilePath}.backup`;
-
-  const providerId = mode === 'anthropic' ? 'claude-mock' : 'openai-mock';
-  const primaryModelId = mode === 'anthropic' ? 'claude-3-5-sonnet' : 'gpt-3.5-turbo';
-  const secondaryModelId = mode === 'anthropic' ? 'claude-3-7-sonnet' : 'gpt-5.4';
-  const genericOpenAiCompatibleProviderId = 'acme-compatible-mock';
-  const genericOpenAiCompatibleModelId = 'text-pro-1';
-  const providerUrl = mode === 'anthropic'
-    ? `http://localhost:${mockPort}/v1/messages`
-    : `http://localhost:${mockPort}/v1/chat/completions`;
+  
+  // Try to preserve existing response times and stats
+  let existingProvider = null;
+  if (fs.existsSync(providersFilePath)) {
+    try {
+      const existingProviders = JSON.parse(fs.readFileSync(providersFilePath, 'utf8'));
+      existingProvider = existingProviders.find((p: any) => p.id === 'openai-mock');
+    } catch (error) {
+      console.log('[TEST-SETUP] Could not parse existing providers.json, starting fresh');
+    }
+  }
 
   const mockProvider = {
-    id: providerId,
+    id: 'openai-mock', // Use existing provider ID to override it
     apiKey: 'mock-api-key-for-testing',
-    provider_url: providerUrl,
+    provider_url: `http://localhost:${mockPort}/v1/chat/completions`, // Point to our mock
+    streamingCompatible: true, // Mock provider supports streaming
+    models: {
+      'gpt-3.5-turbo': {
+        id: 'gpt-3.5-turbo',
+        token_generation_speed: existingProvider?.models?.['gpt-3.5-turbo']?.token_generation_speed || 50,
+        response_times: existingProvider?.models?.['gpt-3.5-turbo']?.response_times || [],
+        errors: existingProvider?.models?.['gpt-3.5-turbo']?.errors || 0,
+        consecutive_errors: existingProvider?.models?.['gpt-3.5-turbo']?.consecutive_errors || 0,
+        avg_response_time: existingProvider?.models?.['gpt-3.5-turbo']?.avg_response_time || null,
+        avg_provider_latency: existingProvider?.models?.['gpt-3.5-turbo']?.avg_provider_latency || null,
+        avg_token_speed: existingProvider?.models?.['gpt-3.5-turbo']?.avg_token_speed || null
+      },
+      'gpt-5.4': {
+        id: 'gpt-5.4',
+        token_generation_speed: existingProvider?.models?.['gpt-5.4']?.token_generation_speed || 50,
+        response_times: existingProvider?.models?.['gpt-5.4']?.response_times || [],
+        errors: existingProvider?.models?.['gpt-5.4']?.errors || 0,
+        consecutive_errors: existingProvider?.models?.['gpt-5.4']?.consecutive_errors || 0,
+        avg_response_time: existingProvider?.models?.['gpt-5.4']?.avg_response_time || null,
+        avg_provider_latency: existingProvider?.models?.['gpt-5.4']?.avg_provider_latency || null,
+        avg_token_speed: existingProvider?.models?.['gpt-5.4']?.avg_token_speed || null
+      }
+    },
+    avg_response_time: existingProvider?.avg_response_time || null,
+    avg_provider_latency: existingProvider?.avg_provider_latency || null,
+    errors: existingProvider?.errors || 0,
+    provider_score: existingProvider?.provider_score || null,
+    disabled: false
+  };
+
+  const nativeMockProvider = {
+    id: 'native-openai-mock',
+    apiKey: 'mock-api-key-for-testing',
+    provider_url: `http://localhost:${mockPort}/v1`,
+    family: 'openai',
+    supportsNativeResponses: true,
+    supportsOpenAIChatCompletions: true,
     streamingCompatible: true,
     models: {
-      [primaryModelId]: {
-        id: primaryModelId,
+      'gpt-3.5-turbo': {
+        id: 'gpt-3.5-turbo',
         token_generation_speed: 50,
         response_times: [],
         errors: 0,
@@ -59,8 +94,8 @@ export function setupMockProviderConfig(mode: 'openai' | 'anthropic' = 'openai')
         avg_provider_latency: null,
         avg_token_speed: null
       },
-      [secondaryModelId]: {
-        id: secondaryModelId,
+      'gpt-5.4': {
+        id: 'gpt-5.4',
         token_generation_speed: 50,
         response_times: [],
         errors: 0,
@@ -70,41 +105,8 @@ export function setupMockProviderConfig(mode: 'openai' | 'anthropic' = 'openai')
         avg_token_speed: null
       }
     },
-    avg_response_time: null,
-    avg_provider_latency: null,
-    errors: 0,
-    provider_score: mode === 'anthropic' ? 95 : 100,
     disabled: false
   };
-
-  const additionalProviders = mode === 'openai'
-    ? [
-        {
-          id: genericOpenAiCompatibleProviderId,
-          apiKey: 'mock-api-key-for-testing',
-          provider_url: providerUrl,
-          native_protocol: 'openai',
-          streamingCompatible: true,
-          models: {
-            [genericOpenAiCompatibleModelId]: {
-              id: genericOpenAiCompatibleModelId,
-              token_generation_speed: 50,
-              response_times: [],
-              errors: 0,
-              consecutive_errors: 0,
-              avg_response_time: null,
-              avg_provider_latency: null,
-              avg_token_speed: null
-            }
-          },
-          avg_response_time: null,
-          avg_provider_latency: null,
-          errors: 0,
-          provider_score: 90,
-          disabled: false
-        }
-      ]
-    : [];
 
   const testUserKey = {
     userId: 'test-user',
@@ -114,41 +116,28 @@ export function setupMockProviderConfig(mode: 'openai' | 'anthropic' = 'openai')
     tier: 'enterprise'
   };
 
-  const created = DEFAULT_TEST_MODELS_CREATED_AT;
+  const created = Math.floor(Date.now() / 1000);
   const testModels = {
     object: 'list',
     data: [
       {
-        id: primaryModelId,
+        id: 'gpt-3.5-turbo',
         object: 'model',
         created,
-        owned_by: providerId,
+        owned_by: 'openai-mock',
         providers: 1,
         throughput: 50,
         capabilities: ['text', 'tool_calling'],
       },
       {
-        id: secondaryModelId,
+        id: 'gpt-5.4',
         object: 'model',
         created,
-        owned_by: providerId,
+        owned_by: 'openai-mock',
         providers: 1,
         throughput: 50,
         capabilities: ['text', 'tool_calling'],
       },
-      ...(mode === 'openai'
-        ? [
-            {
-              id: genericOpenAiCompatibleModelId,
-              object: 'model',
-              created,
-              owned_by: genericOpenAiCompatibleProviderId,
-              providers: 1,
-              throughput: 50,
-              capabilities: ['text', 'tool_calling'],
-            },
-          ]
-        : []),
     ],
   };
 
@@ -173,13 +162,22 @@ export function setupMockProviderConfig(mode: 'openai' | 'anthropic' = 'openai')
   }
 
   // Write mock provider configuration
-  fs.writeFileSync(providersFilePath, JSON.stringify([mockProvider, ...additionalProviders], null, 2));
+  fs.writeFileSync(providersFilePath, JSON.stringify([mockProvider, nativeMockProvider], null, 2));
   console.log('[TEST-SETUP] Created mock provider configuration');
 
   fs.writeFileSync(modelsFilePath, JSON.stringify(testModels, null, 2));
   console.log('[TEST-SETUP] Created isolated test models.json');
 
   // Add test API key to keys.json
+  let existingKeys: Record<string, typeof testUserKey> = {};
+  if (fs.existsSync(keysFilePath)) {
+    try {
+      existingKeys = JSON.parse(fs.readFileSync(keysFilePath, 'utf8'));
+    } catch (error) {
+      console.log('[TEST-SETUP] Could not parse existing keys.json, starting fresh');
+    }
+  }
+
   const deriveKeyHash = (value: string) => crypto.pbkdf2Sync(
     value,
     hashSecret,
@@ -188,7 +186,9 @@ export function setupMockProviderConfig(mode: 'openai' | 'anthropic' = 'openai')
     hashDigest
   ).toString('hex');
 
-  const updatedKeys: Record<string, typeof testUserKey> = {};
+  const updatedKeys: Record<string, typeof testUserKey> = {
+    ...existingKeys,
+  };
 
   if (!updatedKeys[testApiKey]) {
     updatedKeys[testApiKey] = testUserKey;
@@ -199,11 +199,11 @@ export function setupMockProviderConfig(mode: 'openai' | 'anthropic' = 'openai')
     updatedKeys[hashedApiKey] = testUserKey;
   }
 
-  if (!updatedKeys[LEGACY_TEST_API_KEY]) {
-    updatedKeys[LEGACY_TEST_API_KEY] = testUserKey;
+  if (!updatedKeys[DEFAULT_TEST_API_KEY]) {
+    updatedKeys[DEFAULT_TEST_API_KEY] = testUserKey;
   }
 
-  const hashedFallbackKey = deriveKeyHash(LEGACY_TEST_API_KEY);
+  const hashedFallbackKey = deriveKeyHash(DEFAULT_TEST_API_KEY);
   if (!updatedKeys[hashedFallbackKey]) {
     updatedKeys[hashedFallbackKey] = testUserKey;
   }
@@ -212,36 +212,81 @@ export function setupMockProviderConfig(mode: 'openai' | 'anthropic' = 'openai')
   console.log('[TEST-SETUP] Added test API key to keys.json');
 }
 
-function restoreOrRemoveGeneratedFile(filePath: string, backupPath: string, label: string): void {
-  if (fs.existsSync(backupPath)) {
-    fs.copyFileSync(backupPath, filePath);
-    fs.unlinkSync(backupPath);
-    console.log(`[TEST-CLEANUP] Restored original ${label}`);
-    return;
-  }
-
-  if (fs.existsSync(filePath)) {
-    fs.unlinkSync(filePath);
-    console.log(`[TEST-CLEANUP] Removed generated ${label}`);
-  }
-}
-
-function removeDirectoryIfEmpty(dirPath: string): void {
-  if (!fs.existsSync(dirPath)) return;
-  if (fs.readdirSync(dirPath).length > 0) return;
-  fs.rmdirSync(dirPath);
-}
-
 export function restoreProviderConfig() {
-  const providersFilePath = resolveTestDataPath('API_PROVIDERS_FILE', path.join(testDataRoot, 'providers.json'));
-  const keysFilePath = resolveTestDataPath('API_KEYS_FILE', path.join(testDataRoot, 'keys.json'));
-  const modelsFilePath = resolveTestDataPath('API_MODELS_FILE', path.join(testDataRoot, 'models.json'));
+  const providersFilePath = resolveTestDataPath('API_PROVIDERS_FILE', path.join(apiRoot, 'providers.json'));
+  const keysFilePath = resolveTestDataPath('API_KEYS_FILE', path.join(apiRoot, 'keys.json'));
+  const modelsFilePath = resolveTestDataPath('API_MODELS_FILE', path.join(apiRoot, 'models.json'));
   const backupProvidersPath = `${providersFilePath}.backup`;
   const backupKeysPath = `${keysFilePath}.backup`;
   const backupModelsPath = `${modelsFilePath}.backup`;
 
-  restoreOrRemoveGeneratedFile(providersFilePath, backupProvidersPath, 'providers.json');
-  restoreOrRemoveGeneratedFile(keysFilePath, backupKeysPath, 'keys.json');
-  restoreOrRemoveGeneratedFile(modelsFilePath, backupModelsPath, 'models.json');
-  removeDirectoryIfEmpty(testDataRoot);
+  // Preserve response times and stats from the test run
+  let updatedProviderData = null;
+  if (fs.existsSync(providersFilePath)) {
+    try {
+      const currentProviders = JSON.parse(fs.readFileSync(providersFilePath, 'utf8'));
+      updatedProviderData = currentProviders.find((p: any) => p.id === 'openai-mock');
+    } catch (error) {
+      console.log('[TEST-CLEANUP] Could not parse current providers.json');
+    }
+  }
+
+  if (fs.existsSync(backupProvidersPath)) {
+    // Read the backup
+    const backupProviders = JSON.parse(fs.readFileSync(backupProvidersPath, 'utf8'));
+    
+    // Find the existing provider in backup and merge the new response times
+    if (updatedProviderData) {
+      const existingProviderIndex = backupProviders.findIndex((p: any) => p.id === 'openai-mock');
+      if (existingProviderIndex >= 0) {
+        // Merge response times and updated stats
+        const existingProvider = backupProviders[existingProviderIndex];
+        if (existingProvider.models && existingProvider.models['gpt-3.5-turbo'] && 
+            updatedProviderData.models && updatedProviderData.models['gpt-3.5-turbo']) {
+          
+          // Keep all the new response times, errors, and computed stats
+          existingProvider.models['gpt-3.5-turbo'].response_times = 
+            updatedProviderData.models['gpt-3.5-turbo'].response_times || existingProvider.models['gpt-3.5-turbo'].response_times;
+          existingProvider.models['gpt-3.5-turbo'].errors = 
+            updatedProviderData.models['gpt-3.5-turbo'].errors;
+          existingProvider.models['gpt-3.5-turbo'].consecutive_errors = 
+            updatedProviderData.models['gpt-3.5-turbo'].consecutive_errors;
+          existingProvider.models['gpt-3.5-turbo'].avg_response_time = 
+            updatedProviderData.models['gpt-3.5-turbo'].avg_response_time;
+          existingProvider.models['gpt-3.5-turbo'].avg_provider_latency = 
+            updatedProviderData.models['gpt-3.5-turbo'].avg_provider_latency;
+          existingProvider.models['gpt-3.5-turbo'].avg_token_speed = 
+            updatedProviderData.models['gpt-3.5-turbo'].avg_token_speed;
+          
+          // Update provider-level stats too
+          existingProvider.avg_response_time = updatedProviderData.avg_response_time;
+          existingProvider.avg_provider_latency = updatedProviderData.avg_provider_latency;
+          existingProvider.errors = updatedProviderData.errors;
+          existingProvider.provider_score = updatedProviderData.provider_score;
+          
+          console.log('[TEST-CLEANUP] Merged new response times and stats into original provider data');
+        }
+      }
+    }
+    
+    // Write the merged data back
+    fs.writeFileSync(providersFilePath, JSON.stringify(backupProviders, null, 2));
+    fs.unlinkSync(backupProvidersPath);
+    console.log('[TEST-CLEANUP] Restored providers.json with updated response times');
+  } else {
+    // If no backup exists, keep the current file (which should have the new response times)
+    console.log('[TEST-CLEANUP] No backup found, keeping current providers.json with new response times');
+  }
+
+  if (fs.existsSync(backupKeysPath)) {
+    fs.copyFileSync(backupKeysPath, keysFilePath);
+    fs.unlinkSync(backupKeysPath);
+    console.log('[TEST-CLEANUP] Restored original keys.json');
+  }
+
+  if (fs.existsSync(backupModelsPath)) {
+    fs.copyFileSync(backupModelsPath, modelsFilePath);
+    fs.unlinkSync(backupModelsPath);
+    console.log('[TEST-CLEANUP] Restored original models.json');
+  }
 }

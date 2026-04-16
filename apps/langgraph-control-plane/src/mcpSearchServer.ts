@@ -4,11 +4,43 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import * as z from 'zod/v4';
 
+type SearchSourceKind = 'web' | 'docs' | 'github' | 'youtube' | 'papers';
+
 type SearchResult = {
   title: string;
   url: string;
   description: string;
   source: string;
+  sourceKind: SearchSourceKind;
+};
+
+const SEARCH_SOURCE_SITE_FILTERS: Record<Exclude<SearchSourceKind, 'web'>, string[]> = {
+  docs: [
+    'docs.rs',
+    'tokio.rs',
+    'crates.io',
+    'readthedocs.io',
+    'developer.mozilla.org',
+    'modelcontextprotocol.io',
+    'temporal.io',
+    'qdrant.tech',
+    'platform.openai.com',
+    'openrouter.ai',
+    'docs.anthropic.com',
+    'ai.google.dev',
+    'developers.google.com',
+    'postman.com',
+    'docs.redis.com',
+    'redis.io',
+    'pypi.org',
+    'langchain.com',
+    'langchain.dev',
+    'rust-embedded.org',
+    'python-requests.org',
+  ],
+  github: ['github.com'],
+  youtube: ['youtube.com', 'youtu.be'],
+  papers: ['arxiv.org', 'paperswithcode.com', 'dl.acm.org', 'ieeexplore.ieee.org'],
 };
 
 const SEARCH_PROVIDER = String(process.env.SEARCH_PROVIDER || 'auto').trim().toLowerCase() || 'auto';
@@ -57,6 +89,25 @@ function truncateText(value: string, maxChars: number): string {
   return `${normalized.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`;
 }
 
+function queryHasExplicitSiteConstraint(query: string): boolean {
+  return /(^|\s)site:[^\s]+/i.test(String(query || ''));
+}
+
+function buildScopedSearchQuery(query: string, sourceKind: SearchSourceKind): string {
+  const normalizedQuery = String(query || '').trim();
+  if (!normalizedQuery || sourceKind === 'web' || queryHasExplicitSiteConstraint(normalizedQuery)) {
+    return normalizedQuery;
+  }
+
+  const siteFilters = SEARCH_SOURCE_SITE_FILTERS[sourceKind];
+  if (!siteFilters || siteFilters.length === 0) return normalizedQuery;
+  if (siteFilters.length === 1) {
+    return `${normalizedQuery} site:${siteFilters[0]}`.trim();
+  }
+
+  return `${normalizedQuery} (${siteFilters.map((site) => `site:${site}`).join(' OR ')})`.trim();
+}
+
 function normalizeUrl(rawUrl: string): string {
   const decodedValue = decodeHtmlEntities(String(rawUrl || '').trim());
   if (!decodedValue) return '';
@@ -95,11 +146,33 @@ async function fetchWithTimeout(url: string, init: RequestInit = {}, timeoutMs: 
   }
 }
 
-function dedupeResults(results: SearchResult[], limit: number): SearchResult[] {
+function normalizeHostname(rawUrl: string): string {
+  try {
+    return new URL(rawUrl).hostname.trim().toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+function sourceKindAllowsHostname(sourceKind: SearchSourceKind, hostname: string): boolean {
+  if (sourceKind === 'web') return true;
+  const normalizedHostname = String(hostname || '').trim().toLowerCase();
+  if (!normalizedHostname) return false;
+  const allowedHosts = SEARCH_SOURCE_SITE_FILTERS[sourceKind];
+  if (!allowedHosts || allowedHosts.length === 0) return true;
+  return allowedHosts.some((allowedHost) => normalizedHostname === allowedHost || normalizedHostname.endsWith(`.${allowedHost}`));
+}
+
+function filterResultsBySourceKind(results: SearchResult[], sourceKind: SearchSourceKind): SearchResult[] {
+  if (sourceKind === 'web') return results;
+  return results.filter((result) => sourceKindAllowsHostname(sourceKind, normalizeHostname(result.url)));
+}
+
+function dedupeResults(results: SearchResult[], limit: number, sourceKind: SearchSourceKind = 'web'): SearchResult[] {
   const seen = new Set<string>();
   const deduped: SearchResult[] = [];
 
-  for (const result of results) {
+  for (const result of filterResultsBySourceKind(results, sourceKind)) {
     const key = `${result.url}::${result.title}`.trim();
     if (!result.url || !result.title || seen.has(key)) continue;
     seen.add(key);
@@ -110,11 +183,12 @@ function dedupeResults(results: SearchResult[], limit: number): SearchResult[] {
   return deduped;
 }
 
-async function searchSearxng(query: string, limit: number): Promise<SearchResult[]> {
+async function searchSearxng(query: string, limit: number, sourceKind: SearchSourceKind = 'web'): Promise<SearchResult[]> {
   if (!SEARXNG_BASE_URL) return [];
 
+  const scopedQuery = buildScopedSearchQuery(query, sourceKind);
   const baseSearchUrl = new URL('/search', SEARXNG_BASE_URL);
-  baseSearchUrl.searchParams.set('q', query);
+  baseSearchUrl.searchParams.set('q', scopedQuery);
   baseSearchUrl.searchParams.set('language', 'en-US');
   baseSearchUrl.searchParams.set('safesearch', '1');
   if (SEARXNG_ENGINES) {
@@ -138,8 +212,10 @@ async function searchSearxng(query: string, limit: number): Promise<SearchResult
         url: normalizeUrl(String(entry?.url || '')),
         description: truncateText(stripHtml(String(entry?.content || '')), 320),
         source: String(entry?.engine || 'searxng').trim() || 'searxng',
+        sourceKind,
       })),
       limit,
+      sourceKind,
     );
     if (parsedResults.length > 0) {
       return parsedResults;
@@ -177,27 +253,28 @@ async function searchSearxng(query: string, limit: number): Promise<SearchResult
       source: engineMatches.length > 0
         ? engineMatches.map((entry) => stripHtml(entry[1])).filter(Boolean).join(',')
         : 'searxng',
+      sourceKind,
     });
   }
 
-  return dedupeResults(results, limit);
+  return dedupeResults(results, limit, sourceKind);
 }
 
-async function runSearxngOnlySearch(query: string, limit: number): Promise<{ provider: string; results: SearchResult[] }> {
+async function runSearxngOnlySearch(query: string, limit: number, sourceKind: SearchSourceKind = 'web'): Promise<{ provider: string; results: SearchResult[] }> {
   if (!SEARXNG_BASE_URL) {
     throw new Error('SearXNG search is unavailable because SEARXNG_BASE_URL is not configured.');
   }
 
-  const results = await searchSearxng(query, limit);
+  const results = await searchSearxng(query, limit, sourceKind);
   return {
     provider: 'searxng',
     results,
   };
 }
 
-async function searchDuckDuckGoHtml(query: string, limit: number): Promise<SearchResult[]> {
+async function searchDuckDuckGoHtml(query: string, limit: number, sourceKind: SearchSourceKind = 'web'): Promise<SearchResult[]> {
   const url = new URL('https://html.duckduckgo.com/html/');
-  url.searchParams.set('q', query);
+  url.searchParams.set('q', buildScopedSearchQuery(query, sourceKind));
   url.searchParams.set('kl', 'us-en');
 
   const response = await fetchWithTimeout(url.toString());
@@ -225,19 +302,20 @@ async function searchDuckDuckGoHtml(query: string, limit: number): Promise<Searc
       url: href,
       description,
       source: 'duckduckgo',
+      sourceKind,
     });
   }
 
-  return dedupeResults(results, limit);
+  return dedupeResults(results, limit, sourceKind);
 }
 
-function collectDuckDuckGoTopicResults(topicEntries: unknown[], results: SearchResult[]): void {
+function collectDuckDuckGoTopicResults(topicEntries: unknown[], results: SearchResult[], sourceKind: SearchSourceKind = 'web'): void {
   for (const entry of topicEntries) {
     if (!entry || typeof entry !== 'object') continue;
     const record = entry as Record<string, any>;
 
     if (Array.isArray(record.Topics)) {
-      collectDuckDuckGoTopicResults(record.Topics, results);
+      collectDuckDuckGoTopicResults(record.Topics, results, sourceKind);
       continue;
     }
 
@@ -251,13 +329,14 @@ function collectDuckDuckGoTopicResults(topicEntries: unknown[], results: SearchR
       url,
       description: truncateText(rest.join(' - ').trim() || text, 320),
       source: 'duckduckgo',
+      sourceKind,
     });
   }
 }
 
-async function searchDuckDuckGoInstantAnswer(query: string, limit: number): Promise<SearchResult[]> {
+async function searchDuckDuckGoInstantAnswer(query: string, limit: number, sourceKind: SearchSourceKind = 'web'): Promise<SearchResult[]> {
   const url = new URL('https://api.duckduckgo.com/');
-  url.searchParams.set('q', query);
+  url.searchParams.set('q', buildScopedSearchQuery(query, sourceKind));
   url.searchParams.set('format', 'json');
   url.searchParams.set('no_redirect', '1');
   url.searchParams.set('no_html', '1');
@@ -279,15 +358,17 @@ async function searchDuckDuckGoInstantAnswer(query: string, limit: number): Prom
       url: abstractUrl,
       description: truncateText(abstractText, 320),
       source: 'duckduckgo',
+      sourceKind,
     });
   }
 
-  collectDuckDuckGoTopicResults(Array.isArray(payload.RelatedTopics) ? payload.RelatedTopics : [], results);
-  return dedupeResults(results, limit);
+  collectDuckDuckGoTopicResults(Array.isArray(payload.RelatedTopics) ? payload.RelatedTopics : [], results, sourceKind);
+  return dedupeResults(results, limit, sourceKind);
 }
 
-async function runSearch(query: string, options?: { local?: boolean; location?: string; count?: number }): Promise<{ provider: string; results: SearchResult[] }> {
+async function runSearch(query: string, options?: { local?: boolean; location?: string; count?: number; sourceKind?: SearchSourceKind }): Promise<{ provider: string; results: SearchResult[] }> {
   const limit = Math.max(1, Math.min(10, options?.count || SEARCH_RESULT_LIMIT));
+  const sourceKind = options?.sourceKind || 'web';
   const normalizedQuery = [
     query,
     options?.local && options?.location ? `near ${options.location}` : '',
@@ -304,7 +385,7 @@ async function runSearch(query: string, options?: { local?: boolean; location?: 
 
   if (preferredProvider !== 'duckduckgo' && SEARXNG_BASE_URL) {
     try {
-      const results = await searchSearxng(normalizedQuery, limit);
+      const results = await searchSearxng(normalizedQuery, limit, sourceKind);
       if (results.length > 0 || preferredProvider === 'searxng') {
         return { provider: 'searxng', results };
       }
@@ -317,7 +398,7 @@ async function runSearch(query: string, options?: { local?: boolean; location?: 
   }
 
   try {
-    const htmlResults = await searchDuckDuckGoHtml(normalizedQuery, limit);
+    const htmlResults = await searchDuckDuckGoHtml(normalizedQuery, limit, sourceKind);
     if (htmlResults.length > 0) {
       return { provider: 'duckduckgo', results: htmlResults };
     }
@@ -326,7 +407,7 @@ async function runSearch(query: string, options?: { local?: boolean; location?: 
   }
 
   try {
-    const instantAnswerResults = await searchDuckDuckGoInstantAnswer(normalizedQuery, limit);
+    const instantAnswerResults = await searchDuckDuckGoInstantAnswer(normalizedQuery, limit, sourceKind);
     if (instantAnswerResults.length > 0) {
       return { provider: 'duckduckgo', results: instantAnswerResults };
     }
@@ -340,6 +421,15 @@ async function runSearch(query: string, options?: { local?: boolean; location?: 
 
   return { provider: preferredProvider === 'searxng' ? 'searxng' : 'duckduckgo', results: [] };
 }
+
+const SearchSourceKindSchema = z.enum(['web', 'docs', 'github', 'youtube', 'papers']);
+const SearchResultSchema = z.object({
+  title: z.string(),
+  url: z.string(),
+  description: z.string(),
+  source: z.string(),
+  sourceKind: SearchSourceKindSchema,
+});
 
 function formatResults(query: string, provider: string, results: SearchResult[]): string {
   if (results.length === 0) {
@@ -358,103 +448,99 @@ const server = new McpServer({
   version: '1.0.0',
 });
 
-server.registerTool('brave_web_search', {
-  description: 'Search the web using a local SearxNG instance when configured, otherwise DuckDuckGo as a no-key fallback.',
-  inputSchema: {
-    query: z.string().min(1).describe('The search query to run.'),
-    count: z.number().int().min(1).max(10).optional().describe('Maximum number of results to return.'),
-  },
-  outputSchema: {
-    provider: z.string(),
-    results: z.array(z.object({
-      title: z.string(),
-      url: z.string(),
-      description: z.string(),
-      source: z.string(),
-    })),
-  },
-}, async ({ query, count }) => {
-  const { provider, results } = await runSearch(query, { count });
-  return {
-    content: [
-      {
-        type: 'text',
-        text: formatResults(query, provider, results),
-      },
-    ],
-    structuredContent: {
-      provider,
-      results,
+function registerSearchTool(input: {
+  name: string;
+  description: string;
+  sourceKind?: SearchSourceKind;
+  local?: boolean;
+  searxngOnly?: boolean;
+}): void {
+  server.registerTool(input.name, {
+    description: input.description,
+    inputSchema: {
+      query: z.string().min(1).describe('The search query to run.'),
+      ...(input.local
+        ? { location: z.string().optional().describe('Optional location hint, such as a city or neighborhood.') }
+        : {}),
+      count: z.number().int().min(1).max(10).optional().describe('Maximum number of results to return.'),
     },
-  };
-});
-
-server.registerTool('searxng_web_search', {
-  description: 'Search the web using the configured local SearXNG instance only. This tool does not fall back to other providers.',
-  inputSchema: {
-    query: z.string().min(1).describe('The search query to run against SearXNG.'),
-    count: z.number().int().min(1).max(10).optional().describe('Maximum number of results to return.'),
-  },
-  outputSchema: {
-    provider: z.string(),
-    results: z.array(z.object({
-      title: z.string(),
-      url: z.string(),
-      description: z.string(),
-      source: z.string(),
-    })),
-  },
-}, async ({ query, count }) => {
-  const limit = Math.max(1, Math.min(10, count || SEARCH_RESULT_LIMIT));
-  const { provider, results } = await runSearxngOnlySearch(query, limit);
-  return {
-    content: [
-      {
-        type: 'text',
-        text: formatResults(query, provider, results),
-      },
-    ],
-    structuredContent: {
-      provider,
-      results,
+    outputSchema: {
+      provider: z.string(),
+      results: z.array(SearchResultSchema),
     },
-  };
-});
-
-server.registerTool('brave_local_search', {
-  description: 'Run a location-biased search using the same no-key fallback backend as brave_web_search.',
-  inputSchema: {
-    query: z.string().min(1).describe('The local search query to run.'),
-    location: z.string().optional().describe('Optional location hint, such as a city or neighborhood.'),
-    count: z.number().int().min(1).max(10).optional().describe('Maximum number of results to return.'),
-  },
-  outputSchema: {
-    provider: z.string(),
-    results: z.array(z.object({
-      title: z.string(),
-      url: z.string(),
-      description: z.string(),
-      source: z.string(),
-    })),
-  },
-}, async ({ query, location, count }) => {
-  const { provider, results } = await runSearch(query, {
-    local: true,
-    location,
-    count,
+  }, async ({ query, location, count }) => {
+    const sourceKind = input.sourceKind || 'web';
+    const limit = Math.max(1, Math.min(10, count || SEARCH_RESULT_LIMIT));
+    const queryLabel = input.local && location
+      ? `${query} near ${location}`
+      : query;
+    const { provider, results } = input.searxngOnly
+      ? await runSearxngOnlySearch(queryLabel, limit, sourceKind)
+      : input.local
+      ? await runSearch(query, {
+          local: true,
+          location,
+          count,
+          sourceKind,
+        })
+      : await runSearch(query, {
+          count,
+          sourceKind,
+        });
+    return {
+      content: [
+        {
+          type: 'text',
+          text: formatResults(queryLabel, provider, results),
+        },
+      ],
+      structuredContent: {
+        provider,
+        results,
+      },
+    };
   });
-  return {
-    content: [
-      {
-        type: 'text',
-        text: formatResults(location ? `${query} near ${location}` : query, provider, results),
-      },
-    ],
-    structuredContent: {
-      provider,
-      results,
-    },
-  };
+}
+
+registerSearchTool({
+  name: 'brave_web_search',
+  description: 'Search the web using a local SearxNG instance when configured, otherwise DuckDuckGo as a no-key fallback.',
+});
+
+registerSearchTool({
+  name: 'searxng_web_search',
+  description: 'Search the web using the configured local SearXNG instance only. This tool does not fall back to other providers.',
+  searxngOnly: true,
+});
+
+registerSearchTool({
+  name: 'brave_docs_search',
+  description: 'Search official docs and package documentation using the same no-key fallback backend, preserving a docs source kind for downstream ranking.',
+  sourceKind: 'docs',
+});
+
+registerSearchTool({
+  name: 'brave_github_search',
+  description: 'Search GitHub repositories, examples, issues, and discussions using the same no-key fallback backend, preserving a github source kind for downstream ranking.',
+  sourceKind: 'github',
+});
+
+registerSearchTool({
+  name: 'brave_youtube_search',
+  description: 'Search YouTube technical walkthroughs and implementation videos using the same no-key fallback backend, preserving a youtube source kind for downstream ranking.',
+  sourceKind: 'youtube',
+});
+
+registerSearchTool({
+  name: 'brave_papers_search',
+  description: 'Search papers and spec-like sources such as arXiv or Papers With Code using the same no-key fallback backend, preserving a papers source kind for downstream ranking.',
+  sourceKind: 'papers',
+});
+
+registerSearchTool({
+  name: 'brave_local_search',
+  description: 'Run a location-biased search using the same no-key fallback backend as brave_web_search.',
+  local: true,
 });
 
 async function main(): Promise<void> {
