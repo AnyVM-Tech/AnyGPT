@@ -320,6 +320,8 @@ Common endpoints:
 Notes:
 *   [`/v1/responses`](apps/api/routes/openai.ts) is the preferred path for native OpenAI clients such as Roo Code.
 *   Video creation uses `POST /v1/videos`; `GET /v1/videos` lists existing jobs.
+*   For Veo requests, `aspect_ratio` (or `aspectRatio`) accepts `16:9` or `9:16`, and duration can be sent as `duration`, `seconds`, `duration_seconds`, or `durationSeconds`.
+*   On the current Gemini-backed Veo 3 / Veo 3.1 route, audio is native to the model. `generate_audio` / `generateAudio` and `model_variant` / `variant` are accepted as compatibility inputs, but they do not mute output. To influence sound, describe it in the prompt.
 *   Plain text Responses streams can use a passthrough fast path for lower latency; reasoning/tool-call cases may be normalized server-side to preserve OpenAI-native semantics.
 *   Text-capable Gemini, DeepSeek, xAI/Grok, and similar models can be served through `/v1/responses` when they behave like chat/text models.
 *   Media-only or dedicated non-chat models such as embeddings, TTS, STT, image generation, and video generation are redirected to their dedicated endpoints instead of `/v1/responses`.

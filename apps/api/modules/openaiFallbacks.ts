@@ -230,6 +230,13 @@ function shouldTryNextVideoGenerationProvider(error: any): boolean {
   if ([401, 402, 403, 408, 409, 425, 429].includes(statusCode)) {
     return true;
   }
+  if (
+    normalized.includes('your project has been denied access') ||
+    normalized.includes('project has been denied access') ||
+    normalized.includes('please contact support')
+  ) {
+    return true;
+  }
   if (statusCode >= 500 && statusCode <= 599) {
     return true;
   }
@@ -1514,7 +1521,16 @@ export async function handleImageGenFallbackFromChatOrResponses(params: {
     resJson = result.responseJson;
     imageRef = result.imageRef;
   } catch (error: any) {
-    const statusCode = typeof error?.statusCode === 'number' ? error.statusCode : 503;
+    const statusCode =
+      typeof error?.statusCode === 'number'
+        ? error.statusCode
+        : typeof error?.status === 'number'
+          ? error.status
+          : /failed to process request|authorization failed|api key expired|project has been denied access|permission_denied|invalid api key/i.test(
+              String(error?.message || '')
+            )
+            ? 503
+            : 503;
     if (!(response as any).completed) {
       response.status(statusCode).json({
         error: error?.message || (imageUrl ? 'No available provider for image edits' : 'No available provider for image generation'),

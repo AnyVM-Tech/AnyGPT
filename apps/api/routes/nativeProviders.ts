@@ -32,7 +32,7 @@ import {
 	getBackpressureRetryAfterSeconds,
 	withBufferedRequestBody
 } from '../modules/requestIntake.js';
-import { redactToken } from '../modules/redaction.js';
+import { hashToken, redactToken } from '../modules/redaction.js';
 import { getRequestQueueForLane } from '../modules/requestQueue.js';
 import {
 	applyResponseHeaders,
@@ -144,6 +144,11 @@ const nativeResponsesProviderPinMemory = new Map<
 	string,
 	{ providerId: string; expiresAt: number }
 >();
+const NATIVE_RESPONSES_HASH_SECRET = (
+	process.env.NATIVE_RESPONSES_HASH_SECRET ||
+	process.env.API_KEY_HASH_SECRET ||
+	'anygpt-native-responses'
+).trim();
 
 type NativeFamily =
 	| 'openai'
@@ -901,6 +906,21 @@ function supportsNativeResponsesHistory(
 	return Boolean(family && NATIVE_RESPONSES_HISTORY_FAMILIES.has(family));
 }
 
+function deriveNativeResponsesScopedHash(
+	context: string,
+	value: string,
+	length: number
+): string {
+	const normalizedValue = String(value || '').trim();
+	if (!normalizedValue) return '';
+	const normalizedContext = String(context || '').trim() || 'native-responses';
+	const digest = hashToken(
+		normalizedValue,
+		`${NATIVE_RESPONSES_HASH_SECRET}:${normalizedContext}`
+	);
+	return digest.slice(0, Math.max(8, Math.floor(length)));
+}
+
 function buildNativeResponsesOwnerScope(request: Request): string | undefined {
 	const normalizedUserId =
 		typeof (request as any)?.userId === 'string' &&
@@ -913,15 +933,12 @@ function buildNativeResponsesOwnerScope(request: Request): string | undefined {
 			? request.apiKey.trim()
 			: '';
 	if (!normalizedApiKey) return undefined;
-	try {
-		return `key:${crypto
-			.createHmac('sha256', 'anygpt-native-owner-scope')
-			.update(normalizedApiKey)
-			.digest('hex')
-			.slice(0, 24)}`;
-	} catch {
-		return `key:${normalizedApiKey.slice(0, 8)}`;
-	}
+	const derived = deriveNativeResponsesScopedHash(
+		'owner-scope',
+		normalizedApiKey,
+		24
+	);
+	return derived ? `key:${derived}` : `key:${normalizedApiKey.slice(0, 8)}`;
 }
 
 function pruneExpiredNativeResponsesProviderPins(): void {
@@ -971,23 +988,21 @@ function buildNativeResponsesProviderPinStorageKey(params: {
 		typeof params.ownerScope === 'string' && params.ownerScope.trim()
 			? params.ownerScope.trim()
 			: 'anon';
-	try {
-		const digest = crypto
-			.createHash('sha256')
-			.update(
-				`${normalizedOwnerScope}|${params.family}|${normalizedThreadKey}`
-			)
-			.digest('hex');
+	const digest = deriveNativeResponsesScopedHash(
+		'provider-pin-storage',
+		`${normalizedOwnerScope}|${params.family}|${normalizedThreadKey}`,
+		64
+	);
+	if (digest) {
 		return `${NATIVE_RESPONSES_PROVIDER_PIN_REDIS_PREFIX}${digest}`;
-	} catch {
-		const fallback = Buffer.from(
-			`${normalizedOwnerScope}|${params.family}|${normalizedThreadKey}`,
-			'utf8'
-		)
-			.toString('base64url')
-			.slice(0, 96);
-		return `${NATIVE_RESPONSES_PROVIDER_PIN_REDIS_PREFIX}${fallback}`;
 	}
+	const fallback = Buffer.from(
+		`${normalizedOwnerScope}|${params.family}|${normalizedThreadKey}`,
+		'utf8'
+	)
+		.toString('base64url')
+		.slice(0, 96);
+	return `${NATIVE_RESPONSES_PROVIDER_PIN_REDIS_PREFIX}${fallback}`;
 }
 
 function extractNativeResponsesProviderPinThreadKey(

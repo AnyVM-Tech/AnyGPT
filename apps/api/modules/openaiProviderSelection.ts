@@ -419,21 +419,48 @@ export async function listImageGenProviders(
 ): Promise<ImageGenerationProviderSelection[]> {
   const providers = await dataManager.load<LoadedProviders>('providers');
   const requiresCaps = Array.isArray(requiredCaps) && requiredCaps.length > 0;
+  const modelIdVariants = normalizeModelIdVariants(modelId);
   const matches = providers.filter((p: LoadedProviderData) =>
-    !p.disabled &&
     (p.id.includes('openai') || p.id.includes('xai') || isGeminiLikeProviderId(p.id) || p.id.includes('imagen')) &&
     p.apiKey &&
     p.models &&
-    modelId in p.models
+    modelIdVariants.some((variant) => variant in p.models)
   );
-  const candidates = requiresCaps
+  const capabilityMatches = requiresCaps
     ? matches.filter((p: LoadedProviderData) => {
-      const modelData = p.models?.[modelId];
+      const modelData = modelIdVariants
+        .map((variant) => p.models?.[variant])
+        .find((entry) => entry !== undefined);
       return providerSupportsRequiredCaps(modelId, modelData, requiredCaps);
     })
     : matches;
 
-  const pickFrom = candidates.length > 0 ? candidates : matches;
+  const supportedMatches = capabilityMatches.filter((provider) => {
+    if (isGeminiLikeProviderId(provider.id) || provider.id.includes('imagen')) {
+      return !hasRecentGeminiCatalogAuthFailureSignal(provider);
+    }
+    return (
+      !provider.disabled &&
+      !hasInvalidOpenAiKeySignal(provider) &&
+      !hasOpenRouterBillingFailureSignal(provider)
+    );
+  });
+
+  const stableSupportedMatches = supportedMatches.filter((provider) => {
+    if (isGeminiLikeProviderId(provider.id) || provider.id.includes('imagen')) {
+      return true;
+    }
+    return !hasRecentRateLimitOrTimeoutSignal(provider);
+  });
+
+  const pickFrom =
+    stableSupportedMatches.length > 0
+      ? stableSupportedMatches
+      : supportedMatches.length > 0
+        ? supportedMatches
+        : capabilityMatches.length > 0
+          ? capabilityMatches
+          : matches;
   if (pickFrom.length === 0) return [];
   return shuffleArray(pickFrom).map(mapImageGenerationProviderSelection);
 }
@@ -626,6 +653,8 @@ function hasRecentGeminiCatalogAuthFailureSignal(provider: LoadedProviderData): 
     lastError.includes('api_key_invalid') ||
     lastError.includes('generative language api has not been used in project') ||
     lastError.includes('generative language api is disabled') ||
+    lastError.includes('your project has been denied access') ||
+    lastError.includes('project has been denied access') ||
     lastError.includes('accessnotconfigured') ||
     lastError.includes('service_disabled') ||
     lastError.includes('gemini_project_auth_failure')

@@ -12059,14 +12059,19 @@ function scoreResearchScoutPreviewQueryMatch(
 }
 
 function decodeResearchScoutHtmlEntities(text: string): string {
-  return String(text || '')
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;/gi, "'")
-    .replace(/&#x27;/gi, "'");
+  const entityMap: Record<string, string> = {
+    nbsp: ' ',
+    amp: '&',
+    lt: '<',
+    gt: '>',
+    quot: '"',
+    '#39': "'",
+    '#x27': "'",
+  };
+  return String(text || '').replace(
+    /&(nbsp|amp|lt|gt|quot|#39|#x27);/gi,
+    (match, entity) => entityMap[String(entity || '').toLowerCase()] ?? match,
+  );
 }
 
 function normalizeResearchScoutWhitespace(value: unknown): string {
@@ -12085,13 +12090,55 @@ function extractResearchScoutMetaDescription(html: string): string {
 }
 
 function extractResearchScoutBodyText(html: string): string {
-  const stripped = String(html || '')
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<noscript[\s\S]*?<\/noscript>/gi, ' ')
-    .replace(/<!--[\s\S]*?-->/g, ' ')
-    .replace(/<svg[\s\S]*?<\/svg>/gi, ' ')
-    .replace(/<[^>]+>/g, ' ');
+  const source = String(html || '');
+  const lower = source.toLowerCase();
+  let index = 0;
+  let stripped = '';
+  let skipTag: string | null = null;
+
+  while (index < source.length) {
+    if (skipTag) {
+      const closeStart = lower.indexOf(`</${skipTag}`, index);
+      if (closeStart === -1) break;
+      const closeEnd = source.indexOf('>', closeStart);
+      if (closeEnd === -1) break;
+      stripped += ' ';
+      index = closeEnd + 1;
+      skipTag = null;
+      continue;
+    }
+
+    if (source.startsWith('<!--', index)) {
+      const closeComment = source.indexOf('-->', index + 4);
+      if (closeComment === -1) break;
+      stripped += ' ';
+      index = closeComment + 3;
+      continue;
+    }
+
+    const ch = source[index];
+    if (ch !== '<') {
+      stripped += ch;
+      index += 1;
+      continue;
+    }
+
+    const tagEnd = source.indexOf('>', index + 1);
+    if (tagEnd === -1) break;
+    const tagContent = source.slice(index + 1, tagEnd).trim();
+    const isClosing = tagContent.startsWith('/');
+    const normalizedTag = (isClosing ? tagContent.slice(1) : tagContent)
+      .trim()
+      .split(/\s+/, 1)[0]
+      .toLowerCase();
+
+    if (!isClosing && ['script', 'style', 'noscript', 'svg'].includes(normalizedTag)) {
+      skipTag = normalizedTag;
+    }
+
+    stripped += ' ';
+    index = tagEnd + 1;
+  }
   return truncateTextMiddle(
     normalizeResearchScoutWhitespace(decodeResearchScoutHtmlEntities(stripped)),
     RESEARCH_SCOUT_PREFETCH_TEXT_MAX_CHARS,

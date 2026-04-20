@@ -52,6 +52,20 @@ const RESPONSES_HISTORY_ARCHIVE_TTL_SECONDS = Math.max(
 const RESPONSES_HISTORY_ARCHIVE_REDIS_PREFIX = 'api:responses_history_archive:';
 const responsesHistoryMemory = new Map<string, { expiresAt: number; entry: StoredResponsesHistoryEntry }>();
 
+function summarizeResponsesHistoryError(error: unknown): string {
+  if (!error || typeof error !== 'object') return 'unknown_error';
+  const anyError = error as { code?: unknown; name?: unknown; constructor?: { name?: unknown } };
+  const code = typeof anyError.code === 'string' && anyError.code.trim() ? anyError.code.trim() : '';
+  if (code) return code;
+  const name = typeof anyError.name === 'string' && anyError.name.trim() ? anyError.name.trim() : '';
+  if (name) return name;
+  const constructorName =
+    typeof anyError.constructor?.name === 'string' && anyError.constructor.name.trim()
+      ? anyError.constructor.name.trim()
+      : '';
+  return constructorName || 'unknown_error';
+}
+
 export function cloneResponsesHistoryValue<T>(value: T): T {
   if (typeof value === 'undefined') return value;
   return JSON.parse(JSON.stringify(value)) as T;
@@ -172,7 +186,9 @@ async function saveResponsesHistoryArchiveEntry(entry: StoredResponsesHistoryEnt
       RESPONSES_HISTORY_ARCHIVE_TTL_SECONDS,
     );
   } catch (error: any) {
-    console.warn(`[ResponsesHistory] Failed to persist archive ${normalizedId}: ${error?.message || error}`);
+    console.warn(
+      `[ResponsesHistory] Failed to persist archive ${normalizedId}: ${summarizeResponsesHistoryError(error)}`
+    );
   }
 }
 
@@ -198,7 +214,9 @@ async function touchResponsesHistoryEntry(entry: StoredResponsesHistoryEntry): P
       RESPONSES_HISTORY_TTL_SECONDS,
     );
   } catch (error: any) {
-    console.warn(`[ResponsesHistory] Failed to refresh ${stored.id}: ${error?.message || error}`);
+    console.warn(
+      `[ResponsesHistory] Failed to refresh ${stored.id}: ${summarizeResponsesHistoryError(error)}`
+    );
   }
 
   return stored;
@@ -236,7 +254,9 @@ export async function loadResponsesHistoryEntry(responseId: string): Promise<Sto
         return cloneResponsesHistoryValue(refreshed);
       }
     } catch (error: any) {
-      console.warn(`[ResponsesHistory] Failed to load ${normalizedId} from Redis: ${error?.message || error}`);
+      console.warn(
+        `[ResponsesHistory] Failed to load ${normalizedId} from Redis: ${summarizeResponsesHistoryError(error)}`
+      );
     }
   }
 
@@ -268,7 +288,9 @@ export async function saveResponsesHistoryEntry(entry: StoredResponsesHistoryEnt
       RESPONSES_HISTORY_TTL_SECONDS,
     );
   } catch (error: any) {
-    console.warn(`[ResponsesHistory] Failed to persist ${normalizedId}: ${error?.message || error}`);
+    console.warn(
+      `[ResponsesHistory] Failed to persist ${normalizedId}: ${summarizeResponsesHistoryError(error)}`
+    );
   }
 }
 

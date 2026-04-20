@@ -125,6 +125,16 @@ function resolveVeoModelPricingSpec(modelId: string): VeoModelPricingSpec | null
   return VEO_MODEL_PRICING[normalized] || null;
 }
 
+function isAlwaysOnAudioVeoModel(modelId: string): boolean {
+  const normalized = normalizeVideoModelId(modelId);
+  return (
+    normalized === 'veo-3.0-generate-001' ||
+    normalized === 'veo-3.0-fast-generate-001' ||
+    normalized === 'veo-3.1-generate-preview' ||
+    normalized === 'veo-3.1-fast-generate-preview'
+  );
+}
+
 function normalizeResolutionValue(value: unknown): VeoVideoResolution | null {
   const normalized = String(value || '').trim().toLowerCase();
   if (!normalized) return null;
@@ -216,7 +226,11 @@ export function resolveVeoRequestedAudioVariant(
   modelId: string,
   requestBody: any
 ): VeoAudioVariant | null {
-  if (!resolveVeoModelPricingSpec(modelId)) return null;
+  const spec = resolveVeoModelPricingSpec(modelId);
+  if (!spec) return null;
+  if (isAlwaysOnAudioVeoModel(modelId)) {
+    return spec.defaultVariant;
+  }
 
   for (const field of [
     'model_variant',

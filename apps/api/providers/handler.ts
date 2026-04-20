@@ -1571,8 +1571,7 @@ export class MessageHandler {
 		const normalizedModelId = this.normalizeModelId(modelId);
 		const isGoogleFamilyProvider = this.isGeminiFamilyProvider(providerId);
 		const isImagenFamilyModel =
-			normalizedModelId.startsWith('imagen-') ||
-			normalizedModelId.startsWith('nano-banana');
+			normalizedModelId.startsWith('imagen-');
 		return isGoogleFamilyProvider && isImagenFamilyModel;
 	}
 
@@ -5493,6 +5492,8 @@ function shouldSkipGeminiProviderForMessage(
 			'generative language api has not been used in project'
 		) ||
 		combined.includes('generative language api is disabled') ||
+		combined.includes('your project has been denied access') ||
+		combined.includes('project has been denied access') ||
 		combined.includes('service_disabled') ||
 		combined.includes('accessnotconfigured') ||
 		textMentionsHostname(combined, 'generativelanguage.googleapis.com') ||

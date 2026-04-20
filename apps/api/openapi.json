@@ -695,7 +695,7 @@
     "/v1/videos/generations": {
       "post": {
         "summary": "Create video (legacy alias)",
-        "description": "Deprecated alias for POST /v1/videos.",
+        "description": "Deprecated alias for POST /v1/videos. Accepts the same JSON body as /v1/videos.",
         "deprecated": true,
         "security": [
           {
@@ -716,15 +716,21 @@
             },
             "application/json": {
               "schema": {
-                "type": "object",
-                "additionalProperties": true
+                "$ref": "#/components/schemas/VideoGenerationRequest"
               }
             }
           }
         },
         "responses": {
           "200": {
-            "description": "Video generation"
+            "description": "Video generation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoGenerationAcceptedResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -775,7 +781,7 @@
       },
       "post": {
         "summary": "Create video",
-        "description": "Creates a video generation job. Use POST on this path; GET /v1/videos lists jobs.",
+        "description": "Creates a video generation job. Use POST on this path; GET /v1/videos lists jobs. For Veo models, use `aspect_ratio` (or `aspectRatio`) with `16:9` or `9:16`, and `duration` / `seconds` with `4`, `6`, or `8`. On the current Gemini-backed Veo 3 and Veo 3.1 path, audio is native to the model and `generate_audio` / `generateAudio` are compatibility fields only; they do not disable audio output.",
         "security": [
           {
             "BearerAuth": []
@@ -795,15 +801,21 @@
             },
             "application/json": {
               "schema": {
-                "type": "object",
-                "additionalProperties": true
+                "$ref": "#/components/schemas/VideoGenerationRequest"
               }
             }
           }
         },
         "responses": {
           "200": {
-            "description": "Video generation"
+            "description": "Video generation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoGenerationAcceptedResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -1642,6 +1654,228 @@
       }
     },
     "schemas": {
+      "VideoGenerationRequest": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "model",
+          "prompt"
+        ],
+        "properties": {
+          "model": {
+            "type": "string",
+            "description": "Video generation model id such as `veo-3.1-fast-generate-preview`, `veo-3.1-generate-preview`, `veo-3.0-fast-generate-001`, or `veo-3.0-generate-001`."
+          },
+          "prompt": {
+            "type": "string",
+            "description": "Primary text prompt for generation. For Veo 3 and Veo 3.1 on the current Gemini-backed route, describe desired sound in the prompt because audio is model-native."
+          },
+          "input": {
+            "type": "string",
+            "description": "Alias for `prompt` on JSON requests."
+          },
+          "duration": {
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "description": "Preferred duration field in seconds. Veo currently supports `4`, `6`, or `8`."
+          },
+          "seconds": {
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "description": "Alias for duration in seconds."
+          },
+          "duration_seconds": {
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "description": "Alias for duration in seconds."
+          },
+          "durationSeconds": {
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "description": "Alias for duration in seconds."
+          },
+          "aspect_ratio": {
+            "type": "string",
+            "enum": [
+              "16:9",
+              "9:16"
+            ],
+            "description": "Preferred OpenAI-compatible aspect ratio field for Veo."
+          },
+          "aspectRatio": {
+            "type": "string",
+            "enum": [
+              "16:9",
+              "9:16"
+            ],
+            "description": "Camel-case alias for `aspect_ratio`."
+          },
+          "resolution": {
+            "type": "string",
+            "enum": [
+              "720p",
+              "1080p",
+              "4k"
+            ],
+            "description": "Requested output resolution where the upstream model supports it."
+          },
+          "size": {
+            "type": "string",
+            "description": "Alternative size hint. AnyGPT maps common Veo sizes such as `1280x720`, `720x1280`, `1920x1080`, and `3840x2160` to aspect ratio and/or resolution."
+          },
+          "generate_audio": {
+            "type": "boolean",
+            "description": "Compatibility field. On the current Gemini-backed Veo 3 / 3.1 path in AnyGPT, audio is native to the model and this field does not disable audio."
+          },
+          "generateAudio": {
+            "type": "boolean",
+            "description": "Camel-case alias for `generate_audio`."
+          },
+          "model_variant": {
+            "type": "string",
+            "enum": [
+              "with_audio",
+              "without_audio"
+            ],
+            "description": "Compatibility / pricing hint. Gemini-backed Veo 3 / 3.1 requests in AnyGPT still produce native-audio output."
+          },
+          "modelVariant": {
+            "type": "string",
+            "enum": [
+              "with_audio",
+              "without_audio"
+            ],
+            "description": "Camel-case alias for `model_variant`."
+          },
+          "variant": {
+            "type": "string",
+            "enum": [
+              "with_audio",
+              "without_audio"
+            ],
+            "description": "Generic variant alias."
+          },
+          "negative_prompt": {
+            "type": "string",
+            "description": "Optional negative prompt for supported video backends."
+          },
+          "negativePrompt": {
+            "type": "string",
+            "description": "Camel-case alias for `negative_prompt`."
+          },
+          "seed": {
+            "type": "integer",
+            "description": "Optional seed hint."
+          },
+          "image_url": {
+            "type": "string",
+            "description": "Optional image URL / data URL first-frame reference for supported models."
+          },
+          "imageUrl": {
+            "type": "string",
+            "description": "Camel-case alias for `image_url`."
+          },
+          "input_reference": {
+            "description": "Optional OpenAI-compatible image reference object or URL/data URL for supported video backends."
+          },
+          "video_url": {
+            "type": "string",
+            "description": "Optional source video URL for supported edit/extension style requests."
+          },
+          "videoUrl": {
+            "type": "string",
+            "description": "Camel-case alias for `video_url`."
+          }
+        }
+      },
+      "VideoGenerationAcceptedResponse": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string"
+          },
+          "created": {
+            "type": "integer"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "provider": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "content_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "operation": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "error": {
+            "type": [
+              "object",
+              "string",
+              "null"
+            ]
+          },
+          "error_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
       "AdminProviderPayload": {
         "type": "object",
         "additionalProperties": false,

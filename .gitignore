@@ -44,10 +44,17 @@ apps/langgraph-control-plane/dist/
 apps/exposure-runtime/target/
 apps/exposure-runtime/data/
 apps/anyscan/target/
+apps/anyscan/dist/
 apps/anyscan/data/
 apps/anyscan/__pycache__/
 apps/anyscan/.external-runtime.env
 apps/langgraph-control-plane/__pycache__/
+
+# Local workspace/tooling artifacts
+.codex
+.mcp.json
+*.deb
+VulnScanner-zmap-alternative-/
 # Specific files
 vite.config.ts.timestamp*
 apps/api/dist/

@@ -6292,6 +6292,14 @@ openaiRouter.post(
 				error.statusCode >= 400 &&
 				error.statusCode < 600
 					? error.statusCode
+					: typeof error?.status === 'number' &&
+						  error.status >= 400 &&
+						  error.status < 600
+						? error.status
+						: /failed to process request|authorization failed|api key expired|project has been denied access|permission_denied|invalid api key/i.test(
+								  String(error?.message || '')
+							  )
+							? 503
 					: String(error?.message || '').includes(
 								'No available provider for image generation'
 						  )
