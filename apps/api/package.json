@@ -45,7 +45,7 @@
 		"eventsource": "^2.0.2",
 		"openai": "^4.104.0",
 		"selenium-webdriver": "^4.41.0",
-		"uuid": "^11.1.0",
+		"uuid": "^13.0.0",
 		"ws": "^8.19.0"
 	},
 	"devDependencies": {
