@@ -335,9 +335,55 @@ async function init() {
   }
 }
 
+function initScrollSpy() {
+  if (typeof IntersectionObserver === 'undefined') return;
+
+  const links = Array.from(document.querySelectorAll('nav a[href^="#"]'));
+  const sections = [];
+  for (const link of links) {
+    const section = document.getElementById(link.getAttribute('href').slice(1));
+    if (section) sections.push(section);
+  }
+  if (!sections.length) return;
+
+  let activeId = null;
+  const setActive = (id) => {
+    if (id === activeId) return;
+    activeId = id;
+    for (const link of links) {
+      const isActive = link.getAttribute('href') === '#' + id;
+      link.classList.toggle('nav-link-active', isActive);
+      if (isActive) link.setAttribute('aria-current', 'page');
+      else link.removeAttribute('aria-current');
+    }
+  };
+
+  const visible = new Set();
+  const observer = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (entry.isIntersecting) visible.add(entry.target.id);
+      else visible.delete(entry.target.id);
+    }
+    // Prefer the first section (in document order) currently inside the middle band.
+    const firstVisible = sections.find((s) => visible.has(s.id));
+    if (firstVisible) {
+      setActive(firstVisible.id);
+      return;
+    }
+    // Fallback: scrolled past the last section — keep the last nav link active.
+    const scrollBottom = window.scrollY + window.innerHeight;
+    if (scrollBottom >= document.documentElement.scrollHeight - 4) {
+      setActive(sections[sections.length - 1].id);
+    }
+  }, { rootMargin: '-40% 0px -40% 0px', threshold: 0 });
+
+  for (const section of sections) observer.observe(section);
+}
+
 // Run when DOM is ready
+const onReady = () => { init(); initScrollSpy(); };
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', init);
+  document.addEventListener('DOMContentLoaded', onReady);
 } else {
-  init();
+  onReady();
 }
