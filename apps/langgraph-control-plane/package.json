@@ -20,7 +20,7 @@
     "@langchain/langgraph-checkpoint": "^1.0.0",
     "@modelcontextprotocol/sdk": "^1.27.1",
     "dotenv": "^16.6.1",
-    "langsmith": "^0.5.10",
+    "langsmith": "^0.6.3",
     "redis": "^4.7.0",
     "zod": "^3.25.76"
   },
