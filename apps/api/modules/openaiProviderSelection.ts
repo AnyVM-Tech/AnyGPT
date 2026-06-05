@@ -381,6 +381,68 @@ export async function pickOpenAIProviderKey(
   return { apiKey: pick.apiKey!, baseUrl: extractOrigin(pick.provider_url || 'https://api.openai.com') };
 }
 
+// Returns ALL matching OpenAI-compatible provider keys for a model (shuffled),
+// so callers can fail over across keys (e.g. audio TTS/STT) instead of being
+// stuck with a single random pick that may have billing/quota/auth problems.
+export async function listOpenAIProviderKeys(
+  modelId: string,
+  requiredCaps: ModelCapability[] = []
+): Promise<{ apiKey: string; baseUrl: string }[]> {
+  const providers = await dataManager.load<LoadedProviders>('providers');
+  const requiresCaps = Array.isArray(requiredCaps) && requiredCaps.length > 0;
+  const requiresToolCalling = requiredCaps.includes('tool_calling');
+  const matches = providers.filter((p: LoadedProviderData) =>
+    !p.disabled &&
+    p.id.includes('openai') &&
+    !hasInvalidOpenAiKeySignal(p) &&
+    !hasOpenRouterBillingFailureSignal(p) &&
+    (!requiresToolCalling || !hasRecentRateLimitOrTimeoutSignal(p)) &&
+    p.apiKey &&
+    p.models &&
+    modelId in p.models
+  );
+  const candidates = requiresCaps
+    ? matches.filter((p: LoadedProviderData) =>
+        providerSupportsRequiredCaps(modelId, p.models?.[modelId], requiredCaps)
+      )
+    : matches;
+  const pool = candidates.length > 0 ? candidates : matches;
+  return shuffleArray(pool).map((p: LoadedProviderData) => ({
+    apiKey: p.apiKey!,
+    baseUrl: extractOrigin(p.provider_url || 'https://api.openai.com'),
+  }));
+}
+
+// Returns matching Gemini-family provider keys for a model (shuffled). Used to
+// drive native Gemini audio (TTS) via generateContent + speechConfig.
+export async function listGeminiProviderKeys(
+  modelId: string
+): Promise<{ apiKey: string; baseUrl: string }[]> {
+  const providers = await dataManager.load<LoadedProviders>('providers');
+  const matches = providers.filter((p: LoadedProviderData) =>
+    !p.disabled &&
+    isGeminiLikeProviderId(p.id) &&
+    !hasRecentGeminiCatalogAuthFailureSignal(p) &&
+    p.apiKey &&
+    p.models &&
+    modelId in p.models
+  );
+  const pool =
+    matches.length > 0
+      ? matches
+      : providers.filter(
+          (p: LoadedProviderData) =>
+            !p.disabled && isGeminiLikeProviderId(p.id) && p.apiKey && p.models && modelId in p.models
+        );
+  return shuffleArray(pool).map((p: LoadedProviderData) => ({
+    apiKey: p.apiKey!,
+    baseUrl: extractApiBase(
+      p.provider_url || 'https://generativelanguage.googleapis.com/v1beta',
+      'https://generativelanguage.googleapis.com/v1beta'
+    ),
+  }));
+}
+
 export async function pickEmbeddingProviderKey(
   modelId: string,
 ): Promise<EmbeddingProviderSelection | null> {

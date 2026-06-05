@@ -148,13 +148,16 @@ import {
 	listAnyVideoProviders,
 	listVideoGenProviders,
 	pickEmbeddingProviderKey,
-	pickOpenAIProviderKey
+	pickOpenAIProviderKey,
+	listOpenAIProviderKeys,
+	listGeminiProviderKeys
 } from '../modules/openaiProviderSelection.js';
 import {
 	AUDIO_CONTENT_TYPES,
 	forwardTtsToOpenAI,
 	forwardSttToOpenAI
 } from '../modules/openaiAudio.js';
+import { GeminiAI } from '../providers/gemini.js';
 import {
 	handleImageGenFallbackFromChatOrResponses,
 	handleVideoGenFallbackFromChatOrResponses,
@@ -5970,6 +5973,96 @@ openaiRouter.post(
 	}
 );
 
+// Wrap headerless PCM (16-bit LE) into a minimal WAV container. Gemini native
+// TTS returns raw PCM (audio/L16), which most clients cannot play directly.
+function pcmToWavBuffer(
+	pcm: Uint8Array,
+	sampleRate: number,
+	channels = 1,
+	bitsPerSample = 16
+): Uint8Array {
+	const blockAlign = (channels * bitsPerSample) >> 3;
+	const byteRate = sampleRate * blockAlign;
+	const header = Buffer.alloc(44);
+	header.write('RIFF', 0);
+	header.writeUInt32LE(36 + pcm.length, 4);
+	header.write('WAVE', 8);
+	header.write('fmt ', 12);
+	header.writeUInt32LE(16, 16);
+	header.writeUInt16LE(1, 20);
+	header.writeUInt16LE(channels, 22);
+	header.writeUInt32LE(sampleRate, 24);
+	header.writeUInt32LE(byteRate, 28);
+	header.writeUInt16LE(blockAlign, 32);
+	header.writeUInt16LE(bitsPerSample, 34);
+	header.write('data', 36);
+	header.writeUInt32LE(pcm.length, 40);
+	return Buffer.concat([header, Buffer.from(pcm)]);
+}
+
+function parseAudioDataUrl(
+	value: string
+): { mime: string; buffer: Buffer } | null {
+	const m = /^data:([^;,]+)[^,]*;base64,(.+)$/s.exec(String(value || '').trim());
+	if (!m) return null;
+	return { mime: m[1].toLowerCase(), buffer: Buffer.from(m[2], 'base64') };
+}
+
+// Native Gemini TTS via generateContent + speechConfig (with provider failover).
+async function synthesizeGeminiSpeech(opts: {
+	model: string;
+	input: string;
+	voice: string;
+	responseFormat: string;
+}): Promise<
+	| { ok: true; body: Uint8Array; contentType: string }
+	| { ok: false; status: number; error: string }
+> {
+	const candidates = await listGeminiProviderKeys(opts.model);
+	if (candidates.length === 0)
+		return { ok: false, status: 503, error: 'No available Gemini provider for TTS' };
+	// Gemini prebuilt voices are capitalized (e.g. Kore); map OpenAI-style
+	// lowercase voice names to a sensible default.
+	const geminiVoice = /^[A-Z]/.test(opts.voice) ? opts.voice : 'Kore';
+	let lastError = 'unknown error';
+	let lastStatus = 502;
+	for (const provider of candidates) {
+		try {
+			const gemini = new GeminiAI(provider.apiKey);
+			const result = await gemini.sendMessage({
+				model: { id: opts.model },
+				messages: [{ role: 'user', content: opts.input }],
+				modalities: ['audio'],
+				audio: { voice: geminiVoice }
+			} as any);
+			const parsed = parseAudioDataUrl(String((result as any)?.response || ''));
+			if (!parsed || parsed.buffer.length === 0) {
+				lastError = 'Gemini returned no audio content';
+				continue;
+			}
+			const isPcm =
+				/l16|pcm|octet-stream/.test(parsed.mime) ||
+				!parsed.mime.startsWith('audio/');
+			if (isPcm) {
+				if ((opts.responseFormat || '').toLowerCase() === 'pcm')
+					return { ok: true, body: parsed.buffer, contentType: 'audio/pcm' };
+				const rateMatch = /rate=(\d+)/.exec(parsed.mime);
+				const sampleRate = rateMatch ? parseInt(rateMatch[1], 10) : 24000;
+				return {
+					ok: true,
+					body: pcmToWavBuffer(parsed.buffer, sampleRate),
+					contentType: 'audio/wav'
+				};
+			}
+			return { ok: true, body: parsed.buffer, contentType: parsed.mime };
+		} catch (err: any) {
+			lastError = err?.message ? String(err.message) : String(err);
+			lastStatus = typeof err?.statusCode === 'number' ? err.statusCode : 502;
+		}
+	}
+	return { ok: false, status: lastStatus, error: lastError };
+}
+
 // --- TTS: /v1/audio/speech ---
 openaiRouter.post(
 	'/audio/speech',
@@ -6038,6 +6131,28 @@ openaiRouter.post(
 				return;
 			}
 
+			const isGeminiTtsModel = /gemini/i.test(model);
+			if (isGeminiTtsModel) {
+				const gemResult = await synthesizeGeminiSpeech({
+					model,
+					input,
+					voice,
+					responseFormat
+				});
+				if (!gemResult.ok) {
+					if (!response.completed)
+						return response.status(gemResult.status).json({
+							error: `TTS upstream error: ${gemResult.error}`,
+							timestamp: new Date().toISOString()
+						});
+					return;
+				}
+				response.setHeader('Content-Type', gemResult.contentType);
+				response.end(gemResult.body);
+				await updateUserTokenUsage(Math.ceil(input.length / 4), request.apiKey!);
+				return;
+			}
+
 			const capsOk = await enforceModelCapabilities(
 				model,
 				['audio_output'],
@@ -6045,10 +6160,8 @@ openaiRouter.post(
 			);
 			if (!capsOk) return;
 
-			const provider = await pickOpenAIProviderKey(model, [
-				'audio_output'
-			]);
-			if (!provider) {
+			const ttsProviders = await listOpenAIProviderKeys(model, ['audio_output']);
+			if (ttsProviders.length === 0) {
 				if (!response.completed)
 					return response.status(503).json({
 						error: 'No available provider for TTS',
@@ -6057,63 +6170,75 @@ openaiRouter.post(
 				return;
 			}
 
-			const upstreamUrl = `${provider.baseUrl}/v1/audio/speech`;
-			const upstreamRes = await fetchWithTimeout(
-				upstreamUrl,
-				{
-					method: 'POST',
-					headers: {
-						'Content-Type': 'application/json',
-						Authorization: `Bearer ${provider.apiKey}`
-					},
-					body: JSON.stringify({
-						model,
-						input,
-						voice,
-						response_format: responseFormat,
-						speed,
-						stream
-					})
-				},
-				UPSTREAM_TIMEOUT_MS
-			);
+			let ttsLastError = '';
+			let ttsLastStatus = 502;
+			for (const provider of ttsProviders) {
+				let upstreamRes;
+				try {
+					upstreamRes = await fetchWithTimeout(
+						`${provider.baseUrl}/v1/audio/speech`,
+						{
+							method: 'POST',
+							headers: {
+								'Content-Type': 'application/json',
+								Authorization: `Bearer ${provider.apiKey}`
+							},
+							body: JSON.stringify({
+								model,
+								input,
+								voice,
+								response_format: responseFormat,
+								speed,
+								stream
+							})
+						},
+						UPSTREAM_TIMEOUT_MS
+					);
+				} catch (err: any) {
+					ttsLastError = err?.message ? String(err.message) : String(err);
+					ttsLastStatus = 502;
+					continue;
+				}
 
-			if (!upstreamRes.ok) {
-				const errText = await upstreamRes.text().catch(() => '');
-				if (!response.completed)
-					return response.status(upstreamRes.status).json({
-						error: `TTS upstream error: ${errText || upstreamRes.statusText}`,
-						timestamp: new Date().toISOString()
-					});
+				if (!upstreamRes.ok) {
+					ttsLastError = await upstreamRes.text().catch(() => '');
+					ttsLastStatus = upstreamRes.status;
+					// Billing/quota/auth failures on one key -> try the next provider.
+					continue;
+				}
+
+				const upstreamContentType = upstreamRes.headers.get('content-type');
+				const contentType =
+					upstreamContentType ||
+					AUDIO_CONTENT_TYPES[responseFormat] ||
+					'audio/mpeg';
+				response.setHeader('Content-Type', contentType);
+
+				if (stream && upstreamRes.body) {
+					const reader = upstreamRes.body.getReader();
+					while (true) {
+						const { done, value } = await reader.read();
+						if (done) break;
+						if (value && value.length > 0) {
+							response.write(value);
+						}
+					}
+					response.end();
+				} else {
+					const arrayBuffer = await upstreamRes.arrayBuffer();
+					response.end(new Uint8Array(arrayBuffer));
+				}
+
+				await updateUserTokenUsage(Math.ceil(input.length / 4), request.apiKey!);
 				return;
 			}
 
-			const upstreamContentType = upstreamRes.headers.get('content-type');
-			const contentType =
-				upstreamContentType ||
-				AUDIO_CONTENT_TYPES[responseFormat] ||
-				'audio/mpeg';
-			response.setHeader('Content-Type', contentType);
-
-			if (stream && upstreamRes.body) {
-				const reader = upstreamRes.body.getReader();
-				while (true) {
-					const { done, value } = await reader.read();
-					if (done) break;
-					if (value && value.length > 0) {
-						response.write(value);
-					}
-				}
-				response.end();
-			} else {
-				const arrayBuffer = await upstreamRes.arrayBuffer();
-				response.end(new Uint8Array(arrayBuffer));
-			}
-
-			await updateUserTokenUsage(
-				Math.ceil(input.length / 4),
-				request.apiKey!
-			);
+			if (!response.completed)
+				response.status(ttsLastStatus).json({
+					error: `TTS upstream error: ${ttsLastError || 'all providers failed'}`,
+					timestamp: new Date().toISOString()
+				});
+			return;
 		} catch (error: any) {
 			await logError(error, request);
 			if (!response.completed)
@@ -6130,14 +6255,35 @@ openaiRouter.post(
 	'/audio/transcriptions',
 	async (request: Request, response: Response) => {
 		try {
-			// For multipart/form-data, we need to forward the raw body
+			// For multipart/form-data, forward the raw body to the upstream as-is.
 			const contentType = request.headers['content-type'] || '';
-			const model = request.query?.model;
+			const rawBody = await request.buffer();
 
-			if (!model || typeof model !== 'string') {
+			// OpenAI clients send `model` as a multipart form field; also accept it as
+			// a query param for compatibility.
+			let model =
+				typeof request.query?.model === 'string' ? request.query.model : '';
+			if (contentType.includes('multipart/form-data')) {
+				const boundary = contentType.split('boundary=')[1]?.trim();
+				if (boundary) {
+					try {
+						const parsed = parseMultipartBody(rawBody, boundary);
+						if (
+							typeof parsed.fields?.model === 'string' &&
+							parsed.fields.model.trim()
+						) {
+							model = parsed.fields.model.trim();
+						}
+					} catch {
+						// fall back to query param below
+					}
+				}
+			}
+
+			if (!model) {
 				if (!response.completed)
 					return response.status(400).json({
-						error: 'Bad Request: model is required (query param)',
+						error: 'Bad Request: model is required (multipart form field "model" or query param)',
 						timestamp: new Date().toISOString()
 					});
 				return;
@@ -6172,10 +6318,8 @@ openaiRouter.post(
 			);
 			if (!capsOk) return;
 
-			const provider = await pickOpenAIProviderKey(model, [
-				'audio_input'
-			]);
-			if (!provider) {
+			const sttProviders = await listOpenAIProviderKeys(model, ['audio_input']);
+			if (sttProviders.length === 0) {
 				if (!response.completed)
 					return response.status(503).json({
 						error: 'No available provider for STT',
@@ -6184,39 +6328,49 @@ openaiRouter.post(
 				return;
 			}
 
-			// Read raw body as Buffer via the buffer() method
-			const rawBody = await request.buffer();
-			const upstreamUrl = `${provider.baseUrl}/v1/audio/transcriptions`;
-			const upstreamRes = await fetchWithTimeout(
-				upstreamUrl,
-				{
-					method: 'POST',
-					headers: {
-						'Content-Type': contentType,
-						Authorization: `Bearer ${provider.apiKey}`
-					},
-					body: rawBody as any
-				},
-				UPSTREAM_TIMEOUT_MS
-			);
-
-			const resContentType =
-				upstreamRes.headers.get('content-type') || 'application/json';
-			response.setHeader('Content-Type', resContentType);
-
-			if (!upstreamRes.ok) {
-				const errText = await upstreamRes.text().catch(() => '');
-				if (!response.completed) {
-					response.status(upstreamRes.status).end(errText);
-					return;
+			let sttLastError = '';
+			let sttLastStatus = 502;
+			for (const provider of sttProviders) {
+				let upstreamRes;
+				try {
+					upstreamRes = await fetchWithTimeout(
+						`${provider.baseUrl}/v1/audio/transcriptions`,
+						{
+							method: 'POST',
+							headers: {
+								'Content-Type': contentType,
+								Authorization: `Bearer ${provider.apiKey}`
+							},
+							body: rawBody as any
+						},
+						UPSTREAM_TIMEOUT_MS
+					);
+				} catch (err: any) {
+					sttLastError = err?.message ? String(err.message) : String(err);
+					sttLastStatus = 502;
+					continue;
 				}
+
+				if (!upstreamRes.ok) {
+					sttLastError = await upstreamRes.text().catch(() => '');
+					sttLastStatus = upstreamRes.status;
+					// Failover to the next provider key.
+					continue;
+				}
+
+				const resContentType =
+					upstreamRes.headers.get('content-type') || 'application/json';
+				response.setHeader('Content-Type', resContentType);
+				const resBody = await upstreamRes.text();
+				response.end(resBody);
+				await updateUserTokenUsage(100, request.apiKey!); // Flat estimate for audio transcription
 				return;
 			}
 
-			const resBody = await upstreamRes.text();
-			response.end(resBody);
-
-			await updateUserTokenUsage(100, request.apiKey!); // Flat estimate for audio transcription
+			if (!response.completed)
+				response
+					.status(sttLastStatus)
+					.end(sttLastError || 'STT: all providers failed');
 		} catch (error: any) {
 			await logError(error, request);
 			console.error('STT route error:', error.message);
