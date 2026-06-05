@@ -23,6 +23,16 @@ module.exports = {
 	// Base config
 	extends: ['eslint:recommended'],
 
+	rules: {
+		// Surface (warn, don't fail) common quality issues flagged in review.
+		// Underscore-prefixed args/vars are treated as intentionally unused.
+		'no-unused-vars': [
+			'warn',
+			{ argsIgnorePattern: '^_', varsIgnorePattern: '^_' }
+		],
+		'no-console': ['warn', { allow: ['warn', 'error'] }]
+	},
+
 	overrides: [
 		// React
 		{
@@ -69,7 +79,15 @@ module.exports = {
 				'plugin:@typescript-eslint/recommended',
 				'plugin:import/recommended',
 				'plugin:import/typescript'
-			]
+			],
+			rules: {
+				'no-unused-vars': 'off',
+				'@typescript-eslint/no-unused-vars': [
+					'warn',
+					{ argsIgnorePattern: '^_', varsIgnorePattern: '^_' }
+				],
+				'@typescript-eslint/no-explicit-any': 'warn'
+			}
 		},
 
 		// Node

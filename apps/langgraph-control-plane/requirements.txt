@@ -1,0 +1,11 @@
+# Python dependencies for the LangGraph control-plane OpenHands bridge
+# (openhands_bridge.py). Required when CONTROL_PLANE_AI_PROVIDER=openhands.
+#
+# Install into the control-plane Python environment, e.g.:
+#   python3 -m venv .venv-openhands
+#   ./.venv-openhands/bin/pip install -r apps/langgraph-control-plane/requirements.txt
+#
+# Pinned to the versions verified against this bridge; allow patch/minor
+# updates but not breaking majors.
+openhands-sdk>=1.17.0,<2.0.0
+openhands-tools>=1.17.0,<2.0.0

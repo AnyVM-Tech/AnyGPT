@@ -127,7 +127,7 @@ export async function computeProviderMetricsInWorker(
   const w = ensureWorker();
   if (!w) {
     // Fallback inline
-    computeProviderStatsWithEMA(providerData, alpha);
+    computeProviderStatsWithEMA(providerData);
     computeProviderScore(providerData, latencyWeight, errorWeight);
     return providerData;
   }
@@ -141,7 +141,7 @@ export async function computeProviderMetricsInWorker(
       jobs.delete(id);
       console.warn(`[WorkerPool] Job ${id} timed out after ${WORKER_JOB_TIMEOUT_MS}ms, falling back inline.`);
       try {
-        computeProviderStatsWithEMA(providerData, alpha);
+        computeProviderStatsWithEMA(providerData);
         computeProviderScore(providerData, latencyWeight, errorWeight);
         resolve(providerData);
       } catch (fallbackErr) {
@@ -160,7 +160,7 @@ export async function computeProviderMetricsInWorker(
       jobs.delete(id);
       console.warn('[WorkerPool] postMessage failed, falling back inline.', err);
       try {
-        computeProviderStatsWithEMA(providerData, alpha);
+        computeProviderStatsWithEMA(providerData);
         computeProviderScore(providerData, latencyWeight, errorWeight);
         resolve(providerData);
       } catch (fallbackErr) {

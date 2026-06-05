@@ -1013,6 +1013,10 @@ type VideoRequestCacheEntry = VideoRequestCacheProvider & {
 
 const videoRequestCache = new Map<string, VideoRequestCacheEntry>();
 const VIDEO_CACHE_EVICTION_INTERVAL_MS = 5 * 60 * 1000;
+const VIDEO_REQUEST_CACHE_MAX_ENTRIES = (() => {
+	const raw = Number(process.env.VIDEO_REQUEST_CACHE_MAX_ENTRIES);
+	return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 10_000;
+})();
 const VIDEO_REQUEST_CACHE_REDIS_KEY_PREFIX = 'api:video-request-cache:';
 
 // Periodic eviction to prevent unbounded Map growth
@@ -1187,6 +1191,17 @@ function setVideoRequestCacheLocal(
 	if (!requestId) return;
 	const expiresAt = Date.now() + Math.max(1, ttlMs);
 	videoRequestCache.set(requestId, { ...provider, expiresAt });
+	// Bound the cache: if unpolled requests accumulate faster than the periodic
+	// sweep evicts them, drop the oldest entries (insertion order) immediately.
+	if (videoRequestCache.size > VIDEO_REQUEST_CACHE_MAX_ENTRIES) {
+		const excess = videoRequestCache.size - VIDEO_REQUEST_CACHE_MAX_ENTRIES;
+		const iterator = videoRequestCache.keys();
+		for (let i = 0; i < excess; i++) {
+			const next = iterator.next();
+			if (next.done) break;
+			videoRequestCache.delete(next.value);
+		}
+	}
 }
 
 function deleteVideoRequestCacheLocal(requestId: string) {

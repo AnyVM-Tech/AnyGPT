@@ -13,7 +13,7 @@ function handleMetricsMessage(msg: any, send: (payload: any) => void) {
   if (!msg || msg.type !== 'provider-metrics') return;
   const { id, providerData, alpha, latencyWeight, errorWeight } = msg as MetricsMessage;
   try {
-    computeProviderStatsWithEMA(providerData, alpha);
+    computeProviderStatsWithEMA(providerData);
     computeProviderScore(providerData, latencyWeight, errorWeight);
     send({ id, type: 'provider-metrics', providerData });
   } catch (err) {

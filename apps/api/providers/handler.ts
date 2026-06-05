@@ -447,6 +447,29 @@ return {0, wait_ms}
 `;
 
 // Periodic eviction to prevent unbounded Map growth
+// Hard cap so a burst of unique keys cannot grow these maps without bound
+// between the (time-based) eviction sweeps below.
+const PROVIDER_CACHE_MAX_ENTRIES = (() => {
+	const raw = Number(process.env.PROVIDER_CACHE_MAX_ENTRIES);
+	return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 50_000;
+})();
+
+// Removes the oldest entries (Map preserves insertion order) until `map` is
+// within `max`. Returns the number of entries removed.
+function trimOldestEntries<K, V>(map: Map<K, V>, max: number): number {
+	if (map.size <= max) return 0;
+	let removed = 0;
+	const excess = map.size - max;
+	const iterator = map.keys();
+	for (let i = 0; i < excess; i++) {
+		const next = iterator.next();
+		if (next.done) break;
+		map.delete(next.value);
+		removed++;
+	}
+	return removed;
+}
+
 const _cooldownEvictionTimer = setInterval(() => {
 	const now = Date.now();
 	let evicted = 0;
@@ -498,6 +521,13 @@ const _cooldownEvictionTimer = setInterval(() => {
 			evicted++;
 		}
 	}
+	// Enforce hard caps in case unique-key churn outpaces time-based expiry.
+	evicted += trimOldestEntries(providerCooldowns, PROVIDER_CACHE_MAX_ENTRIES);
+	evicted += trimOldestEntries(providerDistributedCooldowns, PROVIDER_CACHE_MAX_ENTRIES);
+	evicted += trimOldestEntries(providerFastSkips, PROVIDER_CACHE_MAX_ENTRIES);
+	evicted += trimOldestEntries(providerRateLimitStarts, PROVIDER_CACHE_MAX_ENTRIES);
+	evicted += trimOldestEntries(providerRateLimitWindows, PROVIDER_CACHE_MAX_ENTRIES);
+	evicted += trimOldestEntries(modelNegativeCaches, PROVIDER_CACHE_MAX_ENTRIES);
 	if (evicted > 0) {
 		console.log(
 			`[CooldownEviction] Swept ${evicted} expired cooldown/rate-limit entries. ` +

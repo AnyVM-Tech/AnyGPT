@@ -15,29 +15,31 @@ const LIVE_METRICS_URL = '/api/live-metrics';
 const LIVE_METRICS_REFRESH_MS = 30_000;
 const LIVE_METRICS_REDUCED_MOTION_REFRESH_MS = 60_000;
 const LIVE_METRICS_REQUEST_TIMEOUT_MS = 8_000;
-const THEME_COLOR_DEFAULT = '#041140';
-const THEME_COLOR_HERO = '#010827';
 const DEFAULT_PAGE_TITLE = 'AnyGPT — Unified AI Workspace';
-const AUTHENTICATED_PAGE_TITLE = 'AnyGPT Workspace';
 const HIDDEN_PAGE_TITLE = 'AnyGPT — Come back to your workspace';
-const DASHBOARD_STORAGE_KEYS = ['anygpt:last-dashboard-url', 'librechat:last-dashboard-url'];
-const DARK_COLOR_SCHEME_QUERY = '(prefers-color-scheme: dark)';
 let liveMetricsRequestInFlight = false;
 let liveMetricsPollHandle = null;
 let liveMetricsVisibilityBound = false;
 let liveMetricsNetworkBound = false;
-let liveMetricsPageLifecycleBound = false;
-let liveMetricsMotionBound = false;
 let liveMetricsAbortController = null;
-let liveMetricsMotionQuery = null;
-let themeColorObserver = null;
-let colorSchemeThemeColorBound = false;
-let colorSchemeThemeQuery = null;
 let pageVisibilityTitleBound = false;
 let currentPageTitleBase = DEFAULT_PAGE_TITLE;
 
-function browserIsOffline() {
-  return typeof navigator !== 'undefined' && navigator.onLine === false;
+/**
+ * Escape a string for safe interpolation into innerHTML. Identity values
+ * (e.g. the Keycloak token name) are untrusted and must be escaped to
+ * prevent XSS when injected into the auth button markup.
+ */
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (ch) => {
+    switch (ch) {
+      case '&': return '&amp;';
+      case '<': return '&lt;';
+      case '>': return '&gt;';
+      case '"': return '&quot;';
+      default: return '&#39;';
+    }
+  });
 }
 
 function updatePageTitle() {
@@ -45,11 +47,6 @@ function updatePageTitle() {
   document.title = document.visibilityState === 'hidden'
     ? HIDDEN_PAGE_TITLE
     : currentPageTitleBase;
-}
-
-function setPageTitleBase(title) {
-  currentPageTitleBase = title || DEFAULT_PAGE_TITLE;
-  updatePageTitle();
 }
 
 function bindPageTitleVisibilityHandling() {
@@ -191,9 +188,16 @@ function renderLiveMetrics(metrics) {
   }
 }
 
-async function initLiveMetrics() {
+async function refreshLiveMetrics() {
   if (liveMetricsRequestInFlight) return;
   liveMetricsRequestInFlight = true;
+
+  const controller =
+    typeof AbortController !== 'undefined' ? new AbortController() : null;
+  liveMetricsAbortController = controller;
+  const timeoutHandle = controller
+    ? setTimeout(() => controller.abort(), LIVE_METRICS_REQUEST_TIMEOUT_MS)
+    : null;
 
   try {
     const response = await fetch(LIVE_METRICS_URL, {
@@ -201,6 +205,7 @@ async function initLiveMetrics() {
       headers: {
         accept: 'application/json',
       },
+      signal: controller ? controller.signal : undefined,
     });
 
     if (!response.ok) {
@@ -212,12 +217,17 @@ async function initLiveMetrics() {
   } catch (err) {
     console.warn('[AnyGPT Homepage] Live metrics fetch failed:', err);
   } finally {
+    if (timeoutHandle) clearTimeout(timeoutHandle);
+    if (liveMetricsAbortController === controller) {
+      liveMetricsAbortController = null;
+    }
     liveMetricsRequestInFlight = false;
   }
 }
 
 function startLiveMetricsPolling() {
-  initLiveMetrics();
+  bindLiveMetricsVisibilityHandling();
+  void refreshLiveMetrics();
 
   if (liveMetricsPollHandle !== null) {
     return;
@@ -239,7 +249,7 @@ function loginButtons() {
 }
 
 function dashboardButtons(name) {
-  const greeting = name ? `Welcome, ${name}` : 'Welcome back';
+  const greeting = name ? `Welcome, ${escapeHtml(name)}` : 'Welcome back';
   return `
     <a href="${DASHBOARD_URL}" class="btn btn-primary">
       Open Dashboard →
@@ -257,7 +267,7 @@ function navLoginButtons() {
 
 function navDashboardButtons(name) {
   return `
-    <span class="hidden xl:inline nav-name">${name || 'Workspace'}</span>
+    <span class="hidden xl:inline nav-name">${escapeHtml(name) || 'Workspace'}</span>
     <a href="${DOCS_URL}" target="_blank" rel="noreferrer" class="btn btn-secondary btn-compact hidden md:inline-flex">API Docs</a>
     <a href="${DASHBOARD_URL}" class="btn btn-primary btn-compact">Dashboard</a>
   `;
@@ -381,7 +391,11 @@ function initScrollSpy() {
 }
 
 // Run when DOM is ready
-const onReady = () => { init(); initScrollSpy(); };
+const onReady = () => {
+  bindPageTitleVisibilityHandling();
+  init();
+  initScrollSpy();
+};
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', onReady);
 } else {

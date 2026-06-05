@@ -64,9 +64,11 @@ export function computeEMA(
   return Math.round(calculatedEMA * 100) / 100; // Round result
 }
 
+// NOTE: This computes simple per-provider averages over the recorded
+// response_times window. It does not apply exponential smoothing despite the
+// historical "WithEMA" name (see computeEMA above for the actual EMA helper).
 export function computeProviderStatsWithEMA(
-  providerData: Provider,
-  _alpha?: number
+  providerData: Provider
 ): void {
   let totalResponseTime = 0;
   let totalProviderLatency = 0;
