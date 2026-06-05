@@ -324,7 +324,7 @@ function resolveVideoSize(requestBody: any, defaultSize?: string): string | unde
   return typeof defaultSize === 'string' && defaultSize.trim() ? defaultSize.trim() : undefined;
 }
 
-function resolveVideoSeconds(requestBody: any): string | undefined {
+function resolveVideoSeconds(requestBody: any, defaultSeconds?: number): string | undefined {
   const secondsValue = getAliasedFieldValue(requestBody, ['seconds']);
   if (typeof secondsValue === 'string' && secondsValue.trim()) {
     return secondsValue.trim();
@@ -342,6 +342,9 @@ function resolveVideoSeconds(requestBody: any): string | undefined {
     if (Number.isFinite(parsed) && parsed > 0) {
       return String(Math.floor(parsed));
     }
+  }
+  if (typeof defaultSeconds === 'number' && Number.isFinite(defaultSeconds) && defaultSeconds > 0) {
+    return String(Math.floor(defaultSeconds));
   }
   return undefined;
 }
@@ -1119,7 +1122,7 @@ async function requestVideoGenerationWithProvider(params: {
     }
 
     const size = resolveVideoSize(requestBody, soraModel?.defaultSize);
-    const seconds = resolveVideoSeconds(requestBody);
+    const seconds = resolveVideoSeconds(requestBody, soraModel?.defaultSeconds);
     const inputReference = buildOpenAIVideoInputReference(requestBody, imageUrl);
     if (inputReference?.json) payload.input_reference = inputReference.json;
     if (size) payload.size = size;

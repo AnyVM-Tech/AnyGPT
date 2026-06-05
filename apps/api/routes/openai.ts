@@ -67,6 +67,7 @@ import {
 	isNanoBananaModel,
 	ensureNanoBananaModalities,
 	isNonChatModel,
+	resolveSoraVideoModelId,
 	composeAssistantContent,
 	inferToolCallsFromJsonText,
 	filterValidChatMessages
@@ -1802,19 +1803,33 @@ function resolveImageBillingQuantity(requestBody: any): number {
 	return typeof requested === 'number' ? Math.max(1, Math.ceil(requested)) : 1;
 }
 
-function resolveVideoBillingQuantity(requestBody: any): number {
-	return (
+function resolveVideoBillingQuantity(requestBody: any, modelId?: string): number {
+	const explicit =
 		parsePositiveNumericField(requestBody?.seconds) ??
 		parsePositiveNumericField(requestBody?.duration) ??
-		1
-	);
+		parsePositiveNumericField(requestBody?.duration_seconds) ??
+		parsePositiveNumericField(requestBody?.durationSeconds);
+	if (typeof explicit === 'number') return explicit;
+
+	const soraDefaults = modelId ? resolveSoraVideoModelId(modelId) : null;
+	if (
+		typeof soraDefaults?.defaultSeconds === 'number' &&
+		Number.isFinite(soraDefaults.defaultSeconds) &&
+		soraDefaults.defaultSeconds > 0
+	) {
+		return soraDefaults.defaultSeconds;
+	}
+
+	return 1;
 }
 
 function resolveParsedVideoBillingQuantity(
-	parsedBody: ParsedVideoForwardBody
+	parsedBody: ParsedVideoForwardBody,
+	modelId?: string
 ): number {
 	return resolveVideoBillingQuantity(
-		parsedBody.jsonBody ?? parsedBody.multipart?.fields ?? {}
+		parsedBody.jsonBody ?? parsedBody.multipart?.fields ?? {},
+		modelId
 	);
 }
 
@@ -6785,7 +6800,7 @@ const handleVideoGenerationRequest = async (
 				response.json(responseJson);
 
 				const tokenEstimate = Math.ceil(prompt.length / 4) + 500;
-				const videoSeconds = resolveVideoBillingQuantity(billingRequestBody);
+				const videoSeconds = resolveVideoBillingQuantity(billingRequestBody, model);
 				const pricingUnitRateOverride = resolveVideoPricingUnitRateOverride(model, billingRequestBody);
 				await updateUserTokenUsage(tokenEstimate, request.apiKey!, {
 					modelId: model,
@@ -6913,7 +6928,7 @@ openaiRouter.post(
 				const prompt = extractParsedVideoField(parsedBody, 'prompt');
 					if (prompt) {
 						const tokenEstimate = Math.ceil(prompt.length / 4) + 500;
-						const videoSeconds = resolveParsedVideoBillingQuantity(parsedBody);
+						const videoSeconds = resolveParsedVideoBillingQuantity(parsedBody, model || '');
 						const pricingUnitRateOverride = resolveVideoPricingUnitRateOverride(
 							model || '',
 							parsedBody.jsonBody ?? parsedBody.multipart?.fields ?? {}
@@ -6990,7 +7005,7 @@ openaiRouter.post(
 				const prompt = extractParsedVideoField(parsedBody, 'prompt');
 					if (prompt) {
 						const tokenEstimate = Math.ceil(prompt.length / 4) + 500;
-						const videoSeconds = resolveParsedVideoBillingQuantity(parsedBody);
+						const videoSeconds = resolveParsedVideoBillingQuantity(parsedBody, model || '');
 						const pricingUnitRateOverride = resolveVideoPricingUnitRateOverride(
 							model || '',
 							parsedBody.jsonBody ?? parsedBody.multipart?.fields ?? {}
@@ -7169,11 +7184,11 @@ openaiRouter.post(
 				const prompt = typeof body?.prompt === 'string' ? body.prompt : '';
 					if (prompt) {
 						const tokenEstimate = Math.ceil(prompt.length / 4) + 500;
-						const videoSeconds = resolveVideoBillingQuantity(body);
 						const remixModelId =
 							typeof body?.model === 'string' && body.model.trim()
 								? body.model
 								: '';
+						const videoSeconds = resolveVideoBillingQuantity(body, remixModelId);
 						const pricingUnitRateOverride = resolveVideoPricingUnitRateOverride(
 							remixModelId,
 							body

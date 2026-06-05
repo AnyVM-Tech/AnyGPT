@@ -1,13 +1,15 @@
 import { rewriteGeneratedImageContent } from './generatedImageStore.js';
 
-const SORA_VIDEO_DEFAULTS: Record<string, { providerModelId: string; defaultSize?: string }> = {
-  sora: { providerModelId: 'sora-2', defaultSize: '1280x720' },
-  'sora-2': { providerModelId: 'sora-2', defaultSize: '1280x720' },
-  'sora-2l': { providerModelId: 'sora-2', defaultSize: '1280x720' },
-  'sora-2p': { providerModelId: 'sora-2', defaultSize: '720x1280' },
-  'sora-2-pro': { providerModelId: 'sora-2-pro', defaultSize: '1792x1024' },
-  'sora-2l-pro': { providerModelId: 'sora-2-pro', defaultSize: '1792x1024' },
-  'sora-2p-pro': { providerModelId: 'sora-2-pro', defaultSize: '1024x1792' },
+const SORA_DEFAULT_SECONDS = 4;
+
+const SORA_VIDEO_DEFAULTS: Record<string, { providerModelId: string; defaultSize?: string; defaultSeconds?: number }> = {
+  sora: { providerModelId: 'sora-2', defaultSize: '1280x720', defaultSeconds: SORA_DEFAULT_SECONDS },
+  'sora-2': { providerModelId: 'sora-2', defaultSize: '1280x720', defaultSeconds: SORA_DEFAULT_SECONDS },
+  'sora-2l': { providerModelId: 'sora-2', defaultSize: '1280x720', defaultSeconds: SORA_DEFAULT_SECONDS },
+  'sora-2p': { providerModelId: 'sora-2', defaultSize: '720x1280', defaultSeconds: SORA_DEFAULT_SECONDS },
+  'sora-2-pro': { providerModelId: 'sora-2-pro', defaultSize: '1792x1024', defaultSeconds: SORA_DEFAULT_SECONDS },
+  'sora-2l-pro': { providerModelId: 'sora-2-pro', defaultSize: '1792x1024', defaultSeconds: SORA_DEFAULT_SECONDS },
+  'sora-2p-pro': { providerModelId: 'sora-2-pro', defaultSize: '1024x1792', defaultSeconds: SORA_DEFAULT_SECONDS },
 };
 
 function collectModelIdCandidates(modelId: string): string[] {
@@ -26,7 +28,7 @@ function collectModelIdCandidates(modelId: string): string[] {
   return Array.from(candidates);
 }
 
-export function resolveSoraVideoModelId(modelId: string): { providerModelId: string; defaultSize?: string } | null {
+export function resolveSoraVideoModelId(modelId: string): { providerModelId: string; defaultSize?: string; defaultSeconds?: number } | null {
   for (const candidate of collectModelIdCandidates(modelId)) {
     const mapped = SORA_VIDEO_DEFAULTS[candidate];
     if (mapped) {
