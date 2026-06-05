@@ -387,7 +387,7 @@ export async function pickOpenAIProviderKey(
 export async function listOpenAIProviderKeys(
   modelId: string,
   requiredCaps: ModelCapability[] = []
-): Promise<{ apiKey: string; baseUrl: string }[]> {
+): Promise<{ providerId: string; apiKey: string; baseUrl: string }[]> {
   const providers = await dataManager.load<LoadedProviders>('providers');
   const requiresCaps = Array.isArray(requiredCaps) && requiredCaps.length > 0;
   const requiresToolCalling = requiredCaps.includes('tool_calling');
@@ -408,6 +408,7 @@ export async function listOpenAIProviderKeys(
     : matches;
   const pool = candidates.length > 0 ? candidates : matches;
   return shuffleArray(pool).map((p: LoadedProviderData) => ({
+    providerId: p.id,
     apiKey: p.apiKey!,
     baseUrl: extractOrigin(p.provider_url || 'https://api.openai.com'),
   }));
@@ -417,7 +418,7 @@ export async function listOpenAIProviderKeys(
 // drive native Gemini audio (TTS) via generateContent + speechConfig.
 export async function listGeminiProviderKeys(
   modelId: string
-): Promise<{ apiKey: string; baseUrl: string }[]> {
+): Promise<{ providerId: string; apiKey: string; baseUrl: string }[]> {
   const providers = await dataManager.load<LoadedProviders>('providers');
   const matches = providers.filter((p: LoadedProviderData) =>
     !p.disabled &&
@@ -435,6 +436,7 @@ export async function listGeminiProviderKeys(
             !p.disabled && isGeminiLikeProviderId(p.id) && p.apiKey && p.models && modelId in p.models
         );
   return shuffleArray(pool).map((p: LoadedProviderData) => ({
+    providerId: p.id,
     apiKey: p.apiKey!,
     baseUrl: extractApiBase(
       p.provider_url || 'https://generativelanguage.googleapis.com/v1beta',

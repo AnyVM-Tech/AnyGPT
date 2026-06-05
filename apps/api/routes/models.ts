@@ -404,6 +404,35 @@ function truncateNativeRouteModels(
     };
 }
 
+const DEAD_AUDIO_NAMESPACE_ALIASES = new Set([
+    'openai/gpt-audio',
+    'openai/gpt-audio-mini',
+    'openai/gpt-4o-audio-preview',
+]);
+
+function filterDeadAudioNamespaceAliases(modelsData: ModelsFileStructure): {
+    models: ModelsFileStructure;
+    filteredOutCount: number;
+} {
+    const data = Array.isArray(modelsData?.data) ? modelsData.data : [];
+    const ids = new Set(data.map((model) => model?.id).filter(Boolean));
+    const filtered = data.filter((model) => {
+        const id = typeof model?.id === 'string' ? model.id : '';
+        if (!DEAD_AUDIO_NAMESPACE_ALIASES.has(id)) return true;
+        const canonicalId = id.replace(/^openai\//, '');
+        const hasCanonical = ids.has(canonicalId);
+        const liveProviders = Number((model as any)?.providers || 0);
+        return !(hasCanonical && liveProviders <= 0);
+    });
+    if (filtered.length === data.length) {
+        return { models: modelsData, filteredOutCount: 0 };
+    }
+    return {
+        models: { ...modelsData, data: filtered },
+        filteredOutCount: data.length - filtered.length,
+    };
+}
+
 function extractRequestApiKey(request: any): string | null {
     const authHeader = request.headers['authorization'] || request.headers['Authorization'];
     const bearer = extractBearerToken(typeof authHeader === 'string' ? authHeader : null);
@@ -440,8 +469,13 @@ export async function buildModelsPayload(request: any): Promise<PreparedModelsPa
     const nativeRouteFilter = nativeRouteFamily
         ? filterModelsForNativeRouteFamily(modelsData, providersData || [], nativeRouteFamily)
         : null;
-    const routeFamilyModelsData = nativeRouteFilter?.models || modelsData;
-    const routeModelsFiltered = Boolean(nativeRouteFilter && nativeRouteFilter.filteredOutCount > 0);
+    const routeFamilyModelsDataRaw = nativeRouteFilter?.models || modelsData;
+    const deadAudioAliasFilter = filterDeadAudioNamespaceAliases(routeFamilyModelsDataRaw);
+    const routeFamilyModelsData = deadAudioAliasFilter.models;
+    const routeModelsFiltered = Boolean(
+        (nativeRouteFilter && nativeRouteFilter.filteredOutCount > 0) ||
+        deadAudioAliasFilter.filteredOutCount > 0
+    );
     const liveCountsUpdatedAt = getStableLiveCountsUpdatedAt(modelsData);
     const apiKey = extractRequestApiKey(request);
     const includePlan = request.query?.include_plan === '1' || request.query?.includePlan === '1';

@@ -6008,6 +6008,120 @@ function parseAudioDataUrl(
 	return { mime: m[1].toLowerCase(), buffer: Buffer.from(m[2], 'base64') };
 }
 
+type AudioProviderCandidate = {
+	providerId?: string;
+	apiKey: string;
+	baseUrl: string;
+};
+
+function shouldRecordAudioProviderFailure(status: number, errorText: string): boolean {
+	const lower = String(errorText || '').toLowerCase();
+	return (
+		status === 401 ||
+		status === 403 ||
+		status === 408 ||
+		status === 409 ||
+		status === 425 ||
+		status === 429 ||
+		(status >= 500 && status <= 599) ||
+		lower.includes('billing_not_active') ||
+		lower.includes('account is not active') ||
+		lower.includes('billing details') ||
+		lower.includes('quota') ||
+		lower.includes('rate limit') ||
+		lower.includes('invalid api key') ||
+		lower.includes('incorrect api key') ||
+		lower.includes('model_not_found') ||
+		lower.includes('does not exist or you do not have access') ||
+		lower.includes('timeout') ||
+		lower.includes('timed out')
+	);
+}
+
+function summarizeAudioProviderFailure(
+	operation: string,
+	model: string,
+	status: number,
+	errorText: string
+): { message: string; code: string } {
+	const compact = String(errorText || '')
+		.replace(/\s+/g, ' ')
+		.trim()
+		.slice(0, 3500);
+	const lower = compact.toLowerCase();
+	const code =
+		lower.includes('billing_not_active') ||
+		lower.includes('account is not active') ||
+		lower.includes('billing details')
+			? 'BILLING_NOT_ACTIVE'
+			: status === 429 ||
+				  lower.includes('rate limit') ||
+				  lower.includes('quota') ||
+				  lower.includes('insufficient_quota')
+				? 'RATE_LIMIT_OR_QUOTA'
+				: status === 401 ||
+					  status === 403 ||
+					  lower.includes('invalid api key') ||
+					  lower.includes('incorrect api key')
+					? 'AUTH_FAILURE'
+					: lower.includes('timeout') || lower.includes('timed out')
+						? 'TIMEOUT'
+						: `UPSTREAM_${status || 502}`;
+	return {
+		message: `[audio:${operation}] ${model} failed with ${status}: ${compact || 'unknown upstream error'}`,
+		code
+	};
+}
+
+async function updateAudioProviderSignal(params: {
+	provider: AudioProviderCandidate;
+	model: string;
+	success: boolean;
+	operation: 'tts' | 'stt';
+	status?: number;
+	errorText?: string;
+}): Promise<void> {
+	try {
+		const providers = await dataManager.load<LoadedProviders>('providers');
+		const provider = providers.find((entry: LoadedProviderData) =>
+			params.provider.providerId
+				? entry.id === params.provider.providerId
+				: entry.apiKey === params.provider.apiKey
+		);
+		if (!provider) return;
+
+		if (params.success) {
+			delete (provider as any).lastError;
+			delete (provider as any).lastErrorCode;
+			delete (provider as any).lastStatus;
+			delete (provider as any).lastErrorAt;
+			await dataManager.save<LoadedProviders>('providers', providers);
+			return;
+		}
+
+		const status = params.status || 502;
+		if (!shouldRecordAudioProviderFailure(status, params.errorText || '')) {
+			return;
+		}
+		const summary = summarizeAudioProviderFailure(
+			params.operation,
+			params.model,
+			status,
+			params.errorText || ''
+		);
+		(provider as any).lastError = summary.message;
+		(provider as any).lastErrorCode = summary.code;
+		(provider as any).lastStatus = status;
+		(provider as any).lastErrorAt = Date.now();
+		await dataManager.save<LoadedProviders>('providers', providers);
+	} catch (signalErr: any) {
+		console.warn(
+			`[Audio] Failed updating provider signal for ${params.operation}/${params.model}:`,
+			signalErr?.message || signalErr
+		);
+	}
+}
+
 // Native Gemini TTS via generateContent + speechConfig (with provider failover).
 async function synthesizeGeminiSpeech(opts: {
 	model: string;
@@ -6038,8 +6152,22 @@ async function synthesizeGeminiSpeech(opts: {
 			const parsed = parseAudioDataUrl(String((result as any)?.response || ''));
 			if (!parsed || parsed.buffer.length === 0) {
 				lastError = 'Gemini returned no audio content';
+				await updateAudioProviderSignal({
+					provider,
+					model: opts.model,
+					operation: 'tts',
+					success: false,
+					status: 502,
+					errorText: lastError
+				});
 				continue;
 			}
+			await updateAudioProviderSignal({
+				provider,
+				model: opts.model,
+				operation: 'tts',
+				success: true
+			});
 			const isPcm =
 				/l16|pcm|octet-stream/.test(parsed.mime) ||
 				!parsed.mime.startsWith('audio/');
@@ -6058,6 +6186,14 @@ async function synthesizeGeminiSpeech(opts: {
 		} catch (err: any) {
 			lastError = err?.message ? String(err.message) : String(err);
 			lastStatus = typeof err?.statusCode === 'number' ? err.statusCode : 502;
+			await updateAudioProviderSignal({
+				provider,
+				model: opts.model,
+				operation: 'tts',
+				success: false,
+				status: lastStatus,
+				errorText: lastError
+			});
 		}
 	}
 	return { ok: false, status: lastStatus, error: lastError };
@@ -6197,15 +6333,38 @@ openaiRouter.post(
 				} catch (err: any) {
 					ttsLastError = err?.message ? String(err.message) : String(err);
 					ttsLastStatus = 502;
+					await updateAudioProviderSignal({
+						provider,
+						model,
+						operation: 'tts',
+						success: false,
+						status: ttsLastStatus,
+						errorText: ttsLastError
+					});
 					continue;
 				}
 
 				if (!upstreamRes.ok) {
 					ttsLastError = await upstreamRes.text().catch(() => '');
 					ttsLastStatus = upstreamRes.status;
+					await updateAudioProviderSignal({
+						provider,
+						model,
+						operation: 'tts',
+						success: false,
+						status: ttsLastStatus,
+						errorText: ttsLastError
+					});
 					// Billing/quota/auth failures on one key -> try the next provider.
 					continue;
 				}
+
+				await updateAudioProviderSignal({
+					provider,
+					model,
+					operation: 'tts',
+					success: true
+				});
 
 				const upstreamContentType = upstreamRes.headers.get('content-type');
 				const contentType =
@@ -6348,15 +6507,38 @@ openaiRouter.post(
 				} catch (err: any) {
 					sttLastError = err?.message ? String(err.message) : String(err);
 					sttLastStatus = 502;
+					await updateAudioProviderSignal({
+						provider,
+						model,
+						operation: 'stt',
+						success: false,
+						status: sttLastStatus,
+						errorText: sttLastError
+					});
 					continue;
 				}
 
 				if (!upstreamRes.ok) {
 					sttLastError = await upstreamRes.text().catch(() => '');
 					sttLastStatus = upstreamRes.status;
+					await updateAudioProviderSignal({
+						provider,
+						model,
+						operation: 'stt',
+						success: false,
+						status: sttLastStatus,
+						errorText: sttLastError
+					});
 					// Failover to the next provider key.
 					continue;
 				}
+
+				await updateAudioProviderSignal({
+					provider,
+					model,
+					operation: 'stt',
+					success: true
+				});
 
 				const resContentType =
 					upstreamRes.headers.get('content-type') || 'application/json';
