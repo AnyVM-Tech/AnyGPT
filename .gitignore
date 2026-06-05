@@ -105,3 +105,25 @@ apps/api/providers.json.backup
 apps/api/providers.json.bak
 apps/api/modules/keyChecker.ts
 apps/api/providers.json.bak.invalid-gemini-removed
+
+# --- Secrets / credentials (NEVER commit) ---
+*.pem
+*.key
+*.p12
+*.pfx
+wireguard-*.conf
+aws_check.*
+aws_parse.*
+find_key.js
+*.env.local
+
+# --- Local AI/editor tooling artifacts ---
+.kilo/
+.kilocodeignore
+.playwright-mcp/
+.claude/
+CLAUDE.md
+
+# --- Cloned/nested helper repos (have their own .git) ---
+/anyscan-engine-c/
+/awesome-claude-skills/
