@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-03-23T06:57:36.802Z",
+  "updated_at": "2026-06-05T22:49:21Z",
   "models": {
     "deepseek-chat": {
       "input": 0.27,
@@ -637,15 +637,15 @@
       "input": 0,
       "output": 0,
       "source": "official",
-      "updated_at": "2026-03-23T06:57:36.802Z",
-      "per_image": 0.003125
+      "per_second": 0.1,
+      "updated_at": "2026-06-05T22:49:21Z"
     },
     "sora-2-pro": {
       "input": 0,
       "output": 0,
       "source": "official",
-      "updated_at": "2026-03-23T06:57:36.802Z",
-      "per_image": 0.2
+      "per_second": 0.2,
+      "updated_at": "2026-06-05T22:49:21Z"
     },
     "gpt-5.4": {
       "input": 2.375,
@@ -684,22 +684,25 @@
       "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "tts-1-hd": {
-      "input": 30,
+      "input": 0,
       "output": 0,
+      "per_million_characters": 30.0,
       "source": "official",
-      "updated_at": "2026-03-23T06:57:36.802Z"
+      "updated_at": "2026-06-05T22:49:21Z"
     },
     "tts-1-1106": {
-      "input": 15,
+      "input": 0,
       "output": 0,
+      "per_million_characters": 15.0,
       "source": "official",
-      "updated_at": "2026-03-23T06:57:36.802Z"
+      "updated_at": "2026-06-05T22:49:21Z"
     },
     "tts-1-hd-1106": {
-      "input": 30,
+      "input": 0,
       "output": 0,
+      "per_million_characters": 30.0,
       "source": "official",
-      "updated_at": "2026-03-23T06:57:36.802Z"
+      "updated_at": "2026-06-05T22:49:21Z"
     },
     "gpt-4o-transcribe": {
       "input": 2.5,
@@ -709,17 +712,18 @@
       "audio_input": 6
     },
     "tts-1": {
-      "input": 15,
+      "input": 0,
       "output": 0,
+      "per_million_characters": 15.0,
       "source": "official",
-      "updated_at": "2026-03-23T06:57:36.802Z"
+      "updated_at": "2026-06-05T22:49:21Z"
     },
     "whisper-1": {
       "input": 0,
       "output": 0,
+      "per_minute": 0.006,
       "source": "official",
-      "updated_at": "2026-03-23T06:57:36.802Z",
-      "audio_input": 0.006
+      "updated_at": "2026-06-05T22:49:21Z"
     },
     "o4-mini-deep-research": {
       "input": 2,
@@ -897,7 +901,7 @@
       "output": 1.425,
       "source": "openrouter",
       "updated_at": "2026-03-23T06:57:36.802Z",
-      "per_image": 2.4e-7
+      "per_image": 2.4e-07
     },
     "gemini-3-pro-image-preview": {
       "input": 1,
@@ -907,10 +911,11 @@
       "per_image": 0.04
     },
     "gemini-3.1-flash-image-preview": {
-      "input": 0.475,
-      "output": 2.85,
-      "source": "openrouter",
-      "updated_at": "2026-03-23T06:57:36.802Z"
+      "input": 0.1,
+      "output": 0.4,
+      "per_image": 0.04,
+      "source": "official",
+      "updated_at": "2026-06-05T22:49:21Z"
     },
     "gemini-robotics-er-1.5-preview": {
       "input": 1.25,
@@ -967,36 +972,36 @@
       "input": 0,
       "output": 0,
       "source": "official",
-      "updated_at": "2026-03-23T06:57:36.802Z",
-      "per_request": 0.35
+      "per_second": 0.35,
+      "updated_at": "2026-06-05T22:49:21Z"
     },
     "veo-3.0-generate-001": {
       "input": 0,
       "output": 0,
       "source": "official",
-      "updated_at": "2026-04-14T21:02:48Z",
-      "per_image": 0.4
+      "per_second": 0.4,
+      "updated_at": "2026-06-05T22:49:21Z"
     },
     "veo-3.0-fast-generate-001": {
       "input": 0,
       "output": 0,
       "source": "official",
-      "updated_at": "2026-04-14T21:02:48Z",
-      "per_image": 0.1
+      "per_second": 0.1,
+      "updated_at": "2026-06-05T22:49:21Z"
     },
     "veo-3.1-generate-preview": {
       "input": 0,
       "output": 0,
       "source": "official",
-      "updated_at": "2026-04-14T21:02:48Z",
-      "per_image": 0.4
+      "per_second": 0.4,
+      "updated_at": "2026-06-05T22:49:21Z"
     },
     "veo-3.1-fast-generate-preview": {
       "input": 0,
       "output": 0,
       "source": "official",
-      "updated_at": "2026-04-14T21:02:48Z",
-      "per_image": 0.1
+      "per_second": 0.1,
+      "updated_at": "2026-06-05T22:49:21Z"
     },
     "gemini-2.5-flash-native-audio-latest": {
       "input": 0.15,
@@ -1142,7 +1147,7 @@
       "output": 1.425,
       "source": "openrouter",
       "updated_at": "2026-03-23T06:57:36.802Z",
-      "per_image": 2.4e-7
+      "per_image": 2.4e-07
     },
     "bytedance-seed/seed-2.0-mini": {
       "input": 0.095,
@@ -1151,10 +1156,11 @@
       "updated_at": "2026-03-23T06:57:36.802Z"
     },
     "google/gemini-3.1-flash-image-preview": {
-      "input": 0.475,
-      "output": 2.85,
-      "source": "openrouter",
-      "updated_at": "2026-03-23T06:57:36.802Z"
+      "input": 0.1,
+      "output": 0.4,
+      "per_image": 0.04,
+      "source": "official",
+      "updated_at": "2026-06-05T22:49:21Z"
     },
     "qwen/qwen3.5-35b-a3b": {
       "input": 0.154375,
@@ -2131,7 +2137,7 @@
       "output": 9.5,
       "source": "openrouter",
       "updated_at": "2026-03-23T06:57:36.802Z",
-      "per_image": 0.00000119
+      "per_image": 1.19e-06
     },
     "deepseek/deepseek-r1-0528": {
       "input": 0.4275,
@@ -2174,7 +2180,7 @@
       "output": 9.5,
       "source": "openrouter",
       "updated_at": "2026-03-23T06:57:36.802Z",
-      "per_image": 0.00000119
+      "per_image": 1.19e-06
     },
     "arcee-ai/spotlight": {
       "input": 0.171,
@@ -3036,28 +3042,25 @@
       "audio_output": 0
     },
     "gpt-4o-mini-tts": {
-      "input": 0,
-      "output": 0,
+      "input": 0.6,
+      "output": 12.0,
+      "audio_output": 24.0,
       "source": "official",
-      "updated_at": "2026-03-23T06:57:36.802Z",
-      "audio_input": 0,
-      "audio_output": 12
+      "updated_at": "2026-06-05T22:49:21Z"
     },
     "gpt-4o-mini-tts-2025-03-20": {
-      "input": 0,
-      "output": 0,
+      "input": 0.6,
+      "output": 12.0,
+      "audio_output": 24.0,
       "source": "official",
-      "updated_at": "2026-03-23T06:57:36.802Z",
-      "audio_input": 0,
-      "audio_output": 12
+      "updated_at": "2026-06-05T22:49:21Z"
     },
     "gpt-4o-mini-tts-2025-12-15": {
-      "input": 0,
-      "output": 0,
+      "input": 0.6,
+      "output": 12.0,
+      "audio_output": 24.0,
       "source": "official",
-      "updated_at": "2026-03-23T06:57:36.802Z",
-      "audio_input": 0,
-      "audio_output": 12
+      "updated_at": "2026-06-05T22:49:21Z"
     },
     "dall-e-3": {
       "input": 0,
@@ -3158,6 +3161,13 @@
       "output": 2.19,
       "source": "official",
       "updated_at": "2026-03-23T06:57:36.802Z"
+    },
+    "veo-3.1-lite-generate-preview": {
+      "input": 0,
+      "output": 0,
+      "source": "official",
+      "per_second": 0.1,
+      "updated_at": "2026-06-05T22:49:21Z"
     }
   }
 }

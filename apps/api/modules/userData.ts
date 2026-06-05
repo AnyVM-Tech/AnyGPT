@@ -16,6 +16,7 @@ import {
   loadTiers,
 } from './tierManager.js';
 import type { TierData, TiersFile } from './tierManager.js';
+import { calculateDynamicPricing } from './modelUpdater.js';
 
 export type { TierData, TiersFile } from './tierManager.js';
 
@@ -23,6 +24,9 @@ export type { TierData, TiersFile } from './tierManager.js';
 type SpecialPricingMetric =
   | 'per_image'
   | 'per_request'
+  | 'per_second'
+  | 'per_minute'
+  | 'per_million_characters'
   | 'image_input'
   | 'audio_input'
   | 'audio_output';
@@ -32,6 +36,9 @@ interface ModelPricing {
   output: number;
   per_image?: number;
   per_request?: number;
+  per_second?: number;
+  per_minute?: number;
+  per_million_characters?: number;
   image_input?: number;
   audio_input?: number;
   audio_output?: number;
@@ -40,6 +47,9 @@ interface ModelPricing {
 const SPECIAL_PRICING_FIELDS: SpecialPricingMetric[] = [
   'per_image',
   'per_request',
+  'per_second',
+  'per_minute',
+  'per_million_characters',
   'image_input',
   'audio_input',
   'audio_output',
@@ -245,7 +255,12 @@ async function refreshPricingCache(): Promise<void> {
     const next = new Map<string, ModelPricing>();
     const blendedRates: number[] = [];
     for (const m of data) {
-      const p = (m as any).pricing;
+      const providerCount = Math.max(
+        Number((m as any).providers || 0),
+        Number((m as any).active_providers || 0),
+        Number((m as any).known_providers || 0)
+      );
+      const p = calculateDynamicPricing(m.id, providerCount) || (m as any).pricing;
       if (!p) continue;
       const inp = typeof p.input === 'number' ? p.input : 0;
       const out = typeof p.output === 'number' ? p.output : 0;

@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { fetchWithTimeout } from './http.js';
 import { detectMimeTypeFromBase64 } from './mediaParsing.js';
+import { resolveVideoDefaultDurationSeconds } from './videoPricing.js';
 import type { VideoGenerationProviderSelection } from './openaiProviderSelection.js';
 
 const GEMINI_VIDEO_CACHE_TTL_MS = Math.max(
@@ -292,7 +293,7 @@ function buildGeminiReferenceImages(value: any): Array<Record<string, any>> | un
   return references.length > 0 ? references : undefined;
 }
 
-function buildGeminiVideoParameters(requestBody: any): Record<string, any> {
+function buildGeminiVideoParameters(modelId: string, requestBody: any): Record<string, any> {
   const parameters: Record<string, any> = {};
 
   const aspectRatio = normalizeAspectRatio(requestBody);
@@ -303,7 +304,7 @@ function buildGeminiVideoParameters(requestBody: any): Record<string, any> {
 
   const durationSeconds = normalizePositiveInteger(
     getAliasedFieldValue(requestBody, ['durationSeconds', 'duration_seconds', 'seconds', 'duration'])
-  );
+  ) ?? resolveVideoDefaultDurationSeconds(modelId);
   if (durationSeconds !== null) parameters.durationSeconds = durationSeconds;
 
   const requestedVideoCount = normalizePositiveInteger(
@@ -537,7 +538,7 @@ export async function requestGeminiVideoGeneration(params: {
   const body: Record<string, any> = {
     instances: [instance],
   };
-  const parameters = buildGeminiVideoParameters(requestBody);
+  const parameters = buildGeminiVideoParameters(modelId, requestBody);
   if (Object.keys(parameters).length > 0) {
     body.parameters = parameters;
   }

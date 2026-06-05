@@ -175,7 +175,7 @@ import {
 	isGeminiVideoRequestId,
 	type VideoRequestCacheProvider
 } from '../modules/geminiVideo.js';
-import { resolveVideoPricingUnitRateOverride } from '../modules/videoPricing.js';
+import { resolveVideoDefaultDurationSeconds, resolveVideoPricingUnitRateOverride } from '../modules/videoPricing.js';
 import {
 	buildVideoRequestCacheProvider,
 	resolveVideoRequestCacheTtlMs
@@ -1811,13 +1811,13 @@ function resolveVideoBillingQuantity(requestBody: any, modelId?: string): number
 		parsePositiveNumericField(requestBody?.durationSeconds);
 	if (typeof explicit === 'number') return explicit;
 
-	const soraDefaults = modelId ? resolveSoraVideoModelId(modelId) : null;
+	const defaultSeconds = modelId ? resolveVideoDefaultDurationSeconds(modelId) : null;
 	if (
-		typeof soraDefaults?.defaultSeconds === 'number' &&
-		Number.isFinite(soraDefaults.defaultSeconds) &&
-		soraDefaults.defaultSeconds > 0
+		typeof defaultSeconds === 'number' &&
+		Number.isFinite(defaultSeconds) &&
+		defaultSeconds > 0
 	) {
-		return soraDefaults.defaultSeconds;
+		return defaultSeconds;
 	}
 
 	return 1;
@@ -1831,6 +1831,71 @@ function resolveParsedVideoBillingQuantity(
 		parsedBody.jsonBody ?? parsedBody.multipart?.fields ?? {},
 		modelId
 	);
+}
+
+function resolveVideoBillingModelId(modelId: string): string {
+	return resolveSoraVideoModelId(modelId)?.providerModelId || modelId;
+}
+
+function buildTtsUsageOptions(model: string, input: string): {
+	modelId: string;
+	promptTokens?: number;
+	completionTokens?: number;
+	pricingMetric?: 'per_million_characters';
+	pricingQuantity?: number;
+} {
+	const textTokenEstimate = Math.ceil(input.length / 4);
+	if (/^tts-1(?:-|$)/i.test(model)) {
+		return {
+			modelId: model,
+			pricingMetric: 'per_million_characters',
+			pricingQuantity: input.length / 1_000_000
+		};
+	}
+	return { modelId: model, promptTokens: textTokenEstimate, completionTokens: 0 };
+}
+
+function buildSttUsageFromResponse(model: string, responseBody: string): {
+	numberOfTokens: number;
+	options: {
+		modelId: string;
+		promptTokens?: number;
+		completionTokens?: number;
+		pricingMetric?: 'per_minute';
+		pricingQuantity?: number;
+	};
+} {
+	try {
+		const parsed = JSON.parse(responseBody);
+		const usage = parsed?.usage;
+		const seconds = Number(usage?.seconds);
+		if (usage?.type === 'duration' && Number.isFinite(seconds) && seconds > 0) {
+			return {
+				numberOfTokens: Math.max(1, Math.ceil(seconds * 25)),
+				options: {
+					modelId: model,
+					pricingMetric: 'per_minute',
+					pricingQuantity: seconds / 60
+				}
+			};
+		}
+		const totalTokens = Number(usage?.total_tokens);
+		if (Number.isFinite(totalTokens) && totalTokens > 0) {
+			const inputTokens = Number(usage?.input_tokens);
+			const outputTokens = Number(usage?.output_tokens);
+			return {
+				numberOfTokens: Math.ceil(totalTokens),
+				options: {
+					modelId: model,
+					...(Number.isFinite(inputTokens) && inputTokens >= 0 ? { promptTokens: inputTokens } : {}),
+					...(Number.isFinite(outputTokens) && outputTokens >= 0 ? { completionTokens: outputTokens } : {})
+				}
+			};
+		}
+	} catch {
+		// Keep the conservative fallback below.
+	}
+	return { numberOfTokens: 100, options: { modelId: model } };
 }
 
 function getVideoResourceRetryableStatusCodes(
@@ -6300,7 +6365,7 @@ openaiRouter.post(
 				}
 				response.setHeader('Content-Type', gemResult.contentType);
 				response.end(gemResult.body);
-				await updateUserTokenUsage(Math.ceil(input.length / 4), request.apiKey!);
+				await updateUserTokenUsage(Math.ceil(input.length / 4), request.apiKey!, buildTtsUsageOptions(model, input));
 				return;
 			}
 
@@ -6403,7 +6468,7 @@ openaiRouter.post(
 					response.end(new Uint8Array(arrayBuffer));
 				}
 
-				await updateUserTokenUsage(Math.ceil(input.length / 4), request.apiKey!);
+				await updateUserTokenUsage(Math.ceil(input.length / 4), request.apiKey!, buildTtsUsageOptions(model, input));
 				return;
 			}
 
@@ -6560,7 +6625,8 @@ openaiRouter.post(
 				response.setHeader('Content-Type', resContentType);
 				const resBody = await upstreamRes.text();
 				response.end(resBody);
-				await updateUserTokenUsage(100, request.apiKey!); // Flat estimate for audio transcription
+				const sttUsage = buildSttUsageFromResponse(model, resBody);
+				await updateUserTokenUsage(sttUsage.numberOfTokens, request.apiKey!, sttUsage.options);
 				return;
 			}
 
@@ -6644,7 +6710,9 @@ openaiRouter.post(
 				response.json(responseJson);
 
 				const tokenEstimate = Math.ceil(prompt.length / 4) + 500; // prompt + generation cost estimate
-				const imageCount = resolveImageBillingQuantity(body);
+				const imageCount = Array.isArray(responseJson?.data) && responseJson.data.length > 0
+					? responseJson.data.length
+					: resolveImageBillingQuantity(body);
 				await updateUserTokenUsage(tokenEstimate, request.apiKey!, {
 					modelId: model,
 					pricingMetric: 'per_image',
@@ -6800,10 +6868,11 @@ const handleVideoGenerationRequest = async (
 				response.json(responseJson);
 
 				const tokenEstimate = Math.ceil(prompt.length / 4) + 500;
-				const videoSeconds = resolveVideoBillingQuantity(billingRequestBody, model);
-				const pricingUnitRateOverride = resolveVideoPricingUnitRateOverride(model, billingRequestBody);
+				const billingModelId = resolveVideoBillingModelId(model);
+				const videoSeconds = resolveVideoBillingQuantity(billingRequestBody, billingModelId);
+				const pricingUnitRateOverride = resolveVideoPricingUnitRateOverride(billingModelId, billingRequestBody);
 				await updateUserTokenUsage(tokenEstimate, request.apiKey!, {
-					modelId: model,
+					modelId: billingModelId,
 					pricingMetric: 'per_image',
 					pricingQuantity: videoSeconds,
 					...(pricingUnitRateOverride
@@ -6928,9 +6997,10 @@ openaiRouter.post(
 				const prompt = extractParsedVideoField(parsedBody, 'prompt');
 					if (prompt) {
 						const tokenEstimate = Math.ceil(prompt.length / 4) + 500;
-						const videoSeconds = resolveParsedVideoBillingQuantity(parsedBody, model || '');
+						const billingModelId = model ? resolveVideoBillingModelId(model) : '';
+						const videoSeconds = resolveParsedVideoBillingQuantity(parsedBody, billingModelId);
 						const pricingUnitRateOverride = resolveVideoPricingUnitRateOverride(
-							model || '',
+							billingModelId,
 							parsedBody.jsonBody ?? parsedBody.multipart?.fields ?? {}
 						);
 						await updateUserTokenUsage(tokenEstimate, request.apiKey!, {
@@ -7005,9 +7075,10 @@ openaiRouter.post(
 				const prompt = extractParsedVideoField(parsedBody, 'prompt');
 					if (prompt) {
 						const tokenEstimate = Math.ceil(prompt.length / 4) + 500;
-						const videoSeconds = resolveParsedVideoBillingQuantity(parsedBody, model || '');
+						const billingModelId = model ? resolveVideoBillingModelId(model) : '';
+						const videoSeconds = resolveParsedVideoBillingQuantity(parsedBody, billingModelId);
 						const pricingUnitRateOverride = resolveVideoPricingUnitRateOverride(
-							model || '',
+							billingModelId,
 							parsedBody.jsonBody ?? parsedBody.multipart?.fields ?? {}
 						);
 						await updateUserTokenUsage(tokenEstimate, request.apiKey!, {
@@ -7188,16 +7259,14 @@ openaiRouter.post(
 							typeof body?.model === 'string' && body.model.trim()
 								? body.model
 								: '';
-						const videoSeconds = resolveVideoBillingQuantity(body, remixModelId);
+						const billingModelId = remixModelId ? resolveVideoBillingModelId(remixModelId) : '';
+						const videoSeconds = resolveVideoBillingQuantity(body, billingModelId);
 						const pricingUnitRateOverride = resolveVideoPricingUnitRateOverride(
-							remixModelId,
+							billingModelId,
 							body
 						);
 						await updateUserTokenUsage(tokenEstimate, request.apiKey!, {
-							modelId:
-								typeof body?.model === 'string' && body.model.trim()
-									? body.model
-									: undefined,
+							modelId: billingModelId || undefined,
 							pricingMetric: 'per_image',
 							pricingQuantity: videoSeconds,
 							...(pricingUnitRateOverride
@@ -8072,7 +8141,9 @@ openaiRouter.post(
 				response.json(resJson);
 
 				const tokenEstimate = Math.ceil(prompt.length / 4) + 500;
-				const imageCount = resolveImageBillingQuantity(parsedBody);
+				const imageCount = Array.isArray(resJson?.data) && resJson.data.length > 0
+					? resJson.data.length
+					: resolveImageBillingQuantity(parsedBody);
 				await updateUserTokenUsage(tokenEstimate, request.apiKey!, {
 					modelId: model,
 					pricingMetric: 'per_image',

@@ -635,7 +635,7 @@
       "pricing": {
         "input": 0.005991,
         "output": 0.035949,
-        "per_image": 5e-8,
+        "per_image": 5e-08,
         "unit": "per_million_tokens"
       }
     },
@@ -677,8 +677,9 @@
         "image_output"
       ],
       "pricing": {
-        "input": 0.009986,
-        "output": 0.059914,
+        "input": 0.00727,
+        "output": 0.029078,
+        "per_image": 0.008,
         "unit": "per_million_tokens"
       }
     },
@@ -889,10 +890,50 @@
         "image_output"
       ],
       "pricing": {
-        "per_request": 0.07,
+        "per_second": 0.07,
         "input": 0,
         "output": 0,
-        "unit": "per_million_tokens"
+        "unit": "per_million_tokens",
+        "billing_unit": "second",
+        "per_image": 0.07,
+        "default_duration_seconds": 8,
+        "default_variant": "without_audio",
+        "video_variants": {
+          "with_audio": {
+            "per_image": 0.07,
+            "per_second": 0.07,
+            "billing_unit": "second",
+            "resolutions": {
+              "720p": {
+                "per_image": 0.07,
+                "per_second": 0.07,
+                "billing_unit": "second"
+              },
+              "1080p": {
+                "per_image": 0.07,
+                "per_second": 0.07,
+                "billing_unit": "second"
+              }
+            }
+          },
+          "without_audio": {
+            "per_image": 0.07,
+            "per_second": 0.07,
+            "billing_unit": "second",
+            "resolutions": {
+              "720p": {
+                "per_image": 0.07,
+                "per_second": 0.07,
+                "billing_unit": "second"
+              },
+              "1080p": {
+                "per_image": 0.07,
+                "per_second": 0.07,
+                "billing_unit": "second"
+              }
+            }
+          }
+        }
       }
     },
     {
@@ -911,11 +952,13 @@
         "image_output"
       ],
       "pricing": {
-        "per_image": 0.08,
         "per_second": 0.08,
         "input": 0,
         "output": 0,
+        "unit": "per_million_tokens",
         "billing_unit": "second",
+        "per_image": 0.08,
+        "default_duration_seconds": 8,
         "default_variant": "with_audio",
         "video_variants": {
           "with_audio": {
@@ -952,8 +995,7 @@
               }
             }
           }
-        },
-        "unit": "per_million_tokens"
+        }
       }
     },
     {
@@ -972,11 +1014,13 @@
         "image_output"
       ],
       "pricing": {
-        "per_image": 0.02,
         "per_second": 0.02,
         "input": 0,
         "output": 0,
+        "unit": "per_million_tokens",
         "billing_unit": "second",
+        "per_image": 0.02,
+        "default_duration_seconds": 8,
         "default_variant": "with_audio",
         "video_variants": {
           "with_audio": {
@@ -1023,8 +1067,7 @@
               }
             }
           }
-        },
-        "unit": "per_million_tokens"
+        }
       }
     },
     {
@@ -1043,11 +1086,13 @@
         "image_output"
       ],
       "pricing": {
-        "per_image": 0.08,
         "per_second": 0.08,
         "input": 0,
         "output": 0,
+        "unit": "per_million_tokens",
         "billing_unit": "second",
+        "per_image": 0.08,
+        "default_duration_seconds": 8,
         "default_variant": "with_audio",
         "video_variants": {
           "with_audio": {
@@ -1094,8 +1139,7 @@
               }
             }
           }
-        },
-        "unit": "per_million_tokens"
+        }
       }
     },
     {
@@ -1114,11 +1158,13 @@
         "image_output"
       ],
       "pricing": {
-        "per_image": 0.02,
         "per_second": 0.02,
         "input": 0,
         "output": 0,
+        "unit": "per_million_tokens",
         "billing_unit": "second",
+        "per_image": 0.02,
+        "default_duration_seconds": 8,
         "default_variant": "with_audio",
         "video_variants": {
           "with_audio": {
@@ -1165,8 +1211,7 @@
               }
             }
           }
-        },
-        "unit": "per_million_tokens"
+        }
       }
     },
     {
@@ -1780,7 +1825,8 @@
         "audio_output"
       ],
       "pricing": {
-        "input": 0.16776,
+        "per_million_characters": 6,
+        "input": 0,
         "output": 0,
         "unit": "per_million_tokens"
       }
@@ -1801,7 +1847,8 @@
         "audio_output"
       ],
       "pricing": {
-        "input": 0.08388,
+        "per_million_characters": 3,
+        "input": 0,
         "output": 0,
         "unit": "per_million_tokens"
       }
@@ -1822,7 +1869,8 @@
         "audio_output"
       ],
       "pricing": {
-        "input": 0.16776,
+        "per_million_characters": 6,
+        "input": 0,
         "output": 0,
         "unit": "per_million_tokens"
       }
@@ -2407,9 +2455,9 @@
         "audio_output"
       ],
       "pricing": {
-        "audio_output": 0.6,
-        "input": 0,
-        "output": 0,
+        "input": 0.008654,
+        "output": 0.173086,
+        "audio_output": 1.2,
         "unit": "per_million_tokens"
       }
     },
@@ -3114,10 +3162,14 @@
         "image_output"
       ],
       "pricing": {
-        "per_image": 0.000625,
+        "per_second": 0.02,
         "input": 0,
         "output": 0,
-        "unit": "per_million_tokens"
+        "unit": "per_million_tokens",
+        "billing_unit": "second",
+        "per_image": 0.02,
+        "default_duration_seconds": 4,
+        "default_video_cost": 0.08
       }
     },
     {
@@ -3136,10 +3188,14 @@
         "image_output"
       ],
       "pricing": {
-        "per_image": 0.04,
+        "per_second": 0.04,
         "input": 0,
         "output": 0,
-        "unit": "per_million_tokens"
+        "unit": "per_million_tokens",
+        "billing_unit": "second",
+        "per_image": 0.04,
+        "default_duration_seconds": 4,
+        "default_video_cost": 0.16
       }
     },
     {
@@ -3465,9 +3521,9 @@
         "audio_output"
       ],
       "pricing": {
-        "audio_output": 0.6,
-        "input": 0,
-        "output": 0,
+        "input": 0.008654,
+        "output": 0.173086,
+        "audio_output": 1.2,
         "unit": "per_million_tokens"
       }
     },
@@ -3487,9 +3543,9 @@
         "audio_output"
       ],
       "pricing": {
-        "audio_output": 0.6,
-        "input": 0,
-        "output": 0,
+        "input": 0.008654,
+        "output": 0.173086,
+        "audio_output": 1.2,
         "unit": "per_million_tokens"
       }
     },
@@ -3832,7 +3888,8 @@
         "audio_output"
       ],
       "pricing": {
-        "input": 0.08388,
+        "per_million_characters": 3,
+        "input": 0,
         "output": 0,
         "unit": "per_million_tokens"
       }
@@ -3853,7 +3910,7 @@
         "audio_input"
       ],
       "pricing": {
-        "audio_input": 0.0003,
+        "per_minute": 0.0012,
         "input": 0,
         "output": 0,
         "unit": "per_million_tokens"
@@ -4326,10 +4383,60 @@
         "image_output"
       ],
       "pricing": {
-        "per_request": 0.07,
+        "per_second": 0.02,
         "input": 0,
         "output": 0,
-        "unit": "per_million_tokens"
+        "unit": "per_million_tokens",
+        "billing_unit": "second",
+        "per_image": 0.02,
+        "default_duration_seconds": 8,
+        "default_variant": "with_audio",
+        "video_variants": {
+          "with_audio": {
+            "per_image": 0.02,
+            "per_second": 0.02,
+            "billing_unit": "second",
+            "resolutions": {
+              "720p": {
+                "per_image": 0.02,
+                "per_second": 0.02,
+                "billing_unit": "second"
+              },
+              "1080p": {
+                "per_image": 0.024,
+                "per_second": 0.024,
+                "billing_unit": "second"
+              },
+              "4k": {
+                "per_image": 0.06,
+                "per_second": 0.06,
+                "billing_unit": "second"
+              }
+            }
+          },
+          "without_audio": {
+            "per_image": 0.016,
+            "per_second": 0.016,
+            "billing_unit": "second",
+            "resolutions": {
+              "720p": {
+                "per_image": 0.016,
+                "per_second": 0.016,
+                "billing_unit": "second"
+              },
+              "1080p": {
+                "per_image": 0.02,
+                "per_second": 0.02,
+                "billing_unit": "second"
+              },
+              "4k": {
+                "per_image": 0.05,
+                "per_second": 0.05,
+                "billing_unit": "second"
+              }
+            }
+          }
+        }
       }
     },
     {
@@ -4940,7 +5047,7 @@
       "pricing": {
         "input": 0.006491,
         "output": 0.038944,
-        "per_image": 5e-8,
+        "per_image": 5e-08,
         "unit": "per_million_tokens"
       }
     },
@@ -4981,8 +5088,9 @@
         "image_output"
       ],
       "pricing": {
-        "input": 0.010818,
-        "output": 0.064907,
+        "input": 0.00727,
+        "output": 0.029078,
+        "per_image": 0.008,
         "unit": "per_million_tokens"
       }
     },
@@ -8587,7 +8695,7 @@
       "pricing": {
         "input": 0.020193,
         "output": 0.161547,
-        "per_image": 2.4e-7,
+        "per_image": 2.4e-07,
         "unit": "per_million_tokens"
       }
     },
@@ -8738,7 +8846,7 @@
       "pricing": {
         "input": 0.020193,
         "output": 0.161547,
-        "per_image": 2.4e-7,
+        "per_image": 2.4e-07,
         "unit": "per_million_tokens"
       }
     },

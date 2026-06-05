@@ -9,12 +9,41 @@ type VeoVariantPricingSpec = {
 type VeoModelPricingSpec = {
   defaultVariant: VeoAudioVariant;
   variants: Record<VeoAudioVariant, VeoVariantPricingSpec>;
+  defaultDurationSeconds?: number;
 };
 
 const VIDEO_SPECIAL_DISCOUNT_FACTOR = 0.20;
+const SORA_DEFAULT_SECONDS = 4;
+const VEO_DEFAULT_SECONDS = 8;
+
+const SORA_MODEL_PRICING: Record<string, { defaultPerSecond: number; defaultDurationSeconds: number }> = {
+  'sora-2': { defaultPerSecond: 0.10, defaultDurationSeconds: SORA_DEFAULT_SECONDS },
+  'sora-2-pro': { defaultPerSecond: 0.20, defaultDurationSeconds: SORA_DEFAULT_SECONDS },
+};
 
 const VEO_MODEL_PRICING: Record<string, VeoModelPricingSpec> = {
+  'veo-2.0-generate-001': {
+    defaultVariant: 'without_audio',
+    defaultDurationSeconds: VEO_DEFAULT_SECONDS,
+    variants: {
+      with_audio: {
+        defaultPerSecond: 0.35,
+        resolutions: {
+          '720p': 0.35,
+          '1080p': 0.35,
+        },
+      },
+      without_audio: {
+        defaultPerSecond: 0.35,
+        resolutions: {
+          '720p': 0.35,
+          '1080p': 0.35,
+        },
+      },
+    },
+  },
   'veo-3.0-generate-001': {
+    defaultDurationSeconds: VEO_DEFAULT_SECONDS,
     defaultVariant: 'with_audio',
     variants: {
       with_audio: {
@@ -34,6 +63,7 @@ const VEO_MODEL_PRICING: Record<string, VeoModelPricingSpec> = {
     },
   },
   'veo-3.0-fast-generate-001': {
+    defaultDurationSeconds: VEO_DEFAULT_SECONDS,
     defaultVariant: 'with_audio',
     variants: {
       with_audio: {
@@ -55,6 +85,7 @@ const VEO_MODEL_PRICING: Record<string, VeoModelPricingSpec> = {
     },
   },
   'veo-3.1-generate-preview': {
+    defaultDurationSeconds: VEO_DEFAULT_SECONDS,
     defaultVariant: 'with_audio',
     variants: {
       with_audio: {
@@ -76,6 +107,29 @@ const VEO_MODEL_PRICING: Record<string, VeoModelPricingSpec> = {
     },
   },
   'veo-3.1-fast-generate-preview': {
+    defaultDurationSeconds: VEO_DEFAULT_SECONDS,
+    defaultVariant: 'with_audio',
+    variants: {
+      with_audio: {
+        defaultPerSecond: 0.10,
+        resolutions: {
+          '720p': 0.10,
+          '1080p': 0.12,
+          '4k': 0.30,
+        },
+      },
+      without_audio: {
+        defaultPerSecond: 0.08,
+        resolutions: {
+          '720p': 0.08,
+          '1080p': 0.10,
+          '4k': 0.25,
+        },
+      },
+    },
+  },
+  'veo-3.1-lite-generate-preview': {
+    defaultDurationSeconds: VEO_DEFAULT_SECONDS,
     defaultVariant: 'with_audio',
     variants: {
       with_audio: {
@@ -123,6 +177,27 @@ function normalizeVideoModelId(modelId: string): string {
 function resolveVeoModelPricingSpec(modelId: string): VeoModelPricingSpec | null {
   const normalized = normalizeVideoModelId(modelId);
   return VEO_MODEL_PRICING[normalized] || null;
+}
+
+function resolveSoraModelPricingSpec(modelId: string): { defaultPerSecond: number; defaultDurationSeconds: number } | null {
+  const normalized = normalizeVideoModelId(modelId);
+  if (normalized === 'sora' || normalized === 'sora-2' || normalized === 'sora-2l' || normalized === 'sora-2p') {
+    return SORA_MODEL_PRICING['sora-2'];
+  }
+  if (normalized === 'sora-2-pro' || normalized === 'sora-2l-pro' || normalized === 'sora-2p-pro') {
+    return SORA_MODEL_PRICING['sora-2-pro'];
+  }
+  return null;
+}
+
+export function resolveVideoDefaultDurationSeconds(modelId: string): number | null {
+  const soraSpec = resolveSoraModelPricingSpec(modelId);
+  if (soraSpec) return soraSpec.defaultDurationSeconds;
+  const veoSpec = resolveVeoModelPricingSpec(modelId);
+  if (typeof veoSpec?.defaultDurationSeconds === 'number' && veoSpec.defaultDurationSeconds > 0) {
+    return veoSpec.defaultDurationSeconds;
+  }
+  return null;
 }
 
 function isAlwaysOnAudioVeoModel(modelId: string): boolean {
@@ -300,6 +375,11 @@ export function resolveVideoPricingUnitRateOverride(
   modelId: string,
   requestBody: any
 ): number | null {
+  const soraSpec = resolveSoraModelPricingSpec(modelId);
+  if (soraSpec) {
+    return roundTo(soraSpec.defaultPerSecond * VIDEO_SPECIAL_DISCOUNT_FACTOR, 8);
+  }
+
   const spec = resolveVeoModelPricingSpec(modelId);
   if (!spec) return null;
 
@@ -342,6 +422,18 @@ function buildVariantPricingDescriptor(
 }
 
 export function buildVideoPricingMetadata(modelId: string): Record<string, any> | null {
+  const soraSpec = resolveSoraModelPricingSpec(modelId);
+  if (soraSpec) {
+    const perSecond = roundTo(soraSpec.defaultPerSecond * VIDEO_SPECIAL_DISCOUNT_FACTOR, 8);
+    return {
+      billing_unit: 'second',
+      per_second: perSecond,
+      per_image: perSecond,
+      default_duration_seconds: soraSpec.defaultDurationSeconds,
+      default_video_cost: roundTo(perSecond * soraSpec.defaultDurationSeconds, 8),
+    };
+  }
+
   const spec = resolveVeoModelPricingSpec(modelId);
   if (!spec) return null;
 
@@ -349,6 +441,8 @@ export function buildVideoPricingMetadata(modelId: string): Record<string, any> 
   return {
     billing_unit: 'second',
     per_second: defaultPricing.per_second,
+    per_image: defaultPricing.per_second,
+    ...(typeof spec.defaultDurationSeconds === 'number' ? { default_duration_seconds: spec.defaultDurationSeconds } : {}),
     default_variant: spec.defaultVariant,
     video_variants: {
       with_audio: buildVariantPricingDescriptor(spec, 'with_audio'),

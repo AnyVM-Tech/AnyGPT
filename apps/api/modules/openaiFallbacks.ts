@@ -33,7 +33,7 @@ import {
   type VideoRequestCacheProvider,
 } from './geminiVideo.js';
 import { resolveSoraVideoModelId } from './openaiRouteUtils.js';
-import { resolveVideoPricingUnitRateOverride } from './videoPricing.js';
+import { resolveVideoDefaultDurationSeconds, resolveVideoPricingUnitRateOverride } from './videoPricing.js';
 import {
   buildVideoRequestCacheProvider,
   resolveVideoRequestCacheTtlMs,
@@ -367,13 +367,18 @@ function resolveRequestedImageCount(requestBody: any): number {
   return typeof requested === 'number' ? Math.max(1, Math.ceil(requested)) : 1;
 }
 
-function resolveVideoBillingQuantity(requestBody: any): number {
-  const requestedSeconds = resolveVideoSeconds(requestBody);
+function resolveVideoBillingQuantity(requestBody: any, modelId?: string): number {
+  const defaultSeconds = modelId ? resolveVideoDefaultDurationSeconds(modelId) : null;
+  const requestedSeconds = resolveVideoSeconds(requestBody, defaultSeconds || undefined);
   const parsedSeconds = parsePositiveNumericField(requestedSeconds);
   if (typeof parsedSeconds === 'number') {
     return parsedSeconds;
   }
   return 1;
+}
+
+function resolveVideoBillingModelId(modelId: string): string {
+  return resolveSoraVideoModelId(modelId)?.providerModelId || modelId;
 }
 
 type OpenAIVideoInputReference = {
@@ -1638,11 +1643,13 @@ export async function handleImageGenFallbackFromChatOrResponses(params: {
   }
 
   const tokenEstimate = Math.ceil(prompt.length / 4) + 500;
-  const imageCount = resolveRequestedImageCount(requestBody);
+  const producedImageCount = Array.isArray(resJson?.data) && resJson.data.length > 0
+    ? resJson.data.length
+    : resolveRequestedImageCount(requestBody);
   await updateUserTokenUsage(tokenEstimate, request.apiKey!, {
     modelId,
     pricingMetric: 'per_image',
-    pricingQuantity: imageCount,
+    pricingQuantity: producedImageCount,
   });
 }
 
@@ -1759,10 +1766,11 @@ export async function handleVideoGenFallbackFromChatOrResponses(params: {
   }
 
   const tokenEstimate = Math.ceil(prompt.length / 4) + 500;
-  const videoSeconds = resolveVideoBillingQuantity(requestBody);
-  const pricingUnitRateOverride = resolveVideoPricingUnitRateOverride(modelId, requestBody);
+  const billingModelId = resolveVideoBillingModelId(modelId);
+  const videoSeconds = resolveVideoBillingQuantity(requestBody, billingModelId);
+  const pricingUnitRateOverride = resolveVideoPricingUnitRateOverride(billingModelId, requestBody);
   await updateUserTokenUsage(tokenEstimate, request.apiKey!, {
-    modelId,
+    modelId: billingModelId,
     pricingMetric: 'per_image',
     pricingQuantity: videoSeconds,
     ...(pricingUnitRateOverride

@@ -21,6 +21,9 @@ interface BasePricing {
     audio_output?: number;
     per_image?: number;
     per_request?: number;
+    per_second?: number;
+    per_minute?: number;
+    per_million_characters?: number;
     image_input?: number;
 }
 
@@ -409,6 +412,15 @@ export function applyLiveProviderCountsToModelsData(
                 cooling_down_providers: 0,
                 temporarily_unavailable_providers: 0,
             };
+            const providerCountForPricing = Math.max(
+                summary.providers,
+                summary.active_providers,
+                summary.known_providers
+            );
+            const dynamicPrice = calculateDynamicPricing(
+                model.id,
+                providerCountForPricing
+            );
             return {
                 ...model,
                 providers: summary.providers,
@@ -417,6 +429,7 @@ export function applyLiveProviderCountsToModelsData(
                 cooling_down_providers: summary.cooling_down_providers,
                 temporarily_unavailable_providers:
                     summary.temporarily_unavailable_providers,
+                ...(dynamicPrice ? { pricing: dynamicPrice } : {}),
             };
         }),
     };
@@ -1007,10 +1020,20 @@ export function calculateDynamicPricing(modelId: string, providerCount: number):
     if (price.audio_output) shown.audio_output = roundTo(price.audio_output * specialDiscount, TOKEN_PRICE_DECIMALS);
     if (price.per_image) shown.per_image = roundTo(price.per_image * 0.20, SPECIAL_PRICE_DECIMALS);
     if (price.per_request) shown.per_request = roundTo(price.per_request * 0.20, SPECIAL_PRICE_DECIMALS);
+    if (price.per_second) shown.per_second = roundTo(price.per_second * 0.20, SPECIAL_PRICE_DECIMALS);
+    if (price.per_minute) shown.per_minute = roundTo(price.per_minute * 0.20, SPECIAL_PRICE_DECIMALS);
+    if (price.per_million_characters) shown.per_million_characters = roundTo(price.per_million_characters * 0.20, SPECIAL_PRICE_DECIMALS);
     if (price.image_input) shown.image_input = roundTo(price.image_input * 0.20, SPECIAL_PRICE_DECIMALS);
 
     if (shown.input === undefined && shown.output === undefined) {
-        if (price.per_image || price.per_request || price.image_input) {
+        if (
+            price.per_image ||
+            price.per_request ||
+            price.per_second ||
+            price.per_minute ||
+            price.per_million_characters ||
+            price.image_input
+        ) {
             shown.input = 0;
             shown.output = 0;
         } else if (inp > 0) {

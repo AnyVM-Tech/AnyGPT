@@ -24,6 +24,9 @@ interface ModelPricing {
   audio_output?: number;   // $ per million audio output tokens
   per_image?: number;      // $ per generated image
   per_request?: number;    // $ per request (for special models)
+  per_second?: number;     // $ per generated video second
+  per_minute?: number;     // $ per audio minute
+  per_million_characters?: number; // $ per million input/output characters
   source: 'official' | 'openrouter' | 'estimated';
   updated_at: string;
 }
@@ -36,6 +39,9 @@ interface PricingFile {
 type PricingSeed = Partial<ModelPricing> & {
   image?: number;
   request?: number;
+  second?: number;
+  minute?: number;
+  million_characters?: number;
 };
 
 type PricingMap = Record<string, PricingSeed>;
@@ -206,6 +212,12 @@ function buildPricingEntry(price: PricingSeed, source: ModelPricing['source'], n
   else if (typeof price.image === 'number') normalized.per_image = price.image;
   if (typeof price.per_request === 'number') normalized.per_request = price.per_request;
   else if (typeof price.request === 'number') normalized.per_request = price.request;
+  if (typeof price.per_second === 'number') normalized.per_second = price.per_second;
+  else if (typeof price.second === 'number') normalized.per_second = price.second;
+  if (typeof price.per_minute === 'number') normalized.per_minute = price.per_minute;
+  else if (typeof price.minute === 'number') normalized.per_minute = price.minute;
+  if (typeof price.per_million_characters === 'number') normalized.per_million_characters = price.per_million_characters;
+  else if (typeof price.million_characters === 'number') normalized.per_million_characters = price.million_characters;
 
   return normalized;
 }
@@ -329,11 +341,11 @@ const OFFICIAL_PRICES: Record<string, PricingSeed> = {
   'gpt-realtime-mini-2025-10-06': { input: 0.60, output: 2.40, audio_input: 10.00, audio_output: 20.00, source: 'official' },
   'gpt-realtime-mini-2025-12-15': { input: 0.60, output: 2.40, audio_input: 10.00, audio_output: 20.00, source: 'official' },
   'gpt-realtime-1.5': { input: 4.00, output: 16.00, audio_input: 30.00, audio_output: 60.00, source: 'official' },
-  'tts-1': { input: 15.00, source: 'official' },
-  'tts-1-1106': { input: 15.00, source: 'official' },
-  'tts-1-hd': { input: 30.00, source: 'official' },
-  'tts-1-hd-1106': { input: 30.00, source: 'official' },
-  'whisper-1': { audio_input: 0.006, source: 'official' },
+  'tts-1': { input: 0, output: 0, per_million_characters: 15.00, source: 'official' },
+  'tts-1-1106': { input: 0, output: 0, per_million_characters: 15.00, source: 'official' },
+  'tts-1-hd': { input: 0, output: 0, per_million_characters: 30.00, source: 'official' },
+  'tts-1-hd-1106': { input: 0, output: 0, per_million_characters: 30.00, source: 'official' },
+  'whisper-1': { input: 0, output: 0, per_minute: 0.006, source: 'official' },
   // Image generation
   'gpt-image-1': { input: 0, output: 0, per_image: 0.04, source: 'official' },
   'gpt-image-1-mini': { input: 0, output: 0, per_image: 0.02, source: 'official' },
@@ -343,8 +355,8 @@ const OFFICIAL_PRICES: Record<string, PricingSeed> = {
   'chatgpt-image-latest': { input: 0, output: 0, per_image: 0.04, source: 'official' },
   'dall-e-3': { input: 0, output: 0, per_image: 0.04, source: 'official' },
   'dall-e-2': { input: 0, output: 0, per_image: 0.02, source: 'official' },
-  'sora-2': { input: 0, output: 0, per_image: 0.10, source: 'official' },
-  'sora-2-pro': { input: 0, output: 0, per_image: 0.20, source: 'official' },
+  'sora-2': { input: 0, output: 0, per_second: 0.10, source: 'official' },
+  'sora-2-pro': { input: 0, output: 0, per_second: 0.20, source: 'official' },
   // Embeddings
   'text-embedding-3-small': { input: 0.02, output: 0, source: 'official' },
   'text-embedding-3-large': { input: 0.13, output: 0, source: 'official' },
@@ -379,6 +391,8 @@ const OFFICIAL_PRICES: Record<string, PricingSeed> = {
   'gemini-3-flash-preview': { input: 0.10, output: 0.40, source: 'official' },
   'gemini-3-pro-preview': { input: 1.00, output: 8.00, source: 'official' },
   'gemini-3-pro-image-preview': { input: 1.00, output: 8.00, per_image: 0.04, source: 'official' },
+  'gemini-3.1-flash-image-preview': { input: 0.10, output: 0.40, per_image: 0.04, source: 'official' },
+  'google/gemini-3.1-flash-image-preview': { input: 0.10, output: 0.40, per_image: 0.04, source: 'official' },
   'gemini-3.1-pro-preview': { input: 1.00, output: 8.00, source: 'official' },
   'gemini-3.1-pro-preview-customtools': { input: 1.00, output: 8.00, source: 'official' },
   'gemini-robotics-er-1.5-preview': { input: 1.25, output: 5.00, source: 'official' },
@@ -395,11 +409,12 @@ const OFFICIAL_PRICES: Record<string, PricingSeed> = {
   'imagen-4.0-generate-001': { input: 0, output: 0, per_image: 0.04, source: 'official' },
   'imagen-4.0-fast-generate-001': { input: 0, output: 0, per_image: 0.02, source: 'official' },
   'imagen-4.0-ultra-generate-001': { input: 0, output: 0, per_image: 0.08, source: 'official' },
-  'veo-2.0-generate-001': { input: 0, output: 0, per_request: 0.35, source: 'official' },
-  'veo-3.0-generate-001': { input: 0, output: 0, per_image: 0.40, source: 'official' },
-  'veo-3.0-fast-generate-001': { input: 0, output: 0, per_image: 0.10, source: 'official' },
-  'veo-3.1-generate-preview': { input: 0, output: 0, per_image: 0.40, source: 'official' },
-  'veo-3.1-fast-generate-preview': { input: 0, output: 0, per_image: 0.10, source: 'official' },
+  'veo-2.0-generate-001': { input: 0, output: 0, per_second: 0.35, source: 'official' },
+  'veo-3.0-generate-001': { input: 0, output: 0, per_second: 0.40, source: 'official' },
+  'veo-3.0-fast-generate-001': { input: 0, output: 0, per_second: 0.10, source: 'official' },
+  'veo-3.1-generate-preview': { input: 0, output: 0, per_second: 0.40, source: 'official' },
+  'veo-3.1-fast-generate-preview': { input: 0, output: 0, per_second: 0.10, source: 'official' },
+  'veo-3.1-lite-generate-preview': { input: 0, output: 0, per_second: 0.10, source: 'official' },
 
   // ============================================================
   // Deepseek — https://api-docs.deepseek.com/quick_start/pricing
