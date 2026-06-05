@@ -2,6 +2,9 @@
   "name": "anygpt-ui",
   "private": true,
   "packageManager": "bun@1.3.10",
+  "engines": {
+    "node": "20.x || 22.x"
+  },
   "scripts": {
     "dev": "bash scripts/dev.sh",
     "start": "bash scripts/start.sh",
