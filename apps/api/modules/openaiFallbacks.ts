@@ -246,6 +246,9 @@ function shouldTryNextVideoGenerationProvider(error: any): boolean {
   return normalized.includes('billing_hard_limit_reached')
     || normalized.includes('billing hard limit')
     || normalized.includes('billing_limit_user_error')
+    || normalized.includes('api key not found')
+    || normalized.includes('api key not valid')
+    || normalized.includes('api_key_invalid')
     || normalized.includes('invalid api key')
     || normalized.includes('incorrect api key')
     || normalized.includes('you exceeded your current quota')
@@ -255,7 +258,11 @@ function shouldTryNextVideoGenerationProvider(error: any): boolean {
 function buildUnavailableVideoProviderError(
   modelId: string,
   availability?: VideoGenerationProviderAvailability,
-  options: { openAiCompatibleOnly?: boolean } = {}
+  options: {
+    openAiCompatibleOnly?: boolean;
+    attemptedProviders?: number;
+    exhaustedRetryable?: boolean;
+  } = {}
 ): Error {
   const kindCounts = availability?.kindCounts || {};
   const totalMatches = Number(availability?.totalMatches || 0);
@@ -279,6 +286,12 @@ function buildUnavailableVideoProviderError(
   error.openAiVideoProviderCount = openAiMatches;
   error.xaiVideoProviderCount = xaiMatches;
   error.geminiVideoProviderCount = geminiMatches;
+  if (typeof options.attemptedProviders === 'number') {
+    error.attemptedVideoProviderCount = options.attemptedProviders;
+  }
+  if (options.exhaustedRetryable) {
+    error.exhaustedRetryableVideoProviders = true;
+  }
   return error;
 }
 
@@ -1267,12 +1280,19 @@ export async function requestVideoGeneration(params: {
     } catch (error: any) {
       lastError = error;
       const hasMoreProviders = index < providers.length - 1;
-      if (hasMoreProviders && shouldTryNextVideoGenerationProvider(error)) {
+      const retryable = shouldTryNextVideoGenerationProvider(error);
+      if (hasMoreProviders && retryable) {
         console.warn(
           `[VideoGeneration] Provider ${provider.providerId} failed for ${modelId} `
           + `with a retryable capacity error. Trying next provider...`
         );
         continue;
+      }
+      if (retryable) {
+        throw buildUnavailableVideoProviderError(modelId, availability, {
+          attemptedProviders: index + 1,
+          exhaustedRetryable: true,
+        });
       }
       throw error;
     }
@@ -1357,12 +1377,20 @@ export async function requestVideoGenerationMultipart(params: {
     } catch (error: any) {
       lastError = error;
       const hasMoreProviders = index < providers.length - 1;
-      if (hasMoreProviders && shouldTryNextVideoGenerationProvider(error)) {
+      const retryable = shouldTryNextVideoGenerationProvider(error);
+      if (hasMoreProviders && retryable) {
         console.warn(
           `[VideoGenerationMultipart] Provider ${provider.providerId} failed for ${modelId} `
           + 'with a retryable capacity error. Trying next provider...'
         );
         continue;
+      }
+      if (retryable) {
+        throw buildUnavailableVideoProviderError(modelId, availability, {
+          openAiCompatibleOnly: true,
+          attemptedProviders: index + 1,
+          exhaustedRetryable: true,
+        });
       }
       throw error;
     }

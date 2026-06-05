@@ -410,11 +410,17 @@ export async function syncTiersBetweenRedisAndFilesystem(): Promise<TiersFile> {
   ]);
 
   const fallbackDefault = normalizeAndClone(defaultTiersData);
-  const preferred = tiersDataSourcePreference === 'redis'
-    ? (redisTiers || filesystemTiers || fallbackDefault)
-    : (filesystemTiers || redisTiers || fallbackDefault);
+  const merged = tiersDataSourcePreference === 'redis'
+    ? {
+        ...(filesystemTiers || fallbackDefault),
+        ...(redisTiers || {}),
+      }
+    : {
+        ...(redisTiers || fallbackDefault),
+        ...(filesystemTiers || {}),
+      };
 
-  return await saveTiers(preferred);
+  return await saveTiers(merged);
 }
 
 export function mergeTierPatch(currentTier: TierData, patchValue: unknown, tierId: string): TierData {

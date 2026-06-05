@@ -104,6 +104,19 @@ function hasRecentRateLimitOrTimeoutSignal(provider: LoadedProviderData): boolea
     lastError.includes('resource_exhausted') ||
     lastError.includes('quota exceeded') ||
     lastError.includes('quota exhausted') ||
+    lastError.includes('you exceeded your current quota') ||
+    lastError.includes('exceeded your current quota') ||
+    lastError.includes('insufficient_quota') ||
+    lastError.includes('insufficient quota') ||
+    lastError.includes('check your plan and billing') ||
+    lastError.includes('plan and billing details') ||
+    lastError.includes('billing details on our website') ||
+    lastError.includes('account is not active') ||
+    lastError.includes('billing_not_active') ||
+    lastError.includes('billing not active') ||
+    lastError.includes('billing_hard_limit_reached') ||
+    lastError.includes('billing hard limit') ||
+    lastError.includes('billing_limit_user_error') ||
     lastError.includes('timed out') ||
     lastError.includes('timeout')
   );
@@ -641,21 +654,34 @@ export async function listVideoGenProviders(
 function hasRecentGeminiCatalogAuthFailureSignal(provider: LoadedProviderData): boolean {
   if (!isGeminiLikeProviderId(String(provider?.id || ''))) return false;
   const lastError = String((provider as any)?.lastError || (provider as any)?.last_error || '').toLowerCase();
-  const code = String((provider as any)?.lastErrorCode || (provider as any)?.error_code || '').toLowerCase();
+  const code = String((provider as any)?.lastErrorCode || (provider as any)?.last_error_code || (provider as any)?.error_code || '').toLowerCase();
+  const status = Number((provider as any)?.lastStatus || (provider as any)?.last_status || 0);
   return (
     code === 'api_key_invalid' ||
+    code === 'gemini_invalid_api_key' ||
+    code === 'gemini_api_disabled' ||
+    code === 'gemini_catalog_auth_disabled' ||
     code === 'gemini_project_auth_failure' ||
     code === 'service_disabled' ||
+    code === 'consumer_suspended' ||
+    code === 'access_not_configured' ||
+    (status === 400 && lastError.includes('api key')) ||
     lastError.includes('gemini listmodels failed') ||
     lastError.includes('api key not found') ||
     lastError.includes('api key not valid') ||
     lastError.includes('invalid api key') ||
     lastError.includes('api_key_invalid') ||
+    lastError.includes('api key invalid') ||
+    lastError.includes('gemini api has not been used') ||
     lastError.includes('generative language api has not been used in project') ||
     lastError.includes('generative language api is disabled') ||
+    (lastError.includes('requests to this api') && lastError.includes('are blocked')) ||
+    (lastError.includes('consumer') && lastError.includes('suspended')) ||
+    lastError.includes('lightning dunning decision is deny') ||
     lastError.includes('your project has been denied access') ||
     lastError.includes('project has been denied access') ||
     lastError.includes('accessnotconfigured') ||
+    (lastError.includes('permission_denied') && lastError.includes('generativelanguage.googleapis.com')) ||
     lastError.includes('service_disabled') ||
     lastError.includes('gemini_project_auth_failure')
   );

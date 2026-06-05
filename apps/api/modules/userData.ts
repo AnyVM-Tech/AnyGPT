@@ -402,6 +402,7 @@ export interface UserData {
   dailyRequestDate?: string;
   role: 'admin' | 'user';
   tier: keyof TiersFile; // Use keyof TiersFile for better type safety
+  disabled?: boolean;
   estimatedCost?: number;
   paidTokenUsage?: number;
   paidRequestCount?: number;
@@ -538,6 +539,11 @@ export async function validateApiKeyAndUsage(apiKey: string): Promise<{ valid: b
   if (!userData) {
       logger.warn(`[validateApiKeyAndUsage] API key not found (hash: ${apiKeyHash})`);
       return { valid: false, error: 'API key not found.' };
+  }
+
+  if (userData.disabled === true) {
+      logger.warn(`[validateApiKeyAndUsage] API key disabled (hash: ${apiKeyHash})`);
+      return { valid: false, error: 'API key disabled.', userData };
   }
 
   if (typeof userData.tokenUsage !== 'number' || Number.isNaN(userData.tokenUsage) || userData.tokenUsage < 0) {

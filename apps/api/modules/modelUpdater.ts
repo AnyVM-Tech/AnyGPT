@@ -1169,9 +1169,9 @@ function guessOwnedBy(modelId: string): string {
  */
 export async function refreshProviderCountsInModelsFile(options: { notifyProbes?: boolean } = {}): Promise<void> {
     const notifyProbes = options.notifyProbes ?? true;
-    const disableSync = (process.env.DISABLE_MODEL_SYNC || '').toLowerCase() !== 'false';
+    const disableSync = ['1', 'true', 'yes', 'on'].includes((process.env.DISABLE_MODEL_SYNC || '').trim().toLowerCase());
     if (disableSync) {
-        console.log('Model sync is disabled (set DISABLE_MODEL_SYNC=false to enable). Skipping models.json update.');
+        console.log('Model sync is disabled (set DISABLE_MODEL_SYNC=false or unset it to enable). Skipping models.json update.');
         return;
     }
     console.log('Attempting to synchronize models.json with active providers...');
