@@ -681,7 +681,7 @@ function hasRecentGeminiCatalogAuthFailureSignal(provider: LoadedProviderData): 
     lastError.includes('your project has been denied access') ||
     lastError.includes('project has been denied access') ||
     lastError.includes('accessnotconfigured') ||
-    (lastError.includes('permission_denied') && lastError.includes('generativelanguage.googleapis.com')) ||
+    lastError.includes('permission_denied') ||
     lastError.includes('service_disabled') ||
     lastError.includes('gemini_project_auth_failure')
   );

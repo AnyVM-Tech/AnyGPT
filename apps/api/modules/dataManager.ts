@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import redis, { redisReadyPromise, Redis } from './db.js';
+import { hashToken } from './redaction.js';
 
 const BunRuntime = (globalThis as any).Bun;
 const HAS_BUN_FILE_IO =
@@ -821,7 +822,7 @@ class DataManager {
 		if (keys.length === 0) return '';
 		const preview = keys
 			.slice(0, 5)
-			.map(apiKey => `${apiKey.slice(0, 8)}...${apiKey.slice(-6)}`);
+			.map(apiKey => `#${hashToken(apiKey).slice(0, 8)}`);
 		return `${keys.length} key${keys.length === 1 ? '' : 's'} (${preview.join(', ')}${keys.length > preview.length ? ', ...' : ''})`;
 	}
 
@@ -901,9 +902,7 @@ class DataManager {
 			await ensureDir(keySnapshotDir);
 			const timestamp = new Date(now)
 				.toISOString()
-				.replace(/[-:.]/g, '')
-				.replace('T', 'T')
-				.replace('Z', 'Z');
+				.replace(/[-:.]/g, '');
 			const snapshotPath = path.join(
 				keySnapshotDir,
 				`keys-${timestamp}.json`
