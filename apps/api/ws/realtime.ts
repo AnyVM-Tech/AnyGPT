@@ -5,8 +5,8 @@ import { dataManager, LoadedProviders, LoadedProviderData } from '../modules/dat
 import { logError } from '../modules/errorLogger.js';
 import crypto from 'crypto';
 
-const WS_OPEN: 1 = 1; // NodeWebSocket.OPEN
-const WS_CONNECTING: 0 = 0; // NodeWebSocket.CONNECTING
+const WS_OPEN = 1 as const; // NodeWebSocket.OPEN
+const WS_CONNECTING = 0 as const; // NodeWebSocket.CONNECTING
 
 interface RealtimeConfig {
     url: string;
@@ -92,7 +92,7 @@ export function attachRealtimeWebSocket(app: { ws: (path: string, handler: (ws: 
         let isAuthenticated = false;
         let userId: string | null = null;
         let userApiKey: string | null = null;
-        let messageBuffer: RealtimeMessage[] = []; // Buffer messages until upstream connects
+        const messageBuffer: RealtimeMessage[] = []; // Buffer messages until upstream connects
         const MAX_BUFFERED_MESSAGES = 100;
         const UPSTREAM_CONNECT_TIMEOUT_MS = 15000;
         let upstreamConnectTimeout: NodeJS.Timeout | null = null;
@@ -202,7 +202,7 @@ export function attachRealtimeWebSocket(app: { ws: (path: string, handler: (ws: 
                     // uWS send expects string or ArrayBuffer
                     // WebSocket data is Buffer | ArrayBuffer | Buffer[]
                     // Convert to format uWS likes
-                    let payload: any = data;
+                    const payload: any = data;
                     if (Buffer.isBuffer(data)) {
                         // Pass buffer directly? uWS wrapper handles string/ArrayBuffer.
                         // Buffer is Uint8Array which is ArrayBufferView.

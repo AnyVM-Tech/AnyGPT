@@ -170,7 +170,7 @@ router.post('/v3/messages', authAndUsageMiddleware, rateLimitMiddleware, async (
         let statusCode = 500;
         let errorType = 'api_error';
         let clientMessage = 'Internal server error.';
-        let reference = 'An unexpected error occurred processing the Anthropic request.';
+        const reference = 'An unexpected error occurred processing the Anthropic request.';
 
         if (error instanceof SyntaxError) {
             statusCode = 400; errorType = 'invalid_request_error'; clientMessage = 'Invalid JSON payload.';

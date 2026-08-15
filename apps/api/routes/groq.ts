@@ -169,7 +169,7 @@ router.post('/v4/chat/completions', authAndUsageMiddleware, rateLimitMiddleware,
         let errorType = 'api_error';
         let errorCode = 'internal_server_error';
         let clientMessage = 'Internal server error.';
-        let reference = 'An unexpected error occurred processing the Groq request.';
+        const reference = 'An unexpected error occurred processing the Groq request.';
 
         if (error instanceof SyntaxError) {
             statusCode = 400; errorType = 'invalid_request_error'; errorCode = 'invalid_json'; clientMessage = 'Invalid JSON payload.';

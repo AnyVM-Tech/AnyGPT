@@ -1442,7 +1442,9 @@ function sendResponsesTextResult(params: {
   response.setHeader('Content-Type', 'text/event-stream');
   response.setHeader('Cache-Control', 'no-cache');
   response.setHeader('Connection', 'keep-alive');
-  try { (response as any).flushHeaders?.(); } catch {}
+  try { (response as any).flushHeaders?.(); } catch {
+    // Flushing is optional for compatible response implementations.
+  }
 
   const pendingMessageItem = createResponsesMessageItem('', { id: messageId, status: 'in_progress' });
   const finalMessageItem = Array.isArray(responseBody.output)
@@ -1586,7 +1588,9 @@ export async function handleImageGenFallbackFromChatOrResponses(params: {
     response.setHeader('Content-Type', 'text/event-stream');
     response.setHeader('Cache-Control', 'no-cache');
     response.setHeader('Connection', 'keep-alive');
-    try { (response as any).flushHeaders?.(); } catch {}
+    try { (response as any).flushHeaders?.(); } catch {
+      // Flushing is optional for compatible response implementations.
+    }
 
     const firstChunk = {
       id,
@@ -1715,7 +1719,9 @@ export async function handleVideoGenFallbackFromChatOrResponses(params: {
       response.setHeader('Content-Type', 'text/event-stream');
       response.setHeader('Cache-Control', 'no-cache');
       response.setHeader('Connection', 'keep-alive');
-      try { (response as any).flushHeaders?.(); } catch {}
+      try { (response as any).flushHeaders?.(); } catch {
+        // Flushing is optional for compatible response implementations.
+      }
 
       const firstChunk = {
         id,

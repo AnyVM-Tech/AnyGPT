@@ -56,6 +56,7 @@
 		"concurrently": "^10.0.3",
 		"eslint": "^8.57.1",
 		"jest": "^30.4.2",
+		"redis": "^4.7.0",
 		"rimraf": "^5.0.10",
 		"ts-jest": "^29.4.11",
 		"ts-node-dev": "^1.1.8",

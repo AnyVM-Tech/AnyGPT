@@ -1841,7 +1841,7 @@ export class MessageHandler {
 			Number(modelData?.disabled_at || 0)
 		);
 		if (newestFailureAt <= 0) {
-			return Boolean(provider.disabled || modelData?.disabled)
+			return provider.disabled || modelData?.disabled
 				? 'transient'
 				: null;
 		}
@@ -3674,7 +3674,7 @@ export class MessageHandler {
 									: typeof (modelStats as any)
 												?.token_generation_speed ===
 												'number' &&
-										  (modelStats as any)
+                                          (modelStats as any)
 												.token_generation_speed > 0
 										? (modelStats as any)
 												.token_generation_speed

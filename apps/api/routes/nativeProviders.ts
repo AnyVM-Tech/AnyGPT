@@ -364,22 +364,22 @@ function inferNativeFamilyFromModelHeuristics(
 
 	if (
 		normalized.startsWith('openai/') ||
-		/^gpt([\-._]|$)/.test(noNamespace) ||
-		/^o[1-9]([\-._]|$)/.test(noNamespace) ||
-		/^omni([\-._]|$)/.test(noNamespace) ||
-		/^text-embedding([\-._]|$)/.test(noNamespace) ||
-		/^whisper([\-._]|$)/.test(noNamespace) ||
-		/^tts([\-._]|$)/.test(noNamespace) ||
-		/^dall-e([\-._]|$)/.test(noNamespace) ||
-		/^gpt-image([\-._]|$)/.test(noNamespace) ||
-		/^sora([\-._]|$)/.test(noNamespace)
+		/^gpt([-._]|$)/.test(noNamespace) ||
+		/^o[1-9]([-._]|$)/.test(noNamespace) ||
+		/^omni([-._]|$)/.test(noNamespace) ||
+		/^text-embedding([-._]|$)/.test(noNamespace) ||
+		/^whisper([-._]|$)/.test(noNamespace) ||
+		/^tts([-._]|$)/.test(noNamespace) ||
+		/^dall-e([-._]|$)/.test(noNamespace) ||
+		/^gpt-image([-._]|$)/.test(noNamespace) ||
+		/^sora([-._]|$)/.test(noNamespace)
 	) {
 		return 'openai';
 	}
 	if (
 		normalized.startsWith('anthropic/') ||
 		normalized.startsWith('claude/') ||
-		/^claude([\-._]|$)/.test(noNamespace)
+		/^claude([-._]|$)/.test(noNamespace)
 	) {
 		return 'anthropic';
 	}
@@ -387,23 +387,23 @@ function inferNativeFamilyFromModelHeuristics(
 		normalized.startsWith('gemini/') ||
 		normalized.startsWith('google/') ||
 		normalized.startsWith('imagen/') ||
-		/^gemini([\-._]|$)/.test(noNamespace) ||
-		/^imagen([\-._]|$)/.test(noNamespace) ||
-		/^nano-banana([\-._]|$)/.test(noNamespace)
+		/^gemini([-._]|$)/.test(noNamespace) ||
+		/^imagen([-._]|$)/.test(noNamespace) ||
+		/^nano-banana([-._]|$)/.test(noNamespace)
 	) {
 		return 'gemini';
 	}
 	if (normalized.startsWith('openrouter/')) return 'openrouter';
 	if (
 		normalized.startsWith('deepseek/') ||
-		/^deepseek([\-._]|$)/.test(noNamespace)
+		/^deepseek([-._]|$)/.test(noNamespace)
 	) {
 		return 'deepseek';
 	}
 	if (
 		normalized.startsWith('xai/') ||
 		normalized.startsWith('x-ai/') ||
-		/^grok([\-._]|$)/.test(noNamespace)
+		/^grok([-._]|$)/.test(noNamespace)
 	) {
 		return 'xai';
 	}
@@ -1226,7 +1226,7 @@ function getNativeResponsesToolCallKey(rawCall: any): string | null {
 		typeof rawCall?.call_id === 'string' && rawCall.call_id.trim()
 			? rawCall.call_id.trim()
 			: typeof rawCall?.tool_call_id === 'string' &&
-				  rawCall.tool_call_id.trim()
+                  rawCall.tool_call_id.trim()
 				? rawCall.tool_call_id.trim()
 				: undefined;
 	if (callId) return `call:${callId}`;
@@ -1239,9 +1239,9 @@ function getNativeResponsesToolCallKey(rawCall: any): string | null {
 		typeof rawCall?.name === 'string' && rawCall.name.trim()
 			? rawCall.name.trim()
 			: rawCall?.function &&
-				  typeof rawCall.function === 'object' &&
-				  typeof rawCall.function.name === 'string' &&
-				  rawCall.function.name.trim()
+                  typeof rawCall.function === 'object' &&
+                  typeof rawCall.function.name === 'string' &&
+                  rawCall.function.name.trim()
 				? rawCall.function.name.trim()
 				: undefined;
 	return name ? `name:${name}` : null;
@@ -1535,7 +1535,7 @@ async function persistNativeResponsesHistoryEntry(params: {
 		params.context.proxyResponseId.trim()
 			? params.context.proxyResponseId.trim()
 			: typeof params.responsePayload?.id === 'string' &&
-				  params.responsePayload.id.trim()
+                  params.responsePayload.id.trim()
 				? params.responsePayload.id.trim()
 				: '';
 	if (!responseId) return;
@@ -1545,8 +1545,8 @@ async function persistNativeResponsesHistoryEntry(params: {
 		params.upstreamResponseId.trim()
 			? params.upstreamResponseId.trim()
 			: typeof params.responsePayload?.id === 'string' &&
-				  params.responsePayload.id.trim() &&
-				  params.responsePayload.id.trim() !== responseId
+                  params.responsePayload.id.trim() &&
+                  params.responsePayload.id.trim() !== responseId
 				? params.responsePayload.id.trim()
 				: undefined;
 	const model =
@@ -3230,7 +3230,7 @@ async function handleNativeProviderRequest(
 						let streamCreatedAt: number | undefined;
 						let streamOutput: any[] | null = null;
 						let streamOutputText = '';
-						let streamToolCalls: Record<string, any>[] = [];
+						const streamToolCalls: Record<string, any>[] = [];
 						const parser = createSseDataParser(
 							(dataLine, eventName) => {
 								if (!dataLine) return;
@@ -3336,16 +3336,16 @@ async function handleNativeProviderRequest(
 												? parsed.output_text_delta
 												: typeof parsed?.response
 															?.output_text_delta ===
-													  'string'
+                                                      'string'
 													? parsed.response
 															.output_text_delta
 													: typeof parsed?.delta ===
-														  'string'
+                                                          'string'
 														? parsed.delta
 														: typeof parsed
 																	?.response
 																	?.delta ===
-															  'string'
+                                                              'string'
 															? parsed.response
 																	.delta
 															: '';
@@ -3389,7 +3389,7 @@ async function handleNativeProviderRequest(
 							}
 						);
 						try {
-							while (true) {
+							for (;;) {
 								const { done, value } = await reader.read();
 								if (done) break;
 								if (!value || value.length === 0) continue;
@@ -3682,7 +3682,7 @@ async function handleNativeProviderRequest(
 			error?.code === 'QUEUE_WAIT_TIMEOUT'
 				? 503
 				: errorMessage.includes('timed out') ||
-					  errorMessage.includes('abort')
+                      errorMessage.includes('abort')
 					? 504
 					: 502;
 		if (

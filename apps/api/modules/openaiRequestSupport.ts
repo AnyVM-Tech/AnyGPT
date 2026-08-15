@@ -131,7 +131,7 @@ export function createSseDataParser(
 	return (chunk: string) => {
 		buffer += chunk;
 
-		while (true) {
+		for (;;) {
 			const lineBreakIndex = buffer.indexOf('\n');
 			if (lineBreakIndex === -1) break;
 

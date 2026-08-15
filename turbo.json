@@ -38,6 +38,10 @@
 			"outputs": [],
 			"inputs": ["apps/**", "tests/**", "package.json", "bun.lock"]
 		},
+		"typecheck": {
+			"outputs": [],
+			"inputs": ["$TURBO_DEFAULT$", "../../tsconfig.json"]
+		},
 		"dev": {
 			"dependsOn": [],
 			"outputs": [],

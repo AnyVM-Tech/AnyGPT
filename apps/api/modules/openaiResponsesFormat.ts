@@ -61,7 +61,7 @@ function buildResponsesFunctionCallItem(
 		typeof rawCall?.call_id === 'string' && rawCall.call_id.trim()
 			? rawCall.call_id.trim()
 			: typeof rawCall?.tool_call_id === 'string' &&
-				  rawCall.tool_call_id.trim()
+                  rawCall.tool_call_id.trim()
 				? rawCall.tool_call_id.trim()
 				: undefined;
 	const id = normalizeFunctionCallItemId(rawCall?.id, callId);
@@ -224,7 +224,7 @@ export function buildResponsesUsage(
 		typeof usage?.total_tokens === 'number'
 			? usage.total_tokens
 			: typeof inputTokens === 'number' ||
-				  typeof outputTokens === 'number'
+                  typeof outputTokens === 'number'
 				? (inputTokens || 0) + (outputTokens || 0)
 				: undefined;
 
@@ -237,7 +237,7 @@ export function buildResponsesUsage(
 					input_tokens_details: {
 						cached_tokens: 0
 					}
-			  }
+              }
 			: {}),
 		...(typeof outputTokens === 'number'
 			? { output_tokens: outputTokens }
@@ -247,7 +247,7 @@ export function buildResponsesUsage(
 					output_tokens_details: {
 						reasoning_tokens: 0
 					}
-			  }
+              }
 			: {}),
 		...(typeof totalTokens === 'number'
 			? { total_tokens: totalTokens }

@@ -141,7 +141,7 @@ export class OpenAI implements IAIProvider {
 		const trimmed = raw.trim();
 		if (!trimmed) return null;
 		const unquoted = trimmed.replace(/^['"`]+|['"`]+$/g, '');
-		const base = unquoted.split(/[.\[]/)[0]?.trim();
+		const base = unquoted.split(/[.[]/)[0]?.trim();
 		if (!base) return null;
 		return base.toLowerCase();
 	}
@@ -253,7 +253,7 @@ export class OpenAI implements IAIProvider {
 
 		if (results.size === 0) {
 			const listMatch = message.match(
-				/Unsupported parameters?:\s*([^\.\[]+)/i
+				/Unsupported parameters?:\s*([^.[]+)/i
 			);
 			if (listMatch) {
 				const entries = listMatch[1].split(',');
@@ -691,8 +691,8 @@ export class OpenAI implements IAIProvider {
 			typeof schemaContainer.schema === 'object'
 				? schemaContainer.schema
 				: !type &&
-					  responseFormat?.properties &&
-					  typeof responseFormat.properties === 'object'
+                      responseFormat?.properties &&
+                      typeof responseFormat.properties === 'object'
 					? responseFormat
 					: undefined;
 		if (type !== 'json_schema' && !(type === '' && schema)) {
@@ -992,7 +992,7 @@ export class OpenAI implements IAIProvider {
 							part &&
 							typeof part === 'object' &&
 							typeof part.type === 'string'
-				  )
+                  )
 				: [];
 			const normalized: Record<string, any> = {
 				type: 'reasoning',
@@ -1036,17 +1036,17 @@ export class OpenAI implements IAIProvider {
 				typeof entry.call_id === 'string' && entry.call_id.trim()
 					? entry.call_id.trim()
 					: typeof entry.tool_call_id === 'string' &&
-						  entry.tool_call_id.trim()
+                          entry.tool_call_id.trim()
 						? entry.tool_call_id.trim()
 						: typeof entry.id === 'string' &&
-							  entry.id.trim().startsWith('call_')
+                              entry.id.trim().startsWith('call_')
 							? entry.id.trim()
 							: undefined;
 			const name =
 				typeof entry.name === 'string' && entry.name.trim()
 					? entry.name.trim()
 					: typeof entry.function?.name === 'string' &&
-						  entry.function.name.trim()
+                          entry.function.name.trim()
 						? entry.function.name.trim()
 						: undefined;
 			if (!name) return null;
@@ -1377,7 +1377,7 @@ export class OpenAI implements IAIProvider {
 				: String(rawChunk);
 			buffer += text;
 			const dataLines: string[] = [];
-			while (true) {
+			for (;;) {
 				const newlineIndex = buffer.indexOf('\n');
 				if (newlineIndex === -1) break;
 				let line = buffer.slice(0, newlineIndex);
@@ -2016,7 +2016,7 @@ export class OpenAI implements IAIProvider {
 			typeof data?.output_text === 'string' && data.output_text.trim().length > 0
 				? data.output_text.trim()
 				: typeof data?.response?.output_text === 'string' &&
-				  data.response.output_text.trim().length > 0
+                  data.response.output_text.trim().length > 0
 					? data.response.output_text.trim()
 					: undefined;
 		const outputItems = Array.isArray(data?.output)

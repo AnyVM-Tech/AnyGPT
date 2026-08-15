@@ -1,4 +1,4 @@
-import Ajv, { ErrorObject } from 'ajv';
+import { Ajv, type ErrorObject } from 'ajv';
 
 export interface AdminProviderPayload {
   providerId: string;

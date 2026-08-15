@@ -640,7 +640,7 @@ let cachedCpuCount: number | null = null;
 function getSystemMemoryBytes(): number {
 	if (cachedSystemMemoryBytes !== null) return cachedSystemMemoryBytes;
 	try {
-		cachedSystemMemoryBytes = Number(require('os').totalmem?.() || 0);
+		cachedSystemMemoryBytes = Number(os.totalmem?.() || 0);
 	} catch {
 		cachedSystemMemoryBytes = 0;
 	}
@@ -650,7 +650,7 @@ function getSystemMemoryBytes(): number {
 function getCpuCount(): number {
 	if (cachedCpuCount !== null) return cachedCpuCount;
 	try {
-		const cpus = require('os').cpus?.();
+		const cpus = os.cpus?.();
 		cachedCpuCount = Array.isArray(cpus) && cpus.length > 0 ? cpus.length : 1;
 	} catch {
 		cachedCpuCount = 1;

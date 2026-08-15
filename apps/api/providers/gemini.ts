@@ -1086,7 +1086,7 @@ export class GeminiAI implements IAIProvider {
    */
   async sendMessage(message: IMessage): Promise<ProviderResponse> {
     const originalParts = Array.isArray((message as any)?.parts) ? (message as any).parts : null;
-    let retriedWithInlinedRemoteMedia = false;
+    const retriedWithInlinedRemoteMedia = false;
     if (Array.isArray((message as any)?.parts) && (message as any).parts.length > 0) {
       try {
         (message as any).parts = await inlineUnsupportedRemoteImageParts(

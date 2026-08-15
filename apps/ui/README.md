@@ -5,10 +5,17 @@ This folder replaces the previous UI with LibreChat. The LibreChat repo is expec
 
 ## Quick Start
 
-1. Clone LibreChat into this folder:
+1. Bootstrap the ignored LibreChat checkout and install its exact Node/npm dependencies:
    ```bash
-   git clone https://github.com/danny-avila/LibreChat.git apps/ui/librechat
+   bun run frontend:install
    ```
+
+   The installer checks out a tested LibreChat commit from
+   `https://github.com/danny-avila/LibreChat.git` into `apps/ui/librechat`,
+   loads its `.nvmrc`, runs `npm ci` with the manifest-pinned npm version,
+   installs the homepage from the frozen root lockfile, and applies the AnyGPT
+   wrapper config. Override the pinned source with
+   `ANYGPT_LIBRECHAT_REPOSITORY` or `ANYGPT_LIBRECHAT_REF`.
 
 2. Ensure MongoDB is running and update `apps/ui/librechat/.env` if needed:
    - Default expects `MONGO_URI=mongodb://127.0.0.1:27017/LibreChat`
@@ -23,9 +30,9 @@ This folder replaces the previous UI with LibreChat. The LibreChat repo is expec
    cd apps/ui
    bun run dev
    ```
-   If dependencies are missing, run:
+   If dependencies are missing, run from the AnyGPT repository root:
    ```bash
-   (cd apps/ui/librechat && bun install)
+   bun run frontend:install
    ```
 
 ## What This Wrapper Does
@@ -107,3 +114,13 @@ LibreChat talks to the AnyGPT API internally via `ANYGPT_BASE_URL=http://localho
 
 - If you want per-user API keys, change `apiKey` in `config/librechat.yaml` to `user_provided`.
 - Update the `models.default` list in `config/librechat.yaml` to match your AnyGPT `GET /v1/models` output.
+
+## Reproducible UI Design Changes
+
+The tracked config, environment defaults, and AnyGPT/AnyVM assets cover the
+current endpoint, theme, title, footer, and SSO branding. For LibreChat source,
+CSS, or additional static-asset changes, use the context-checked patch workflow
+documented in [`customizations/README.md`](customizations/README.md). The patch
+is stored in the outer repository and replayed by `scripts/sync-config.sh`; it
+refuses conflicts instead of overwriting unrelated edits in the ignored
+LibreChat checkout.
