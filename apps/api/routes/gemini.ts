@@ -279,7 +279,7 @@ router.post('/models/:modelId/generateContent', authAndUsageMiddleware, rateLimi
         let statusCode = 500;
         let statusText = 'INTERNAL'; // Default for Gemini-style error object
         let clientMessage = 'Internal server error.';
-        let reference = 'An unexpected error occurred processing the Gemini request.'; // For generic 500
+        const reference = 'An unexpected error occurred processing the Gemini request.'; // For generic 500
 
         if (error instanceof SyntaxError) {
             statusCode = 400; statusText = 'INVALID_ARGUMENT'; clientMessage = 'Invalid JSON payload.';

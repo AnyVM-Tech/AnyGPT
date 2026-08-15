@@ -22,7 +22,7 @@ function sanitizeProviderErrorText(value: string): string {
 			const label = match.toLowerCase().includes('authorization') ? 'authorization' : 'api_key';
 			return `${label}${separator} [redacted]`;
 		})
-		.replace(/\bauthorization\b\s*[:=]\s*bearer\s+[A-Za-z0-9._\-]+/gi, 'authorization: [redacted]');
+		.replace(/\bauthorization\b\s*[:=]\s*bearer\s+[A-Za-z0-9._-]+/gi, 'authorization: [redacted]');
 }
 
 function sanitizeProviderErrorValue<T>(value: T): T {
@@ -359,7 +359,11 @@ function classifyFingerprintErrorText(text: string): string {
     const lower = normalizeFingerprintString(text).toLowerCase();
     if (!lower) return '';
 
-    const quotaMetricMatch = lower.match(/quota exceeded for metric:?\s*([^,]+)/i) || lower.match(/quota exceeded for metric:\s*([^,]+)/i);
+    const normalizedMetricText = lower.replace(
+        `quota exceeded for metric:${String.fromCharCode(31)}`,
+        'quota exceeded for metric:'
+    );
+    const quotaMetricMatch = normalizedMetricText.match(/quota exceeded for metric:\s*([^,]+)/i);
     if (quotaMetricMatch?.[1]) {
         return `quota:${quotaMetricMatch[1].trim()}`;
     }

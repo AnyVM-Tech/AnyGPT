@@ -1,6 +1,6 @@
 import express from 'express';
+import process from 'node:process';
 import { fileURLToPath } from 'node:url';
-import { execSync } from 'node:child_process';
 import { readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import rateLimit from 'express-rate-limit';
@@ -20,7 +20,13 @@ try {
     }
   }
 } catch { /* no .env file */ }
-const PORT = process.env.HOMEPAGE_PORT || 3091;
+const homepagePort = process.env.HOMEPAGE_PORT || '3091';
+if (!/^\d+$/.test(homepagePort) || Number(homepagePort) < 1 || Number(homepagePort) > 65_535) {
+  console.error('HOMEPAGE_PORT must be an integer between 1 and 65535.');
+  process.exit(1);
+}
+
+const PORT = Number(homepagePort);
 const HOST = process.env.HOMEPAGE_HOST || '0.0.0.0';
 const ANYGPT_API_BASE_URL = (process.env.ANYGPT_API_BASE_URL || 'https://gpt.anyvm.tech').replace(/\/$/, '');
 const LIVE_METRICS_REFRESH_MS = 30_000;
@@ -107,15 +113,6 @@ function buildLiveMetrics(payload, usageMetrics) {
     tokenUsage: Number(usageMetrics?.tokenUsage) || 0,
   };
 }
-
-// Kill any stale process on our port
-try {
-  const pid = execSync(`lsof -ti :${PORT}`, { encoding: 'utf8' }).trim();
-  if (pid) {
-    console.log(`Killing stale process on port ${PORT} (PID: ${pid})`);
-    execSync(`kill -9 ${pid}`);
-  }
-} catch { /* no process on port */ }
 
 const app = express();
 
@@ -298,6 +295,19 @@ app.get('*', spaLimiter, (_req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-app.listen(PORT, HOST, () => {
+const server = app.listen(PORT, HOST, () => {
   console.log(`AnyGPT Homepage running on http://${HOST}:${PORT}`);
+});
+
+server.on('error', (error) => {
+  if (error?.code === 'EADDRINUSE') {
+    console.error(
+      `Cannot start AnyGPT Homepage: ${HOST}:${PORT} is already in use. ` +
+      'The existing listener was left untouched; stop it yourself or set HOMEPAGE_PORT to a free port.',
+    );
+  } else {
+    console.error(`Cannot start AnyGPT Homepage on ${HOST}:${PORT}:`, error);
+  }
+
+  process.exitCode = 1;
 });

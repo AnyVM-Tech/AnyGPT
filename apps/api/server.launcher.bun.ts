@@ -1,5 +1,4 @@
-import { fileURLToPath } from 'node:url';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -217,7 +216,7 @@ function acquireLaunchLock(): void {
 		acquiredAt: new Date().toISOString(),
 	}, null, 2);
 
-	while (true) {
+	for (;;) {
 		try {
 			const handle = fs.openSync(LAUNCH_LOCK_FILE, 'wx');
 			fs.writeFileSync(handle, record, 'utf8');

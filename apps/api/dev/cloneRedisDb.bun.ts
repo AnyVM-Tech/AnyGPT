@@ -1,6 +1,6 @@
 import dotenv from 'dotenv';
 import path from 'node:path';
-import { createClient } from '../../langgraph-control-plane/node_modules/redis';
+import { createClient } from 'redis';
 
 function log(message: string): void {
   console.log(`[experimental-redis-clone] ${message}`);

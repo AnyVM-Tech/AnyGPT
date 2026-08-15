@@ -29,6 +29,36 @@ case ":${PATH}:" in
 	*) export PATH="${BUN_DIR}:${PATH}" ;;
 esac
 
+# Bun provides a `node` compatibility shim when no native Node binary is on PATH.
+# Prefer the repository's nvm-selected Node runtime for Node-based tools such as
+# ESLint, whose CommonJS dependencies are not always compatible with that shim.
+NODE_VERSION=""
+if [[ -r "${ROOT_DIR}/.nvmrc" ]]; then
+	IFS= read -r NODE_VERSION < "${ROOT_DIR}/.nvmrc"
+	NODE_VERSION="${NODE_VERSION#v}"
+	if [[ ! "${NODE_VERSION}" =~ ^[0-9]+([.][0-9]+){0,2}$ ]]; then
+		NODE_VERSION=""
+	fi
+fi
+
+NODE_BIN_DIR=""
+if [[ -n "${NODE_VERSION}" ]]; then
+	for node_candidate in "${USER_HOME}/.nvm/versions/node/v${NODE_VERSION}"*/bin/node; do
+		if [[ -x "${node_candidate}" ]]; then
+			NODE_BIN_DIR="$(dirname "${node_candidate}")"
+			break
+		fi
+	done
+fi
+
+if [[ -z "${NODE_BIN_DIR}" && -n "${NVM_BIN:-}" && -x "${NVM_BIN}/node" ]]; then
+	NODE_BIN_DIR="${NVM_BIN}"
+fi
+
+if [[ -n "${NODE_BIN_DIR}" ]]; then
+	export PATH="${NODE_BIN_DIR}:${PATH}"
+fi
+
 cd "${ROOT_DIR}"
 
 WORKSPACE_SURFACE_ALIASES=(
@@ -103,3 +133,5 @@ elif [[ "$1" == "workspace-surface-quickcheck-thread" ]]; then
 elif [[ "$1" == "workspace-surface-summary-thread" ]]; then
 	set -- bash -lc 'bash ./scripts/with-bun-path.sh bun run workspace:surface:summary && bash ./scripts/with-bun-path.sh bun run frontend:typecheck'
 fi
+
+exec "$@"

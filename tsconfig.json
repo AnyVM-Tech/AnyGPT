@@ -13,7 +13,9 @@
 		/* Language and Environment */
 		"target": "ES2022",
 		"lib": [
-			"ES2022"
+			"ES2022",
+			"DOM",
+			"DOM.Iterable"
 		],
 		// "jsx": "preserve",
 		// "experimentalDecorators": true,
@@ -109,5 +111,6 @@
 		/* Completeness */
 		// "skipDefaultLibCheck": true,
 		"skipLibCheck": true
-	}
+	},
+	"exclude": ["node_modules", "apps/ui/librechat"]
 }

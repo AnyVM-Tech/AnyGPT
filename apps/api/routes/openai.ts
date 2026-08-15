@@ -451,7 +451,9 @@ async function parseChatCompletionsRequestBody(
 								requestBody.messages = JSON.parse(
 									parsed.fields.messages
 								);
-							} catch {}
+							} catch {
+								// Ignore an invalid optional multipart messages field.
+							}
 						}
 						if (parsed.fields.stream)
 							requestBody.stream =
@@ -1120,7 +1122,7 @@ function normalizeVideoRetryState(
 						apiKey: item.apiKey.trim(),
 						baseUrl: item.baseUrl.trim()
 					}))
-		  )
+          )
 		: undefined;
 
 	return {
@@ -2229,8 +2231,7 @@ openaiRouter.post(
 			const userApiKey = request.apiKey!;
 			const tierLimits = request.tierLimits!;
 
-			let requestBody: any;
-			requestBody = await parseChatCompletionsRequestBody(
+			const requestBody: any = await parseChatCompletionsRequestBody(
 				request,
 				response
 			);
@@ -2281,7 +2282,8 @@ openaiRouter.post(
 			}
 
 			const result = extractMessageFromRequestBody(requestBody);
-			let { messages: rawMessages, model: modelId } = result;
+			let { messages: rawMessages } = result;
+			const { model: modelId } = result;
 			rawMessages = filterValidChatMessages(rawMessages);
 			logForgeTrace('chat', 'request.start', request, {
 				modelId,
@@ -2296,7 +2298,7 @@ openaiRouter.post(
 					typeof requestBody?.tool_choice === 'string'
 						? requestBody.tool_choice
 						: typeof requestBody?.tool_choice === 'object' &&
-						  requestBody.tool_choice
+                          requestBody.tool_choice
 							? 'object'
 							: undefined,
 				accept: getHeaderValue(request.headers, 'accept')
@@ -2829,7 +2831,9 @@ openaiRouter.post(
 								);
 								try {
 									result?.passthrough?.upstream?.destroy?.();
-								} catch {}
+								} catch {
+									// Upstream cleanup is best effort before normalization.
+								}
 								fallbackToNormalized = true;
 								break;
 							}
@@ -3046,7 +3050,7 @@ openaiRouter.post(
 									hasFallbackToolCallChunk
 										? ''
 										: typeof fallbackResult.chunk ===
-											  'string'
+                                              'string'
 											? fallbackResult.chunk
 											: '';
 								if (
@@ -3500,7 +3504,7 @@ openaiRouter.post(
 			const timestamp = new Date().toISOString();
 			let statusCode = 500;
 			let clientMessage = 'Internal Server Error';
-			let clientReference =
+			const clientReference =
 				'An unexpected error occurred while processing your chat request.';
 			const errorMeta = error as any;
 			const retryAfterSeconds = resolveRetryAfterSeconds(
@@ -4279,14 +4283,14 @@ openaiRouter.post(
 					typeof message.tool_choice === 'string'
 						? message.tool_choice
 						: typeof message.tool_choice === 'object' &&
-						  message.tool_choice
+                          message.tool_choice
 							? 'object'
 							: undefined,
 				reasoning:
 					typeof requestBody?.reasoning === 'string'
 						? requestBody.reasoning
 						: requestBody?.reasoning &&
-						  typeof requestBody.reasoning === 'object'
+                          typeof requestBody.reasoning === 'object'
 							? 'object'
 							: undefined,
 				accept: getHeaderValue(request.headers, 'accept')
@@ -4500,7 +4504,7 @@ openaiRouter.post(
 					let responsesCreatedSent = false;
 					let responsesTextItemStarted = false;
 					let inlineCompactionItemEmitted = false;
-					let pendingReasoningText = '';
+					const pendingReasoningText = '';
 					let streamedReasoningText = '';
 					const canInferResponsesToolCallsFromText =
 						Array.isArray(message.tools) &&
@@ -4691,7 +4695,9 @@ openaiRouter.post(
 								);
 								try {
 									result?.passthrough?.upstream?.destroy?.();
-								} catch {}
+								} catch {
+									// Upstream cleanup is best effort before normalization.
+								}
 								fallbackToNormalized = true;
 								break;
 							}
@@ -4823,7 +4829,7 @@ openaiRouter.post(
 								typeof result.chunk === 'string' &&
 								result.chunk.length > 0
 							) {
-								let deltaText = result.chunk;
+								const deltaText = result.chunk;
 								fullText += deltaText;
 								if (
 									!toolCallsFromStream &&
@@ -4928,7 +4934,7 @@ openaiRouter.post(
 								if (fallbackResult.finish_reason)
 									finishReasonFromStream =
 										fallbackResult.finish_reason;
-								let fallbackDeltaText = fallbackResult.chunk;
+								const fallbackDeltaText = fallbackResult.chunk;
 								fullText += fallbackDeltaText;
 								if (
 									!toolCallsFromStream &&
@@ -5347,7 +5353,7 @@ openaiRouter.post(
 				typeof result.reasoning === 'string' && result.reasoning.trim()
 					? result.reasoning
 					: (effectiveToolCalls && effectiveToolCalls.length > 0) ||
-					  (typeof outputText === 'string' && outputText.trim().length > 0)
+                      (typeof outputText === 'string' && outputText.trim().length > 0)
 						? effectiveToolCalls && effectiveToolCalls.length > 0
 							? 'Selecting the best tool and preparing its arguments.'
 							: 'Planning the response before generating the final answer.'
@@ -5459,7 +5465,7 @@ openaiRouter.post(
 			const timestamp = new Date().toISOString();
 			let statusCode = 500;
 			let clientMessage = 'Internal Server Error';
-			let clientReference =
+			const clientReference =
 				'An unexpected error occurred while processing your responses request.';
 			const errorMeta = error as any;
 			const retryAfterSeconds = resolveRetryAfterSeconds(
@@ -5804,7 +5810,7 @@ openaiRouter.get(
 		} catch (error: any) {
 			await logError(error, request);
 			let statusCode = 500;
-			let clientMessage = 'Internal Server Error';
+			const clientMessage = 'Internal Server Error';
 			if (String(error?.message || '').includes('expired'))
 				statusCode = 410;
 			if (String(error?.message || '').includes('Invalid'))
@@ -5959,7 +5965,7 @@ openaiRouter.post(
 			const timestamp = new Date().toISOString();
 			let statusCode = 500;
 			let clientMessage = 'Internal Server Error';
-			let clientReference =
+			const clientReference =
 				'An unexpected error occurred while processing your Azure chat request.';
 			const explicitStatusCode =
 				typeof (error as any)?.statusCode === 'number'
@@ -6135,14 +6141,14 @@ function summarizeAudioProviderFailure(
 		lower.includes('billing details')
 			? 'BILLING_NOT_ACTIVE'
 			: status === 429 ||
-				  lower.includes('rate limit') ||
-				  lower.includes('quota') ||
-				  lower.includes('insufficient_quota')
+                  lower.includes('rate limit') ||
+                  lower.includes('quota') ||
+                  lower.includes('insufficient_quota')
 				? 'RATE_LIMIT_OR_QUOTA'
 				: status === 401 ||
-					  status === 403 ||
-					  lower.includes('invalid api key') ||
-					  lower.includes('incorrect api key')
+                      status === 403 ||
+                      lower.includes('invalid api key') ||
+                      lower.includes('incorrect api key')
 					? 'AUTH_FAILURE'
 					: lower.includes('timeout') || lower.includes('timed out')
 						? 'TIMEOUT'
@@ -6455,7 +6461,7 @@ openaiRouter.post(
 
 				if (stream && upstreamRes.body) {
 					const reader = upstreamRes.body.getReader();
-					while (true) {
+					for (;;) {
 						const { done, value } = await reader.read();
 						if (done) break;
 						if (value && value.length > 0) {
@@ -6727,16 +6733,16 @@ openaiRouter.post(
 				error.statusCode < 600
 					? error.statusCode
 					: typeof error?.status === 'number' &&
-						  error.status >= 400 &&
-						  error.status < 600
+                          error.status >= 400 &&
+                          error.status < 600
 						? error.status
 						: /failed to process request|authorization failed|api key expired|project has been denied access|permission_denied|invalid api key/i.test(
-								  String(error?.message || '')
-							  )
+                                  String(error?.message || '')
+                              )
 							? 503
 					: String(error?.message || '').includes(
 								'No available provider for image generation'
-						  )
+                          )
 						? 503
 						: 500;
 			if (!response.completed) {
@@ -6889,7 +6895,7 @@ const handleVideoGenerationRequest = async (
 				? error.statusCode
 				: String(error?.message || '').includes(
 							'No available provider for video generation'
-					  )
+                      )
 					? 503
 					: 500;
 		if (!response.completed) {
@@ -6926,7 +6932,7 @@ openaiRouter.get('/videos', async (request: Request, response: Response) => {
 									item,
 									VIDEO_REQUEST_CACHE_TTL_MS
 								)
-						  )
+                          )
 						: Promise.resolve()
 				)
 			);
@@ -7634,7 +7640,7 @@ openaiRouter.get(
 								contentUri,
 								ttlMs:
 									cachedProvider.ttlMs || VIDEO_REQUEST_CACHE_TTL_MS
-						  }
+                          }
 						: null);
 				if (cacheUpdate) {
 					await setVideoRequestCache(requestId, cacheUpdate);
@@ -8001,7 +8007,7 @@ openaiRouter.post(
 
 				if (upstreamRes.body) {
 					const reader = upstreamRes.body.getReader();
-					while (true) {
+					for (;;) {
 						const { done, value } = await reader.read();
 						if (done) break;
 						if (value && value.length > 0) response.write(value);

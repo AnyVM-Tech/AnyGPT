@@ -9,12 +9,16 @@ bash "$ROOT/scripts/sync-config.sh"
 
 cd "$ROOT/librechat"
 
+# shellcheck source=activate-node.sh
+. "$ROOT/scripts/activate-node.sh"
+
 if [[ ! -d node_modules || ! -x node_modules/.bin/cross-env ]]; then
-  echo "Installing LibreChat dependencies..."
-  bash "$BUN_SH" install
+  echo "LibreChat dependencies are missing or incomplete." >&2
+  echo "Run 'bun run frontend:install' from $REPO_ROOT, then retry." >&2
+  exit 1
 fi
 
-if [[ ! -f node_modules/@librechat/data-schemas/dist/index.cjs ]] || [[ ! -f packages/data-provider/dist/react-query/index.es.js ]]; then
+if [[ ! -f node_modules/@librechat/data-schemas/dist/index.cjs ]] || [[ ! -f packages/data-provider/dist/react-query/index.js ]]; then
   echo "Building LibreChat workspace packages..."
   bash "$BUN_SH" run build:packages
 fi
@@ -24,12 +28,22 @@ if [[ ! -f client/dist/index.html ]]; then
   bash "$BUN_SH" run build:client
 fi
 
-# Kill any process already using the LibreChat backend port (3080)
+# Never terminate an unrelated process that already owns the backend port.
 BACKEND_PORT="${PORT:-3080}"
+FRONTEND_PORT="${VITE_PORT:-3090}"
+if [[ "$BACKEND_PORT" == "$FRONTEND_PORT" ]]; then
+  echo "LibreChat backend and Vite ports must differ (both resolved to $BACKEND_PORT)." >&2
+  exit 1
+fi
 if PID=$(lsof -ti :"$BACKEND_PORT" 2>/dev/null); then
-  echo "Killing existing process on port $BACKEND_PORT (PID: $PID)..."
-  kill -9 $PID 2>/dev/null || true
-  sleep 1
+  echo "LibreChat backend port $BACKEND_PORT is already in use by PID(s): $PID" >&2
+  echo "Stop or reconfigure that process explicitly before starting this stack." >&2
+  exit 1
+fi
+if PID=$(lsof -ti :"$FRONTEND_PORT" 2>/dev/null); then
+  echo "LibreChat Vite port $FRONTEND_PORT is already in use by PID(s): $PID" >&2
+  echo "Stop or reconfigure that process explicitly before starting this stack." >&2
+  exit 1
 fi
 
 # Ensure Vite binds to all interfaces (not just IPv6 loopback)
@@ -37,7 +51,7 @@ export HOST=0.0.0.0
 # Allow reverse-proxy hostnames through Vite's host check
 export VITE_ALLOWED_HOSTS="${VITE_ALLOWED_HOSTS:-gpt.anyvm.tech}"
 
-bash "$BUN_SH" run backend:dev &
+PORT="$BACKEND_PORT" bash "$BUN_SH" run backend:dev &
 BACKEND_PID=$!
 
 cleanup() {
@@ -47,4 +61,4 @@ cleanup() {
 }
 trap cleanup EXIT
 
-bash "$BUN_SH" run frontend:dev
+PORT="$FRONTEND_PORT" bash "$BUN_SH" run frontend:dev

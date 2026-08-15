@@ -8,7 +8,9 @@
   },
   "scripts": {
     "start": "bash ../../bun.sh run ./serve.js",
-    "dev": "bash ../../bun.sh run ./serve.js"
+    "dev": "bash ../../bun.sh run ./serve.js",
+    "test": "bash ../../scripts/with-bun-path.sh node ./apps/homepage/serve.port-safety.test.mjs",
+    "typecheck": "bash ../../bun.sh ../../node_modules/typescript/bin/tsc --noEmit --allowJs --checkJs false --skipLibCheck --target ES2022 --module ESNext --moduleResolution Bundler serve.js public/script.js"
   },
   "dependencies": {
     "express": "^4.22.2",

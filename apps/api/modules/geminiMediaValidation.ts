@@ -470,7 +470,7 @@ export function validateGeminiModelCapabilityRequest(modelId: string, body: unkn
     const hasToolCallingHint =
       requestJson.includes('tool_choice') ||
       requestJson.includes('tool_calls') ||
-      requestJson.includes('\"tools\"') ||
+      requestJson.includes('"tools"') ||
       requestJson.includes('function_declarations') ||
       requestJson.includes('function_calling');
 
@@ -505,7 +505,7 @@ export function validateGeminiModelCapabilityRequest(modelId: string, body: unkn
       requestJson.includes('image_base64') ||
       requestJson.includes('b64_json') ||
       requestJson.includes('response_format":"b64_json') ||
-      requestJson.includes('response_format\":\"b64_json') ||
+      requestJson.includes('response_format":"b64_json') ||
       requestJson.includes('response_format') && requestJson.includes('b64_json') ||
       (requestJson.includes('modalities') && requestJson.includes('image')) ||
       (requestJson.includes('response_format') && requestJson.includes('image'));
@@ -688,7 +688,7 @@ export function validateGeminiModelCapabilityRequest(modelId: string, body: unkn
       requestJson.includes('function_calling') ||
       requestJson.includes('parallel_tool_calls') ||
       requestJson.includes('tool_calls') ||
-      requestJson.includes('\"tools\"') ||
+      requestJson.includes('"tools"') ||
       requestJson.includes('[probe:tool_calling]');
 
     const hasUnsupportedAudioHintForLyria =

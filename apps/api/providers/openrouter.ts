@@ -26,7 +26,7 @@ function isOpenRouterToolUseUnsupportedError(error: any): boolean {
     lowerMessage.includes('tools for multi-agent models') ||
     lowerMessage.includes('[probe:tool_calling]');
   const isProviderAvailabilityOrGovernanceFailure =
-    /no endpoints found that support (tool use|the tool|the provided ['\"]tool_choice['\"] value)|no allowed providers are available for the selected model|no providers? available|provider routing/i.test(message);
+    /no endpoints found that support (tool use|the tool|the provided ['"]tool_choice['"] value)|no allowed providers are available for the selected model|no providers? available|provider routing/i.test(message);
   const isToolCallingGovernanceFailure =
     isToolCallingRequest && /beta access|invalid argument|not supported|unsupported/i.test(lowerMessage);
   return (
@@ -288,14 +288,16 @@ export class OpenRouterAI implements IAIProvider {
     const chunks: Buffer[] = [];
     let total = 0;
 
-    while (true) {
+    for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
       if (!value || value.length === 0) continue;
       const chunk = Buffer.from(value);
       total += chunk.length;
       if (maxBytes > 0 && total > maxBytes) {
-        try { await reader.cancel(); } catch {}
+        try { await reader.cancel(); } catch {
+          // The abort and size error below remain authoritative.
+        }
         controller?.abort(new Error('Image exceeds max size.'));
         throw new Error('Image exceeds max size.');
       }

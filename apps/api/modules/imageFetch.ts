@@ -149,14 +149,16 @@ async function readResponseBodyWithLimit(
   const chunks: Buffer[] = [];
   let total = 0;
 
-  while (true) {
+  for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
     if (!value || value.length === 0) continue;
     const chunk = Buffer.from(value);
     total += chunk.length;
     if (maxBytes > 0 && total > maxBytes) {
-      try { await reader.cancel(); } catch {}
+      try { await reader.cancel(); } catch {
+        // The abort and size error below remain authoritative.
+      }
       controller?.abort(new Error('Image exceeds max size.'));
       throw new Error('Image exceeds max size.');
     }

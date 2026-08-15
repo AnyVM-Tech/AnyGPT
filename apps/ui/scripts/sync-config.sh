@@ -71,3 +71,8 @@ if [[ -f "$ROOT/AnyVM-logo.png" ]]; then
   cp "$ROOT/AnyVM-logo.png" "$PUBLIC_DIR/AnyVM-logo.png"
   echo "Copied AnyVM-logo.png into $PUBLIC_DIR"
 fi
+
+# --- Optional source/design overlay ---
+# This uses a context-checked Git patch so it never blindly replaces local
+# changes inside the ignored LibreChat checkout.
+bash "$ROOT/scripts/apply-customizations.sh"

@@ -60,7 +60,7 @@ async function updateProviders(
       disabled: false // Add required disabled field
     };
 
-    let providers = await dataManager.load<LoadedProviders>('providers');
+    const providers = await dataManager.load<LoadedProviders>('providers');
     if (!Array.isArray(providers)) {
       console.error('Invalid providers data format. Expected an array of providers.');
       process.exit(1);

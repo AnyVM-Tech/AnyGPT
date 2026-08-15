@@ -1,5 +1,6 @@
 export function normalizeInputAudio(audio: { data: string; format: string }): { buffer: Buffer; mimeType: string; extension: string } | null {
-  let { data, format } = audio;
+  let { data } = audio;
+  const { format } = audio;
   let mimeType = format;
 
   if (typeof data === 'string' && data.startsWith('data:')) {

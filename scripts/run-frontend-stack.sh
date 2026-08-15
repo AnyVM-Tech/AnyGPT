@@ -2,18 +2,117 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
 BUN_SH="$ROOT/bun.sh"
 MODE="${1:-dev}"
+READINESS_COMMAND="frontend:readiness"
 UI_DIR="$ROOT/apps/ui"
+LIBRECHAT_DIR="$UI_DIR/librechat"
 HOMEPAGE_DIR="$ROOT/apps/homepage"
-SKIP_INSTALL_IF_PRESENT="${ANYGPT_FRONTEND_SKIP_INSTALL_IF_PRESENT:-1}"
-READINESS_TIMEOUT_SECONDS="${ANYGPT_FRONTEND_READINESS_TIMEOUT_SECONDS:-15}"
-HOMEPAGE_START_TIMEOUT_SECONDS="${ANYGPT_HOMEPAGE_START_TIMEOUT_SECONDS:-0}"
+FRONTEND_STATE_DIR="$(git -C "$ROOT" rev-parse --absolute-git-dir)/anygpt-local"
+FRONTEND_INSTALL_LOCK="$FRONTEND_STATE_DIR/frontend-install.lock"
+FRONTEND_INSTALL_STAMP="$FRONTEND_STATE_DIR/frontend-install.success"
+FRONTEND_STACK_LOCK="$FRONTEND_STATE_DIR/frontend-stack.lock"
+FRONTEND_STACK_PID_FILE="$FRONTEND_STATE_DIR/frontend-stack.pid"
 SUPPORTED_MODES="dev start readiness preflight preflight-ready readiness-ready readiness-only preflight-status status workspace-status install-check-status install-summary install-check install-check-only operator-preflight doctor same-thread-defer-status same-thread-status workspace-surface-strict workspace-surface-fast-status workspace-surface-pending-status workspace-surface-typecheck workspace-surface-install-typecheck workspace-surface-preflight workspace-surface-summary workspace-surface-defer workspace-surface-goal-status workspace-surface-same-thread-reminder workspace-surface-root-smoke workspace-surface-root-check frontend-install-status frontend-preflight frontend-typecheck help"
 LANGSMITH_PENDING_RUNS_SAMPLE="${ANYGPT_LANGSMITH_PENDING_RUNS_SAMPLE:-4}"
 
+lock_is_held() {
+  local lock_file="$1"
+
+  [[ -e "$lock_file" ]] || return 1
+  command -v flock >/dev/null 2>&1 || return 1
+
+  if flock -n "$lock_file" true 2>/dev/null; then
+    return 1
+  fi
+
+  return 0
+}
+
+active_stack_pid() {
+  local stack_pid=""
+
+  [[ -r "$FRONTEND_STACK_PID_FILE" ]] || return 0
+  read -r stack_pid < "$FRONTEND_STACK_PID_FILE" || true
+  if [[ "$stack_pid" =~ ^[0-9]+$ ]] && kill -0 "$stack_pid" 2>/dev/null; then
+    printf '%s' "$stack_pid"
+  fi
+}
+
+frontend_install_stamp_is_current() {
+  local bun_lock_sha256=""
+  local librechat_commit=""
+  local librechat_lock_sha256=""
+
+  [[ -r "$FRONTEND_INSTALL_STAMP" ]] || return 1
+  [[ -f "$ROOT/bun.lock" && -f "$LIBRECHAT_DIR/package-lock.json" ]] || return 1
+  command -v git >/dev/null 2>&1 || return 1
+  command -v sha256sum >/dev/null 2>&1 || return 1
+
+  librechat_commit="$(git -C "$LIBRECHAT_DIR" rev-parse HEAD 2>/dev/null)" || return 1
+  librechat_lock_sha256="$(sha256sum "$LIBRECHAT_DIR/package-lock.json" | awk '{print $1}')"
+  bun_lock_sha256="$(sha256sum "$ROOT/bun.lock" | awk '{print $1}')"
+
+  grep -Fqx "installer_version=1" "$FRONTEND_INSTALL_STAMP" &&
+    grep -Fqx "librechat_commit=$librechat_commit" "$FRONTEND_INSTALL_STAMP" &&
+    grep -Fqx "librechat_lock_sha256=$librechat_lock_sha256" "$FRONTEND_INSTALL_STAMP" &&
+    grep -Fqx "bun_lock_sha256=$bun_lock_sha256" "$FRONTEND_INSTALL_STAMP"
+}
+
+case "$MODE" in
+  -h|--help)
+    MODE="help"
+    ;;
+  preflight-ready|readiness-ready|operator-preflight|frontend-preflight)
+    MODE="preflight"
+    ;;
+  doctor:json)
+    MODE="readiness"
+    READINESS_COMMAND="frontend:doctor"
+    ;;
+  preflight:json)
+    MODE="readiness"
+    READINESS_COMMAND="frontend:preflight"
+    ;;
+  smoke)
+    if [[ "${2:-}" == "--strict" ]]; then
+      MODE="workspace-surface-strict"
+    else
+      MODE="readiness"
+      READINESS_COMMAND="frontend:smoke"
+    fi
+    ;;
+  smoke:json)
+    if [[ "${2:-}" == "--strict" ]]; then
+      MODE="smoke-strict-json"
+    else
+      MODE="readiness"
+      READINESS_COMMAND="frontend:smoke"
+    fi
+    ;;
+  smoke:strict)
+    MODE="workspace-surface-strict"
+    ;;
+  smoke:defer)
+    MODE="preflight-status"
+    ;;
+  workspace-status)
+    MODE="status"
+    ;;
+  frontend-install-status|install:status|install:status:json)
+    MODE="install-check-status"
+    ;;
+  check)
+    MODE="frontend-typecheck"
+    ;;
+  install-check|install-check:json)
+    MODE="workspace-surface-install-typecheck"
+    ;;
+esac
+
 report_frontend_install_status() {
-  local ui_node_modules="$UI_DIR/node_modules"
+  local ui_node_modules="$LIBRECHAT_DIR/node_modules"
   local homepage_node_modules="$HOMEPAGE_DIR/node_modules"
   local missing=0
 
@@ -23,9 +122,9 @@ report_frontend_install_status() {
   echo "Workspace-surface observability note for thread 471543ca-136b-483e-9700-6c53d92449f5:workspace-surface: sibling-thread pending runs do not satisfy validation for this workspace-surface thread."
 
   if [[ -d "$ui_node_modules" ]]; then
-    echo "Frontend install status: apps/ui dependencies appear present at $ui_node_modules"
+    echo "Frontend install status: LibreChat dependencies appear present at $ui_node_modules"
   else
-    echo "Frontend install status: apps/ui dependencies are missing at $ui_node_modules"
+    echo "Frontend install status: LibreChat dependencies are missing at $ui_node_modules"
     missing=1
   fi
 
@@ -36,13 +135,23 @@ report_frontend_install_status() {
     missing=1
   fi
 
+  if lock_is_held "$FRONTEND_INSTALL_LOCK"; then
+    echo "Frontend install status: dependency installation is currently in progress"
+    missing=1
+  elif frontend_install_stamp_is_current; then
+    echo "Frontend install status: dependency state matches the current LibreChat and Bun lockfiles"
+  else
+    echo "Frontend install status: dependency state is not verified against the current lockfiles"
+    missing=1
+  fi
+
   if [[ "$missing" -eq 0 ]]; then
     echo "Workspace-surface operator note for thread 471543ca-136b-483e-9700-6c53d92449f5:workspace-surface: frontend dependency directories are present, so the next bounded local step can be a workspace summary, preflight, or typecheck command."
     echo "Workspace-surface validation reminder for thread 471543ca-136b-483e-9700-6c53d92449f5:workspace-surface: this install-status check is local readiness evidence only; this iteration still needs at least one fresh same-thread LangSmith run/trace with explicit goal context plus a passed workspace smoke/typecheck result, or a clear operator-facing no-run defer reason if no run was emitted."
     return 0
   fi
 
-  echo "Workspace-surface operator defer reason for thread 471543ca-136b-483e-9700-6c53d92449f5:workspace-surface: one or more frontend dependency directories are missing, so run 'bun run frontend:install' before workspace-surface preflight or typecheck commands."
+  echo "Workspace-surface operator defer reason for thread 471543ca-136b-483e-9700-6c53d92449f5:workspace-surface: frontend dependency state is missing, in progress, or stale, so run 'bun run frontend:install' before workspace-surface preflight or typecheck commands."
   echo "Workspace-surface validation reminder for thread 471543ca-136b-483e-9700-6c53d92449f5:workspace-surface: pending or sibling-thread LangSmith activity is partial observability only and does not satisfy validation for this thread; after installing dependencies, confirm at least one fresh same-thread run/trace with explicit goal context plus a passed workspace smoke/typecheck result, or preserve a clear no-run defer reason."
   return 1
 }
@@ -211,7 +320,7 @@ if [[ "$MODE" == "workspace-surface-strict" ]]; then
   exit $?
 fi
 
-if [[ "$MODE" == "same-thread-status" || "$MODE" == "quick-status" || "$MODE" == "workspace-surface-status" ]]; then
+if [[ "$MODE" == "same-thread-status" || "$MODE" == "quick-status" || "$MODE" == "workspace-surface-status" || "$MODE" == "workspace-surface-goal-status" ]]; then
   MODE="same-thread-defer-status"
 fi
 
@@ -237,34 +346,57 @@ if [[ "$MODE" == "doctor" ]]; then
   else
     echo "[defer] bun runtime is unavailable via $BUN_SH" >&2
     echo "Next validation success condition: capture at least one fresh same-thread LangSmith control-plane run/trace with explicit goal context plus a passed workspace smoke/typecheck result, or preserve this no-run defer reason if no run was emitted." >&2
-    exit 0
+    exit 1
   fi
 
   if [[ -f "$ROOT/package.json" ]]; then
     echo "[ok] root package.json present at $ROOT/package.json"
   else
     echo "[defer] root package.json missing at $ROOT/package.json" >&2
-    exit 0
+    exit 1
   fi
 
   if [[ -d "$UI_DIR" ]]; then
     echo "[ok] ui workspace present at $UI_DIR"
   else
     echo "[defer] ui workspace missing at $UI_DIR" >&2
-    exit 0
+    exit 1
   fi
 
   if [[ -d "$HOMEPAGE_DIR" ]]; then
     echo "[ok] homepage workspace present at $HOMEPAGE_DIR"
   else
     echo "[defer] homepage workspace missing at $HOMEPAGE_DIR" >&2
-    exit 0
+    exit 1
   fi
 
+  readiness_output=""
+  if ! readiness_output="$(bash "$0" readiness 2>&1)"; then
+    echo "[defer] frontend readiness prerequisites are incomplete" >&2
+    printf '%s\n' "$readiness_output" >&2
+    exit 1
+  fi
+
+  echo "[ok] bounded frontend readiness check passed"
+  printf '%s\n' "$readiness_output"
   echo "[ok] frontend workspace doctor checks passed"
   echo "Pending LangSmith activity from other threads remains partial observability only for thread 2ecf435b-4dc3-45ec-bdae-27cee1f93b64:workspace-surface and does not by itself satisfy validation."
   echo "Next validation success condition: capture at least one fresh same-thread LangSmith control-plane run/trace with explicit goal context plus a passed workspace smoke/typecheck result, or preserve a clear operator-facing no-run defer reason if no run was emitted."
   exit 0
+fi
+
+if [[ "$MODE" == "smoke-strict-json" ]]; then
+  strict_output=""
+  if strict_output="$(bash "$0" workspace-surface-strict 2>&1)"; then
+    printf '{"command":"frontend:smoke:strict","status":"ready","reason":"bounded strict frontend smoke and typecheck path passed","next_validation":"confirm at least one fresh LangSmith control-plane run/trace for this iteration or preserve a clear operator-facing defer reason if no run was emitted"}\n'
+    exit 0
+  else
+    strict_status=$?
+  fi
+
+  printf '%s\n' "$strict_output" >&2
+  printf '{"command":"frontend:smoke:strict","status":"defer","reason":"bounded strict frontend smoke or typecheck path failed","next_validation":"fix the reported local smoke/typecheck failure, rerun this strict check, and then confirm a fresh LangSmith run/trace or preserve a clear operator-facing defer reason"}\n'
+  exit "$strict_status"
 fi
 
 if [[ " $SUPPORTED_MODES " != *" $MODE "* ]]; then
@@ -310,13 +442,19 @@ fi
 
 UI_SCRIPT="$UI_DIR/scripts/$MODE.sh"
 
-if [[ "$MODE" != "readiness" && "$MODE" != "preflight" && "$MODE" != "readiness-only" && ! -f "$UI_SCRIPT" ]]; then
-  echo "Frontend stack defer reason: expected LibreChat mode script is missing for '$MODE'." >&2
-  echo "  missing: $UI_SCRIPT" >&2
-  echo "  next: use a supported frontend mode with an existing apps/ui/scripts/<mode>.sh entrypoint, or restore the missing LibreChat script before rerunning frontend stack commands" >&2
-  echo "  validation: confirm at least one fresh LangSmith control-plane run/trace for this iteration, or preserve this clear operator-facing no-run defer reason if no run was emitted" >&2
-  exit 2
-fi
+case "$MODE" in
+  readiness|preflight|readiness-only|doctor|status|install-check-status|install-check-only)
+    ;;
+  *)
+    if [[ ! -f "$UI_SCRIPT" ]]; then
+      echo "Frontend stack defer reason: expected LibreChat mode script is missing for '$MODE'." >&2
+      echo "  missing: $UI_SCRIPT" >&2
+      echo "  next: use a supported frontend mode with an existing apps/ui/scripts/<mode>.sh entrypoint, or restore the missing LibreChat script before rerunning frontend stack commands" >&2
+      echo "  validation: confirm at least one fresh LangSmith control-plane run/trace for this iteration, or preserve this clear operator-facing no-run defer reason if no run was emitted" >&2
+      exit 2
+    fi
+    ;;
+esac
 
 case " $SUPPORTED_MODES " in
   *" $MODE "*) ;;
@@ -328,67 +466,68 @@ case " $SUPPORTED_MODES " in
     ;;
 esac
 
-should_skip_install() {
-  [[ "$SKIP_INSTALL_IF_PRESENT" == "1" ]] && [[ -d "$UI_DIR/node_modules" ]] && [[ -d "$HOMEPAGE_DIR/node_modules" ]]
-}
-
-print_missing_install_hint() {
-  local missing=()
-  [[ -d "$UI_DIR/node_modules" ]] || missing+=("apps/ui/node_modules")
-  [[ -d "$HOMEPAGE_DIR/node_modules" ]] || missing+=("apps/homepage/node_modules")
-
-  if [[ "$SKIP_INSTALL_IF_PRESENT" == "1" ]] && (( ${#missing[@]} > 0 )); then
-    echo "Frontend dependency readiness note: install-skip is enabled, but required workspace dependencies are missing: ${missing[*]}" >&2
-    echo "  next: run 'bun run frontend:install' or 'bun run frontend:install:check' before smoke/dev/start" >&2
-  fi
-}
-
-print_concurrent_runner_hint() {
-  local ui_pids=""
-  local homepage_pids=""
-
-  if command -v pgrep >/dev/null 2>&1; then
-    ui_pids="$(pgrep -f "$ROOT/apps/ui/.*/scripts/(dev|start)\.sh|$ROOT/apps/ui && bash ./scripts/(dev|start)\.sh" 2>/dev/null | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
-    homepage_pids="$(pgrep -f "$ROOT/apps/homepage.*(bun|$BUN_SH).*(dev|start)" 2>/dev/null | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
-  fi
-
-  if [[ -n "$ui_pids" || -n "$homepage_pids" ]]; then
-    echo "Frontend readiness note: existing frontend stack process(es) detected before starting a new '$MODE' run." >&2
-    [[ -n "$ui_pids" ]] && echo "  ui candidate pid(s): $ui_pids" >&2
-    [[ -n "$homepage_pids" ]] && echo "  homepage candidate pid(s): $homepage_pids" >&2
-    echo "  next: prefer 'bun run frontend:readiness' or reuse the active stack to avoid overlapping runners and misleading smoke signals" >&2
-  fi
-}
-
 run_readiness_check() {
-  local missing=()
-  local ui_pids=""
-  local homepage_pids=""
+  local command_name="${1:-frontend:readiness}"
+  local install_in_progress="false"
+  local missing_dependencies=()
+  local missing_dependencies_json=""
+  local missing_requirements=()
+  local missing_requirements_json=""
   local status="ready"
   local reason="frontend stack dependencies present and no overlapping runner detected"
+  local stack_pid=""
 
-  [[ -d "$UI_DIR/node_modules" ]] || missing+=("apps/ui/node_modules")
-  [[ -d "$HOMEPAGE_DIR/node_modules" ]] || missing+=("apps/homepage/node_modules")
+  [[ -d "$LIBRECHAT_DIR/node_modules" ]] || missing_dependencies+=("apps/ui/librechat/node_modules")
+  [[ -d "$HOMEPAGE_DIR/node_modules" ]] || missing_dependencies+=("apps/homepage/node_modules")
 
-  if command -v pgrep >/dev/null 2>&1; then
-    ui_pids="$(pgrep -f "$ROOT/apps/ui/.*/scripts/(dev|start)\.sh|$ROOT/apps/ui && bash ./scripts/(dev|start)\.sh" 2>/dev/null | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
-    homepage_pids="$(pgrep -f "$ROOT/apps/homepage.*(bun|$BUN_SH).*(dev|start)" 2>/dev/null | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+  [[ -x "$BUN_SH" ]] || missing_requirements+=("bun.sh")
+  [[ -x "$UI_DIR/scripts/activate-node.sh" ]] || missing_requirements+=("apps/ui/scripts/activate-node.sh")
+  [[ -x "$UI_DIR/scripts/dev.sh" ]] || missing_requirements+=("apps/ui/scripts/dev.sh")
+  [[ -x "$UI_DIR/scripts/start.sh" ]] || missing_requirements+=("apps/ui/scripts/start.sh")
+  [[ -f "$HOMEPAGE_DIR/package.json" ]] || missing_requirements+=("apps/homepage/package.json")
+  [[ -f "$LIBRECHAT_DIR/package.json" ]] || missing_requirements+=("apps/ui/librechat/package.json")
+  [[ -f "$LIBRECHAT_DIR/package-lock.json" ]] || missing_requirements+=("apps/ui/librechat/package-lock.json")
+  [[ -f "$LIBRECHAT_DIR/.nvmrc" ]] || missing_requirements+=("apps/ui/librechat/.nvmrc")
+  command -v flock >/dev/null 2>&1 || missing_requirements+=("flock")
+  command -v git >/dev/null 2>&1 || missing_requirements+=("git")
+  command -v setsid >/dev/null 2>&1 || missing_requirements+=("setsid")
+  command -v sha256sum >/dev/null 2>&1 || missing_requirements+=("sha256sum")
+  if [[ -x "$UI_DIR/scripts/activate-node.sh" ]] &&
+    ! (source "$UI_DIR/scripts/activate-node.sh" >/dev/null 2>&1); then
+    missing_requirements+=("LibreChat Node/npm/npx/lsof toolchain")
   fi
 
-  if (( ${#missing[@]} > 0 )); then
+  if lock_is_held "$FRONTEND_INSTALL_LOCK"; then
+    install_in_progress="true"
     status="defer"
-    reason="missing frontend workspace dependencies"
-  elif [[ -n "$ui_pids" || -n "$homepage_pids" ]]; then
+    reason="frontend dependency installation is in progress"
+  elif (( ${#missing_dependencies[@]} > 0 || ${#missing_requirements[@]} > 0 )); then
+    status="defer"
+    reason="missing frontend runtime requirements"
+  elif ! frontend_install_stamp_is_current; then
+    status="defer"
+    reason="frontend dependencies are not verified against the current lockfiles"
+  elif lock_is_held "$FRONTEND_STACK_LOCK"; then
     status="active"
     reason="existing frontend runner detected; reuse active stack to avoid overlapping runners"
+    stack_pid="$(active_stack_pid)"
   fi
 
-  printf '{"command":"frontend:readiness","status":"%s","reason":"%s","missing_dependencies":[%s],"ui_candidate_pids":"%s","homepage_candidate_pids":"%s","next_validation":"confirm at least one fresh LangSmith control-plane run/trace for this iteration or preserve a clear operator-facing defer reason if no run was emitted"}\n' \
+  if (( ${#missing_dependencies[@]} > 0 )); then
+    missing_dependencies_json="$(printf '"%s",' "${missing_dependencies[@]}" | sed 's/,$//')"
+  fi
+  if (( ${#missing_requirements[@]} > 0 )); then
+    missing_requirements_json="$(printf '"%s",' "${missing_requirements[@]}" | sed 's/,$//')"
+  fi
+
+  printf '{"command":"%s","status":"%s","reason":"%s","missing_dependencies":[%s],"missing_requirements":[%s],"install_in_progress":%s,"stack_pid":"%s","next_validation":"confirm at least one fresh LangSmith control-plane run/trace for this iteration or preserve a clear operator-facing defer reason if no run was emitted"}\n' \
+    "$command_name" \
     "$status" \
     "$reason" \
-    "$(printf '"%s",' "${missing[@]}" | sed 's/,$//')" \
-    "$ui_pids" \
-    "$homepage_pids"
+    "$missing_dependencies_json" \
+    "$missing_requirements_json" \
+    "$install_in_progress" \
+    "$stack_pid"
 
   case "$status" in
     ready|active) return 0 ;;
@@ -397,7 +536,14 @@ run_readiness_check() {
 }
 
 case "$MODE" in
-  dev|start|doctor|doctor:json|preflight|preflight:json|status|install:status|install:status:json|check|install-check|install-check:json|smoke|smoke:json|smoke:strict|smoke:defer|readiness)
+  readiness|preflight|readiness-only)
+    run_readiness_check "$READINESS_COMMAND"
+    exit $?
+    ;;
+esac
+
+case "$MODE" in
+  dev|start|doctor|doctor:json|preflight:json|status|install:status|install:status:json|install-check-status|install-check-only|check|install-check|install-check:json|smoke|smoke:json|smoke:strict|smoke:defer)
     ;;
   help|-h|--help)
     cat <<'EOF'
@@ -433,16 +579,6 @@ EOF
     ;;
 esac
 
-REQUESTED_MODE="$MODE"
-STRICT_SMOKE=false
-
-if [[ "$MODE" == "smoke" || "$MODE" == "smoke:strict" ]]; then
-  if [[ "$MODE" == "smoke:strict" ]]; then
-    STRICT_SMOKE=true
-  fi
-  MODE="status"
-fi
-
 if [[ ! -x "$BUN_SH" ]]; then
   echo "Missing Bun launcher at $BUN_SH" >&2
   echo "Defer reason: frontend stack cannot run until the root Bun launcher is present and executable." >&2
@@ -467,10 +603,16 @@ if [[ ! -d "$HOMEPAGE_DIR" ]]; then
   exit 1
 fi
 
-if [[ ! -x "$UI_DIR/scripts/$MODE.sh" ]]; then
-  echo "Frontend stack start aborted: missing executable UI mode script at $UI_DIR/scripts/$MODE.sh" >&2
-  exit 1
-fi
+case "$MODE" in
+  readiness|preflight|readiness-only|doctor|status|install-check-status|install-check-only)
+    ;;
+  *)
+    if [[ ! -x "$UI_DIR/scripts/$MODE.sh" ]]; then
+      echo "Frontend stack start aborted: missing executable UI mode script at $UI_DIR/scripts/$MODE.sh" >&2
+      exit 1
+    fi
+    ;;
+esac
 
 if [[ ! -f "$HOMEPAGE_DIR/package.json" ]]; then
   echo "Frontend stack start aborted: missing homepage package manifest at $HOMEPAGE_DIR/package.json" >&2
@@ -487,7 +629,14 @@ echo "Frontend stack preflight passed"
 echo "  root: $ROOT"
 echo "  mode: $MODE"
 
-echo "  ui script: $UI_DIR/scripts/${MODE}.sh"
+case "$MODE" in
+  doctor|status|install-check-status|install-check-only)
+    echo "  ui script: not required for this status-only mode"
+    ;;
+  *)
+    echo "  ui script: $UI_DIR/scripts/${MODE}.sh"
+    ;;
+esac
 if [[ "$MODE" == "status" ]]; then
   echo "  homepage manifest: $HOMEPAGE_DIR/package.json"
 else
@@ -509,7 +658,7 @@ fi
 if [[ "$MODE" == "status" ]]; then
   echo "Frontend status summary"
   echo "  bun launcher: ready"
-  echo "  ui mode script: present"
+  echo "  ui mode script: not required for status mode"
   echo "  homepage manifest: present"
   echo "  status: workspace prerequisites are present; no frontend processes were started"
   echo "  next validation: on the experimental target only, check health, routing/static assets, one representative API path, and confirm at least one fresh LangSmith control-plane run/trace for this iteration or preserve a clear operator-facing defer reason if no run was emitted"
@@ -517,15 +666,8 @@ if [[ "$MODE" == "status" ]]; then
 fi
 
 if [[ "$MODE" == "install-check-status" ]]; then
-  echo "Frontend install-check status summary"
-  echo "  bun launcher: ready"
-  echo "  ui workspace: $UI_DIR"
-  echo "  homepage manifest: $HOMEPAGE_DIR/package.json"
-  echo "  status: ready for 'bun run frontend:dev' or 'bun run frontend:start' without starting long-lived processes"
-  echo "  observability: if LangSmith still shows pending sibling runs for thread 2ecf435b-4dc3-45ec-bdae-27cee1f93b64:workspace-surface or nearby workspace iterations, treat that as partial observability only rather than completed validation"
-  echo "  next: if frontend dependencies may be stale or missing, run 'bun run frontend:install:check' (or the compatibility alias 'bun run frontend:install-check') before smoke/dev/start; otherwise prefer 'bun run frontend:preflight:status' or doctor output over speculative retries in a shared workspace"
-  echo "  next validation: confirm at least one fresh same-thread LangSmith control-plane run/trace for thread 2ecf435b-4dc3-45ec-bdae-27cee1f93b64:workspace-surface with explicit goal context plus a passed workspace or control-plane smoke/typecheck result, or preserve a clear operator-facing no-run defer reason if no run was emitted"
-  exit 0
+  report_frontend_install_status
+  exit $?
 fi
 
 if [[ "$MODE" == "install-check-only" ]]; then
@@ -539,11 +681,50 @@ if [[ "$MODE" == "install-check-only" ]]; then
   exit 0
 fi
 
+if ! frontend_install_stamp_is_current; then
+  echo "Frontend stack start aborted: dependencies are not verified against the current lockfiles." >&2
+  echo "Run 'bun run frontend:install', then retry." >&2
+  exit 1
+fi
+if ! command -v flock >/dev/null 2>&1; then
+  echo "Frontend stack start aborted: 'flock' from util-linux is required." >&2
+  exit 1
+fi
+if ! command -v setsid >/dev/null 2>&1; then
+  echo "Frontend stack start aborted: 'setsid' from util-linux is required for isolated child process groups." >&2
+  exit 1
+fi
+
+mkdir -p "$FRONTEND_STATE_DIR"
+exec 8>"$FRONTEND_STACK_LOCK"
+if ! flock -n 8; then
+  existing_stack_pid="$(active_stack_pid)"
+  echo "Frontend stack start aborted: another local frontend stack is already running${existing_stack_pid:+ (PID $existing_stack_pid)}." >&2
+  exit 1
+fi
+if lock_is_held "$FRONTEND_INSTALL_LOCK"; then
+  echo "Frontend stack start aborted: frontend dependency installation is in progress." >&2
+  exit 1
+fi
+
+printf '%s\n' "$$" > "$FRONTEND_STACK_PID_FILE"
+release_stack_state() {
+  local recorded_pid=""
+
+  if [[ -r "$FRONTEND_STACK_PID_FILE" ]]; then
+    read -r recorded_pid < "$FRONTEND_STACK_PID_FILE" || true
+  fi
+  if [[ "$recorded_pid" == "$$" ]]; then
+    rm -f "$FRONTEND_STACK_PID_FILE"
+  fi
+}
+trap release_stack_state EXIT
+
 echo "Starting LibreChat ($MODE)..."
 echo "  command: cd $ROOT/apps/ui && bash ./scripts/$MODE.sh"
 (
   cd "$ROOT/apps/ui"
-  bash "./scripts/$MODE.sh"
+  exec setsid bash "./scripts/$MODE.sh"
 ) &
 UI_PID=$!
 
@@ -551,19 +732,44 @@ echo "Starting homepage ($MODE)..."
 echo "  command: cd $ROOT/apps/homepage && bash $BUN_SH run $MODE"
 (
   cd "$ROOT/apps/homepage"
-  bash "$BUN_SH" run "$MODE"
+  exec setsid bash "$BUN_SH" run "$MODE"
 ) &
 HOMEPAGE_PID=$!
 
 cleanup_children() {
   local reason="$1"
-  if kill -0 "$UI_PID" 2>/dev/null; then
-    echo "Stopping remaining LibreChat ($MODE) process after ${reason}..." >&2
-    kill "$UI_PID" 2>/dev/null || true
+  local ui_group_running=false
+  local homepage_group_running=false
+
+  if kill -0 -- "-$UI_PID" 2>/dev/null; then
+    ui_group_running=true
+    echo "Stopping remaining LibreChat ($MODE) process group after ${reason}..." >&2
+    kill -TERM -- "-$UI_PID" 2>/dev/null || true
   fi
-  if kill -0 "$HOMEPAGE_PID" 2>/dev/null; then
-    echo "Stopping remaining homepage ($MODE) process after ${reason}..." >&2
-    kill "$HOMEPAGE_PID" 2>/dev/null || true
+  if kill -0 -- "-$HOMEPAGE_PID" 2>/dev/null; then
+    homepage_group_running=true
+    echo "Stopping remaining homepage ($MODE) process group after ${reason}..." >&2
+    kill -TERM -- "-$HOMEPAGE_PID" 2>/dev/null || true
+  fi
+
+  for _ in {1..20}; do
+    ui_group_running=false
+    homepage_group_running=false
+    kill -0 -- "-$UI_PID" 2>/dev/null && ui_group_running=true
+    kill -0 -- "-$HOMEPAGE_PID" 2>/dev/null && homepage_group_running=true
+    if [[ "$ui_group_running" == false && "$homepage_group_running" == false ]]; then
+      return 0
+    fi
+    sleep 0.1
+  done
+
+  if [[ "$ui_group_running" == true ]]; then
+    echo "Force-stopping remaining LibreChat ($MODE) process group after ${reason}..." >&2
+    kill -KILL -- "-$UI_PID" 2>/dev/null || true
+  fi
+  if [[ "$homepage_group_running" == true ]]; then
+    echo "Force-stopping remaining homepage ($MODE) process group after ${reason}..." >&2
+    kill -KILL -- "-$HOMEPAGE_PID" 2>/dev/null || true
   fi
 }
 
@@ -577,18 +783,24 @@ on_interrupt() {
 
 trap on_interrupt INT TERM
 
-wait -n "$UI_PID" "$HOMEPAGE_PID"
-FIRST_EXIT_STATUS=$?
+if wait -n "$UI_PID" "$HOMEPAGE_PID"; then
+  FIRST_EXIT_STATUS=0
+else
+  FIRST_EXIT_STATUS=$?
+fi
+
+if [[ "$FIRST_EXIT_STATUS" -eq 0 ]]; then
+  echo "Frontend stack aborted: a long-lived frontend child exited unexpectedly with status 0; treating the incomplete stack as a failure." >&2
+  FIRST_EXIT_STATUS=1
+fi
 
 trap - INT TERM
 
-UI_RUNNING=false
-HOMEPAGE_RUNNING=false
 UI_EXIT_STATUS=
 HOMEPAGE_EXIT_STATUS=
 
 if kill -0 "$UI_PID" 2>/dev/null; then
-  UI_RUNNING=true
+  :
 else
   if wait "$UI_PID" 2>/dev/null; then
     UI_EXIT_STATUS=0
@@ -599,7 +811,7 @@ else
 fi
 
 if kill -0 "$HOMEPAGE_PID" 2>/dev/null; then
-  HOMEPAGE_RUNNING=true
+  :
 else
   if wait "$HOMEPAGE_PID" 2>/dev/null; then
     HOMEPAGE_EXIT_STATUS=0

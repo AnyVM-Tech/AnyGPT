@@ -1463,8 +1463,8 @@ class DataManager {
 				dataSourcePreference === 'redis' && hasRedisKeys
 					? this.normalizeKeysSchema(redisKeys).normalized
 					: dataSourcePreference === 'filesystem' &&
-						  hasFsKeys &&
-						  !fsInvalid
+                          hasFsKeys &&
+                          !fsInvalid
 						? this.normalizeKeysSchema(fsKeys).normalized
 						: hasRedisKeys
 							? this.normalizeKeysSchema(redisKeys).normalized

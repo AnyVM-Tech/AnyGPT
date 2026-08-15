@@ -990,7 +990,8 @@ export function isProviderAuthConfigurationError(error: any): boolean {
 		Boolean((error as any)?.lastProviderErrorSummary) ||
 		Boolean((error as any)?.errorDetails?.lastProviderId) ||
 		Boolean((error as any)?.errorDetails?.lastProviderError) ||
-		Boolean((error as any)?.errorDetails?.lastProviderErrorSummary);		message.includes('unsupported parameter') ||
+		Boolean((error as any)?.errorDetails?.lastProviderErrorSummary) ||
+		message.includes('unsupported parameter') ||
 		message.includes('not supported with this model') ||
 		message.includes('invalid_request_error') ||
 		message.includes('resource has been exhausted') ||
@@ -1000,7 +1001,7 @@ export function isProviderAuthConfigurationError(error: any): boolean {
 		message.includes('invalid_api_key') ||
 		message.includes('key_invalid') ||
 		message.includes('401') ||
-		message.includes('402');
+		message.includes('402') ||
 		Boolean((error as any)?.errorDetails?.lastProviderId) ||
 		Boolean((error as any)?.errorDetails?.attemptedProviders);
 	const wrappedAuthOrQuotaSignal =

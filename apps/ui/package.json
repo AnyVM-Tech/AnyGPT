@@ -10,6 +10,7 @@
     "start": "bash scripts/start.sh",
     "stop": "bash scripts/stop.sh",
     "sync-config": "bash scripts/sync-config.sh",
-    "sync-librechat": "bash scripts/sync-librechat.sh"
+    "sync-librechat": "bash scripts/sync-librechat.sh",
+    "typecheck": "bash -n scripts/*.sh"
   }
 }

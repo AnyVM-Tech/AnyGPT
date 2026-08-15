@@ -355,6 +355,8 @@ main().catch((err) => {
   process.exit(1);
 }).finally(async () => {
   if (redis) {
-    try { await redis.quit(); } catch {}
+    try { await redis.quit(); } catch {
+      // Best-effort cleanup for this developer probe.
+    }
   }
 });
